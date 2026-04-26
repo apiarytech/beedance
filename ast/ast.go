@@ -42,6 +42,7 @@ type TypeSpecifier struct {
 
 func (ts *TypeSpecifier) expressionNode()      {}
 func (ts *TypeSpecifier) TokenLiteral() string { return ts.Token.Literal }
+func (ts *TypeSpecifier) String() string       { return ts.Token.Literal }
 
 type Program struct {
 	Statements []Statement
@@ -67,28 +68,157 @@ func (p *Program) String() string {
 
 // Statements
 type VarDeclStatement struct {
-	Token       token.Token // the 'VAR' token
-	Name        *Identifier
-	DataType    *TypeSpecifier
-	Value       Expression // Initial value
-	IsConstant  bool
-	IsRetain    bool
-	IsNonRetain bool
+	Token         token.Token // the 'VAR' token
+	Name          *Identifier
+	Location      *AtDeclaration
+	DataType      Expression
+	Value         Expression // Initial value
+	IsConstant    bool
+	IsRetain      bool
+	IsNonRetain   bool
+	IsRisingEdge  bool
+	IsFallingEdge bool
 }
 
 func (vds *VarDeclStatement) statementNode()       {}
 func (vds *VarDeclStatement) TokenLiteral() string { return vds.Token.Literal }
 func (vds *VarDeclStatement) String() string {
 	var out bytes.Buffer
-	out.WriteString(vds.TokenLiteral() + " ")
+
+	// Only add the block type keyword if it's part of the token,
+	// to correctly format struct members and other declarations.
+	if vds.Token.Type == token.VAR {
+		out.WriteString(vds.TokenLiteral() + " ")
+	}
 	out.WriteString(vds.Name.String())
+	if vds.Location != nil {
+		out.WriteString(" ")
+		out.WriteString(vds.Location.String())
+	}
 	out.WriteString(" : ")
-	out.WriteString(vds.DataType.TokenLiteral())
+	if vds.DataType != nil {
+		out.WriteString(vds.DataType.String())
+	}
 
 	if vds.Value != nil {
 		out.WriteString(" := ")
 		out.WriteString(vds.Value.String())
 	}
+	out.WriteString(";")
+	return out.String()
+}
+
+type AtDeclaration struct {
+	Token    token.Token // The 'AT' token
+	Location *DirectVariable
+}
+
+func (ad *AtDeclaration) statementNode()       {}
+func (ad *AtDeclaration) TokenLiteral() string { return ad.Token.Literal }
+func (ad *AtDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("AT ")
+	out.WriteString(ad.Location.String())
+	return out.String()
+}
+
+type DirectVariable struct {
+	Token   token.Token // The '%' token
+	Address string
+}
+
+func (dv *DirectVariable) expressionNode()      {}
+func (dv *DirectVariable) TokenLiteral() string { return dv.Token.Literal }
+func (dv *DirectVariable) String() string {
+	return "%" + dv.Address
+}
+
+type ConfigurationDeclaration struct {
+	Token         token.Token // The 'CONFIGURATION' token
+	Name          *Identifier
+	GlobalVars    []*GlobalVarDeclaration
+	Resources     []*ResourceDeclaration
+	AccessDecls   []*AccessVarDeclaration
+	InstanceInits *ConfigVarDeclaration
+}
+
+func (cd *ConfigurationDeclaration) statementNode()       {}
+func (cd *ConfigurationDeclaration) TokenLiteral() string { return cd.Token.Literal }
+func (cd *ConfigurationDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("CONFIGURATION " + cd.Name.String() + "\n")
+	// ... string representations for children
+	out.WriteString("END_CONFIGURATION")
+	return out.String()
+}
+
+type ResourceDeclaration struct {
+	Token        token.Token // The 'RESOURCE' token
+	Name         *Identifier
+	ResourceType *Identifier
+	GlobalVars   []*GlobalVarDeclaration
+	Tasks        []*TaskDeclaration
+	Programs     []*ProgramConfiguration
+}
+
+func (rd *ResourceDeclaration) statementNode()       {}
+func (rd *ResourceDeclaration) TokenLiteral() string { return rd.Token.Literal }
+func (rd *ResourceDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("RESOURCE " + rd.Name.String() + " ON " + rd.ResourceType.String() + "\n")
+	// ... string representations for children
+	out.WriteString("END_RESOURCE")
+	return out.String()
+}
+
+type TaskDeclaration struct {
+	Token    token.Token // The 'TASK' token
+	Name     *Identifier
+	Single   Expression
+	Interval Expression
+	Priority Expression
+}
+
+func (td *TaskDeclaration) statementNode()       {}
+func (td *TaskDeclaration) TokenLiteral() string { return td.Token.Literal }
+func (td *TaskDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("TASK " + td.Name.String())
+	out.WriteString("(")
+	if td.Single != nil {
+		out.WriteString("SINGLE := ")
+		out.WriteString(td.Single.String())
+	}
+	if td.Interval != nil {
+		out.WriteString("INTERVAL := ")
+		out.WriteString(td.Interval.String())
+	}
+	out.WriteString("PRIORITY := ")
+	out.WriteString(td.Priority.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type ProgramConfiguration struct {
+	Token        token.Token // The 'PROGRAM' token
+	InstanceName *Identifier
+	TaskName     *Identifier // Optional: from WITH clause
+	TypeName     *Identifier
+	// TODO: Add connections/arguments for programs, e.g. (Input1 := Value1)
+}
+
+func (pc *ProgramConfiguration) statementNode()       {}
+func (pc *ProgramConfiguration) TokenLiteral() string { return pc.Token.Literal }
+func (pc *ProgramConfiguration) String() string {
+	var out bytes.Buffer
+	out.WriteString("PROGRAM ")
+	out.WriteString(pc.InstanceName.String())
+	if pc.TaskName != nil {
+		out.WriteString(" WITH ")
+		out.WriteString(pc.TaskName.String())
+	}
+	out.WriteString(" : ")
+	out.WriteString(pc.TypeName.String())
 	out.WriteString(";")
 	return out.String()
 }
@@ -185,6 +315,18 @@ func (il *IntegerLiteral) expressionNode()      {}
 func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
 func (il *IntegerLiteral) String() string       { return il.Token.Literal }
 
+type RealLiteral struct {
+	Token     token.Token
+	Value     float64
+	Precision int // 32 for REAL, 64 for LREAL
+}
+
+func (rl *RealLiteral) expressionNode()      {}
+func (rl *RealLiteral) TokenLiteral() string { return rl.Token.Literal }
+func (rl *RealLiteral) String() string {
+	return rl.Token.Literal
+}
+
 type PrefixExpression struct {
 	Token    token.Token // The prefix token, e.g. !
 	Operator string
@@ -220,6 +362,26 @@ func (ie *InfixExpression) String() string {
 	out.WriteString(ie.Left.String())
 	out.WriteString(" " + ie.Operator + " ")
 	out.WriteString(ie.Right.String())
+	out.WriteString(")")
+
+	return out.String()
+}
+
+type MemberAccessExpression struct {
+	Token  token.Token // The '.' token
+	Struct Expression  // The expression on the left of the dot
+	Member *Identifier // The identifier on the right of the dot
+}
+
+func (mae *MemberAccessExpression) expressionNode()      {}
+func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Literal }
+func (mae *MemberAccessExpression) String() string {
+	var out bytes.Buffer
+
+	out.WriteString("(")
+	out.WriteString(mae.Struct.String())
+	out.WriteString(".")
+	out.WriteString(mae.Member.String())
 	out.WriteString(")")
 
 	return out.String()
@@ -391,6 +553,42 @@ func (ce *CallExpression) String() string {
 	out.WriteString(strings.Join(args, ", "))
 	out.WriteString(")")
 
+	return out.String()
+}
+
+type NamedArgument struct {
+	Token token.Token // The identifier token for the argument name
+	Name  *Identifier
+	Value Expression
+}
+
+func (na *NamedArgument) expressionNode()      {}
+func (na *NamedArgument) TokenLiteral() string { return na.Token.Literal }
+func (na *NamedArgument) String() string {
+	var out bytes.Buffer
+	out.WriteString(na.Name.String())
+	out.WriteString(" := ")
+	out.WriteString(na.Value.String())
+	return out.String()
+}
+
+type OutputArgument struct {
+	Token  token.Token // The '=>' token
+	Source *Identifier
+	Target Expression // Should be a variable
+}
+
+func (oa *OutputArgument) expressionNode()      {}
+func (oa *OutputArgument) TokenLiteral() string { return oa.Token.Literal }
+func (oa *OutputArgument) String() string {
+	var out bytes.Buffer
+	if oa.Source != nil {
+		out.WriteString(oa.Source.String())
+	}
+	out.WriteString(" => ")
+	if oa.Target != nil {
+		out.WriteString(oa.Target.String())
+	}
 	return out.String()
 }
 
@@ -641,6 +839,23 @@ func (gvd *GlobalVarDeclaration) String() string {
 	return out.String()
 }
 
+type VarBlockDeclaration struct {
+	Token        token.Token // The 'VAR' token
+	Declarations []*VarDeclStatement
+}
+
+func (vbd *VarBlockDeclaration) statementNode()       {}
+func (vbd *VarBlockDeclaration) TokenLiteral() string { return vbd.Token.Literal }
+func (vbd *VarBlockDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("VAR\n")
+	for _, d := range vbd.Declarations {
+		out.WriteString("\t" + d.String() + "\n")
+	}
+	out.WriteString("END_VAR")
+	return out.String()
+}
+
 type TypeDeclaration struct {
 	Token    token.Token // The identifier token (the name of the new type)
 	Name     *Identifier
@@ -714,7 +929,7 @@ func (ed *EnumDefinition) String() string {
 type ArrayDefinition struct {
 	Token    token.Token // The 'ARRAY' token
 	Ranges   []Expression
-	DataType Expression
+	DataType *TypeSpecifier
 }
 
 func (ad *ArrayDefinition) expressionNode()      {}
@@ -728,7 +943,9 @@ func (ad *ArrayDefinition) String() string {
 	}
 	out.WriteString(strings.Join(ranges, ", "))
 	out.WriteString("] OF ")
-	out.WriteString(ad.DataType.String())
+	if ad.DataType != nil {
+		out.WriteString(ad.DataType.String())
+	}
 
 	return out.String()
 }
@@ -750,3 +967,76 @@ func (as *ActionStatement) String() string {
 	out.WriteString("\nEND_ACTION")
 	return out.String()
 }
+
+type ActionAssociation struct {
+	Token      token.Token // The action name token
+	ActionName *Identifier
+	Qualifier  *Identifier // N, L, D, P, etc.
+	Indicators []*Identifier
+}
+
+func (aa *ActionAssociation) statementNode()       {}
+func (aa *ActionAssociation) TokenLiteral() string { return aa.Token.Literal }
+func (aa *ActionAssociation) String() string {
+	var out bytes.Buffer
+	out.WriteString(aa.ActionName.String())
+	out.WriteString("(")
+	out.WriteString(aa.Qualifier.String())
+	out.WriteString(")")
+	return out.String()
+}
+
+type FunctionDeclaration struct {
+	Token      token.Token // The 'FUNCTION' token
+	Name       *Identifier
+	ReturnType *TypeSpecifier
+	VarInputs  []*VarDeclStatement
+	VarOutputs []*VarDeclStatement
+	VarInOuts  []*VarDeclStatement
+	Vars       []*VarDeclStatement
+	Body       *BlockStatement
+}
+
+func (fd *FunctionDeclaration) statementNode()       {}
+func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
+func (fd *FunctionDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("FUNCTION ")
+	if fd.Name != nil {
+		out.WriteString(fd.Name.String())
+	}
+	out.WriteString(" : ")
+	if fd.ReturnType != nil {
+		out.WriteString(fd.ReturnType.String())
+	}
+	out.WriteString("\n")
+	// Simplified string representation for now
+	if fd.Body != nil {
+		out.WriteString(fd.Body.String())
+	}
+	out.WriteString("\nEND_FUNCTION")
+	return out.String()
+}
+
+type StepStatement struct {
+	Token       token.Token // The 'STEP' or 'INITIAL_STEP' token
+	Name        *Identifier
+	IsInitial   bool
+	Actions     []*ActionAssociation // Or a similar structure for action associations
+	Transitions []*TransitionStatement
+}
+
+func (ss *StepStatement) statementNode()       {}
+func (ss *StepStatement) TokenLiteral() string { return ss.Token.Literal }
+func (ss *StepStatement) String() string       { return "STEP " + ss.Name.String() }
+
+type TransitionStatement struct {
+	Token     token.Token // The 'TRANSITION' token
+	From      []*Identifier
+	To        []*Identifier
+	Condition Expression
+}
+
+func (ts *TransitionStatement) statementNode()       {}
+func (ts *TransitionStatement) TokenLiteral() string { return ts.Token.Literal }
+func (ts *TransitionStatement) String() string       { return "TRANSITION" }

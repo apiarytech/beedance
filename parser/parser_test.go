@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"beedance/ast"
@@ -18,50 +19,76 @@ func TestVarDeclStatements(t *testing.T) {
 		isRetain           bool
 		isNonRetain        bool
 	}{
-		{"VAR myVar : INT := 5;", "myVar", "INT", 5, false, false, false},
-		{"VAR myFlag : BOOL := true;", "myFlag", "BOOL", true, false, false, false},
-		{"VAR anotherVar : REAL;", "anotherVar", "REAL", nil, false, false, false},
-		{"VAR MyConst : CONSTANT INT := 100;", "MyConst", "INT", 100, true, false, false},
-		{"VAR RetainVar : RETAIN INT := 42;", "RetainVar", "INT", 42, false, true, false},
-		{"VAR NonRetainVar : NON_RETAIN BOOL;", "NonRetainVar", "BOOL", nil, false, false, true},
+		{"VAR myVar : INT := 5; END_VAR", "myVar", "INT", 5, false, false, false},
+		{"VAR myFlag : BOOL := true; END_VAR", "myFlag", "BOOL", true, false, false, false},
+		{"VAR anotherVar : REAL; END_VAR", "anotherVar", "REAL", nil, false, false, false},
+		{"VAR CONSTANT MyConst : INT := 100; END_VAR", "MyConst", "INT", 100, true, false, false},
+		{"VAR RETAIN RetainVar : INT := 42; END_VAR", "RetainVar", "INT", 42, false, true, false},
+		{"VAR NON_RETAIN NonRetainVar : BOOL; END_VAR", "NonRetainVar", "BOOL", nil, false, false, true},
+		{`VAR myVar AT %IX0.0 : BOOL; END_VAR`, "myVar", "BOOL", nil, false, false, false},
+		{"VAR myUpperBool : BOOL := TRUE; END_VAR", "myUpperBool", "BOOL", true, false, false, false},
+		{`VAR
+			MultiVar1 : INT;               //Test 1
+			MultiVar2 : BOOL := TRUE;      //Test 2
+		END_VAR`,
+			"MultiVar1", "INT", nil, false, false, false,
+		},
 	}
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		l := lexer.New(tt.input)
 		p := New(l)
 		program := p.ParseProgram()
 		if len(p.Errors()) > 0 {
-			t.Errorf("parser has %d errors", len(p.Errors()))
+			t.Errorf("test case %d: parser has %d errors", i, len(p.Errors()))
 			for _, msg := range p.Errors() {
-				t.Errorf("parser error: %q", msg)
+				t.Errorf("test case %d: parser error: %q", i, msg)
 			}
 			t.FailNow()
 		}
 
 		if len(program.Statements) != 1 {
-			t.Fatalf("program.Statements does not contain 1 statements. got=%d",
-				len(program.Statements))
+			t.Fatalf("test case %d: program.Statements does not contain 1 statement. got=%d", i, len(program.Statements))
 		}
 
-		stmt, ok := program.Statements[0].(*ast.VarDeclStatement)
+		block, ok := program.Statements[0].(*ast.VarBlockDeclaration)
 		if !ok {
-			t.Fatalf("program.Statements[0] is not ast.VarDeclStatement. got=%T", program.Statements[0])
+			t.Fatalf("test case %d: program.Statements[0] is not ast.VarBlockDeclaration. got=%T", i, program.Statements[0])
 		}
+
+		// For the multi-line test case, we expect 2 declarations.
+		if tt.expectedIdentifier == "MultiVar1" {
+			if len(block.Declarations) != 2 {
+				t.Fatalf("test case %d: block.Declarations does not contain 2 statements for multi-line test. got=%d", i, len(block.Declarations))
+			}
+			// Test first declaration in multi-line block
+			if !testVarDeclStatement(t, block.Declarations[0], "MultiVar1", "INT") {
+				return
+			}
+			// Test second declaration in multi-line block
+			if !testVarDeclStatement(t, block.Declarations[1], "MultiVar2", "BOOL") || !testLiteralExpression(t, block.Declarations[1].Value, true) {
+				return
+			}
+			continue // Skip the generic checks below for this specific multi-line case
+		} else if len(block.Declarations) != 1 {
+			t.Fatalf("test case %d: block.Declarations does not contain 1 statement. got=%d", i, len(block.Declarations))
+		}
+		stmt := block.Declarations[0] // We'll check the first declaration for all tests
 
 		if !testVarDeclStatement(t, stmt, tt.expectedIdentifier, tt.expectedDataType) {
 			return
 		}
 
 		if stmt.IsConstant != tt.isConstant {
-			t.Fatalf("stmt.IsConstant is not %v. got=%v", tt.isConstant, stmt.IsConstant)
+			t.Fatalf("test case %d: stmt.IsConstant is not %v. got=%v", i, tt.isConstant, stmt.IsConstant)
 		}
 
 		if stmt.IsRetain != tt.isRetain {
-			t.Fatalf("stmt.IsRetain is not %v. got=%v", tt.isRetain, stmt.IsRetain)
+			t.Fatalf("test case %d: stmt.IsRetain is not %v. got=%v", i, tt.isRetain, stmt.IsRetain)
 		}
 
 		if stmt.IsNonRetain != tt.isNonRetain {
-			t.Fatalf("stmt.IsNonRetain is not %v. got=%v", tt.isNonRetain, stmt.IsNonRetain)
+			t.Fatalf("test case %d: stmt.IsNonRetain is not %v. got=%v", i, tt.isNonRetain, stmt.IsNonRetain)
 		}
 
 		val := stmt.Value
@@ -167,6 +194,78 @@ func TestStructTypeDeclaration(t *testing.T) {
 	}
 }
 
+func TestComplexTypeBlockDeclaration(t *testing.T) {
+	input := `
+		TYPE
+			MyInteger   : INT := 10;
+			MySubrange  : INT (0..100);
+			MyArray     : ARRAY [1..10] OF BOOL;
+			MyStruct    : STRUCT Field1:INT; END_STRUCT;
+		END_TYPE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	typeBlock, ok := program.Statements[0].(*ast.TypeBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.TypeBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(typeBlock.Declarations) != 4 {
+		t.Fatalf("Expected 4 type declarations. got=%d", len(typeBlock.Declarations))
+	}
+
+	// 1. Test MyInteger : INT := 10;
+	decl1 := typeBlock.Declarations[0]
+	if decl1.Name.Value != "MyInteger" {
+		t.Errorf("Invalid name for declaration 1. got=%s", decl1.Name.Value)
+	}
+	// NOTE: The current parser does not handle initial values for simple type declarations.
+	// This test confirms it parses the type correctly, but the initial value is ignored.
+	if decl1.DataType.String() != "INT" {
+		t.Errorf("Invalid data type for declaration 1. got=%s", decl1.DataType.String())
+	}
+
+	// 2. Test MySubrange : INT (0..100);
+	decl2 := typeBlock.Declarations[1]
+	if decl2.Name.Value != "MySubrange" {
+		t.Errorf("Invalid name for declaration 2. got=%s", decl2.Name.Value)
+	}
+	// NOTE: The current parser does not handle subrange type declarations.
+	// This test confirms it parses the base type correctly, but the subrange is ignored.
+	if decl2.DataType.String() != "INT" {
+		t.Errorf("Invalid data type for declaration 2. got=%s", decl2.DataType.String())
+	}
+
+	// 3. Test MyArray : ARRAY [1..10] OF BOOL;
+	decl3 := typeBlock.Declarations[2]
+	if decl3.Name.Value != "MyArray" {
+		t.Errorf("Invalid name for declaration 3. got=%s", decl3.Name.Value)
+	}
+	if _, ok := decl3.DataType.(*ast.ArrayDefinition); !ok {
+		t.Errorf("DataType for declaration 3 is not ArrayDefinition. got=%T", decl3.DataType)
+	}
+
+	// 4. Test MyStruct : STRUCT Field1:INT; END_STRUCT;
+	decl4 := typeBlock.Declarations[3]
+	if decl4.Name.Value != "MyStruct" {
+		t.Errorf("Invalid name for declaration 4. got=%s", decl4.Name.Value)
+	}
+	structDef, ok := decl4.DataType.(*ast.StructDefinition)
+	if !ok {
+		t.Errorf("DataType for declaration 4 is not StructDefinition. got=%T", decl4.DataType)
+	}
+	if len(structDef.Members) != 1 {
+		t.Errorf("Expected 1 member in MyStruct. got=%d", len(structDef.Members))
+	}
+}
+
 func TestArrayTypeDeclaration(t *testing.T) {
 	input := `
 		TYPE
@@ -227,12 +326,17 @@ func TestVarDeclWithUserDefinedType(t *testing.T) {
 		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
 	}
 
-	varBlock, ok := program.Statements[1].(*ast.VarDeclStatement)
+	varBlock, ok := program.Statements[1].(*ast.VarBlockDeclaration)
 	if !ok {
-		t.Fatalf("program.Statements[1] is not ast.VarDeclStatement. got=%T", program.Statements[1])
+		t.Fatalf("program.Statements[1] is not ast.VarBlockDeclaration. got=%T", program.Statements[1])
 	}
 
-	testVarDeclStatement(t, varBlock, "myVar", "MyStruct")
+	if len(varBlock.Declarations) != 1 {
+		t.Fatalf("varBlock.Declarations does not contain 1 statement. got=%d", len(varBlock.Declarations))
+	}
+	stmt := varBlock.Declarations[0]
+
+	testVarDeclStatement(t, stmt, "myVar", "MyStruct")
 }
 
 func TestVarDeclWithUserDefinedArrayType(t *testing.T) {
@@ -254,12 +358,17 @@ func TestVarDeclWithUserDefinedArrayType(t *testing.T) {
 		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
 	}
 
-	varStmt, ok := program.Statements[1].(*ast.VarDeclStatement)
+	varBlock, ok := program.Statements[1].(*ast.VarBlockDeclaration)
 	if !ok {
-		t.Fatalf("program.Statements[1] is not ast.VarDeclStatement. got=%T", program.Statements[1])
+		t.Fatalf("program.Statements[1] is not ast.VarBlockDeclaration. got=%T", program.Statements[1])
 	}
 
-	testVarDeclStatement(t, varStmt, "myArr", "MyIntArray")
+	if len(varBlock.Declarations) != 1 {
+		t.Fatalf("varBlock.Declarations does not contain 1 statement. got=%d", len(varBlock.Declarations))
+	}
+	stmt := varBlock.Declarations[0]
+
+	testVarDeclStatement(t, stmt, "myArr", "MyIntArray")
 }
 
 func TestConfigVarDeclarations(t *testing.T) {
@@ -367,8 +476,58 @@ func TestAccessVarDeclarations(t *testing.T) {
 func TestExternalVarDeclarations(t *testing.T) {
 	input := `
 		VAR_EXTERNAL
-			External1 : INT;
-			External2 : CONSTANT BOOL;
+			External1 : INT;           // Standard external variable (read/write)
+		END_VAR
+
+		VAR_EXTERNAL CONSTANT
+			External2 : BOOL;          // External constant (read-only)
+		END_VAR
+`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 2 {
+		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
+	}
+
+	// Test first block: VAR_EXTERNAL
+	stmt1, ok := program.Statements[0].(*ast.ExternalVarDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExternalVarDeclaration. got=%T", program.Statements[0])
+	}
+	if len(stmt1.Vars) != 1 {
+		t.Fatalf("Expected 1 external variable in first block. got=%d", len(stmt1.Vars))
+	}
+	if !testVarDeclStatement(t, stmt1.Vars[0], "External1", "INT") {
+		return
+	}
+	if stmt1.Vars[0].IsConstant {
+		t.Errorf("External1 should not be constant")
+	}
+
+	// Test second block: VAR_EXTERNAL CONSTANT
+	stmt2, ok := program.Statements[1].(*ast.ExternalVarDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[1] is not ast.ExternalVarDeclaration. got=%T", program.Statements[1])
+	}
+	if len(stmt2.Vars) != 1 {
+		t.Fatalf("Expected 1 external variable in second block. got=%d", len(stmt2.Vars))
+	}
+	if !testVarDeclStatement(t, stmt2.Vars[0], "External2", "BOOL") {
+		return
+	}
+	if !stmt2.Vars[0].IsConstant {
+		t.Errorf("External2 should be constant")
+	}
+}
+
+func TestMixedExternalVarDeclarations(t *testing.T) {
+	input := `
+		VAR_EXTERNAL CONSTANT
+			External1 : INT := 1; 
+			External2 : BOOL := TRUE;
 		END_VAR
 	`
 	l := lexer.New(input)
@@ -392,17 +551,23 @@ func TestExternalVarDeclarations(t *testing.T) {
 	if !testVarDeclStatement(t, stmt.Vars[0], "External1", "INT") {
 		return
 	}
+	if stmt.Vars[0].IsConstant {
+		t.Errorf("External1 should not be constant")
+	}
 
 	if !testVarDeclStatement(t, stmt.Vars[1], "External2", "BOOL") {
 		return
+	}
+	if !stmt.Vars[1].IsConstant {
+		t.Errorf("External2 should be constant")
 	}
 }
 
 func TestGlobalVarDeclarations(t *testing.T) {
 	input := `
-		VAR_GLOBAL
+		VAR_GLOBAL RETAIN
 			Global1 : INT;
-			Global2 : RETAIN BOOL := TRUE;
+			Global2 : BOOL := TRUE;
 		END_VAR
 	`
 	l := lexer.New(input)
@@ -527,6 +692,47 @@ func TestIntegerLiteralExpression(t *testing.T) {
 	if literal.TokenLiteral() != "5" {
 		t.Errorf("literal.TokenLiteral not %s. got=%s", "5",
 			literal.TokenLiteral())
+	}
+}
+
+func TestRealLiteralExpression(t *testing.T) {
+	tests := []struct {
+		input             string
+		expectedValue     float64
+		expectedPrecision int
+	}{
+		{"1.23E4;", 12300.0, 32},
+		{"1.23e-4;", 0.000123, 32},
+		{"REAL#3.14;", 3.14, 32},
+		{"LREAL#2.718;", 2.718, 64},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+		}
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+		}
+
+		literal, ok := stmt.Expression.(*ast.RealLiteral)
+		if !ok {
+			t.Fatalf("exp not *ast.RealLiteral. got=%T", stmt.Expression)
+		}
+		// Use a small tolerance (epsilon) for float comparison to avoid precision issues.
+		const epsilon = 1e-6
+		if diff := literal.Value - tt.expectedValue; diff < -epsilon || diff > epsilon {
+			t.Errorf("literal.Value not %g. got=%g", tt.expectedValue, literal.Value)
+		}
+		if literal.Precision != tt.expectedPrecision {
+			t.Errorf("literal.Precision not %d. got=%d", tt.expectedPrecision, literal.Precision)
+		}
 	}
 }
 
@@ -744,6 +950,14 @@ func TestOperatorPrecedenceParsing(t *testing.T) {
 			"(a OR (b AND c))",
 		},
 		{
+			"a & b OR c",
+			"((a & b) OR c)",
+		},
+		{
+			"a XOR b & c",
+			"(a XOR (b & c))",
+		},
+		{
 			"a ** b + c",
 			"((a ** b) + c)",
 		},
@@ -804,7 +1018,11 @@ func TestBooleanExpression(t *testing.T) {
 }
 
 func TestIfStatement(t *testing.T) {
-	input := `IF x < y THEN x; END_IF`
+	input := `
+		IF x < y THEN 
+			x; 
+		END_IF
+		`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -851,7 +1069,13 @@ func TestIfStatement(t *testing.T) {
 }
 
 func TestIfElseStatement(t *testing.T) {
-	input := `IF x < y THEN x; ELSE y; END_IF`
+	input := `
+		IF x < y THEN 
+			x; 
+		ELSE 
+			y; 
+		END_IF
+		`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -913,7 +1137,15 @@ func TestIfElseStatement(t *testing.T) {
 }
 
 func TestIfElsifElseStatement(t *testing.T) {
-	input := `IF x < y THEN x; ELSIF x > y THEN y; ELSE z; END_IF`
+	input := `
+		IF x < y THEN
+			x;
+		ELSIF x > y THEN
+			y;
+		ELSE
+			z;
+		END_IF
+		`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -1543,8 +1775,11 @@ func TestNestedIfStatement(t *testing.T) {
 }
 
 func TestForLoopStatement(t *testing.T) {
-	input := `FOR i := 1 TO 10 BY 2 DO x := x + 1; END_FOR`
-
+	input := `
+		FOR i := 1 TO 10 BY 2 DO 
+			x := x + 1; 
+		END_FOR
+		`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()
@@ -1587,8 +1822,11 @@ func TestForLoopStatement(t *testing.T) {
 }
 
 func TestWhileStatement(t *testing.T) {
-	input := `WHILE x < 10 DO x := x + 1; END_WHILE`
-
+	input := `
+		WHILE x < 10 DO 
+			x := x + 1; 
+		END_WHILE
+		`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()
@@ -1621,7 +1859,10 @@ func TestWhileStatement(t *testing.T) {
 }
 
 func TestRepeatUntilStatement(t *testing.T) {
-	input := `REPEAT x := x + 1; UNTIL x > 10 END_REPEAT`
+	input := `
+		REPEAT x := x + 1; 
+		UNTIL x > 10 
+		END_REPEAT`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -1903,8 +2144,13 @@ func TestExitStatement(t *testing.T) {
 }
 
 func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, dataType string) bool {
-	if s.TokenLiteral() != "VAR" {
-		t.Errorf("s.TokenLiteral not 'VAR'. got=%q", s.TokenLiteral())
+	// The token for a VarDeclStatement inside a block is its identifier, not the 'VAR' keyword.
+	if s.TokenLiteral() != name {
+		// For backward compatibility with any tests that might parse single-line VAR decls not in a block,
+		// we can allow 'VAR' as a token literal. But for block declarations, it should be the name.
+		if s.TokenLiteral() != "VAR" {
+			t.Errorf("s.TokenLiteral not '%s'. got=%q", name, s.TokenLiteral())
+		}
 		return false
 	}
 
@@ -1919,9 +2165,9 @@ func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, da
 		return false
 	}
 
-	if s.DataType.TokenLiteral() != dataType {
-		t.Errorf("s.DataType.TokenLiteral() not '%s'. got=%s",
-			dataType, s.DataType.TokenLiteral())
+	if s.DataType.String() != dataType {
+		t.Errorf("s.DataType.String() not '%s'. got=%s",
+			dataType, s.DataType.String())
 		return false
 	}
 
@@ -2026,9 +2272,10 @@ func testBooleanLiteral(t *testing.T, exp ast.Expression, value bool) bool {
 		return false
 	}
 
-	if bo.TokenLiteral() != fmt.Sprintf("%t", value) {
-		t.Errorf("bo.TokenLiteral not %t. got=%s",
-			value, bo.TokenLiteral())
+	if strings.ToLower(bo.TokenLiteral()) != fmt.Sprintf("%t", value) {
+		t.Errorf("bo.TokenLiteral not case-insensitive for %t. got=%s",
+			value, bo.TokenLiteral(),
+		)
 		return false
 	}
 

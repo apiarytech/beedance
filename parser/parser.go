@@ -22,37 +22,45 @@ import (
 const (
 	_ int = iota
 	LOWEST
-	LOGICAL_OR  // OR, XOR, NOR
-	LOGICAL_AND // AND, NAND
+	ASSIGN      // :=
+	LOGICAL_OR  // OR
+	LOGICAL_XOR // XOR
+	LOGICAL_AND // AND
+	EQUALS      // =, <>
+	LESSGREATER // <, >, <=, >=
+	SUM         // +, -
+	PRODUCT     // *, /, MOD
 	EXPONENT    // **
-	EQUALS      // ==
-	LESSGREATER // > or <
-	SUM         // +
-	PRODUCT     // *
-	PREFIX      // -X or !X
+	PREFIX      // -X or NOT X
 	CALL        // myFunction(X)
 	INDEX       // array[index]
+	MEMBER      // struct.member
 )
 
 var precedences = map[token.TokenType]int{
-	token.EQ:       EQUALS,      // =
-	token.NEQ:      EQUALS,      // <>
-	token.LT:       LESSGREATER, // <
-	token.GT:       LESSGREATER, // >
-	token.LE:       LESSGREATER, // <=
-	token.GE:       LESSGREATER, // >=
-	token.PLUS:     SUM,         // +
-	token.MINUS:    SUM,         // -
-	token.SLASH:    PRODUCT,     // /
-	token.ASTERISK: PRODUCT,     // *
-	token.LPAREN:   CALL,        // (
-	token.LBRACKET: INDEX,       // [
-	token.AND:      LOGICAL_AND,
-	token.NAND:     LOGICAL_AND,
-	token.OR:       LOGICAL_OR,
-	token.XOR:      LOGICAL_OR,
-	token.NOR:      LOGICAL_OR,
-	token.EXPONENT: EXPONENT,
+	token.ASSIGN:    ASSIGN,
+	token.OR:        LOGICAL_OR,
+	token.NOR:       LOGICAL_OR,
+	token.XOR:       LOGICAL_XOR,
+	token.AND:       LOGICAL_AND,
+	token.AMPERSAND: LOGICAL_AND,
+	token.NAND:      LOGICAL_AND,
+	token.EQ:        EQUALS,
+	token.NEQ:       EQUALS,
+	token.LT:        LESSGREATER,
+	token.GT:        LESSGREATER,
+	token.LE:        LESSGREATER,
+	token.GE:        LESSGREATER,
+	token.MINUS:     SUM,
+	token.PLUS:      SUM,
+	token.MOD:       PRODUCT,
+	token.SLASH:     PRODUCT,
+	token.ASTERISK:  PRODUCT,
+	token.EXPONENT:  EXPONENT,
+	token.NOT:       PREFIX,
+	token.LPAREN:    CALL,
+	token.LBRACKET:  INDEX,
+	token.DOT:       MEMBER,
 }
 
 type (
@@ -64,9 +72,8 @@ type Parser struct {
 	l      *lexer.Lexer
 	errors []string
 
-	curToken   token.Token
-	peekToken  token.Token
-	peekToken2 token.Token
+	curToken  token.Token
+	peekToken token.Token
 
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
@@ -78,15 +85,31 @@ func New(l *lexer.Lexer) *Parser {
 		errors: []string{},
 	}
 
+	// B.3.1 Expressions - prefix functions
 	p.prefixParseFns = make(map[token.TokenType]prefixParseFn)
-	p.registerPrefix(token.IDENT, p.parseIdentifier)
+
+	// Literals (B.1.2)
 	p.registerPrefix(token.INT, p.parseIntegerLiteral)
+	p.registerPrefix(token.REAL, p.parseRealLiteral)
+	p.registerPrefix(token.LREAL, p.parseRealLiteral)
 	p.registerPrefix(token.STRING_LITERAL, p.parseStringLiteral)
 	p.registerPrefix(token.WSTRING_LITERAL, p.parseWStringLiteral)
-	p.registerPrefix(token.NOT, p.parsePrefixExpression)
-	p.registerPrefix(token.MINUS, p.parsePrefixExpression)
+	p.registerPrefix(token.TIME, p.parseTimeLiteral)
+	p.registerPrefix(token.DATE, p.parseTimeLiteral)
+	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeLiteral)
+	p.registerPrefix(token.DATE_AND_TIME, p.parseTimeLiteral)
 	p.registerPrefix(token.TRUE, p.parseBoolean)
 	p.registerPrefix(token.FALSE, p.parseBoolean)
+
+	// Variables (B.1.4)
+	p.registerPrefix(token.IDENT, p.parseIdentifier)
+	p.registerPrefix(token.DIRECT_VAR, p.parseDirectVariable)
+
+	// Prefix Operators
+	p.registerPrefix(token.NOT, p.parsePrefixExpression)
+	p.registerPrefix(token.MINUS, p.parsePrefixExpression)
+
+	// Grouped Expressions
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(token.FUNCTION, p.parseFunctionLiteral)
 	p.registerPrefix(token.MACRO, p.parseMacroLiteral)
@@ -114,14 +137,20 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.XOR, p.parseInfixExpression)
 	p.registerInfix(token.NAND, p.parseInfixExpression)
 	p.registerInfix(token.NOR, p.parseInfixExpression)
+	// Non-standard logical operators are now grouped with standard ones
+	// for clarity, but the precedence map dictates their behavior.
+	p.registerInfix(token.AMPERSAND, p.parseInfixExpression) // Standard alias for AND
 
+	p.registerInfix(token.MOD, p.parseInfixExpression)
+
+	p.registerInfix(token.ASSIGN, p.parseInfixExpression)
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
+	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
 
-	// Read two tokens, so curToken and peekToken are both set
-	p.nextToken() // curToken
-	p.nextToken() // peekToken
-	p.nextToken() // peekToken2
+	// // Read two tokens, so curToken and peekToken are both set
+	p.nextToken()
+	p.nextToken()
 
 	return p
 }
@@ -129,7 +158,6 @@ func New(l *lexer.Lexer) *Parser {
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
-	p.peekToken2 = p.l.NextToken()
 
 	// Check for lexer errors and create parser errors for them.
 	switch p.curToken.Type {
@@ -187,7 +215,9 @@ func (p *Parser) ParseProgram() *ast.Program {
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
-		p.nextToken()
+		if !p.curTokenIs(token.EOF) {
+			p.nextToken()
+		}
 	}
 
 	return program
@@ -196,7 +226,7 @@ func (p *Parser) ParseProgram() *ast.Program {
 func (p *Parser) parseStatement() ast.Statement {
 	switch p.curToken.Type {
 	case token.VAR:
-		return p.parseVarDeclStatement()
+		return p.parseVarBlockStatement()
 	case token.VAR_GLOBAL:
 		return p.parseGlobalVarDeclStatement()
 	case token.VAR_EXTERNAL:
@@ -231,14 +261,15 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseStepStatement()
 	case token.INITIAL_STEP:
 		return p.parseInitialStepStatement()
+	case token.CONFIGURATION:
+		return p.parseConfigurationDeclaration()
 	case token.EXIT:
 		return &ast.ExitStatement{Token: p.curToken}
 	default:
 		return p.parseExpressionStatement()
 	}
 }
-
-func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
+func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -290,13 +321,10 @@ func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 	return stmt
 }
 
-func (p *Parser) parseStructMember() *ast.VarDeclStatement {
-	// This is similar to parseVarDeclStatement but for struct members,
-	// which don't start with the VAR keyword.
+func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
-	if !p.curTokenIs(token.IDENT) {
-		p.errors = append(p.errors, "expected member name (identifier)")
+	if !p.expectPeek(token.IDENT) {
 		return nil
 	}
 
@@ -308,13 +336,20 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 
 	p.nextToken() // Move to the data type token
 
-	// Check if the current token is a valid data type
-	if !p.isDataTypeToken(p.curToken) {
-		p.errors = append(p.errors, fmt.Sprintf("expected a data type for member, got %s", p.curToken.Literal))
-		return nil
+	// Check for RETAIN/NON_RETAIN qualifiers
+	if p.curTokenIs(token.RETAIN) {
+		stmt.IsRetain = true
+		p.nextToken() // consume RETAIN
+	} else if p.curTokenIs(token.NON_RETAIN) {
+		stmt.IsNonRetain = true
+		p.nextToken() // consume NON_RETAIN
 	}
 
-	stmt.DataType = &ast.TypeSpecifier{Token: p.curToken}
+	stmt.DataType = p.parseTypeSpecifier() // This now correctly assigns ast.Expression
+	if stmt.DataType == nil {
+		return nil
+	}
+	p.nextToken() // consume data type
 
 	// Check for optional initial value assignment (:=)
 	if p.peekTokenIs(token.ASSIGN) {
@@ -323,47 +358,56 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 		stmt.Value = p.parseExpression(LOWEST)
 	}
 
-	p.expectPeek(token.SEMICOLON)
+	if !p.expectPeek(token.SEMICOLON) {
+		return nil
+	}
 	return stmt
+}
+
+func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
+	stmt := &ast.VarBlockDeclaration{Token: p.curToken}
+
+	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
+	p.nextToken()
+	return stmt
+}
+
+func (p *Parser) parseStructMember() *ast.VarDeclStatement {
+	// This is similar to parseVarDeclStatement but for struct members,
+	// which don't start with the VAR keyword.
+	if !p.curTokenIs(token.IDENT) {
+		p.errors = append(p.errors, fmt.Sprintf("expected member name (identifier), got %s", p.curToken.Type))
+		// Skip tokens until we find the end of the line or the struct to recover.
+		for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.END_STRUCT) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
+			p.nextToken()
+		}
+		return nil // Return nil to signal a parsing failure for this member
+	}
+	return p.parseVarDeclStatement()
 }
 
 func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	stmt := &ast.GlobalVarDeclaration{Token: p.curToken}
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// The parseVarDeclarations leaves us at the END_VAR token.
-
 	return stmt
 }
 
 func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 	stmt := &ast.ExternalVarDeclaration{Token: p.curToken}
-
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// The parseVarDeclarations leaves us at the END_VAR token.
-
 	return stmt
 }
 
 func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 	stmt := &ast.AccessVarDeclaration{Token: p.curToken}
-
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// The parseVarDeclarations leaves us at the END_VAR token.
-
 	return stmt
 }
 
 func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 	stmt := &ast.TempVarDeclaration{Token: p.curToken}
-
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// The parseVarDeclarations leaves us at the END_VAR token.
-
 	return stmt
 }
 
@@ -371,10 +415,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// The parseVarDeclarations leaves us at the END_VAR token, so we expect it.
-	p.expectPeek(token.END_VAR)
-
+	p.nextToken()
 	return stmt
 }
 
@@ -389,7 +430,7 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 		if decl != nil {
 			block.Declarations = append(block.Declarations, decl)
 		}
-		p.nextToken()
+		p.nextToken() // Move to the start of the next declaration or END_TYPE
 	}
 
 	return block
@@ -408,7 +449,21 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		return nil
 	}
 	p.nextToken() // consume COLON, move to type definition
-	decl.DataType = p.parseExpression(LOWEST)
+	if p.curTokenIs(token.STRUCT) {
+		decl.DataType = p.parseStructDefinition()
+	} else {
+		decl.DataType = p.parseTypeSpecifier() // Can be ARRAY or simple type
+	}
+
+	// The semicolon is expected after the type definition.
+	if !p.curTokenIs(token.SEMICOLON) {
+		p.nextToken() // Consume the type definition (e.g., END_STRUCT)
+	}
+	if !p.curTokenIs(token.SEMICOLON) {
+		p.peekError(token.SEMICOLON)
+		return nil
+	}
+
 	return decl
 }
 
@@ -423,30 +478,341 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 		if member != nil {
 			structDef.Members = append(structDef.Members, member)
 		}
-		p.nextToken()
+		// parseStructMember (via parseVarDeclStatement) consumes the semicolon.
+		// The next token is either the next member's identifier or END_STRUCT.
 	}
 
-	p.expectPeek(token.END_STRUCT)
+	if !p.curTokenIs(token.END_STRUCT) {
+		p.peekError(token.END_STRUCT)
+		return nil
+	}
+
 	return structDef
 }
 
 func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
 	varDecls := []*ast.VarDeclStatement{}
 
-	p.nextToken() // consume VAR, VAR_INPUT, etc.
+	isConstant := false
+	isRetain := false
+	isNonRetain := false
 
-	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) {
-		stmt := p.parseVarDeclStatement()
-		if stmt != nil {
-			varDecls = append(varDecls, stmt)
+	p.nextToken() // Consume VAR, VAR_INPUT, etc.
+
+	if p.curTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // consume CONSTANT
+	} else if p.curTokenIs(token.RETAIN) {
+		isRetain = true
+		p.nextToken() // consume RETAIN
+	} else if p.curTokenIs(token.NON_RETAIN) {
+		isNonRetain = true
+		p.nextToken() // consume NON_RETAIN
+	}
+
+	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
+		// Each iteration parses one or more variables of the same type.
+		// e.g., Var1, Var2 : INT;
+		names := p.parseIdentifierList()
+
+		var atDecl *ast.AtDeclaration
+		if p.peekTokenIs(token.AT) {
+			p.nextToken() // consume name, move to AT
+			atDecl = p.parseAtDeclaration()
+		}
+
+		if !p.expectPeek(token.COLON) { // After this, curToken is ':'
+			return nil
+		}
+
+		p.nextToken() // Consume ':', move to data type
+		dataType := p.parseTypeSpecifier()
+		if dataType == nil {
+			return nil
+		}
+		// After parsing the type, we should be on the type token.
+		// Now we advance to check for initialization or semicolon.
+
+		var initialValue ast.Expression
+		if p.peekTokenIs(token.ASSIGN) {
+			p.nextToken() // to ASSIGN
+			p.nextToken() // to expression start
+			initialValue = p.parseExpression(LOWEST)
+		}
+
+		p.nextToken() // Consume the data type token or the last token of the initial value expression.
+
+		isRisingEdge := p.peekTokenIs(token.R_EDGE)
+		isFallingEdge := p.peekTokenIs(token.F_EDGE)
+
+		for _, name := range names {
+			decl := &ast.VarDeclStatement{
+				Token:         name.Token,
+				Name:          name,
+				Location:      atDecl,
+				DataType:      dataType,
+				Value:         initialValue,
+				IsConstant:    isConstant,
+				IsRetain:      isRetain,
+				IsNonRetain:   isNonRetain,
+				IsRisingEdge:  isRisingEdge,
+				IsFallingEdge: isFallingEdge,
+			}
+			varDecls = append(varDecls, decl)
+		}
+
+		if isRisingEdge {
+			p.nextToken() // consume data type
+			p.expectPeek(token.R_EDGE)
+		} else if isFallingEdge {
+			p.nextToken() // consume data type
+			p.expectPeek(token.F_EDGE)
+		}
+
+		// After parsing the declaration, we should be at the semicolon.
+		// We don't use expectPeek because the main ParseProgram loop handles the final nextToken().
+		if !p.curTokenIs(token.SEMICOLON) {
+			p.peekError(token.SEMICOLON)
+			return nil
+		}
+
+		p.nextToken() // Consume the semicolon to advance to the next declaration or END_VAR
+	}
+	return varDecls
+}
+
+func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
+	if !p.curTokenIs(token.AT) {
+		return nil
+	}
+	decl := &ast.AtDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.DIRECT_VAR) {
+		return nil
+	}
+
+	// p.curToken is now the DIRECT_VAR token.
+	// We don't call parseDirectVariable here because that's a prefix function.
+	// We just build the AST node directly.
+	loc := &ast.DirectVariable{Token: p.curToken, Address: strings.TrimPrefix(p.curToken.Literal, "%")}
+	if loc == nil {
+		return nil
+	}
+	decl.Location = loc
+	return decl
+}
+
+func (p *Parser) parseDirectVariable() ast.Expression {
+	dv := &ast.DirectVariable{Token: p.curToken}
+	// The lexer now provides the full direct variable literal (e.g., "%IX1.0")
+	// We just need to strip the leading '%' for the AST node's value.
+	dv.Address = strings.TrimPrefix(p.curToken.Literal, "%")
+	return dv
+}
+
+func (p *Parser) parseConfigurationDeclaration() ast.Statement {
+	stmt := &ast.ConfigurationDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken()
+
+	for !p.curTokenIs(token.END_CONFIGURATION) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.RESOURCE:
+			res := p.parseResourceDeclaration()
+			if res != nil {
+				stmt.Resources = append(stmt.Resources, res)
+			}
+		case token.VAR_GLOBAL:
+			// Simplified, assumes one global block
+			stmt.GlobalVars = append(stmt.GlobalVars, p.parseGlobalVarDeclStatement())
 		}
 		p.nextToken()
-		if p.curTokenIs(endToken) {
-			break
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
+	stmt := &ast.ResourceDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.ON) {
+		return nil
+	}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.ResourceType = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken()
+
+	for !p.curTokenIs(token.END_RESOURCE) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.TASK:
+			task := p.parseTaskDeclaration()
+			if task != nil {
+				stmt.Tasks = append(stmt.Tasks, task)
+			}
+		case token.PROGRAM:
+			progConfig := p.parseProgramConfiguration()
+			if progConfig != nil {
+				stmt.Programs = append(stmt.Programs, progConfig)
+			}
+		}
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
+	stmt := &ast.TaskDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+
+	// Parse the task configuration (SINGLE, INTERVAL, PRIORITY)
+	for !p.curTokenIs(token.RPAREN) && !p.curTokenIs(token.EOF) {
+		p.nextToken() // move to the keyword
+		switch p.curToken.Type {
+		case token.SINGLE:
+			if !p.expectPeek(token.ASSIGN) {
+				return nil
+			}
+			p.nextToken()
+			stmt.Single = p.parseExpression(LOWEST)
+		case token.INTERVAL:
+			if !p.expectPeek(token.ASSIGN) {
+				return nil
+			}
+			p.nextToken()
+			stmt.Interval = p.parseExpression(LOWEST)
+		case token.PRIORITY:
+			if !p.expectPeek(token.ASSIGN) {
+				return nil
+			}
+			p.nextToken()
+			stmt.Priority = p.parseExpression(LOWEST)
+		}
+		if p.curTokenIs(token.COMMA) {
+			p.nextToken()
 		}
 	}
 
-	return varDecls
+	if !p.curTokenIs(token.RPAREN) {
+		return nil
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
+	stmt := &ast.ProgramConfiguration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected program instance name
+	}
+	stmt.InstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Check for optional WITH clause
+	if p.peekTokenIs(token.WITH) {
+		p.nextToken() // consume instance name, move to WITH
+		if !p.expectPeek(token.IDENT) {
+			return nil // Expected task name
+		}
+		stmt.TaskName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected program type name
+	}
+	stmt.TypeName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// TODO: Parse optional parenthesized connection list `(...)`
+
+	// Program configuration must end with a semicolon
+	p.expectPeek(token.SEMICOLON)
+
+	return stmt
+}
+
+func (p *Parser) parseIdentifierList() []*ast.Identifier {
+	list := []*ast.Identifier{}
+	list = append(list, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		list = append(list, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
+	}
+
+	return list
+}
+
+func (p *Parser) parseTypeSpecifier() ast.Expression {
+	if p.curTokenIs(token.ARRAY) {
+		return p.parseArrayDefinition()
+	}
+	if p.isDataTypeToken(p.curToken) {
+		return &ast.TypeSpecifier{Token: p.curToken}
+	}
+
+	p.errors = append(p.errors, fmt.Sprintf("expected a data type, got %s", p.curToken.Type))
+	return nil
+}
+
+func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
+	def := &ast.ArrayDefinition{Token: p.curToken}
+
+	if !p.expectPeek(token.LBRACKET) {
+		return nil
+	}
+	p.nextToken() // consume '['
+
+	def.Ranges = []ast.Expression{}
+	for !p.curTokenIs(token.RBRACKET) {
+		rangeExp := p.parseExpression(LOWEST)
+		def.Ranges = append(def.Ranges, rangeExp)
+
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken() // consume expression
+			p.nextToken() // consume ','
+		} else {
+			p.nextToken() // consume expression
+		}
+	}
+
+	if !p.curTokenIs(token.RBRACKET) {
+		p.peekError(token.RBRACKET)
+		return nil
+	}
+
+	if !p.expectPeek(token.OF) {
+		return nil
+	}
+	p.nextToken() // consume 'OF', move to data type
+	def.DataType = &ast.TypeSpecifier{Token: p.curToken}
+	return def
 }
 
 func (p *Parser) isDataTypeToken(tok token.Token) bool {
@@ -546,6 +912,33 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	return lit
 }
 
+func (p *Parser) parseRealLiteral() ast.Expression {
+	lit := &ast.RealLiteral{Token: p.curToken}
+
+	literal := p.curToken.Literal
+	// Handle typed literals like REAL#1.23
+	if strings.Contains(literal, "#") {
+		parts := strings.SplitN(literal, "#", 2)
+		literal = parts[1]
+	}
+
+	// Default to REAL (32-bit) unless LREAL is specified.
+	bitSize := 32
+	if p.curToken.Type == token.LREAL {
+		bitSize = 64
+	}
+	lit.Precision = bitSize
+
+	value, err := strconv.ParseFloat(literal, bitSize)
+	if err != nil {
+		msg := fmt.Sprintf("could not parse %q as real", literal)
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+	lit.Value = value
+	return lit
+}
+
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
@@ -585,6 +978,25 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	return expression
 }
 
+func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression {
+	exp := &ast.MemberAccessExpression{
+		Token:  p.curToken,
+		Struct: left,
+	}
+
+	// We expect an identifier after the dot.
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+
+	exp.Member = &ast.Identifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	return exp
+}
+
 func (p *Parser) parseBoolean() ast.Expression {
 	return &ast.Boolean{Token: p.curToken, Value: p.curTokenIs(token.TRUE)}
 }
@@ -611,6 +1023,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		return nil
 	}
 
+	p.nextToken() // consume THEN
 	ifStmt.Consequence = p.parseBlockStatementForIf()
 
 	// Keep track of the current statement for chaining ELSIF
@@ -626,6 +1039,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			return nil
 		}
 
+		p.nextToken() // consume THEN
 		newIf.Consequence = p.parseBlockStatementForIf()
 
 		current.Alternative = newIf
@@ -666,7 +1080,8 @@ func (p *Parser) parseForStatement() ast.Statement {
 	stmt.StartValue = p.parseExpression(LOWEST)
 
 	// TO
-	if !p.expectPeek(token.TO) {
+	if !p.curTokenIs(token.TO) {
+		p.peekError(token.TO)
 		return nil
 	}
 
@@ -675,14 +1090,14 @@ func (p *Parser) parseForStatement() ast.Statement {
 	stmt.EndValue = p.parseExpression(LOWEST)
 
 	// [BY <step_value>]
-	if p.peekTokenIs(token.BY) {
-		p.nextToken() // consume BY
-		p.nextToken() // consume expression start
+	if p.curTokenIs(token.BY) {
+		p.nextToken() // consume BY, move to expression start
 		stmt.StepValue = p.parseExpression(LOWEST)
 	}
 
 	// DO
-	if !p.expectPeek(token.DO) {
+	if !p.curTokenIs(token.DO) {
+		p.peekError(token.DO)
 		return nil
 	}
 
@@ -695,7 +1110,11 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 	stmt := &ast.WhileStatement{Token: p.curToken}
 
 	p.nextToken() // consume WHILE
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
 	stmt.Condition = p.parseExpression(LOWEST)
+	p.nextToken() // consume expression
 
 	if !p.expectPeek(token.DO) {
 		return nil
@@ -703,6 +1122,11 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 
 	p.nextToken() // Move to the start of the block
 	stmt.Body = p.parseBlockStatementWhileLoop()
+
+	if !p.curTokenIs(token.END_WHILE) {
+		p.peekError(token.END_WHILE)
+		return nil
+	}
 	return stmt
 }
 
@@ -737,7 +1161,7 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	p.nextToken()
 
 	// Parse case branches
-	for !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.END_CASE) && !p.curTokenIs(token.EOF) {
+	for !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.END_CASE) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.END_CASE) {
 		branch := &ast.CaseBranch{Token: p.curToken}
 		branch.Values = []ast.Expression{}
 
@@ -759,19 +1183,22 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 		branch.Consequence = p.parseStatement()
 		stmt.Cases = append(stmt.Cases, branch)
 
-		p.nextToken()
+		// After parsing a statement, we might be on a semicolon.
+		// The next token should be the start of the next case label, ELSE, or END_CASE.
+		if p.peekTokenIs(token.SEMICOLON) {
+			p.nextToken()
+		}
+		p.nextToken() // Move to the next token to check the loop condition
 	}
 
 	// Parse optional ELSE block
 	if p.curTokenIs(token.ELSE) {
 		p.nextToken() // consume ELSE
-		stmt.Alternative = &ast.BlockStatement{Token: p.curToken}
-		stmt.Alternative.Statements = []ast.Statement{}
-		for !p.curTokenIs(token.END_CASE) && !p.curTokenIs(token.EOF) {
-			statement := p.parseStatement()
-			stmt.Alternative.Statements = append(stmt.Alternative.Statements, statement)
-			p.nextToken()
-		}
+		stmt.Alternative = p.parseBlockStatementUntil(token.END_CASE)
+	}
+
+	if !p.curTokenIs(token.END_CASE) {
+		p.peekError(token.END_CASE)
 	}
 
 	return stmt
@@ -780,13 +1207,14 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
-	p.nextToken()
 
 	for !p.curTokenIs(token.ELSIF) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.END_IF) && !p.curTokenIs(token.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
+		// parseStatement should leave us on the last token of the statement (e.g., ';')
+		// so we advance to the next one to check the loop condition.
 		p.nextToken()
 	}
 
@@ -839,20 +1267,23 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 
 	p.nextToken()
 
-	// Parse variable declaration blocks
-	for p.curTokenIs(token.VAR_INPUT) || p.curTokenIs(token.VAR_OUTPUT) || p.curTokenIs(token.VAR_IN_OUT) || p.curTokenIs(token.VAR) {
+	// Loop to parse all variable declaration blocks
+	for {
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
 		case token.VAR_OUTPUT:
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
 		case token.VAR_IN_OUT:
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR:
-			stmt.Vars = append(stmt.Vars, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		default:
+			// No more VAR blocks, break the loop to parse the body
+			goto end_var_parsing
 		}
-		p.nextToken()
 	}
+end_var_parsing:
 
 	// After var blocks, we have the body
 	body := &ast.BlockStatement{Token: p.curToken}
@@ -879,20 +1310,23 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 
 	p.nextToken()
 
-	// Parse variable declaration blocks
-	for p.curTokenIs(token.VAR_INPUT) || p.curTokenIs(token.VAR_OUTPUT) || p.curTokenIs(token.VAR_IN_OUT) || p.curTokenIs(token.VAR) {
+	// Loop to parse all variable declaration blocks
+	for {
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
 		case token.VAR_OUTPUT:
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
 		case token.VAR_IN_OUT:
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR:
-			stmt.Vars = append(stmt.Vars, p.parseVarDeclarations(token.END_VAR)...)
+			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		default:
+			// No more VAR blocks, break the loop to parse the body
+			goto end_var_parsing
 		}
-		p.nextToken()
 	}
+end_var_parsing:
 
 	// After var blocks, we have the body
 	body := &ast.BlockStatement{Token: p.curToken}
@@ -905,6 +1339,17 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 	stmt.Body = body
 
 	return stmt
+}
+
+// parseVarBlock is a helper to parse a VAR...END_VAR block and return the declarations.
+func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatement {
+	if !p.curTokenIs(blockType) {
+		return nil
+	}
+	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
+	decls := p.parseVarDeclarations(token.END_VAR)
+	p.nextToken() // Consume END_VAR
+	return decls
 }
 
 func (p *Parser) parseActionStatement() ast.Statement {
@@ -924,18 +1369,102 @@ func (p *Parser) parseActionStatement() ast.Statement {
 }
 
 func (p *Parser) parseTransitionStatement() ast.Statement {
-	p.errors = append(p.errors, "parsing TRANSITION statements is not yet implemented")
-	return nil
+	stmt := &ast.TransitionStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.FROM) {
+		return nil
+	}
+
+	p.nextToken() // consume FROM
+	stmt.From = p.parseIdentifierList()
+
+	if !p.expectPeek(token.TO) {
+		return nil
+	}
+
+	p.nextToken() // consume TO
+	stmt.To = p.parseIdentifierList()
+
+	if !p.expectPeek(token.ASSIGN) {
+		return nil
+	}
+
+	p.nextToken() // consume :=
+	stmt.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.SEMICOLON) {
+		return nil
+	}
+
+	if !p.expectPeek(token.END_TRANSITION) {
+		return nil
+	}
+
+	return stmt
 }
 
 func (p *Parser) parseStepStatement() ast.Statement {
-	p.errors = append(p.errors, "parsing STEP statements is not yet implemented")
-	return nil
+	return p.parseStep(false)
 }
 
 func (p *Parser) parseInitialStepStatement() ast.Statement {
-	p.errors = append(p.errors, "parsing INITIAL_STEP statements is not yet implemented")
-	return nil
+	return p.parseStep(true)
+}
+
+func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
+	stmt := &ast.StepStatement{Token: p.curToken, IsInitial: isInitial}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+	p.nextToken() // consume COLON
+
+	stmt.Actions = []*ast.ActionAssociation{}
+	for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.LPAREN) {
+			assoc := p.parseActionAssociation()
+			if assoc != nil {
+				stmt.Actions = append(stmt.Actions, assoc)
+			}
+		}
+		if !p.expectPeek(token.SEMICOLON) {
+			break // Or handle error
+		}
+		p.nextToken()
+	}
+
+	if !p.curTokenIs(token.END_STEP) {
+		p.peekError(token.END_STEP)
+		return nil
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseActionAssociation() *ast.ActionAssociation {
+	assoc := &ast.ActionAssociation{
+		Token:      p.curToken,
+		ActionName: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+	p.nextToken() // consume (
+
+	// For now, we'll assume a simple qualifier, like (N)
+	assoc.Qualifier = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
+
+	return assoc
 }
 
 func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
@@ -1081,12 +1610,22 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	}
 
 	p.nextToken()
-	list = append(list, p.parseExpression(LOWEST))
+
+	// Check for named arguments (IDENT := or IDENT =>)
+	if p.curTokenIs(token.IDENT) && (p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ARROW)) {
+		list = append(list, p.parseNamedArgument())
+	} else {
+		list = append(list, p.parseExpression(LOWEST))
+	}
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		list = append(list, p.parseExpression(LOWEST))
+		if p.curTokenIs(token.IDENT) && (p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ARROW)) {
+			list = append(list, p.parseNamedArgument())
+		} else {
+			list = append(list, p.parseExpression(LOWEST))
+		}
 	}
 
 	if !p.expectPeek(end) {
@@ -1094,6 +1633,29 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	}
 
 	return list
+}
+
+func (p *Parser) parseNamedArgument() ast.Expression {
+	name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken() // move to := or =>
+
+	if p.curTokenIs(token.ASSIGN) {
+		arg := &ast.NamedArgument{Token: name.Token, Name: name}
+		p.nextToken() // move to expression
+		arg.Value = p.parseExpression(LOWEST)
+		return arg
+	}
+
+	if p.curTokenIs(token.ARROW) {
+		arg := &ast.OutputArgument{Token: p.curToken, Source: name}
+		p.nextToken() // move to expression
+		arg.Target = p.parseExpression(LOWEST)
+		return arg
+	}
+
+	// Should not happen due to checks in parseExpressionList
+	return nil
 }
 
 func (p *Parser) parseArrayLiteral() ast.Expression {

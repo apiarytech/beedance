@@ -75,3 +75,32 @@ func TestNumberWithFollowingIdentifier(t *testing.T) {
 		t.Fatalf("Expected IDENT myVar, got %s %s", tok.Type, tok.Literal)
 	}
 }
+
+func TestDirectlyRepresentedVariables(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedType    token.TokenType
+		expectedLiteral string
+	}{
+		{"%IX0.0", token.DIRECT_VAR, "%IX0.0"},
+		{"%MW100", token.DIRECT_VAR, "%MW100"},
+		{"%QB7", token.DIRECT_VAR, "%QB7"},
+		{"%ID42", token.DIRECT_VAR, "%ID42"},
+		{"%I*", token.DIRECT_VAR, "%I*"},
+	}
+
+	for _, tt := range tests {
+		l := New(tt.input)
+		tok := l.NextToken()
+
+		if tok.Type != tt.expectedType {
+			t.Errorf("test for %q - tokentype wrong. expected=%q, got=%q",
+				tt.input, tt.expectedType, tok.Type)
+		}
+
+		if tok.Literal != tt.expectedLiteral {
+			t.Errorf("test for %q - literal wrong. expected=%q, got=%q",
+				tt.input, tt.expectedLiteral, tok.Literal)
+		}
+	}
+}

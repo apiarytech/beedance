@@ -39,12 +39,24 @@ func (l *Lexer) NextToken() token.Token {
 
 	switch l.ch {
 	case '=':
-		tok = newToken(token.EQ, l.ch, startLine, startCol)
+		if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			literal := string(ch) + string(l.ch)
+			tok = token.Token{Type: token.ARROW, Literal: literal, Row: startLine, Column: startCol}
+		} else {
+			tok = newToken(token.EQ, l.ch, startLine, startCol)
+		}
 	case '+':
 		tok = newToken(token.PLUS, l.ch, startLine, startCol)
 	case '-':
 		tok = newToken(token.MINUS, l.ch, startLine, startCol)
 	case '/':
+		if l.peekChar() == '/' {
+			// This is a single-line comment, skip to the end of the line
+			l.skipSingleLineComment()
+			return l.NextToken()
+		}
 		tok = newToken(token.SLASH, l.ch, startLine, startCol)
 	case '*':
 		if l.peekChar() == '*' {
@@ -69,6 +81,8 @@ func (l *Lexer) NextToken() token.Token {
 		} else {
 			tok = newToken(token.LT, l.ch, startLine, startCol)
 		}
+	case '&':
+		tok = newToken(token.AMPERSAND, l.ch, startLine, startCol)
 	case '>':
 		if l.peekChar() == '=' {
 			ch := l.ch
@@ -128,11 +142,22 @@ func (l *Lexer) NextToken() token.Token {
 			l.readChar()
 			literal := string(ch) + string(l.ch)
 			tok = token.Token{Type: token.RANGE, Literal: literal, Row: startLine, Column: startCol}
-		} // A single '.' is not a valid token on its own.
-		tok.Literal = "."
-		tok.Type = token.ILLEGAL
-		tok.Row = startLine
-		tok.Column = startCol
+		} else if isDigit(l.peekChar()) {
+			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol)
+		} else {
+			// A single dot is not a valid token on its own in IEC 61131-3,
+			// except as a structure member accessor, which is handled by the parser.
+			// We'll tokenize it as DOT and let the parser decide its validity.
+			tok = newToken(token.DOT, l.ch, startLine, startCol)
+		}
+	case '%':
+		if isLetter(l.peekChar()) {
+			// This is the start of a directly represented variable (e.g., %IX1.0)
+			tok.Type = token.DIRECT_VAR
+			tok.Literal = l.readDirectVariable()
+			return tok // readDirectVariable advances the lexer, so we return early
+		}
+		tok = newToken(token.ILLEGAL, l.ch, startLine, startCol)
 	default:
 		if isLetter(l.ch) {
 			ident := l.readIdentifier()
@@ -141,6 +166,10 @@ func (l *Lexer) NextToken() token.Token {
 				tok = l.readTypedLiteral(ident, startLine, startCol)
 			} else {
 				tok.Type = token.LookupIdent(strings.ToUpper(ident))
+				// After lookup, if it's still an IDENT, validate it.
+				if tok.Type == token.IDENT && !isValidIdentifier(ident) {
+					tok.Type = token.ILLEGAL
+				}
 				tok.Literal = ident
 			}
 			tok.Row = startLine
@@ -176,6 +205,12 @@ func (l *Lexer) skipComment() token.Token {
 	return l.NextToken()
 }
 
+func (l *Lexer) skipSingleLineComment() {
+	for l.ch != '\n' && l.ch != 0 {
+		l.readChar()
+	}
+}
+
 func (l *Lexer) skipWhitespace() {
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 		l.readChar()
@@ -206,7 +241,7 @@ func (l *Lexer) peekChar() byte {
 	return l.input[l.readPos]
 }
 
-func (l *Lexer) readIdentifier() string {
+func (l *Lexer) readIdentifier() string { // Changed to return the identifier string
 	position := l.position
 	for isLetter(l.ch) || isDigit(l.ch) {
 		l.readChar()
@@ -257,20 +292,30 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 	return l.input[position:l.position], tokType
 }
 
-func (l *Lexer) readTypedLiteral(typePart string, position int, col int) token.Token {
-	valuePartStart := l.position
+func (l *Lexer) readDirectVariable() string {
+	position := l.position
+	l.readChar() // consume '%'
+	// Read location (I, Q, M), size (X, B, W, D, L), and address parts
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '.' || l.ch == '*' {
+		l.readChar()
+	}
+	return l.input[position:l.position]
+}
+
+func (l *Lexer) readTypedLiteral(typePart string, startLine int, startCol int) token.Token {
 	l.readChar() // consume '#'
+	valuePartStart := l.position
 
 	// Read the rest of the literal. This can be complex for time values.
 	// For now, we read until a character that cannot be part of the value.
 	for isDigit(l.ch) || isLetter(l.ch) || l.ch == '.' || l.ch == '_' || l.ch == '+' || l.ch == '-' || l.ch == ':' {
 		l.readChar()
 	}
-	valuePart := l.input[valuePartStart+1 : l.position]
+	valuePart := l.input[valuePartStart:l.position]
 
 	// The whole literal is the token's literal
 	literal := typePart + "#" + valuePart
-	return token.Token{Type: token.LookupIdent(strings.ToUpper(typePart)), Literal: literal, Row: position, Column: col}
+	return token.Token{Type: token.LookupIdent(strings.ToUpper(typePart)), Literal: literal, Row: l.position, Column: l.col}
 }
 
 func (l *Lexer) readString(quote byte) (string, token.TokenType) {
@@ -298,6 +343,20 @@ func isLetter(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
+}
+
+// isValidIdentifier checks for invalid underscore usage according to IEC 61131-3 §2.1.2
+func isValidIdentifier(ident string) bool {
+	if strings.HasPrefix(ident, "__") { // Multiple leading underscores
+		return false
+	}
+	if strings.Contains(ident, "__") { // Multiple embedded underscores
+		return false
+	}
+	if strings.HasSuffix(ident, "_") { // Trailing underscore
+		return false
+	}
+	return true
 }
 
 func newToken(tokenType token.TokenType, ch byte, position int, col int) token.Token {
