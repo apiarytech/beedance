@@ -269,7 +269,8 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 	}
 
 	// Check for a fractional part (making it a REAL)
-	if l.ch == '.' {
+	// Make sure it's not the start of a '..' range token
+	if l.ch == '.' && l.peekChar() != '.' {
 		tokType = token.REAL
 		l.readChar() // consume '.'
 		for isDigit(l.ch) || l.ch == '_' {

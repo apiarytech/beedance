@@ -51,6 +51,7 @@ var precedences = map[token.TokenType]int{
 	token.GT:        LESSGREATER,
 	token.LE:        LESSGREATER,
 	token.GE:        LESSGREATER,
+	token.RANGE:     LESSGREATER,
 	token.MINUS:     SUM,
 	token.PLUS:      SUM,
 	token.MOD:       PRODUCT,
@@ -141,6 +142,7 @@ func New(l *lexer.Lexer) *Parser {
 	// for clarity, but the precedence map dictates their behavior.
 	p.registerInfix(token.AMPERSAND, p.parseInfixExpression) // Standard alias for AND
 
+	p.registerInfix(token.RANGE, p.parseInfixExpression)
 	p.registerInfix(token.MOD, p.parseInfixExpression)
 
 	p.registerInfix(token.ASSIGN, p.parseInfixExpression)
@@ -373,17 +375,38 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 }
 
 func (p *Parser) parseStructMember() *ast.VarDeclStatement {
-	// This is similar to parseVarDeclStatement but for struct members,
-	// which don't start with the VAR keyword.
+	// Struct members are like variable declarations but without the VAR keyword
+	// and, according to the IEC 61131-3 standard, without initial values.
+	stmt := &ast.VarDeclStatement{Token: p.curToken}
+
 	if !p.curTokenIs(token.IDENT) {
 		p.errors = append(p.errors, fmt.Sprintf("expected member name (identifier), got %s", p.curToken.Type))
-		// Skip tokens until we find the end of the line or the struct to recover.
-		for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.END_STRUCT) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+	p.nextToken() // Move to the data type token
+
+	stmt.DataType = p.parseTypeSpecifier()
+	if stmt.DataType == nil {
+		return nil
+	}
+
+	if p.peekTokenIs(token.ASSIGN) {
+		p.errors = append(p.errors, fmt.Sprintf("initialization is not allowed for struct members at row %d, column %d", p.peekToken.Row, p.peekToken.Column))
+		// We can try to recover by skipping the initialization part to continue parsing.
+		for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.END_STRUCT) && !p.peekTokenIs(token.EOF) {
 			p.nextToken()
 		}
-		return nil // Return nil to signal a parsing failure for this member
 	}
-	return p.parseVarDeclStatement()
+
+	if !p.expectPeek(token.SEMICOLON) {
+		return nil
+	}
+	return stmt
 }
 
 func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
@@ -449,18 +472,29 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		return nil
 	}
 	p.nextToken() // consume COLON, move to type definition
+
 	if p.curTokenIs(token.STRUCT) {
 		decl.DataType = p.parseStructDefinition()
 	} else {
 		decl.DataType = p.parseTypeSpecifier() // Can be ARRAY or simple type
 	}
 
-	// The semicolon is expected after the type definition.
-	if !p.curTokenIs(token.SEMICOLON) {
-		p.nextToken() // Consume the type definition (e.g., END_STRUCT)
+	// After the base type, check for optional subrange or initialization.
+	if p.peekTokenIs(token.LPAREN) {
+		// This is a subrange declaration, e.g., INT (0..100)
+		p.nextToken() // consume type, curToken is now '('
+		decl.Subrange = p.parseGroupedExpression()
 	}
-	if !p.curTokenIs(token.SEMICOLON) {
-		p.peekError(token.SEMICOLON)
+
+	if p.peekTokenIs(token.ASSIGN) {
+		// This is an initialization, e.g., INT := 10
+		p.nextToken() // consume type or subrange, curToken is now ':='
+		p.nextToken() // consume ':=', move to expression start
+		decl.InitialValue = p.parseExpression(LOWEST)
+	}
+
+	// A type declaration must end with a semicolon.
+	if !p.expectPeek(token.SEMICOLON) {
 		return nil
 	}
 
@@ -478,8 +512,7 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 		if member != nil {
 			structDef.Members = append(structDef.Members, member)
 		}
-		// parseStructMember (via parseVarDeclStatement) consumes the semicolon.
-		// The next token is either the next member's identifier or END_STRUCT.
+		p.nextToken() // Consume semicolon to advance to the next member or END_STRUCT
 	}
 
 	if !p.curTokenIs(token.END_STRUCT) {

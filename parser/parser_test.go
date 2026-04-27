@@ -142,7 +142,7 @@ func TestStructTypeDeclaration(t *testing.T) {
 		TYPE
 			MyStruct : STRUCT
 				Field1 : INT;
-				Field2 : BOOL := TRUE;
+				Field2 : BOOL;
 			END_STRUCT;
 		END_TYPE
 	`
@@ -189,8 +189,28 @@ func TestStructTypeDeclaration(t *testing.T) {
 	if !testVarDeclStatement(t, member2, "Field2", "BOOL") {
 		return
 	}
-	if !testLiteralExpression(t, member2.Value, true) {
-		return
+}
+
+func TestStructMemberInitializationError(t *testing.T) {
+	input := `
+		TYPE
+			MyStruct : STRUCT
+				Field1 : INT;
+				Field2 : BOOL := TRUE;
+			END_STRUCT;
+		END_TYPE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	p.ParseProgram()
+
+	if len(p.Errors()) == 0 {
+		t.Fatalf("Expected an error for struct member initialization, but got none")
+	}
+
+	expectedError := "initialization is not allowed for struct members"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 }
 
@@ -200,7 +220,9 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 			MyInteger   : INT := 10;
 			MySubrange  : INT (0..100);
 			MyArray     : ARRAY [1..10] OF BOOL;
-			MyStruct    : STRUCT Field1:INT; END_STRUCT;
+			MyStruct    : STRUCT 
+				Field1:INT; 
+			END_STRUCT;
 		END_TYPE
 	`
 	l := lexer.New(input)
@@ -226,10 +248,11 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 	if decl1.Name.Value != "MyInteger" {
 		t.Errorf("Invalid name for declaration 1. got=%s", decl1.Name.Value)
 	}
-	// NOTE: The current parser does not handle initial values for simple type declarations.
-	// This test confirms it parses the type correctly, but the initial value is ignored.
 	if decl1.DataType.String() != "INT" {
 		t.Errorf("Invalid data type for declaration 1. got=%s", decl1.DataType.String())
+	}
+	if !testIntegerLiteral(t, decl1.InitialValue, 10) {
+		t.Errorf("Invalid initial value for declaration 1.")
 	}
 
 	// 2. Test MySubrange : INT (0..100);
@@ -237,10 +260,11 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 	if decl2.Name.Value != "MySubrange" {
 		t.Errorf("Invalid name for declaration 2. got=%s", decl2.Name.Value)
 	}
-	// NOTE: The current parser does not handle subrange type declarations.
-	// This test confirms it parses the base type correctly, but the subrange is ignored.
 	if decl2.DataType.String() != "INT" {
 		t.Errorf("Invalid data type for declaration 2. got=%s", decl2.DataType.String())
+	}
+	if !testInfixExpression(t, decl2.Subrange, 0, "..", 100) {
+		t.Errorf("Invalid subrange for declaration 2.")
 	}
 
 	// 3. Test MyArray : ARRAY [1..10] OF BOOL;
@@ -248,7 +272,7 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 	if decl3.Name.Value != "MyArray" {
 		t.Errorf("Invalid name for declaration 3. got=%s", decl3.Name.Value)
 	}
-	if _, ok := decl3.DataType.(*ast.ArrayDefinition); !ok {
+	if _, ok := typeBlock.Declarations[2].DataType.(*ast.ArrayDefinition); !ok {
 		t.Errorf("DataType for declaration 3 is not ArrayDefinition. got=%T", decl3.DataType)
 	}
 
@@ -551,8 +575,8 @@ func TestMixedExternalVarDeclarations(t *testing.T) {
 	if !testVarDeclStatement(t, stmt.Vars[0], "External1", "INT") {
 		return
 	}
-	if stmt.Vars[0].IsConstant {
-		t.Errorf("External1 should not be constant")
+	if !stmt.Vars[0].IsConstant {
+		t.Errorf("External1 should be constant")
 	}
 
 	if !testVarDeclStatement(t, stmt.Vars[1], "External2", "BOOL") {

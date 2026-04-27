@@ -857,9 +857,11 @@ func (vbd *VarBlockDeclaration) String() string {
 }
 
 type TypeDeclaration struct {
-	Token    token.Token // The identifier token (the name of the new type)
-	Name     *Identifier
-	DataType Expression
+	Token        token.Token // The identifier token (the name of the new type)
+	Name         *Identifier
+	DataType     Expression
+	Subrange     Expression // For subrange types, e.g., (0..100)
+	InitialValue Expression // For initialized types, e.g., := 10
 }
 
 func (td *TypeDeclaration) statementNode()       {}
@@ -869,6 +871,14 @@ func (td *TypeDeclaration) String() string {
 	out.WriteString(td.Name.String())
 	out.WriteString(" : ")
 	out.WriteString(td.DataType.String())
+	if td.Subrange != nil {
+		out.WriteString(" ")
+		out.WriteString(td.Subrange.String())
+	}
+	if td.InitialValue != nil {
+		out.WriteString(" := ")
+		out.WriteString(td.InitialValue.String())
+	}
 	out.WriteString(";")
 	return out.String()
 }
