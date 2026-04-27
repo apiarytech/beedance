@@ -267,6 +267,11 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseConfigurationDeclaration()
 	case token.EXIT:
 		return &ast.ExitStatement{Token: p.curToken}
+	case token.IDENT:
+		if p.peekTokenIs(token.ASSIGN) {
+			return p.parseAssignmentStatement()
+		}
+		return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -1237,6 +1242,27 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	return stmt
 }
 
+func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
+	// We are here because we've seen an IDENT followed by an ASSIGN.
+	// The current token is the IDENT.
+	leftExpr := p.parseExpression(LOWEST) // Parse the left-hand side
+
+	if !p.expectPeek(token.ASSIGN) { // Consume the ':='
+		return nil
+	}
+
+	stmt := &ast.AssignmentStatement{Token: p.curToken, Left: leftExpr}
+
+	p.nextToken() // Move to the start of the value expression
+	stmt.Value = p.parseExpression(LOWEST)
+
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
@@ -1267,27 +1293,42 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 }
 
 func (p *Parser) parseFunctionDeclaration() ast.Statement {
-	// This will parse a named FUNCTION ... END_FUNCTION block
-	// For now, we'll treat it like a function literal expression statement
-	// for AST representation, but a more specific AST node would be better.
-	lit := &ast.FunctionLiteral{Token: p.curToken}
+	stmt := &ast.FunctionDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
 		return nil // Expected function name
 	}
-	// We don't have a name field in FunctionLiteral, so we'll just consume it.
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 	if !p.expectPeek(token.COLON) {
 		return nil // Expected return type separator
 	}
 
-	p.nextToken() // Consume the return type
+	p.nextToken() // Consume ':', move to return type
+	stmt.ReturnType = p.parseTypeSpecifier().(*ast.TypeSpecifier)
 
-	// TODO: Parse VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT, VAR blocks
+	p.nextToken() // Consume return type
 
-	lit.Body = p.parseBlockStatement() // Simplified body parsing
+	// Loop to parse all variable declaration blocks
+	for !p.curTokenIs(token.END_FUNCTION) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.VAR_INPUT) {
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
+		} else if p.curTokenIs(token.VAR_OUTPUT) {
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
+		} else if p.curTokenIs(token.VAR_IN_OUT) {
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		} else if p.curTokenIs(token.VAR) {
+			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		} else {
+			// No more VAR blocks, break the loop to parse the body
+			break
+		}
+	}
 
-	return &ast.ExpressionStatement{Expression: lit}
+	// After var blocks, we have the body
+	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
+
+	return stmt
 }
 
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {

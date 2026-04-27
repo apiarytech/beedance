@@ -1221,8 +1221,21 @@ func TestIfElsifElseStatement(t *testing.T) {
 	testIdentifier(t, elseStmt.Statements[0].(*ast.ExpressionStatement).Expression, "z")
 }
 
-func TestFunctionLiteralParsing(t *testing.T) {
-	input := `fn(x, y) { x + y; }`
+func TestFunctionDeclaration(t *testing.T) {
+	input := `
+		FUNCTION MyFunction : INT
+			VAR_INPUT
+				A : INT;
+				B : INT;
+			END_VAR
+			VAR
+				C : INT;
+			END_VAR
+
+			C := A + B;
+			MyFunction := C * 2;
+		END_FUNCTION
+	`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -1230,42 +1243,49 @@ func TestFunctionLiteralParsing(t *testing.T) {
 	checkParserErrors(t, p)
 
 	if len(program.Statements) != 1 {
-		t.Fatalf("program.Statements does not contain %d statements. got=%d\n",
-			1, len(program.Statements))
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
 	}
 
-	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	stmt, ok := program.Statements[0].(*ast.FunctionDeclaration)
 	if !ok {
-		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T",
-			program.Statements[0])
+		t.Fatalf("program.Statements[0] is not ast.FunctionDeclaration. got=%T", program.Statements[0])
 	}
 
-	function, ok := stmt.Expression.(*ast.FunctionLiteral)
+	if stmt.Name.Value != "MyFunction" {
+		t.Fatalf("Function name is not 'MyFunction'. got=%s", stmt.Name.Value)
+	}
+
+	if stmt.ReturnType.String() != "INT" {
+		t.Fatalf("Function return type is not 'INT'. got=%s", stmt.ReturnType.String())
+	}
+
+	if len(stmt.VarInputs) != 2 {
+		t.Fatalf("Expected 2 VAR_INPUTs. got=%d", len(stmt.VarInputs))
+	}
+	testVarDeclStatement(t, stmt.VarInputs[0], "A", "INT")
+	testVarDeclStatement(t, stmt.VarInputs[1], "B", "INT")
+
+	if len(stmt.Vars) != 1 {
+		t.Fatalf("Expected 1 VAR. got=%d", len(stmt.Vars))
+	}
+	testVarDeclStatement(t, stmt.Vars[0], "C", "INT")
+
+	if len(stmt.Body.Statements) != 2 {
+		t.Fatalf("Function body does not have 2 statements. got=%d", len(stmt.Body.Statements))
+	}
+	// Test first statement in body: C := A + B;
+	stmt1, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("stmt.Expression is not ast.FunctionLiteral. got=%T",
-			stmt.Expression)
+		t.Fatalf("Body statement 1 is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
+	testIdentifier(t, stmt1.Left, "C")
 
-	if len(function.Parameters) != 2 {
-		t.Fatalf("function literal parameters wrong. want 2, got=%d\n",
-			len(function.Parameters))
-	}
-
-	testLiteralExpression(t, function.Parameters[0], "x")
-	testLiteralExpression(t, function.Parameters[1], "y")
-
-	if len(function.Body.Statements) != 1 {
-		t.Fatalf("function.Body.Statements has not 1 statements. got=%d\n",
-			len(function.Body.Statements))
-	}
-
-	bodyStmt, ok := function.Body.Statements[0].(*ast.ExpressionStatement)
+	// Test second statement in body: MyFunction := C * 2;
+	stmt2, ok := stmt.Body.Statements[1].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("function body stmt is not ast.ExpressionStatement. got=%T",
-			function.Body.Statements[0])
+		t.Fatalf("Body statement 2 is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[1])
 	}
-
-	testInfixExpression(t, bodyStmt.Expression, "x", "+", "y")
+	testIdentifier(t, stmt2.Left, "MyFunction")
 }
 
 func TestFunctionParameterParsing(t *testing.T) {
