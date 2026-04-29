@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ const (
 
 	INTEGER_OBJ = "INTEGER"
 	BOOLEAN_OBJ = "BOOLEAN"
+	REAL_OBJ    = "REAL"
 	STRING_OBJ  = "STRING"
 
 	RETURN_VALUE_OBJ = "RETURN_VALUE"
@@ -72,6 +74,19 @@ func (b *Boolean) HashKey() HashKey {
 	}
 
 	return HashKey{Type: b.Type(), Value: value}
+}
+
+type Real struct {
+	Value float64
+}
+
+func (r *Real) Type() ObjectType { return REAL_OBJ }
+func (r *Real) Inspect() string  { return fmt.Sprintf("%f", r.Value) }
+func (r *Real) HashKey() HashKey {
+	// Using Float64bits to get a unique uint64 representation of the float64 value.
+	// This allows float64 to be used as a hash key, though care should be taken
+	// with floating-point precision issues if comparing hashes of computed floats.
+	return HashKey{Type: r.Type(), Value: math.Float64bits(r.Value)}
 }
 
 type Null struct{}

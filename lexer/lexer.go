@@ -261,11 +261,30 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 	// Check for a based literal (e.g., 16#FF)
 	if l.ch == '#' {
 		l.readChar() // consume '#'
-		// Read the value part of the based literal
-		for isDigit(l.ch) || ('a' <= l.ch && l.ch <= 'f') || ('A' <= l.ch && l.ch <= 'F') || l.ch == '_' {
+		// Read the integer part of the based literal's value
+		for isHexDigit(l.ch) || l.ch == '_' {
 			l.readChar()
 		}
-		return l.input[position:l.position], token.INT
+		// Check for a fractional part in a based literal (e.g., 16#A.B)
+		if l.ch == '.' {
+			tokType = token.REAL // It's a real now
+			l.readChar()         // consume '.'
+			for isHexDigit(l.ch) || l.ch == '_' {
+				l.readChar()
+			}
+		}
+		// Based literals do not have exponents in IEC 61131-3
+		return l.input[position:l.position], tokType
+	}
+
+	// If not a based literal, check for fractional part (making it a REAL)
+	// Make sure it's not the start of a '..' range token
+	if l.ch == '.' && l.peekChar() != '.' {
+		tokType = token.REAL
+		l.readChar() // consume '.'
+		for isDigit(l.ch) || l.ch == '_' {
+			l.readChar()
+		}
 	}
 
 	// Check for a fractional part (making it a REAL)
@@ -344,6 +363,11 @@ func isLetter(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
+}
+
+// isHexDigit checks if a character is a hexadecimal digit (0-9, a-f, A-F).
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || ('a' <= ch && ch <= 'f') || ('A' <= ch && ch <= 'F')
 }
 
 // isValidIdentifier checks for invalid underscore usage according to IEC 61131-3 §2.1.2

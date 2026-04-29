@@ -23,10 +23,11 @@ func TestErrorLexing(t *testing.T) {
 		{"$", token.ILLEGAL, "$", 1, 1},
 		{"%", token.ILLEGAL, "%", 1, 1},
 		{"^", token.ILLEGAL, "^", 1, 1},
-		{"&", token.ILLEGAL, "&", 1, 1},
+		{"&", token.AMPERSAND, "&", 1, 1},
 		{"|", token.ILLEGAL, "|", 1, 1},
 	}
 
+	// The test now iterates through all tokens produced by the lexer for each input.
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			l := New(tt.input)
@@ -48,7 +49,7 @@ func TestErrorLexing(t *testing.T) {
 			}
 
 			if !foundError {
-				t.Errorf("did not find expected error token %q", tt.expectedType)
+				t.Errorf("did not find expected token %q for input %q", tt.expectedType, tt.input)
 			}
 		})
 	}
