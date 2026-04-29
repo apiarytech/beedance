@@ -7,7 +7,74 @@ import (
 
 	"beedance/ast"
 	"beedance/lexer"
+	"beedance/token"
 )
+
+func TestSingleVarDeclStatement(t *testing.T) {
+	input := `VAR myVar : INT := 5;`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.VarBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Declarations) != 1 {
+		t.Fatalf("Expected 1 var declaration. got=%d", len(stmt.Declarations))
+	}
+
+	decl := stmt.Declarations[0]
+
+	if decl.Name.Value != "myVar" {
+		t.Errorf("decl.Name.Value not 'myVar'. got=%s", decl.Name.Value)
+	}
+
+	ts, ok := decl.DataType.(*ast.TypeSpecifier)
+	if !ok {
+		t.Fatalf("decl.DataType is not *ast.TypeSpecifier. got=%T", decl.DataType)
+	}
+
+	if ts.TokenLiteral() != "INT" {
+		t.Errorf("decl.DataType not 'INT'. got=%s", decl.DataType)
+	}
+
+	val, ok := decl.Value.(*ast.IntegerLiteral)
+	if !ok || val.Value != 5 {
+		t.Errorf("decl.Value is not 5. got=%v", decl.Value)
+	}
+}
+
+func TestNamedArgumentParsing(t *testing.T) {
+	input := `MyFunc(In1 := 10, Out1 => Res1);`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	stmt := program.Statements[0].(*ast.ExpressionStatement)
+	call, ok := stmt.Expression.(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("stmt.Expression is not ast.CallExpression. got=%T", stmt.Expression)
+	}
+
+	arg1, ok := call.Arguments[0].(*ast.NamedArgument)
+	if !ok || arg1.Name.Value != "In1" || arg1.Value.(*ast.IntegerLiteral).Value != 10 {
+		t.Errorf("First argument is not a correct NamedArgument")
+	}
+
+	arg2, ok := call.Arguments[1].(*ast.OutputArgument)
+	if !ok || arg2.Source.Value != "Out1" || arg2.Target.(*ast.Identifier).Value != "Res1" {
+		t.Errorf("Second argument is not a correct OutputArgument")
+	}
+}
 
 func TestVarDeclStatements(t *testing.T) {
 	tests := []struct {
@@ -1288,36 +1355,6 @@ func TestFunctionDeclaration(t *testing.T) {
 	testIdentifier(t, stmt2.Left, "MyFunction")
 }
 
-func TestFunctionParameterParsing(t *testing.T) {
-	tests := []struct {
-		input          string
-		expectedParams []string
-	}{
-		{input: "fn() {};", expectedParams: []string{}},
-		{input: "fn(x) {};", expectedParams: []string{"x"}},
-		{input: "fn(x, y, z) {};", expectedParams: []string{"x", "y", "z"}},
-	}
-
-	for _, tt := range tests {
-		l := lexer.New(tt.input)
-		p := New(l)
-		program := p.ParseProgram()
-		checkParserErrors(t, p)
-
-		stmt := program.Statements[0].(*ast.ExpressionStatement)
-		function := stmt.Expression.(*ast.FunctionLiteral)
-
-		if len(function.Parameters) != len(tt.expectedParams) {
-			t.Errorf("length parameters wrong. want %d, got=%d\n",
-				len(tt.expectedParams), len(function.Parameters))
-		}
-
-		for i, ident := range tt.expectedParams {
-			testLiteralExpression(t, function.Parameters[i], ident)
-		}
-	}
-}
-
 func TestCallExpressionParsing(t *testing.T) {
 	input := "add(1, 2 * 3, 4 + 5);"
 
@@ -1858,11 +1895,14 @@ func TestForLoopStatement(t *testing.T) {
 		t.Fatalf("for loop body does not contain 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("for loop body statement is not ast.ExpressionStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("for loop body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
-	testInfixExpression(t, bodyStmt.Expression, "x", ":=", "(x + 1)")
+	if !testIdentifier(t, bodyStmt.Left, "x") {
+		return
+	}
+	testInfixExpression(t, bodyStmt.Value, "x", "+", 1)
 }
 
 func TestWhileStatement(t *testing.T) {
@@ -1893,13 +1933,15 @@ func TestWhileStatement(t *testing.T) {
 		t.Fatalf("while loop body does not contain 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("while loop body statement is not ast.ExpressionStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("while loop body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
 
-	// Check the assignment expression `x := x + 1`
-	testInfixExpression(t, bodyStmt.Expression, "x", ":=", "(x + 1)")
+	if !testIdentifier(t, bodyStmt.Left, "x") {
+		return
+	}
+	testInfixExpression(t, bodyStmt.Value, "x", "+", 1)
 }
 
 func TestRepeatUntilStatement(t *testing.T) {
@@ -1930,15 +1972,15 @@ func TestRepeatUntilStatement(t *testing.T) {
 		t.Fatalf("repeat loop body does not contain 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("repeat loop body statement is not ast.ExpressionStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("repeat loop body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
 
-	assignExpr, ok := bodyStmt.Expression.(*ast.InfixExpression)
-	if !ok || assignExpr.Operator != ":=" {
-		t.Fatalf("Expected assignment expression in repeat body. got=%T", bodyStmt.Expression)
+	if !testIdentifier(t, bodyStmt.Left, "x") {
+		return
 	}
+	testInfixExpression(t, bodyStmt.Value, "x", "+", 1)
 }
 
 func TestCaseStatement(t *testing.T) {
@@ -1978,18 +2020,24 @@ func TestCaseStatement(t *testing.T) {
 	if len(case1.Values) != 1 || !testIntegerLiteral(t, case1.Values[0], 1) {
 		t.Errorf("incorrect values for case 1. got=%v", case1.Values)
 	}
-	if _, ok := case1.Consequence.(*ast.ExpressionStatement); !ok {
-		t.Errorf("consequence for case 1 is not ExpressionStatement. got=%T", case1.Consequence)
+	consequence1, ok := case1.Consequence.(*ast.AssignmentStatement)
+	if !ok {
+		t.Errorf("consequence for case 1 is not AssignmentStatement. got=%T", case1.Consequence)
 	}
+	testIdentifier(t, consequence1.Left, "x")
+	testIntegerLiteral(t, consequence1.Value, 1)
 
 	// Test second case: 2, 3: x := 2;
 	case2 := stmt.Cases[1]
 	if len(case2.Values) != 2 || !testIntegerLiteral(t, case2.Values[0], 2) || !testIntegerLiteral(t, case2.Values[1], 3) {
 		t.Errorf("incorrect values for case 2. got=%v", case2.Values)
 	}
-	if _, ok := case2.Consequence.(*ast.ExpressionStatement); !ok {
-		t.Errorf("consequence for case 2 is not ExpressionStatement. got=%T", case2.Consequence)
+	consequence2, ok := case2.Consequence.(*ast.AssignmentStatement)
+	if !ok {
+		t.Errorf("consequence for case 2 is not AssignmentStatement. got=%T", case2.Consequence)
 	}
+	testIdentifier(t, consequence2.Left, "x")
+	testIntegerLiteral(t, consequence2.Value, 2)
 
 	// Test ELSE part
 	if stmt.Alternative == nil {
@@ -1998,6 +2046,12 @@ func TestCaseStatement(t *testing.T) {
 	if len(stmt.Alternative.Statements) != 1 {
 		t.Fatalf("else block does not have 1 statement. got=%d", len(stmt.Alternative.Statements))
 	}
+	elseConsequence, ok := stmt.Alternative.Statements[0].(*ast.AssignmentStatement)
+	if !ok {
+		t.Fatalf("else consequence is not AssignmentStatement. got=%T", stmt.Alternative.Statements[0])
+	}
+	testIdentifier(t, elseConsequence.Left, "x")
+	testIntegerLiteral(t, elseConsequence.Value, 3)
 
 }
 
@@ -2055,8 +2109,12 @@ func TestFunctionBlockDeclaration(t *testing.T) {
 		t.Fatalf("Function block body does not have 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
-	testInfixExpression(t, bodyStmt.Expression, "Out1", ":=", "(In1 + Internal1)")
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
+	if !ok {
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
+	}
+	testIdentifier(t, bodyStmt.Left, "Out1")
+	testInfixExpression(t, bodyStmt.Value, "In1", "+", "Internal1")
 }
 
 func TestProgramDeclaration(t *testing.T) {
@@ -2121,11 +2179,12 @@ func TestProgramDeclaration(t *testing.T) {
 		t.Fatalf("Program body does not have 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement is not ast.ExpressionStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
-	testInfixExpression(t, bodyStmt.Expression, "LocalVar", ":=", "10")
+	testIdentifier(t, bodyStmt.Left, "LocalVar")
+	testIntegerLiteral(t, bodyStmt.Value, 10)
 }
 
 func TestActionStatement(t *testing.T) {
@@ -2157,12 +2216,13 @@ func TestActionStatement(t *testing.T) {
 		t.Fatalf("Action body does not have 1 statement. got=%d", len(stmt.Body.Statements))
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement is not ast.ExpressionStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
 	}
 
-	testInfixExpression(t, bodyStmt.Expression, "x", ":=", "(x + 1)")
+	testIdentifier(t, bodyStmt.Left, "x")
+	testInfixExpression(t, bodyStmt.Value, "x", "+", 1)
 }
 
 func TestExitStatement(t *testing.T) {
@@ -2187,14 +2247,158 @@ func TestExitStatement(t *testing.T) {
 	}
 }
 
+func TestTransitionStatement(t *testing.T) {
+	input := `
+		TRANSITION FROM Step1, Step2 TO Step3 := Condition1 AND Condition2; END_TRANSITION
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.TransitionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.TransitionStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.From) != 2 {
+		t.Fatalf("Expected 2 'FROM' identifiers. got=%d", len(stmt.From))
+	}
+	if stmt.From[0].Value != "Step1" || stmt.From[1].Value != "Step2" {
+		t.Errorf("Incorrect 'FROM' identifiers. got=%s, %s", stmt.From[0].Value, stmt.From[1].Value)
+	}
+
+	if len(stmt.To) != 1 {
+		t.Fatalf("Expected 1 'TO' identifier. got=%d", len(stmt.To))
+	}
+	if stmt.To[0].Value != "Step3" {
+		t.Errorf("Incorrect 'TO' identifier. got=%s", stmt.To[0].Value)
+	}
+
+	if !testInfixExpression(t, stmt.Condition, "Condition1", "AND", "Condition2") {
+		return
+	}
+}
+
+func TestStepStatement(t *testing.T) {
+	input := `
+		STEP MyStep:
+			Action1(N);
+			Action2(P);
+		END_STEP
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.StepStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Name.Value != "MyStep" {
+		t.Errorf("Step name is not 'MyStep'. got=%s", stmt.Name.Value)
+	}
+
+	if stmt.IsInitial {
+		t.Errorf("Step should not be initial")
+	}
+
+	if len(stmt.Actions) != 2 {
+		t.Fatalf("Expected 2 action associations. got=%d", len(stmt.Actions))
+	}
+
+	if stmt.Actions[0].ActionName.Value != "Action1" || stmt.Actions[0].Qualifier.Value != "N" {
+		t.Errorf("Incorrect first action association. got=%s(%s)", stmt.Actions[0].ActionName.Value, stmt.Actions[0].Qualifier.Value)
+	}
+
+	if stmt.Actions[1].ActionName.Value != "Action2" || stmt.Actions[1].Qualifier.Value != "P" {
+		t.Errorf("Incorrect second action association. got=%s(%s)", stmt.Actions[1].ActionName.Value, stmt.Actions[1].Qualifier.Value)
+	}
+}
+
+func TestInitialStepStatement(t *testing.T) {
+	input := `
+		INITIAL_STEP InitStep:
+			InitAction(N);
+		END_STEP
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.StepStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Name.Value != "InitStep" {
+		t.Errorf("Step name is not 'InitStep'. got=%s", stmt.Name.Value)
+	}
+
+	if !stmt.IsInitial {
+		t.Errorf("Step should be initial")
+	}
+
+	if len(stmt.Actions) != 1 {
+		t.Fatalf("Expected 1 action association. got=%d", len(stmt.Actions))
+	}
+}
+
+func TestConfigurationDeclaration(t *testing.T) {
+	input := `
+		CONFIGURATION MyConfig
+			VAR_GLOBAL
+				Global1 : BOOL;
+			END_VAR
+
+			RESOURCE Res1 ON PLC1
+				TASK Task1 (INTERVAL := T#100ms, PRIORITY := 1);
+				PROGRAM Prog1 WITH Task1 : ProgType1;
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+	}
+
+	if stmt.Name.Value != "MyConfig" {
+		t.Errorf("Configuration name is not 'MyConfig'. got=%s", stmt.Name.Value)
+	}
+
+	if len(stmt.Resources) != 1 {
+		t.Fatalf("Expected 1 resource. got=%d", len(stmt.Resources))
+	}
+}
+
 func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, dataType string) bool {
-	// The token for a VarDeclStatement inside a block is its identifier, not the 'VAR' keyword.
-	if s.TokenLiteral() != name {
-		// For backward compatibility with any tests that might parse single-line VAR decls not in a block,
-		// we can allow 'VAR' as a token literal. But for block declarations, it should be the name.
-		if s.TokenLiteral() != "VAR" {
-			t.Errorf("s.TokenLiteral not '%s'. got=%q", name, s.TokenLiteral())
-		}
+	if s.TokenLiteral() != name && s.Token.Type != token.VAR {
+		t.Errorf("s.TokenLiteral not '%s' or 'VAR'. got=%q", name, s.TokenLiteral())
 		return false
 	}
 

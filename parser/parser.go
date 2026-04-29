@@ -264,9 +264,9 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.INITIAL_STEP:
 		return p.parseInitialStepStatement()
 	case token.CONFIGURATION:
-		return p.parseConfigurationDeclaration()
+		return p.parseConfigurationDeclaration() // No semicolon expected after this block
 	case token.EXIT:
-		return &ast.ExitStatement{Token: p.curToken}
+		return p.parseExitStatement()
 	case token.IDENT:
 		if p.peekTokenIs(token.ASSIGN) {
 			return p.parseAssignmentStatement()
@@ -275,6 +275,16 @@ func (p *Parser) parseStatement() ast.Statement {
 	default:
 		return p.parseExpressionStatement()
 	}
+}
+func (p *Parser) parseExitStatement() *ast.ExitStatement {
+	stmt := &ast.ExitStatement{Token: p.curToken}
+
+	// An EXIT statement must be followed by a semicolon.
+	if !p.expectPeek(token.SEMICOLON) {
+		return nil
+	}
+
+	return stmt
 }
 func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
@@ -578,43 +588,25 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			initialValue = p.parseExpression(LOWEST)
 		}
 
-		p.nextToken() // Consume the data type token or the last token of the initial value expression.
-
-		isRisingEdge := p.peekTokenIs(token.R_EDGE)
-		isFallingEdge := p.peekTokenIs(token.F_EDGE)
-
 		for _, name := range names {
 			decl := &ast.VarDeclStatement{
-				Token:         name.Token,
-				Name:          name,
-				Location:      atDecl,
-				DataType:      dataType,
-				Value:         initialValue,
-				IsConstant:    isConstant,
-				IsRetain:      isRetain,
-				IsNonRetain:   isNonRetain,
-				IsRisingEdge:  isRisingEdge,
-				IsFallingEdge: isFallingEdge,
+				Token:       name.Token,
+				Name:        name,
+				Location:    atDecl,
+				DataType:    dataType,
+				Value:       initialValue,
+				IsConstant:  isConstant,
+				IsRetain:    isRetain,
+				IsNonRetain: isNonRetain,
 			}
 			varDecls = append(varDecls, decl)
 		}
 
-		if isRisingEdge {
-			p.nextToken() // consume data type
-			p.expectPeek(token.R_EDGE)
-		} else if isFallingEdge {
-			p.nextToken() // consume data type
-			p.expectPeek(token.F_EDGE)
-		}
-
 		// After parsing the declaration, we should be at the semicolon.
-		// We don't use expectPeek because the main ParseProgram loop handles the final nextToken().
-		if !p.curTokenIs(token.SEMICOLON) {
-			p.peekError(token.SEMICOLON)
-			return nil
+		if !p.expectPeek(token.SEMICOLON) {
+			return nil // Expect and consume the semicolon
 		}
-
-		p.nextToken() // Consume the semicolon to advance to the next declaration or END_VAR
+		p.nextToken() // Move to the start of the next declaration or end token
 	}
 	return varDecls
 }
@@ -872,18 +864,6 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	return stmt
 }
 
-func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
-	stmt := &ast.ExpressionStatement{Token: p.curToken}
-
-	stmt.Expression = p.parseExpression(LOWEST)
-
-	if p.peekTokenIs(token.SEMICOLON) {
-		p.nextToken()
-	}
-
-	return stmt
-}
-
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
@@ -1093,6 +1073,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	// The last token should be END_IF
 	if !p.curTokenIs(token.END_IF) {
 		p.peekError(token.END_IF)
+		p.nextToken() // Consume the END_IF to avoid infinite loop if error recovery is attempted
 		return nil
 	}
 
@@ -1118,53 +1099,54 @@ func (p *Parser) parseForStatement() ast.Statement {
 	stmt.StartValue = p.parseExpression(LOWEST)
 
 	// TO
-	if !p.curTokenIs(token.TO) {
-		p.peekError(token.TO)
+	if !p.expectPeek(token.TO) {
 		return nil
 	}
 
-	// <end_value>
-	p.nextToken()
+	p.nextToken() // Move to the start of the EndValue expression
 	stmt.EndValue = p.parseExpression(LOWEST)
 
 	// [BY <step_value>]
-	if p.curTokenIs(token.BY) {
-		p.nextToken() // consume BY, move to expression start
+	if p.peekTokenIs(token.BY) {
+		p.nextToken() // Consume the expression before BY
+		p.nextToken() // Consume BY, move to expression start
 		stmt.StepValue = p.parseExpression(LOWEST)
 	}
 
 	// DO
-	if !p.curTokenIs(token.DO) {
-		p.peekError(token.DO)
+	if !p.expectPeek(token.DO) {
 		return nil
 	}
 
-	p.nextToken() // Move to the start of the block
-	stmt.Body = p.parseBlockStatementForLoop()
+	p.nextToken() // Consume DO, move to start of body
+
+	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
+
+	// After parsing the body, p.curToken should be END_FOR. We need to consume it.
+	// parseBlockStatementUntil leaves us on END_FOR, so we just need to consume it.
+	p.nextToken()
+
 	return stmt
 }
 
 func (p *Parser) parseWhileStatement() ast.Statement {
 	stmt := &ast.WhileStatement{Token: p.curToken}
 
-	p.nextToken() // consume WHILE
-	if !p.expectPeek(token.LPAREN) {
-		return nil
-	}
+	p.nextToken() // Consume WHILE
 	stmt.Condition = p.parseExpression(LOWEST)
-	p.nextToken() // consume expression
 
 	if !p.expectPeek(token.DO) {
 		return nil
 	}
+	p.nextToken() // Consume DO, move to the start of the block.
+	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
 
-	p.nextToken() // Move to the start of the block
-	stmt.Body = p.parseBlockStatementWhileLoop()
-
+	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
 	if !p.curTokenIs(token.END_WHILE) {
 		p.peekError(token.END_WHILE)
 		return nil
 	}
+
 	return stmt
 }
 
@@ -1242,27 +1224,6 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	return stmt
 }
 
-func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
-	// We are here because we've seen an IDENT followed by an ASSIGN.
-	// The current token is the IDENT.
-	leftExpr := p.parseExpression(LOWEST) // Parse the left-hand side
-
-	if !p.expectPeek(token.ASSIGN) { // Consume the ':='
-		return nil
-	}
-
-	stmt := &ast.AssignmentStatement{Token: p.curToken, Left: leftExpr}
-
-	p.nextToken() // Move to the start of the value expression
-	stmt.Value = p.parseExpression(LOWEST)
-
-	if p.peekTokenIs(token.SEMICOLON) {
-		p.nextToken()
-	}
-
-	return stmt
-}
-
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
@@ -1290,6 +1251,35 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 		return p.parseProgramDeclaration()
 	}
 	return nil // Should not be reached
+}
+
+func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
+	stmt := &ast.AssignmentStatement{
+		Token: p.curToken,
+		Left:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+	}
+
+	if !p.expectPeek(token.ASSIGN) {
+		return nil
+	}
+	// curToken is now ASSIGN
+
+	p.nextToken() // Move to the start of the value expression
+	stmt.Value = p.parseExpression(LOWEST)
+
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+	stmt := &ast.ExpressionStatement{Token: p.curToken}
+	stmt.Expression = p.parseExpression(LOWEST)
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
 }
 
 func (p *Parser) parseFunctionDeclaration() ast.Statement {
@@ -1434,6 +1424,8 @@ func (p *Parser) parseActionStatement() ast.Statement {
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	p.nextToken() // Consume the action name identifier
+
 	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION)
 
 	if !p.curTokenIs(token.END_ACTION) {
@@ -1544,7 +1536,7 @@ func (p *Parser) parseActionAssociation() *ast.ActionAssociation {
 func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
-	p.nextToken()
+	//p.nextToken()
 
 	for !p.curTokenIs(end) && !p.curTokenIs(token.EOF) {
 		stmt := p.parseStatement()
@@ -1565,28 +1557,9 @@ func (p *Parser) parseBlockStatementForLoop() *ast.BlockStatement {
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		p.nextToken()
+		p.nextToken() // <-- This is the problem
 	}
-	if !p.curTokenIs(token.END_FOR) {
-		p.peekError(token.END_FOR)
-	}
-	return block
-}
-
-func (p *Parser) parseBlockStatementWhileLoop() *ast.BlockStatement {
-	block := &ast.BlockStatement{Token: p.curToken}
-	block.Statements = []ast.Statement{}
-
-	for !p.curTokenIs(token.END_WHILE) && !p.curTokenIs(token.EOF) {
-		stmt := p.parseStatement()
-		if stmt != nil {
-			block.Statements = append(block.Statements, stmt)
-		}
-		p.nextToken()
-	}
-	if !p.curTokenIs(token.END_WHILE) {
-		p.peekError(token.END_WHILE)
-	}
+	// END_FOR is consumed by parseForStatement
 	return block
 }
 
