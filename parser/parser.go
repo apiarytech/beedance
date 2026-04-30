@@ -11,8 +11,10 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"beedance/ast"
 	"beedance/lexer"
@@ -94,11 +96,23 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.REAL, p.parseRealLiteral)
 	p.registerPrefix(token.LREAL, p.parseRealLiteral)
 	p.registerPrefix(token.STRING_LITERAL, p.parseStringLiteral)
-	p.registerPrefix(token.WSTRING_LITERAL, p.parseWStringLiteral)
-	p.registerPrefix(token.TIME, p.parseTimeLiteral)
-	p.registerPrefix(token.DATE, p.parseTimeLiteral)
-	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeLiteral)
-	p.registerPrefix(token.DATE_AND_TIME, p.parseTimeLiteral)
+	p.registerPrefix(token.WSTRING_LITERAL, p.parseStringLiteral) // Treat WSTRING as STRING for now
+	p.registerPrefix(token.TIME, p.parseTimeDateLiteral)
+	p.registerPrefix(token.DATE, p.parseTimeDateLiteral)
+	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeDateLiteral)
+	// Specific integer types
+	p.registerPrefix(token.SINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.DINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.LINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.USINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.UINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.UDINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.ULINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.BYTE, p.parseBitStringLiteral)
+	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.DATE_AND_TIME, p.parseTimeDateLiteral)
 	p.registerPrefix(token.TRUE, p.parseBoolean)
 	p.registerPrefix(token.FALSE, p.parseBoolean)
 
@@ -115,7 +129,6 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.FUNCTION, p.parseFunctionLiteral)
 	p.registerPrefix(token.MACRO, p.parseMacroLiteral)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
-	p.registerPrefix(token.TIME, p.parseTimeLiteral)
 	p.registerPrefix(token.LBRACE, p.parseHashLiteral)
 	p.registerPrefix(token.STRUCT, p.parseStructDefinition)
 
@@ -909,16 +922,56 @@ func (p *Parser) parseIdentifier() ast.Expression {
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 
-	literal := p.curToken.Literal
+	literal := p.curToken.Literal // e.g., "INT#10", "16#FF", "10"
 	base := 10
+	bitSize := 64 // Default to LINT/ULINT size
 
+	// Handle typed literals (e.g., SINT#10, INT#20, DINT#30)
+	// The lexer provides the full literal string, e.g., "SINT#10"
 	if strings.Contains(literal, "#") {
-		parts := strings.Split(literal, "#")
-		base, _ = strconv.Atoi(parts[0])
-		literal = parts[1]
-	}
+		parts := strings.SplitN(literal, "#", 2)
+		if len(parts) == 2 {
+			typePart := parts[0]
+			valuePart := parts[1]
 
-	value, err := strconv.ParseInt(literal, base, 64)
+			// Determine bitSize based on the typePart
+			switch token.LookupIdent(strings.ToUpper(typePart)) {
+			case token.SINT, token.USINT:
+				bitSize = 8
+			case token.INT, token.UINT:
+				bitSize = 16
+			case token.DINT, token.UDINT:
+				bitSize = 32
+			case token.LINT, token.ULINT:
+				bitSize = 64
+			}
+
+			// Check for based literal within the value part (e.g., DINT#16#FF)
+			if strings.Contains(valuePart, "#") {
+				baseParts := strings.SplitN(valuePart, "#", 2)
+				if len(baseParts) == 2 {
+					parsedBase, err := strconv.Atoi(baseParts[0])
+					if err == nil {
+						base = parsedBase
+					}
+					valuePart = baseParts[1]
+				}
+			}
+			literal = valuePart
+		}
+	} else if strings.Contains(literal, "#") {
+		// Handle non-typed based literals like 16#FF, 8#77, 2#1011
+		parts := strings.SplitN(literal, "#", 2)
+		if len(parts) == 2 {
+			parsedBase, err := strconv.Atoi(parts[0])
+			if err == nil {
+				base = parsedBase
+			}
+			literal = parts[1]
+		}
+	}
+	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
+	value, err := strconv.ParseInt(literal, base, bitSize)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
 		p.errors = append(p.errors, msg)
@@ -934,8 +987,10 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 	lit := &ast.RealLiteral{Token: p.curToken}
 
 	literal := p.curToken.Literal
-	// Handle typed literals like REAL#1.23
+	// Handle typed literals like REAL#1.23 or LREAL#1.23E-4
 	if strings.Contains(literal, "#") {
+		// The lexer should have already captured the full literal including exponent.
+		// We just need to extract the value part.
 		parts := strings.SplitN(literal, "#", 2)
 		literal = parts[1]
 	}
@@ -946,6 +1001,7 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 		bitSize = 64
 	}
 	lit.Precision = bitSize
+	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
 
 	value, err := strconv.ParseFloat(literal, bitSize)
 	if err != nil {
@@ -957,16 +1013,132 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 	return lit
 }
 
+func (p *Parser) parseBitStringLiteral() ast.Expression {
+	lit := &ast.BitStringLiteral{Token: p.curToken}
+
+	var width int
+	switch p.curToken.Type {
+	case token.BYTE:
+		width = 8
+	case token.WORD:
+		width = 16
+	case token.DWORD:
+		width = 32
+	case token.LWORD:
+		width = 64
+	default:
+		// This case should ideally not be reached if prefix functions are registered correctly.
+		p.errors = append(p.errors, fmt.Sprintf("unknown bitstring type: %s", p.curToken.Type))
+		return nil
+	}
+	lit.Width = width
+
+	literal := p.curToken.Literal // e.g., "BYTE#16#FF" or "WORD#FF"
+
+	// Extract the value part after the first '#'
+	parts := strings.SplitN(literal, "#", 2)
+	if len(parts) < 2 {
+		p.errors = append(p.errors, fmt.Sprintf("invalid bitstring literal format: %q", literal))
+		return nil
+	}
+	valuePart := parts[1] // e.g., "16#FF" or "FF"
+
+	var base int = 16 // Default base for bit strings if not specified, as per IEC 61131-3
+	var valueStr string = valuePart
+
+	// Check if the value part itself contains a base (e.g., "16#FF")
+	if strings.Contains(valuePart, "#") {
+		valueParts := strings.SplitN(valuePart, "#", 2)
+		if len(valueParts) == 2 {
+			parsedBase, err := strconv.Atoi(valueParts[0])
+			if err != nil {
+				p.errors = append(p.errors, fmt.Sprintf("invalid base in bitstring literal: %q", valueParts[0]))
+				return nil
+			}
+			base = parsedBase
+			valueStr = valueParts[1]
+		}
+	}
+
+	// Remove underscores from the value string before parsing
+	valueStr = strings.ReplaceAll(valueStr, "_", "")
+
+	val, err := strconv.ParseUint(valueStr, base, width)
+	if err != nil {
+		msg := fmt.Sprintf("could not parse %q as %s (base %d, width %d): %s", valueStr, p.curToken.Type, base, width, err.Error())
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+
+	lit.Value = val
+	return lit
+}
+
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
-func (p *Parser) parseWStringLiteral() ast.Expression {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
-}
+func (p *Parser) parseTimeDateLiteral() ast.Expression {
+	literal := p.curToken.Literal
+	parts := strings.SplitN(literal, "#", 2)
+	if len(parts) != 2 {
+		p.errors = append(p.errors, fmt.Sprintf("invalid time/date literal format: %q", literal))
+		return nil
+	}
+	valuePart := parts[1]
 
-func (p *Parser) parseTimeLiteral() ast.Expression {
-	return &ast.TimeLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	switch p.curToken.Type {
+	case token.TIME:
+		// Regex to validate IEC 61131-3 duration format.
+		// It allows for optional days, hours, minutes, seconds, and milliseconds.
+		// It also handles underscores between units.
+		// Example valid: 2d_5h_30m_10s_500ms, 10.5s, 500ms
+		validTimeRegex := regexp.MustCompile(`^(((\d+d_?)?(\d+h_?)?(\d+m_?)?(\d+(\.\d+)?s_?)?(\d+ms)?)|(\d+(\.\d+)?s))$`)
+		if !validTimeRegex.MatchString(strings.ToLower(valuePart)) {
+			p.errors = append(p.errors, fmt.Sprintf("invalid TIME literal format: %q", valuePart))
+			return nil
+		}
+		return &ast.TimeLiteral{Token: p.curToken, Value: literal}
+
+	case token.DATE:
+		// Use Go's time parsing with a strict layout.
+		_, err := time.Parse("2006-01-02", valuePart)
+		if err != nil {
+			p.errors = append(p.errors, fmt.Sprintf("invalid DATE literal format: %q, expected YYYY-MM-DD", valuePart))
+			return nil
+		}
+		return &ast.DateLiteral{Token: p.curToken, Value: literal}
+
+	case token.TIME_OF_DAY:
+		// Use Go's time parsing with a strict layout.
+		_, err := time.Parse("15:04:05", valuePart)
+		if err != nil {
+			// Allow for fractional seconds
+			_, err2 := time.Parse("15:04:05.999999999", valuePart)
+			if err2 != nil {
+				p.errors = append(p.errors, fmt.Sprintf("invalid TIME_OF_DAY literal format: %q, expected HH:MM:SS", valuePart))
+				return nil
+			}
+		}
+		return &ast.TimeOfDayLiteral{Token: p.curToken, Value: literal}
+
+	case token.DATE_AND_TIME:
+		// Use Go's time parsing with a strict layout.
+		_, err := time.Parse("2006-01-02-15:04:05", valuePart)
+		if err != nil {
+			// Allow for fractional seconds
+			_, err2 := time.Parse("2006-01-02-15:04:05.999999999", valuePart)
+			if err2 != nil {
+				p.errors = append(p.errors, fmt.Sprintf("invalid DATE_AND_TIME literal format: %q, expected YYYY-MM-DD-HH:MM:SS", valuePart))
+				return nil
+			}
+		}
+		return &ast.DateAndTimeLiteral{Token: p.curToken, Value: literal}
+	}
+
+	// This should not be reached if the prefix functions are registered correctly.
+	p.errors = append(p.errors, fmt.Sprintf("no parsing function for time/date literal type %s", p.curToken.Type))
+	return nil
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {

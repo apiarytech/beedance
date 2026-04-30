@@ -10,6 +10,7 @@
 package lexer
 
 import (
+	"strconv"
 	"strings"
 
 	"beedance/token"
@@ -194,14 +195,30 @@ func (l *Lexer) NextToken() token.Token {
 func (l *Lexer) skipComment() token.Token {
 	startLine := l.line
 	startCol := l.col
-	for !(l.ch == '*' && l.peekChar() == ')') {
+	nestingLevel := 1
+	l.readChar() // consume '('
+	l.readChar() // consume '*'
+
+	for nestingLevel > 0 {
 		if l.ch == 0 { // Check for unterminated comment
 			return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol}
 		}
+
+		if l.ch == '(' && l.peekChar() == '*' {
+			l.readChar()
+			l.readChar()
+			nestingLevel++
+			continue
+		}
+
+		if l.ch == '*' && l.peekChar() == ')' {
+			l.readChar()
+			l.readChar()
+			nestingLevel--
+			continue
+		}
 		l.readChar()
 	}
-	l.readChar() // consume '*'
-	l.readChar() // consume ')'
 	return l.NextToken()
 }
 
@@ -258,23 +275,42 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 		l.readChar()
 	}
 
-	// Check for a based literal (e.g., 16#FF)
+	// Check for a based literal (e.g., 16#FF, 8#77, 2#1010)
 	if l.ch == '#' {
+		baseStr := l.input[position:l.position]
+		base, err := strconv.Atoi(baseStr)
+		if err != nil || (base != 2 && base != 8 && base != 10 && base != 16) {
+			// If the part before # is not a valid base, it's not a valid based literal.
+			// We'll let the parser handle the error. For now, we just return the number part.
+			return baseStr, tokType
+		}
+
 		l.readChar() // consume '#'
-		// Read the integer part of the based literal's value
-		for isHexDigit(l.ch) || l.ch == '_' {
+
+		// Read the value part based on the detected base
+		digitCheckFn := getDigitCheckFn(base)
+		for digitCheckFn(l.ch) || l.ch == '_' {
 			l.readChar()
 		}
+
 		// Check for a fractional part in a based literal (e.g., 16#A.B)
 		if l.ch == '.' {
-			tokType = token.REAL // It's a real now
-			l.readChar()         // consume '.'
-			for isHexDigit(l.ch) || l.ch == '_' {
+			// According to IEC 61131-3, based literals are only for integers (bit strings).
+			// However, some extensions might support this. We'll flag it as illegal for now.
+			// To support it, we would change tokType to REAL and continue parsing.
+			// For now, we stop here and let the parser report an error on the '.'
+			return l.input[position:l.position], token.ILLEGAL
+		}
+
+		// Check for an exponent part, which is not allowed for based literals
+		if l.ch == 'e' || l.ch == 'E' {
+			l.readChar()
+			for isDigit(l.ch) || l.ch == '+' || l.ch == '-' || l.ch == '_' {
 				l.readChar()
 			}
+			return l.input[position:l.position], token.ILLEGAL
 		}
-		// Based literals do not have exponents in IEC 61131-3
-		return l.input[position:l.position], tokType
+		return l.input[position:l.position], token.INT
 	}
 
 	// If not a based literal, check for fractional part (making it a REAL)
@@ -323,19 +359,58 @@ func (l *Lexer) readDirectVariable() string {
 }
 
 func (l *Lexer) readTypedLiteral(typePart string, startLine int, startCol int) token.Token {
-	l.readChar() // consume '#'
-	valuePartStart := l.position
+	startPos := l.position - len(typePart) // Mark the start of the entire literal
+	l.readChar()                           // consume '#'
 
-	// Read the rest of the literal. This can be complex for time values.
-	// For now, we read until a character that cannot be part of the value.
-	for isDigit(l.ch) || isLetter(l.ch) || l.ch == '.' || l.ch == '_' || l.ch == '+' || l.ch == '-' || l.ch == ':' {
+	// Delegate to a specific reader based on the type part.
+	// This makes the lexer more robust and compliant with IEC 61131-3 literal formats.
+	typeKeyword := token.LookupIdent(strings.ToUpper(typePart))
+	switch typeKeyword {
+	case token.BYTE, token.WORD, token.DWORD, token.LWORD:
+		l.readBasedIntegerPart()
+	case token.SINT, token.INT, token.DINT, token.LINT, token.USINT, token.UINT, token.UDINT, token.ULINT:
+		l.readIntegerPart()
+	case token.REAL, token.LREAL:
+		l.readRealPart()
+	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME:
+		l.readTimeDatePart(typeKeyword) // Pass typeKeyword for specific validation
+	default:
+		// Fallback for custom types (identifiers) which might be typed literals.
+		// This maintains flexibility but is less strict.
+		for isDigit(l.ch) || isLetter(l.ch) || l.ch == '_' {
+			l.readChar()
+		}
+	}
+
+	literal := l.input[startPos:l.position]
+	return token.Token{Type: typeKeyword, Literal: literal, Row: startLine, Column: startCol}
+}
+
+// readBasedIntegerPart reads the value part of a bit-string literal (e.g., 16#FF_AB).
+func (l *Lexer) readBasedIntegerPart() {
+	// Optional base (e.g., 2, 8, 16)
+	if isDigit(l.ch) {
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+		if l.ch == '#' {
+			l.readChar() // consume '#'
+		}
+	}
+	// Value part (hex digits for bit-strings)
+	for isHexDigit(l.ch) || l.ch == '_' {
 		l.readChar()
 	}
-	valuePart := l.input[valuePartStart:l.position]
+}
 
-	// The whole literal is the token's literal
-	literal := typePart + "#" + valuePart
-	return token.Token{Type: token.LookupIdent(strings.ToUpper(typePart)), Literal: literal, Row: l.position, Column: l.col}
+// readIntegerPart reads a standard integer value part.
+func (l *Lexer) readIntegerPart() {
+	if l.ch == '+' || l.ch == '-' {
+		l.readChar()
+	}
+	for isDigit(l.ch) || l.ch == '_' {
+		l.readChar()
+	}
 }
 
 func (l *Lexer) readString(quote byte) (string, token.TokenType) {
@@ -357,6 +432,45 @@ func (l *Lexer) readString(quote byte) (string, token.TokenType) {
 	}
 }
 
+// readRealPart reads the value part of a REAL or LREAL literal.
+func (l *Lexer) readRealPart() {
+	// This logic is similar to readNumber but simplified for the value part of a typed literal.
+	if l.ch == '+' || l.ch == '-' {
+		l.readChar()
+	}
+	for isDigit(l.ch) || l.ch == '_' {
+		l.readChar()
+	}
+	if l.ch == '.' {
+		l.readChar() // consume '.'
+		for isDigit(l.ch) || l.ch == '_' {
+			l.readChar()
+		}
+	}
+	// Check for an exponent part (e.g., E+4, e-2)
+	if l.ch == 'e' || l.ch == 'E' {
+		l.readChar() // consume 'e' or 'E'
+		if l.ch == '+' || l.ch == '-' {
+			l.readChar()
+		}
+		for isDigit(l.ch) || l.ch == '_' {
+			l.readChar()
+		}
+	}
+}
+
+// readTimeDatePart reads the value part of time and date related literals.
+func (l *Lexer) readTimeDatePart(tokType token.TokenType) {
+	// This function should be more specific based on tokType for strict compliance.
+	// For now, it's a general reader for time/date components.
+	// Full IEC 61131-3 validation of the *format* (e.g., T#5s, DATE#1990-01-01)
+	// is complex and might be better handled in the parser or a dedicated validator.
+	// Here, we ensure we capture all characters that *could* be part of a valid time/date literal.
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '-' || l.ch == '_' || l.ch == '.' || l.ch == ':' || l.ch == '#' {
+		l.readChar()
+	}
+}
+
 func isLetter(ch byte) bool {
 	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
 }
@@ -368,6 +482,11 @@ func isDigit(ch byte) bool {
 // isHexDigit checks if a character is a hexadecimal digit (0-9, a-f, A-F).
 func isHexDigit(ch byte) bool {
 	return isDigit(ch) || ('a' <= ch && ch <= 'f') || ('A' <= ch && ch <= 'F')
+}
+
+// isOctalDigit checks if a character is an octal digit (0-7).
+func isOctalDigit(ch byte) bool {
+	return '0' <= ch && ch <= '7'
 }
 
 // isValidIdentifier checks for invalid underscore usage according to IEC 61131-3 §2.1.2
@@ -386,4 +505,20 @@ func isValidIdentifier(ident string) bool {
 
 func newToken(tokenType token.TokenType, ch byte, position int, col int) token.Token {
 	return token.Token{Type: tokenType, Literal: string(ch), Row: position, Column: col}
+}
+
+// getDigitCheckFn returns a function to validate digits for a given base.
+func getDigitCheckFn(base int) func(byte) bool {
+	switch base {
+	case 2:
+		return func(ch byte) bool { return ch == '0' || ch == '1' }
+	case 8:
+		return isOctalDigit
+	case 10:
+		return isDigit
+	case 16:
+		return isHexDigit
+	default:
+		return func(ch byte) bool { return false } // Should not happen with pre-validation
+	}
 }

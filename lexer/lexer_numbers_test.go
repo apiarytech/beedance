@@ -30,10 +30,10 @@ func TestNumericLiterals(t *testing.T) {
 		{"123E-4", token.REAL, "123E-4"},
 
 		// Based literals
-		{"2#1010_1100", token.INT, "2#1010_1100"},
-		{"8#377", token.INT, "8#377"},
-		{"16#FF", token.INT, "16#FF"},
-		{"16#ff", token.INT, "16#ff"},
+		{"2#1010_1100", token.INT, "2#1010_1100"}, // Binary
+		{"8#377", token.INT, "8#377"},             // Octal
+		{"16#FF", token.INT, "16#FF"},             // Hexadecimal
+		{"16#ff", token.INT, "16#ff"},             // Hexadecimal (lowercase)
 
 		// Based Real Literals
 		{"16#A.B", token.REAL, "16#A.B"},

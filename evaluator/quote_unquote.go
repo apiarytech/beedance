@@ -68,6 +68,34 @@ func convertObjectToASTNode(obj object.Object) ast.Node {
 		}
 		return &ast.Boolean{Token: t, Value: obj.Value}
 
+	case *object.Real:
+		t := token.Token{
+			Type:    token.REAL,
+			Literal: fmt.Sprintf("%f", obj.Value),
+		}
+		return &ast.RealLiteral{Token: t, Value: obj.Value}
+
+	case *object.BitString: // New: Handle BitString object
+		var tokType token.TokenType
+		switch obj.Width {
+		case 8:
+			tokType = token.BYTE
+		case 16:
+			tokType = token.WORD
+		case 32:
+			tokType = token.DWORD
+		case 64:
+			tokType = token.LWORD
+		default:
+			// If an unsupported width is encountered, return nil or an error AST node
+			return nil
+		}
+		t := token.Token{
+			Type:    tokType,
+			Literal: obj.Inspect(), // Use Inspect to get the standard literal format
+		}
+		return &ast.BitStringLiteral{Token: t, Value: obj.Value, Width: obj.Width}
+
 	case *object.Quote:
 		return obj.Node
 

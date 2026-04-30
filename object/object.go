@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"math"
 	"strings"
+	"time"
 )
 
 type BuiltinFunction func(args ...Object) Object
@@ -17,10 +18,15 @@ const (
 	NULL_OBJ  = "NULL"
 	ERROR_OBJ = "ERROR"
 
-	INTEGER_OBJ = "INTEGER"
-	BOOLEAN_OBJ = "BOOLEAN"
-	REAL_OBJ    = "REAL"
-	STRING_OBJ  = "STRING"
+	INTEGER_OBJ       = "INTEGER"
+	BOOLEAN_OBJ       = "BOOLEAN"
+	REAL_OBJ          = "REAL"
+	STRING_OBJ        = "STRING"
+	BITSTRING_OBJ     = "BITSTRING"
+	TIME_OBJ          = "TIME"
+	DATE_OBJ          = "DATE"
+	TIME_OF_DAY_OBJ   = "TIME_OF_DAY"
+	DATE_AND_TIME_OBJ = "DATE_AND_TIME"
 
 	RETURN_VALUE_OBJ = "RETURN_VALUE"
 
@@ -87,6 +93,75 @@ func (r *Real) HashKey() HashKey {
 	// This allows float64 to be used as a hash key, though care should be taken
 	// with floating-point precision issues if comparing hashes of computed floats.
 	return HashKey{Type: r.Type(), Value: math.Float64bits(r.Value)}
+}
+
+type BitString struct {
+	Value uint64
+	Width int // 8 for BYTE, 16 for WORD, 32 for DWORD, 64 for LWORD
+}
+
+func (bs *BitString) Type() ObjectType { return BITSTRING_OBJ }
+func (bs *BitString) Inspect() string {
+	switch bs.Width {
+	case 8:
+		return fmt.Sprintf("BYTE#16#%X", bs.Value)
+	case 16:
+		return fmt.Sprintf("WORD#16#%X", bs.Value)
+	case 32:
+		return fmt.Sprintf("DWORD#16#%X", bs.Value)
+	case 64:
+		return fmt.Sprintf("LWORD#16#%X", bs.Value)
+	default:
+		return fmt.Sprintf("BITSTRING#%d#%X", bs.Width, bs.Value) // Fallback for unknown width
+	}
+}
+func (bs *BitString) HashKey() HashKey {
+	// For hashing, we combine the value and width to ensure uniqueness.
+	// A simple way is to shift the width and OR with the value, or use a more robust hash function.
+	// For now, we'll use the value directly, assuming the combination of Type and Value is sufficient.
+	return HashKey{Type: bs.Type(), Value: bs.Value}
+}
+
+type Time struct {
+	Value time.Duration
+}
+
+func (t *Time) Type() ObjectType { return TIME_OBJ }
+func (t *Time) Inspect() string  { return fmt.Sprintf("T#%s", t.Value.String()) }
+func (t *Time) HashKey() HashKey {
+	return HashKey{Type: t.Type(), Value: uint64(t.Value)}
+}
+
+type Date struct {
+	Value time.Time
+}
+
+func (d *Date) Type() ObjectType { return DATE_OBJ }
+func (d *Date) Inspect() string  { return fmt.Sprintf("D#%s", d.Value.Format("2006-01-02")) }
+func (d *Date) HashKey() HashKey {
+	return HashKey{Type: d.Type(), Value: uint64(d.Value.UnixNano())}
+}
+
+type TimeOfDay struct {
+	Value time.Time // Stored as a time on a zero date
+}
+
+func (tod *TimeOfDay) Type() ObjectType { return TIME_OF_DAY_OBJ }
+func (tod *TimeOfDay) Inspect() string  { return fmt.Sprintf("TOD#%s", tod.Value.Format("15:04:05")) }
+func (tod *TimeOfDay) HashKey() HashKey {
+	return HashKey{Type: tod.Type(), Value: uint64(tod.Value.UnixNano())}
+}
+
+type DateAndTime struct {
+	Value time.Time
+}
+
+func (dt *DateAndTime) Type() ObjectType { return DATE_AND_TIME_OBJ }
+func (dt *DateAndTime) Inspect() string {
+	return fmt.Sprintf("DT#%s", dt.Value.Format("2006-01-02-15:04:05"))
+}
+func (dt *DateAndTime) HashKey() HashKey {
+	return HashKey{Type: dt.Type(), Value: uint64(dt.Value.UnixNano())}
 }
 
 type Null struct{}

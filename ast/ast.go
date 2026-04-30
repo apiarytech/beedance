@@ -12,6 +12,7 @@ package ast
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"beedance/token"
@@ -346,6 +347,29 @@ func (rl *RealLiteral) String() string {
 	return rl.Token.Literal
 }
 
+type BitStringLiteral struct {
+	Token token.Token // The token for the literal (e.g., BYTE, WORD, DWORD, LWORD)
+	Value uint64
+	Width int // 8, 16, 32, 64
+}
+
+func (bsl *BitStringLiteral) expressionNode()      {}
+func (bsl *BitStringLiteral) TokenLiteral() string { return bsl.Token.Literal }
+func (bsl *BitStringLiteral) String() string {
+	switch bsl.Width {
+	case 8:
+		return fmt.Sprintf("BYTE#16#%X", bsl.Value)
+	case 16:
+		return fmt.Sprintf("WORD#16#%X", bsl.Value)
+	case 32:
+		return fmt.Sprintf("DWORD#16#%X", bsl.Value)
+	case 64:
+		return fmt.Sprintf("LWORD#16#%X", bsl.Value)
+	default:
+		return fmt.Sprintf("BITSTRING#%d#%X", bsl.Width, bsl.Value) // Fallback for unknown width
+	}
+}
+
 type PrefixExpression struct {
 	Token    token.Token // The prefix token, e.g. !
 	Operator string
@@ -622,13 +646,46 @@ func (sl *StringLiteral) String() string       { return sl.Token.Literal }
 
 type TimeLiteral struct {
 	Token token.Token // The token.TIME token
-	Value string
+	Value string      // The raw string value, e.g., "T#5s"
 }
 
 func (tl *TimeLiteral) expressionNode()      {}
 func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
 func (tl *TimeLiteral) String() string {
 	return tl.Token.Literal
+}
+
+type DateLiteral struct {
+	Token token.Token // The token.DATE token
+	Value string
+}
+
+func (dl *DateLiteral) expressionNode()      {}
+func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
+func (dl *DateLiteral) String() string {
+	return dl.Token.Literal
+}
+
+type TimeOfDayLiteral struct {
+	Token token.Token // The token.TIME_OF_DAY token
+	Value string
+}
+
+func (todl *TimeOfDayLiteral) expressionNode()      {}
+func (todl *TimeOfDayLiteral) TokenLiteral() string { return todl.Token.Literal }
+func (todl *TimeOfDayLiteral) String() string {
+	return todl.Token.Literal
+}
+
+type DateAndTimeLiteral struct {
+	Token token.Token // The token.DATE_AND_TIME token
+	Value string
+}
+
+func (dtl *DateAndTimeLiteral) expressionNode()      {}
+func (dtl *DateAndTimeLiteral) TokenLiteral() string { return dtl.Token.Literal }
+func (dtl *DateAndTimeLiteral) String() string {
+	return dtl.Token.Literal
 }
 
 type ArrayLiteral struct {
