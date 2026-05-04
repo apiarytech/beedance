@@ -10,7 +10,8 @@ import (
 )
 
 var (
-	NULL  = &object.Null{}
+	NULL = &object.Null{}
+	// TRUE and FALSE are singletons to optimize memory and comparison.
 	TRUE  = &object.Boolean{Value: true}
 	FALSE = &object.Boolean{Value: false}
 )
@@ -25,8 +26,40 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.BlockStatement:
 		return evalBlockStatement(node, env)
 
+	case *ast.SFCProgram:
+		return evalSFCProgram(node, env)
+
+	case *ast.InitialStepStatement:
+		return newError(node, "SFC InitialStepStatement not yet implemented for direct evaluation")
+
 	case *ast.ExpressionStatement:
 		return Eval(node.Expression, env)
+
+	case *ast.FunctionDeclaration:
+		fn := &object.Function{
+			Name:       node.Name,
+			VarInputs:  node.VarInputs,
+			VarOutputs: node.VarOutputs,
+			VarInOuts:  node.VarInOuts,
+			Vars:       node.Vars,
+			Body:       node.Body,
+			Env:        env,
+		}
+		env.Set(node.Name.Value, fn)
+		return fn
+
+	case *ast.FunctionBlockDeclaration:
+		fb := &object.FunctionBlock{
+			Name:       node.Name,
+			VarInputs:  node.VarInputs,
+			VarOutputs: node.VarOutputs,
+			VarInOuts:  node.VarInOuts,
+			Vars:       node.Vars,
+			Body:       node.Body,
+			Env:        env, // The environment where the FB is declared
+		}
+		env.Set(node.Name.Value, fb)
+		return fb
 
 	case *ast.ReturnStatement:
 		val := Eval(node.ReturnValue, env)
@@ -94,6 +127,11 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		if isError(right) {
 			return right
 		}
+		// Handle NOT for BitStrings
+		if node.Operator == "NOT" && right.Type() == object.BITSTRING_OBJ {
+			return evalBitStringPrefixExpression(node, right)
+		}
+
 		return evalPrefixExpression(node, right)
 
 	case *ast.InfixExpression:
@@ -109,6 +147,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 		return evalInfixExpression(node, left, right)
 
+	case *ast.MemberAccessExpression:
+		return evalMemberAccessExpression(node, env)
+
 	case *ast.IfStatement:
 		return evalIfStatement(node, env)
 
@@ -118,9 +159,12 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.FunctionLiteral:
 		params := node.Parameters
 		body := node.Body
-		return &object.Function{Parameters: params, Env: env, Body: body}
+		return &object.Function{
+			Parameters: params, Env: env, Body: body,
+		}
 
 	case *ast.CallExpression:
+		// Special handling for 'quote' macro
 		if node.Function.TokenLiteral() == "quote" {
 			return quote(node.Arguments[0], env)
 		}
@@ -130,12 +174,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			return function
 		}
 
-		args := evalExpressions(node.Arguments, env)
-		if len(args) == 1 && isError(args[0]) {
-			return args[0]
-		}
-
-		return applyFunction(function, args)
+		// Pass raw AST arguments to applyFunction for proper handling of named/output args
+		return applyFunction(function, node.Arguments, env)
 
 	case *ast.ArrayLiteral:
 		elements := evalExpressions(node.Elements, env)
@@ -161,6 +201,98 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	}
 
 	return nil
+}
+
+// evalSFCProgram evaluates an SFC program.
+func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Object {
+	sfc := &object.SFC{
+		Steps:       make(map[string]*object.Step),
+		Transitions: []*object.Transition{},
+		ActiveSteps: make(map[string]bool),
+	}
+
+	// 1. Build the SFC structure from the AST
+	for _, element := range program.Elements {
+		switch elem := element.(type) {
+		case *ast.InitialStepStatement: // Initial steps are also regular steps
+			sfc.InitialStepName = elem.Name.Value
+			sfc.Steps[elem.Name.Value] = &object.Step{Name: elem.Name, Actions: elem.Actions, IsActive: false}
+		case *ast.StepStatement:
+			sfc.Steps[elem.Name.Value] = &object.Step{Name: elem.Name, Actions: elem.Actions, IsActive: false}
+		case *ast.TransitionStatement:
+			sfc.Transitions = append(sfc.Transitions, &object.Transition{
+				FromSteps: elem.From,
+				ToSteps:   elem.To,
+				Condition: elem.Condition,
+			})
+		}
+	}
+
+	// 2. Initialize the SFC state
+	if sfc.InitialStepName == "" {
+		return newError(program, "SFC program has no initial step") //
+	}
+	sfc.ActiveSteps[sfc.InitialStepName] = true
+	sfc.Steps[sfc.InitialStepName].IsActive = true
+
+	// This would typically be part of a larger execution loop (e.g., PLC scan cycle)
+	// For this basic implementation, we'll just run one evaluation cycle.
+	return evalSFCCycle(sfc, env)
+}
+
+func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
+	// Create a snapshot of active steps before evaluation
+	stepsToEvaluate := make([]string, 0, len(sfc.ActiveSteps))
+	for stepName := range sfc.ActiveSteps {
+		stepsToEvaluate = append(stepsToEvaluate, stepName)
+	}
+
+	// Rule 1: Evaluate actions of all active steps
+	for _, stepName := range stepsToEvaluate {
+		step := sfc.Steps[stepName]
+		for _, action := range step.Actions {
+			// For a basic implementation, we just evaluate the action body
+			// In a full implementation, action qualifiers (N, P, L, etc.) would be handled here.
+			evaluated := Eval(action.Body, env)
+			if isError(evaluated) {
+				return evaluated // Propagate errors
+			}
+		}
+	}
+
+	// Rule 2 & 3: Evaluate transitions and update step states
+	transitionsToClear := []*object.Transition{}
+	for _, transition := range sfc.Transitions {
+		// Check if the transition is enabled (all preceding steps are active)
+		isEnabled := true
+		for _, fromStepName := range transition.FromSteps { //
+			if !sfc.ActiveSteps[fromStepName] {
+				isEnabled = false
+				break
+			}
+		}
+
+		if isEnabled {
+			conditionResult := Eval(transition.Condition, env)
+			if isTruthy(conditionResult) { //
+				transitionsToClear = append(transitionsToClear, transition)
+			}
+		}
+	}
+
+	// Rule 4: Deactivate old steps and activate new ones
+	for _, transition := range transitionsToClear {
+		for _, fromStep := range transition.FromSteps { //
+			delete(sfc.ActiveSteps, fromStep)
+			sfc.Steps[fromStep].IsActive = false
+		}
+		for _, toStep := range transition.ToSteps { //
+			sfc.ActiveSteps[toStep] = true
+			sfc.Steps[toStep].IsActive = true
+		}
+	}
+
+	return NULL // A single cycle completes successfully
 }
 
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
@@ -284,10 +416,8 @@ func evalInfixExpression(
 		return evalStringInfixExpression(node, left, right)
 	case left.Type() == object.BITSTRING_OBJ && right.Type() == object.BITSTRING_OBJ: // New: BitString operations
 		return evalBitStringInfixExpression(node, left, right)
-	case node.Operator == "==":
-		return nativeBoolToBooleanObject(left == right)
-	case node.Operator == "!=":
-		return nativeBoolToBooleanObject(left != right)
+	case isComparisonOperator(node.Operator):
+		return evalComparisonInfix(node, left, right)
 	case left.Type() != right.Type():
 		return newError(node, "type mismatch: %s %s %s",
 			left.Type(), node.Operator, right.Type())
@@ -392,11 +522,11 @@ func evalBitStringInfixExpression(
 	width := leftBitString.Width
 
 	switch node.Operator {
-	case "AND":
+	case "AND", "&":
 		return &object.BitString{Value: leftVal & rightVal, Width: width}
 	case "OR":
 		return &object.BitString{Value: leftVal | rightVal, Width: width}
-	case "XOR":
+	case "XOR", "XOR":
 		return &object.BitString{Value: leftVal ^ rightVal, Width: width}
 	case "==":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
@@ -483,6 +613,14 @@ func evalIdentifier(
 		return builtin
 	}
 
+	// Check for generic type conversion functions like `INT_TO_REAL`
+	if strings.Contains(node.Value, "_TO_") {
+		parts := strings.Split(node.Value, "_TO_")
+		if len(parts) == 2 {
+			return genericConversionBuiltin(parts[0], parts[1])
+		}
+	}
+
 	return newError(node, "identifier not found: %s", node.Value)
 }
 
@@ -536,33 +674,139 @@ func evalExpressions(
 	return result
 }
 
-func applyFunction(fn object.Object, args []object.Object) object.Object {
+// outputArgMapping stores the information needed to map a function's output
+// parameter back to a variable in the calling scope.
+type outputArgMapping struct {
+	SourceParamName string         // The name of the VAR_OUTPUT parameter (e.g., "Out1")
+	TargetVarNode   ast.Expression // The AST node of the target variable in the calling scope (e.g., "Res1")
+}
+
+func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Environment) object.Object {
 	switch fn := fn.(type) {
 
 	case *object.Function:
-		extendedEnv := extendFunctionEnv(fn, args)
-		evaluated := Eval(fn.Body, extendedEnv) // fn.Body is an ast.Node
-		return unwrapReturnValue(evaluated)
+		// Create the function's execution environment, mapping arguments to parameters.
+		extendedEnv, outputMappings, err := extendFunctionEnv(fn, args, callEnv, fn.VarInputs) // Pass fn.VarInputs as parameter declarations
+		if err != nil {
+			return err
+		}
+
+		// Execute the function body in its new environment.
+		evaluated := Eval(fn.Body, extendedEnv)
+		if isError(evaluated) {
+			return evaluated
+		}
+
+		// After execution, handle the output arguments (=>).
+		for _, mapping := range outputMappings {
+			// Get the final value of the output parameter from the function's scope.
+			val, ok := extendedEnv.Get(mapping.SourceParamName)
+			if !ok {
+				// This should ideally not happen if parsing and declaration are correct.
+				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in function scope", mapping.SourceParamName)
+			}
+			// Assign this value to the target variable in the *calling* scope.
+			// We need to evaluate the target variable node in the calling environment.
+			// For now, assuming it's an identifier.
+			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
+				callEnv.Set(targetIdent.Value, val)
+			} else {
+				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			}
+		}
+
+		// Handle the primary return value of the function.
+		// This is the value assigned to the variable with the same name as the function.
+		var returnValue object.Object
+		var ok bool
+
+		if fn.Name != nil {
+			// For named functions, the return value is the variable with the function's name.
+			returnValue, ok = extendedEnv.Get(fn.Name.Value)
+		} else {
+			// For anonymous functions (FunctionLiteral), the return value is the result of the last statement.
+			if len(fn.Body.Statements) > 0 {
+				lastStmt := fn.Body.Statements[len(fn.Body.Statements)-1]
+				returnValue = Eval(lastStmt, extendedEnv)
+				if _, isReturn := returnValue.(*object.ReturnValue); isReturn {
+					returnValue = unwrapReturnValue(returnValue)
+				}
+			} else {
+				returnValue = NULL
+			}
+			ok = true // Assume anonymous functions always "return" something, even if NULL
+		}
+		if !ok {
+			// A function must always return a value. If not explicitly set, it's an error or has a default.
+			// For simplicity, we'll return NULL, but a stricter implementation might error.
+		}
+		return returnValue
 
 	case *object.Builtin:
-		// Builtins don't have an AST node to pass, so we can't easily add line numbers here.
-		return fn.Fn(args...)
+		// For built-in functions, we evaluate all arguments first.
+		evalArgs := evalExpressions(args, callEnv)
+		if len(evalArgs) == 1 && isError(evalArgs[0]) {
+			return evalArgs[0]
+		}
+		return fn.Fn(evalArgs...)
 	default:
-		return newError("not a function: %s", fn.Type())
+		// If the function object itself is an error, it would have been caught earlier.
+		// This case is for when `function` is not a Function or Builtin object.
+		return newError(nil, "not a function: %s", fn.Type()) // Pass nil for node as we don't have it here
 	}
 }
 
-func extendFunctionEnv(
-	fn *object.Function,
-	args []object.Object,
-) *object.Environment {
+// extendFunctionEnv creates a new environment for a function call, populating it
+// with parameters based on the provided arguments.
+func extendFunctionEnv(fn object.Object, args []ast.Expression, callEnv *object.Environment, paramDecls []*ast.VarDeclStatement) (*object.Environment, []outputArgMapping, *object.Error) {
 	env := object.NewEnclosedEnvironment(fn.Env)
+	outputMappings := []outputArgMapping{}
+	positionalParamIndex := 0 // Index for positional parameters in paramDecls
 
-	for paramIdx, param := range fn.Parameters {
-		env.Set(param.Value, args[paramIdx])
+	for _, argNode := range args {
+		switch arg := argNode.(type) {
+		case *ast.NamedArgument: // Handle `InputName := Value`
+			val := Eval(arg.Value, callEnv)
+			if isError(val) {
+				return nil, nil, val.(*object.Error)
+			}
+			env.Set(arg.Name.Value, val)
+
+		case *ast.OutputArgument: // Handle `OutputName => TargetVar`
+			// The target variable is an AST node (e.g., Identifier), not an evaluated object yet.
+			// We store the AST node to resolve it in the calling environment after function execution.
+			outputMappings = append(outputMappings, outputArgMapping{
+				SourceParamName: arg.Source.Value,
+				TargetVarNode:   arg.Target,
+			})
+
+		default: // Handle positional arguments (an expression)
+			if positionalParamIndex >= len(paramDecls) { // Check against the actual parameter declarations
+				return nil, nil, newError(argNode, "too many arguments in function call") //
+			}
+			paramDecl := paramDecls[positionalParamIndex]
+			val := Eval(arg, callEnv)
+			if isError(val) {
+				return nil, nil, val.(*object.Error)
+			}
+
+			// Special handling for VAR_IN_OUT: pass by reference.
+			// For now, we'll treat it as pass-by-value for simplicity,
+			// but a proper implementation would involve storing a reference.
+			// The `paramDecls` here contains both VAR_INPUT and VAR_IN_OUT.
+			// We need to distinguish them. For now, we just set the value.
+			// If `paramDecl` has a `VarInOut` flag, we could handle it differently.
+			// Since `ast.VarDeclStatement` doesn't have a `VarInOut` flag,
+			// we'll just set the value.
+			env.Set(paramDecl.Name.Value, val) // This is pass-by-value
+
+			// TODO: Implement proper VAR_IN_OUT (pass by reference)
+			// This would involve storing a reference to the variable in the callEnv.
+			positionalParamIndex++
+		}
 	}
 
-	return env
+	return env, outputMappings, nil
 }
 
 func unwrapReturnValue(obj object.Object) object.Object {
@@ -639,4 +883,157 @@ func evalHashIndexExpression(node ast.Node, hash, index object.Object) object.Ob
 	}
 
 	return pair.Value
+}
+
+// evalMemberAccessExpression handles access to members of objects (e.g., function block instances).
+func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.Environment) object.Object {
+	left := Eval(node.Struct, env)
+	if isError(left) {
+		return left
+	}
+
+	switch l := left.(type) {
+	case *object.FunctionBlockInstance:
+		member := node.Member.Value
+		val, ok := l.Env.Get(member)
+		if !ok {
+			return newError(node, "member '%s' not found in function block instance '%s'", member, l.Definition.Name.Value)
+		}
+		return val
+	default:
+		return newError(node, "member access not supported for type %s", left.Type())
+	}
+}
+
+// isComparisonOperator checks if a given operator string is a comparison operator.
+func isComparisonOperator(op string) bool {
+	switch op {
+	case "==", "!=", "<", ">", "<=", ">=":
+		return true
+	default:
+		return false
+	}
+}
+
+// evalComparisonInfix handles comparison operations for types not covered by specific infix evaluators.
+func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) object.Object {
+	// Handle NULL comparisons
+	if left == NULL || right == NULL {
+		if node.Operator == "==" {
+			return nativeBoolToBooleanObject(left == right)
+		}
+		if node.Operator == "!=" {
+			return nativeBoolToBooleanObject(left != right)
+		}
+		return newError(node, "unsupported operator for NULL: %s", node.Operator)
+	}
+
+	// Handle Boolean comparisons
+	if left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ {
+		leftVal := left.(*object.Boolean).Value
+		rightVal := right.(*object.Boolean).Value
+		switch node.Operator {
+		case "==":
+			return nativeBoolToBooleanObject(leftVal == rightVal)
+		case "!=":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		default:
+			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+		}
+	}
+
+	// Handle Time comparisons
+	if left.Type() == object.TIME_OBJ && right.Type() == object.TIME_OBJ {
+		leftVal := left.(*object.Time).Value
+		rightVal := right.(*object.Time).Value
+		switch node.Operator {
+		case "==":
+			return nativeBoolToBooleanObject(leftVal == rightVal)
+		case "!=":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		case "<":
+			return nativeBoolToBooleanObject(leftVal < rightVal)
+		case ">":
+			return nativeBoolToBooleanObject(leftVal > rightVal)
+		case "<=":
+			return nativeBoolToBooleanObject(leftVal <= rightVal)
+		case ">=":
+			return nativeBoolToBooleanObject(leftVal >= rightVal)
+		default:
+			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+		}
+	}
+
+	// Handle Date comparisons
+	if left.Type() == object.DATE_OBJ && right.Type() == object.DATE_OBJ {
+		leftVal := left.(*object.Date).Value
+		rightVal := right.(*object.Date).Value
+		switch node.Operator {
+		case "==":
+			return nativeBoolToBooleanObject(leftVal.Equal(rightVal))
+		case "!=":
+			return nativeBoolToBooleanObject(!leftVal.Equal(rightVal))
+		case "<":
+			return nativeBoolToBooleanObject(leftVal.Before(rightVal))
+		case ">":
+			return nativeBoolToBooleanObject(leftVal.After(rightVal))
+		case "<=":
+			return nativeBoolToBooleanObject(leftVal.Before(rightVal) || leftVal.Equal(rightVal))
+		case ">=":
+			return nativeBoolToBooleanObject(leftVal.After(rightVal) || leftVal.Equal(rightVal))
+		default:
+			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+		}
+	}
+
+	// Handle TimeOfDay comparisons
+	if left.Type() == object.TIME_OF_DAY_OBJ && right.Type() == object.TIME_OF_DAY_OBJ {
+		leftVal := left.(*object.TimeOfDay).Value
+		rightVal := right.(*object.TimeOfDay).Value
+		// Convert to nanoseconds since midnight for comparison, ignoring date part
+		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
+		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
+
+		switch node.Operator {
+		case "==":
+			return nativeBoolToBooleanObject(leftNs == rightNs)
+		case "!=":
+			return nativeBoolToBooleanObject(leftNs != rightNs)
+		case "<":
+			return nativeBoolToBooleanObject(leftNs < rightNs)
+		case ">":
+			return nativeBoolToBooleanObject(leftNs > rightNs)
+		case "<=":
+			return nativeBoolToBooleanObject(leftNs <= rightNs)
+		case ">=":
+			return nativeBoolToBooleanObject(leftNs >= rightNs)
+		default:
+			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+		}
+	}
+
+	// Handle DateAndTime comparisons
+	if left.Type() == object.DATE_AND_TIME_OBJ && right.Type() == object.DATE_AND_TIME_OBJ {
+		leftVal := left.(*object.DateAndTime).Value
+		rightVal := right.(*object.DateAndTime).Value
+		switch node.Operator {
+		case "==":
+			return nativeBoolToBooleanObject(leftVal.Equal(rightVal))
+		case "!=":
+			return nativeBoolToBooleanObject(!leftVal.Equal(rightVal))
+		case "<":
+			return nativeBoolToBooleanObject(leftVal.Before(rightVal))
+		case ">":
+			return nativeBoolToBooleanObject(leftVal.After(rightVal))
+		case "<=":
+			return nativeBoolToBooleanObject(leftVal.Before(rightVal) || leftVal.Equal(rightVal))
+		case ">=":
+			return nativeBoolToBooleanObject(leftVal.After(rightVal) || leftVal.Equal(rightVal))
+		default:
+			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+		}
+	}
+
+	// If types are different, it's a type mismatch for comparison
+	return newError(node, "type mismatch for comparison: %s %s %s", left.Type(), node.Operator, right.Type())
 }

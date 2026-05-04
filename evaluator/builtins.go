@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"strconv"
 	"strings"
+	"time"
 )
 
 var builtins = map[string]*object.Builtin{
@@ -447,7 +449,13 @@ var builtins = map[string]*object.Builtin{
 				return newBuiltinError("shift amount for `SHL` must be non-negative, got %d", n.Value)
 			}
 
-			result := in.Value << uint(n.Value)
+			shiftAmount := uint(n.Value)
+			result := in.Value << shiftAmount
+
+			// Apply mask to ensure the result stays within the bitstring's width
+			if in.Width < 64 {
+				result &= (1 << in.Width) - 1
+			}
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
@@ -467,7 +475,13 @@ var builtins = map[string]*object.Builtin{
 			if n.Value < 0 {
 				return newBuiltinError("shift amount for `SHR` must be non-negative, got %d", n.Value)
 			}
-			result := in.Value >> uint(n.Value)
+			shiftAmount := uint(n.Value)
+			result := in.Value >> shiftAmount
+
+			// Apply mask to ensure the result stays within the bitstring's width
+			if in.Width < 64 {
+				result &= (1 << in.Width) - 1
+			}
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
@@ -612,6 +626,23 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Atan(val)}
 		},
 	},
+	"ATAN2": &object.Builtin{
+		Fn: func(args ...object.Object) object.Object {
+			if len(args) != 2 {
+				return newBuiltinError("wrong number of arguments for ATAN2. got=%d, want=2", len(args))
+			}
+			y, okY := getFloat64Value(args[0])
+			if !okY {
+				return newBuiltinError("argument 1 to `ATAN2` must be INTEGER or REAL, got %s", args[0].Type())
+			}
+			x, okX := getFloat64Value(args[1])
+			if !okX {
+				return newBuiltinError("argument 2 to `ATAN2` must be INTEGER or REAL, got %s", args[1].Type())
+			}
+			// IEC 61131-3 specifies ATAN2(Y, X)
+			return &object.Real{Value: math.Atan2(y, x)}
+		},
+	},
 	"LN": &object.Builtin{
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
@@ -684,8 +715,8 @@ var builtins = map[string]*object.Builtin{
 				return newBuiltinError("argument to `ROUND` must be REAL, got %s", args[0].Type())
 			}
 			realVal := args[0].(*object.Real).Value
-			// math.Round rounds half to even, we need half up.
-			return &object.Integer{Value: int64(math.Floor(realVal + 0.5))}
+			// Per IEC 60559 (IEEE 754), the default rounding mode is "round half to even".
+			return &object.Integer{Value: int64(math.Round(realVal))}
 		},
 	},
 	"ABS": &object.Builtin{
@@ -715,38 +746,21 @@ var builtins = map[string]*object.Builtin{
 			return &object.Integer{Value: int64(math.Trunc(realVal))}
 		},
 	},
-	"TO_INT": &object.Builtin{
-		Fn: func(args ...object.Object) object.Object {
-			if len(args) != 1 {
-				return newBuiltinError("wrong number of arguments for TO_INT. got=%d, want=1", len(args))
-			}
-			switch arg := args[0].(type) {
-			case *object.Real:
-				return &object.Integer{Value: int64(arg.Value)}
-			case *object.Integer:
-				return arg
-			default:
-				return newBuiltinError("argument to `TO_INT` not supported, got %s", args[0].Type())
-			}
-		},
-	},
-	"TO_REAL": &object.Builtin{
-		Fn: func(args ...object.Object) object.Object {
-			if len(args) != 1 {
-				return newBuiltinError("wrong number of arguments for TO_REAL. got=%d, want=1", len(args))
-			}
-			switch arg := args[0].(type) {
-			case *object.Integer:
-				return &object.Real{Value: float64(arg.Value)}
-			case *object.Real:
-				return arg
-			default:
-				return newBuiltinError("argument to `TO_REAL` not supported, got %s", args[0].Type())
-			}
-		},
-	},
-	"ADD": &object.Builtin{Fn: addBuiltin},
-	"SUB": &object.Builtin{Fn: subBuiltin},
+	"ADD":  &object.Builtin{Fn: addBuiltin},
+	"SUB":  &object.Builtin{Fn: subBuiltin},
+	"MUL":  &object.Builtin{Fn: mulBuiltin},
+	"DIV":  &object.Builtin{Fn: divBuiltin},
+	"MOD":  &object.Builtin{Fn: modBuiltin},
+	"EXPT": &object.Builtin{Fn: exptBuiltin},
+	"GT":   {Fn: comparisonBuiltin("GT")},
+	"GE":   {Fn: comparisonBuiltin("GE")},
+	"EQ":   {Fn: comparisonBuiltin("EQ")},
+	"LE":   {Fn: comparisonBuiltin("LE")},
+	"LT":   {Fn: comparisonBuiltin("LT")},
+	"NE":   {Fn: comparisonBuiltin("NE")},
+	"LEN":  builtins["len"], // IEC 61131-3 standard function
+	"MUX":  {Fn: muxBuiltin},
+	"MOVE": {Fn: moveBuiltin},
 }
 
 func limitBuiltin(min, in, max object.Object) object.Object {
@@ -1001,4 +1015,506 @@ func subBuiltin(args ...object.Object) object.Object {
 	}
 
 	return newBuiltinError("unsupported argument types for SUB: %s - %s", arg1.Type(), arg2.Type())
+}
+
+// moveBuiltin implements the MOVE standard function.
+func moveBuiltin(args ...object.Object) object.Object {
+	if len(args) != 1 {
+		return newBuiltinError("wrong number of arguments for MOVE. got=%d, want=1", len(args))
+	}
+	// MOVE function simply returns its input, which can then be assigned.
+	// The actual assignment is handled by the calling expression.
+	return args[0]
+}
+
+// mulBuiltin implements the MUL standard function.
+func mulBuiltin(args ...object.Object) object.Object {
+	if len(args) != 2 {
+		return newBuiltinError("wrong number of arguments for MUL. got=%d, want=2", len(args))
+	}
+	arg1 := args[0]
+	arg2 := args[1]
+
+	// Handle TIME * ANY_NUM and ANY_NUM * TIME
+	if t, ok := arg1.(*object.Time); ok {
+		if num, ok := getFloat64Value(arg2); ok {
+			return &object.Time{Value: time.Duration(float64(t.Value) * num)}
+		}
+	}
+	if t, ok := arg2.(*object.Time); ok {
+		if num, ok := getFloat64Value(arg1); ok {
+			return &object.Time{Value: time.Duration(float64(t.Value) * num)}
+		}
+	}
+
+	// Handle numeric types
+	switch a1 := arg1.(type) {
+	case *object.Integer:
+		if a2, ok := arg2.(*object.Integer); ok {
+			return &object.Integer{Value: a1.Value * a2.Value}
+		}
+		if a2, ok := arg2.(*object.Real); ok {
+			return &object.Real{Value: float64(a1.Value) * a2.Value}
+		}
+	case *object.Real:
+		if a2, ok := arg2.(*object.Real); ok {
+			return &object.Real{Value: a1.Value * a2.Value}
+		}
+		if a2, ok := arg2.(*object.Integer); ok {
+			return &object.Real{Value: a1.Value * float64(a2.Value)}
+		}
+	}
+
+	return newBuiltinError("unsupported argument types for MUL: %s * %s", arg1.Type(), arg2.Type())
+}
+
+// divBuiltin implements the DIV standard function.
+func divBuiltin(args ...object.Object) object.Object {
+	if len(args) != 2 {
+		return newBuiltinError("wrong number of arguments for DIV. got=%d, want=2", len(args))
+	}
+	arg1 := args[0]
+	arg2 := args[1]
+
+	// Handle TIME / ANY_NUM
+	if t, ok := arg1.(*object.Time); ok {
+		if num, ok := getFloat64Value(arg2); ok {
+			if num == 0 {
+				return newBuiltinError("division by zero")
+			} // time.Duration is int64 nanoseconds, so convert to float64 for division
+			return &object.Time{Value: time.Duration(float64(t.Value) / num)}
+		}
+	}
+
+	// Handle numeric types
+	switch a1 := arg1.(type) {
+	case *object.Integer:
+		if a2, ok := arg2.(*object.Integer); ok {
+			if a2.Value == 0 {
+				return newBuiltinError("division by zero")
+			}
+			return &object.Integer{Value: a1.Value / a2.Value}
+		}
+		if a2, ok := arg2.(*object.Real); ok {
+			if a2.Value == 0.0 {
+				return newBuiltinError("division by zero")
+			}
+			return &object.Real{Value: float64(a1.Value) / a2.Value}
+		}
+	case *object.Real:
+		if num, ok := getFloat64Value(arg2); ok {
+			if num == 0.0 {
+				return newBuiltinError("division by zero")
+			}
+			return &object.Real{Value: a1.Value / num}
+		}
+	}
+
+	return newBuiltinError("unsupported argument types for DIV: %s / %s", arg1.Type(), arg2.Type())
+}
+
+// modBuiltin implements the MOD standard function.
+func modBuiltin(args ...object.Object) object.Object {
+	if len(args) != 2 {
+		return newBuiltinError("wrong number of arguments for MOD. got=%d, want=2", len(args))
+	}
+	arg1, ok1 := args[0].(*object.Integer)
+	arg2, ok2 := args[1].(*object.Integer)
+
+	if !ok1 || !ok2 {
+		return newBuiltinError("arguments to `MOD` must be INTEGER, got %s and %s", args[0].Type(), args[1].Type())
+	}
+
+	if arg2.Value == 0 {
+		return newBuiltinError("division by zero in MOD")
+	}
+
+	return &object.Integer{Value: arg1.Value % arg2.Value}
+}
+
+// exptBuiltin implements the EXPT standard function.
+func exptBuiltin(args ...object.Object) object.Object {
+	if len(args) != 2 {
+		return newBuiltinError("wrong number of arguments for EXPT. got=%d, want=2", len(args))
+	}
+
+	base, ok1 := getFloat64Value(args[0])
+	if !ok1 {
+		return newBuiltinError("argument 1 to `EXPT` must be numeric, got %s", args[0].Type())
+	}
+
+	exponent, ok2 := getFloat64Value(args[1])
+	if !ok2 {
+		return newBuiltinError("argument 2 to `EXPT` must be numeric, got %s", args[1].Type())
+	}
+
+	// IEC 61131-3 specifies that EXPT returns a REAL.
+	result := math.Pow(base, exponent)
+
+	return &object.Real{Value: result}
+}
+
+// comparisonBuiltin is a factory for creating comparison functions (GT, GE, EQ, LE, LT, NE).
+func comparisonBuiltin(op string) object.BuiltinFunction {
+	return func(args ...object.Object) object.Object {
+		if len(args) != 2 {
+			return newBuiltinError("wrong number of arguments for %s. got=%d, want=2", op, len(args))
+		}
+		return evalComparison(op, args[0], args[1])
+	}
+}
+
+// evalComparison centralizes the logic for all comparison operations.
+func evalComparison(op string, left, right object.Object) object.Object {
+	// Type promotion for REAL and INTEGER
+	if l, ok := left.(*object.Integer); ok {
+		if r, ok := right.(*object.Real); ok {
+			left = &object.Real{Value: float64(l.Value)}
+		}
+	}
+	if l, ok := left.(*object.Real); ok {
+		if r, ok := right.(*object.Integer); ok {
+			right = &object.Real{Value: float64(r.Value)}
+		}
+	}
+
+	if left.Type() != right.Type() {
+		return newBuiltinError("type mismatch for comparison: %s %s %s", left.Type(), op, right.Type())
+	}
+
+	var result bool
+	switch l := left.(type) {
+	case *object.Integer:
+		r := right.(*object.Integer).Value
+		switch op {
+		case "GT":
+			result = l.Value > r
+		case "GE":
+			result = l.Value >= r
+		case "EQ":
+			result = l.Value == r
+		case "LE":
+			result = l.Value <= r
+		case "LT":
+			result = l.Value < r
+		case "NE":
+			result = l.Value != r
+		}
+	case *object.Real:
+		r := right.(*object.Real).Value
+		switch op {
+		case "GT":
+			result = l.Value > r
+		case "GE":
+			result = l.Value >= r
+		case "EQ":
+			result = l.Value == r
+		case "LE":
+			result = l.Value <= r
+		case "LT":
+			result = l.Value < r
+		case "NE":
+			result = l.Value != r
+		}
+	case *object.String:
+		r := right.(*object.String).Value
+		switch op {
+		case "GT":
+			result = l.Value > r
+		case "GE":
+			result = l.Value >= r
+		case "EQ":
+			result = l.Value == r
+		case "LE":
+			result = l.Value <= r
+		case "LT":
+			result = l.Value < r
+		case "NE":
+			result = l.Value != r
+		}
+	case *object.Boolean:
+		r := right.(*object.Boolean).Value
+		// For booleans, only EQ and NE are typically used, but others are valid.
+		// We can treat FALSE as 0 and TRUE as 1 for comparison.
+		li, ri := 0, 0
+		if l.Value {
+			li = 1
+		}
+		if r {
+			ri = 1
+		}
+		return evalComparison(op, &object.Integer{Value: int64(li)}, &object.Integer{Value: int64(ri)})
+
+	default:
+		// For other types, fall back to simple equality/inequality checks.
+		// This covers TIME, DATE, etc., where direct value comparison is meaningful.
+		if op == "EQ" {
+			return nativeBoolToBooleanObject(isEqual(left, right))
+		}
+		if op == "NE" {
+			return nativeBoolToBooleanObject(!isEqual(left, right))
+		}
+		return newBuiltinError("unsupported operand types for %s: %s", op, left.Type())
+	}
+
+	return nativeBoolToBooleanObject(result)
+}
+
+// muxBuiltin implements the MUX standard function.
+func muxBuiltin(args ...object.Object) object.Object {
+	if len(args) < 2 {
+		return newBuiltinError("wrong number of arguments for MUX. got=%d, want>=2", len(args))
+	}
+
+	k, ok := args[0].(*object.Integer)
+	if !ok {
+		return newBuiltinError("argument 1 to `MUX` must be INTEGER, got %s", args[0].Type())
+	}
+
+	valueArgs := args[1:]
+	numInputs := len(valueArgs)
+
+	if k.Value < 0 || k.Value >= int64(numInputs) {
+		return newBuiltinError("index %d out of bounds for MUX with %d inputs", k.Value, numInputs)
+	}
+
+	// Check that all value arguments are of the same type
+	if numInputs > 1 {
+		firstType := valueArgs[0].Type()
+		for i := 1; i < numInputs; i++ {
+			if valueArgs[i].Type() != firstType {
+				return newBuiltinError("all value arguments to `MUX` must be of the same type, got %s but expected %s", valueArgs[i].Type(), firstType)
+			}
+		}
+	}
+
+	return valueArgs[k.Value]
+}
+
+// genericConversionBuiltin creates a built-in function on the fly for `*_TO_*` conversions.
+func genericConversionBuiltin(fromType, toType string) *object.Builtin {
+	return &object.Builtin{
+		Fn: func(args ...object.Object) object.Object {
+			if len(args) != 1 {
+				return newBuiltinError("wrong number of arguments for %s_TO_%s. got=%d, want=1", fromType, toType, len(args))
+			}
+			return applyConversion(args[0], fromType, toType)
+		},
+	}
+}
+
+var integerTypeRanges = map[string]struct {
+	minSigned   int64
+	maxSigned   int64
+	maxUnsigned uint64
+}{
+	"SINT":  {math.MinInt8, math.MaxInt8, 0},
+	"INT":   {math.MinInt16, math.MaxInt16, 0},
+	"DINT":  {math.MinInt32, math.MaxInt32, 0},
+	"LINT":  {math.MinInt64, math.MaxInt64, 0},
+	"USINT": {0, 0, math.MaxUint8},
+	"UINT":  {0, 0, math.MaxUint16},
+	"UDINT": {0, 0, math.MaxUint32},
+	"ULINT": {0, 0, math.MaxUint64},
+}
+
+var bitStringTypeRanges = map[string]uint64{
+	"BYTE":  math.MaxUint8,
+	"WORD":  math.MaxUint16,
+	"DWORD": math.MaxUint32,
+	"LWORD": math.MaxUint64,
+}
+
+// applyConversion handles the logic for converting an object from one type to another.
+func applyConversion(input object.Object, fromType, toType string) object.Object {
+	// Validate that the input object's type matches the 'fromType' part of the function name.
+	// This is a sanity check; the language is strongly typed, but this adds robustness.
+	if !strings.HasPrefix(string(input.Type()), fromType) {
+		// Allow ANY_INT to be converted from any integer type, etc.
+		// This is a simplification; a full implementation would check generic type hierarchies.
+		isNumericConversion := (strings.Contains(fromType, "INT") || strings.Contains(fromType, "REAL")) &&
+			(input.Type() == object.INTEGER_OBJ || input.Type() == object.REAL_OBJ)
+		if !isNumericConversion {
+			return newBuiltinError("type mismatch for %s_TO_%s: input is %s, expected %s", fromType, toType, input.Type(), fromType)
+		}
+	}
+
+	// Handle conversions to Integer types
+	if isIntegerType(toType) {
+		switch val := input.(type) {
+		case *object.Integer:
+			targetRange, ok := integerTypeRanges[toType]
+			if !ok {
+				return newBuiltinError("internal error: unknown integer type %s", toType)
+			}
+			// Check signed vs unsigned ranges
+			if strings.HasPrefix(toType, "U") { // Unsigned
+				if val.Value < 0 || uint64(val.Value) > targetRange.maxUnsigned {
+					return newBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, targetRange.maxUnsigned)
+				}
+			} else { // Signed
+				if val.Value < targetRange.minSigned || val.Value > targetRange.maxSigned {
+					return newBuiltinError("value %d is out of range for type %s (%d to %d)", val.Value, toType, targetRange.minSigned, targetRange.maxSigned)
+				}
+			}
+			// The value fits, so we can return it.
+			// Our internal object.Integer is int64, which can represent all target types.
+			return &object.Integer{Value: val.Value}
+		case *object.Real:
+			// Per IEC 61131-3 (Table 22, footnote b), REAL to INT conversion uses rounding.
+			return &object.Integer{Value: int64(math.Round(val.Value))}
+		case *object.String:
+			i, err := strconv.ParseInt(val.Value, 10, 64)
+			if err != nil {
+				return newBuiltinError("could not parse string to integer: %s", val.Value)
+			}
+			return &object.Integer{Value: i}
+		default:
+			return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
+		}
+	}
+
+	// Handle conversions to Real types
+	if isRealType(toType) {
+		switch val := input.(type) {
+		case *object.Integer:
+			return &object.Real{Value: float64(val.Value)}
+		case *object.Real:
+			return &object.Real{Value: val.Value}
+		case *object.String:
+			f, err := strconv.ParseFloat(val.Value, 64)
+			if err != nil {
+				return newBuiltinError("could not parse string to real: %s", val.Value)
+			}
+			return &object.Real{Value: f}
+		default:
+			return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
+		}
+	}
+
+	// Handle conversions to String types
+	if isStringType(toType) {
+		return &object.String{Value: input.Inspect()}
+	}
+
+	// Handle conversions to Bit-string types (BYTE, WORD, etc.)
+	if isBitStringType(toType) {
+		maxVal, ok := bitStringTypeRanges[toType]
+		if !ok {
+			return newBuiltinError("internal error: unknown bitstring type %s", toType)
+		}
+		width, _ := getBitStringWidth(toType)
+		switch val := input.(type) {
+		case *object.Integer:
+			if val.Value < 0 || uint64(val.Value) > maxVal {
+				return newBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, maxVal)
+			}
+			return &object.BitString{Value: uint64(val.Value), Width: width}
+		default:
+			return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
+		}
+	}
+
+	// Handle BCD conversions
+	if toType == "BCD" {
+		switch val := input.(type) {
+		case *object.Integer:
+			bcd, err := intToBcd(val.Value)
+			if err != nil {
+				return newBuiltinError(err.Error())
+			}
+			// BCD is represented as a WORD (16-bit)
+			return &object.BitString{Value: uint64(bcd), Width: 16}
+		default:
+			return newBuiltinError("conversion from %s to BCD is not supported", input.Type())
+		}
+	}
+	if fromType == "BCD" {
+		if isIntegerType(toType) {
+			return bcdToInt(input)
+		}
+	}
+
+	return newBuiltinError("conversion to type %s is not supported", toType)
+}
+
+func isIntegerType(typeName string) bool {
+	return typeName == "SINT" || typeName == "INT" || typeName == "DINT" || typeName == "LINT" ||
+		typeName == "USINT" || typeName == "UINT" || typeName == "UDINT" || typeName == "ULINT"
+}
+
+func isRealType(typeName string) bool {
+	return typeName == "REAL" || typeName == "LREAL"
+}
+
+func isStringType(typeName string) bool {
+	return typeName == "STRING" || typeName == "WSTRING"
+}
+
+func isBitStringType(typeName string) bool {
+	_, ok := getBitStringWidth(typeName)
+	return ok
+}
+
+func getBitStringWidth(typeName string) (int, bool) {
+	switch typeName {
+	case "BYTE":
+		return 8, true
+	case "WORD":
+		return 16, true
+	case "DWORD":
+		return 32, true
+	case "LWORD":
+		return 64, true
+	default:
+		return 0, false
+	}
+}
+
+// intToBcd converts an integer to its 4-digit BCD representation in a uint16.
+func intToBcd(val int64) (uint16, error) {
+	if val < 0 || val > 9999 {
+		return 0, fmt.Errorf("value %d out of range for 4-digit BCD conversion (0-9999)", val)
+	}
+
+	var bcd uint16
+	shift := uint(0)
+
+	// Handle the case of 0 explicitly
+	if val == 0 {
+		return 0, nil
+	}
+
+	tempVal := val
+	for i := 0; i < 4; i++ {
+		digit := tempVal % 10
+		bcd |= uint16(digit) << shift
+		tempVal /= 10
+		shift += 4
+	}
+
+	return bcd, nil
+}
+
+// bcdToInt converts a BCD value (from a BitString) to an Integer object.
+func bcdToInt(input object.Object) object.Object {
+	bs, ok := input.(*object.BitString)
+	if !ok || bs.Width != 16 {
+		return newBuiltinError("argument for BCD_TO_INT must be a WORD (16-bit BitString), got %s", input.Type())
+	}
+
+	bcdVal := uint16(bs.Value)
+	var result int64
+	var multiplier int64 = 1
+
+	for i := 0; i < 4; i++ {
+		nibble := (bcdVal >> (i * 4)) & 0xF
+		if nibble > 9 {
+			return newBuiltinError("invalid BCD format: nibble %d has value %d > 9", i, nibble)
+		}
+		result += int64(nibble) * multiplier
+		multiplier *= 10
+	}
+
+	return &object.Integer{Value: result}
 }

@@ -1355,6 +1355,52 @@ func TestFunctionDeclaration(t *testing.T) {
 	testIdentifier(t, stmt2.Left, "MyFunction")
 }
 
+func TestFunctionWithMultipleVarBlocks(t *testing.T) {
+	input := `
+		FUNCTION MyFunc : BOOL
+			VAR_INPUT
+				In1 : INT;
+			END_VAR
+			VAR_INPUT
+				In2 : BOOL;
+			END_VAR
+			VAR_OUTPUT
+				Out1 : REAL;
+			END_VAR
+
+			MyFunc := TRUE;
+		END_FUNCTION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.FunctionDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.VarInputs) != 2 {
+		t.Fatalf("Expected 2 VAR_INPUT declarations. got=%d", len(stmt.VarInputs))
+	}
+	testVarDeclStatement(t, stmt.VarInputs[0], "In1", "INT")
+	testVarDeclStatement(t, stmt.VarInputs[1], "In2", "BOOL")
+
+	if len(stmt.VarOutputs) != 1 {
+		t.Fatalf("Expected 1 VAR_OUTPUT declaration. got=%d", len(stmt.VarOutputs))
+	}
+	testVarDeclStatement(t, stmt.VarOutputs[0], "Out1", "REAL")
+
+	if len(stmt.Body.Statements) != 1 {
+		t.Fatalf("Function body should have 1 statement. got=%d", len(stmt.Body.Statements))
+	}
+}
+
 func TestCallExpressionParsing(t *testing.T) {
 	input := "add(1, 2 * 3, 4 + 5);"
 
@@ -2393,6 +2439,404 @@ func TestConfigurationDeclaration(t *testing.T) {
 
 	if len(stmt.Resources) != 1 {
 		t.Fatalf("Expected 1 resource. got=%d", len(stmt.Resources))
+	}
+}
+
+func TestComments(t *testing.T) {
+	input := `
+		VAR // This is a variable block
+			myVar : INT; (* This is a variable declaration *)
+			myArray : ARRAY [1..10] OF REAL; // An array declaration
+		END_VAR
+
+		// This is a function call
+		MyFunction (
+			In1 := 10, (* Input parameter 1 *)
+			In2 := 20, // Input parameter 2
+			Out1 => Res1 // Output parameter
+		);
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 2 {
+		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
+	}
+
+	// Check VAR block
+	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.VarBlockDeclaration. got=%T", program.Statements[0])
+	}
+	if len(varBlock.Declarations) != 2 {
+		t.Fatalf("VarBlockDeclaration does not contain 2 declarations. got=%d", len(varBlock.Declarations))
+	}
+	// Check myVar declaration
+	if !testVarDeclStatement(t, varBlock.Declarations[0], "myVar", "INT") {
+		return
+	}
+	// Check myArray declaration
+	arrayDecl := varBlock.Declarations[1]
+
+	if !testVarDeclStatement(t, arrayDecl, "myArray", "ARRAY") {
+		return
+	}
+	_, isArrayDef := arrayDecl.DataType.(*ast.ArrayDefinition)
+	if !isArrayDef {
+		t.Fatalf("myArray's DataType is not *ast.ArrayDefinition. got=%T", arrayDecl.DataType)
+	}
+
+	// Check function call
+	exprStmt, ok := program.Statements[1].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[1] is not ast.ExpressionStatement. got=%T", program.Statements[1])
+	}
+	call, ok := exprStmt.Expression.(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("Expression is not ast.CallExpression. got=%T", exprStmt.Expression)
+	}
+	if len(call.Arguments) != 3 { // Updated to expect 3 arguments (2 input, 1 output)
+		t.Fatalf("Expected 3 arguments in function call. got=%d", len(call.Arguments))
+	}
+
+	// Test first argument: In1 := 10
+	arg1, ok := call.Arguments[0].(*ast.NamedArgument)
+	if !ok {
+		t.Fatalf("First argument is not *ast.NamedArgument. got=%T", call.Arguments[0])
+	}
+	if arg1.Name.Value != "In1" || !testIntegerLiteral(t, arg1.Value, 10) {
+		t.Errorf("First argument (In1 := 10) is incorrect. Name: %s, Value: %v", arg1.Name.Value, arg1.Value)
+	}
+
+	// Test second argument: In2 := 20
+	arg2, ok := call.Arguments[1].(*ast.NamedArgument)
+	if !ok {
+		t.Fatalf("Second argument is not *ast.NamedArgument. got=%T", call.Arguments[1])
+	}
+	if arg2.Name.Value != "In2" || !testIntegerLiteral(t, arg2.Value, 20) {
+		t.Errorf("Second argument (In2 := 20) is incorrect. Name: %s, Value: %v", arg2.Name.Value, arg2.Value)
+	}
+
+	// Test third argument: Out1 => Res1
+	arg3, ok := call.Arguments[2].(*ast.OutputArgument)
+	if !ok || arg3.Source.Value != "Out1" || !testIdentifier(t, arg3.Target, "Res1") {
+		t.Errorf("Third argument (Out1 => Res1) is incorrect. Source: %s, Target: %v", arg3.Source.Value, arg3.Target)
+	}
+}
+
+func TestNestedComments(t *testing.T) {
+	input := `
+		VAR
+			myVar : INT; (* outer (* middle (* inner *) middle *) outer *)
+		END_VAR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	p.ParseProgram()
+
+	if len(p.Errors()) == 0 {
+		t.Fatalf("Expected an error for nested comments, but got none")
+	}
+
+	expectedError := "illegal character \"nested comment\""
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+}
+
+func TestUnterminatedCommentErrorRecovery(t *testing.T) {
+	input := `
+		VAR
+			myVar : INT; (* This comment is not closed...
+			anotherVar : BOOL;
+		END_VAR
+
+		// The parser should recover and parse this statement
+		myVar := 10;
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) == 0 {
+		t.Fatalf("Expected parser to have errors, but it had none.")
+	}
+
+	// Check that the unterminated comment error was reported
+	expectedError := "unterminated comment"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed the statement after the error
+	if len(program.Statements) < 1 {
+		t.Fatalf("Parser did not recover, expected at least 1 statement to be parsed. got=%d", len(program.Statements))
+	}
+}
+
+func TestMissingSemicolonErrorRecovery(t *testing.T) {
+	input := `
+		VAR
+			myVar : INT := 5 // Missing semicolon
+			anotherVar : BOOL;
+		END_VAR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d", len(p.Errors()))
+	}
+
+	expectedError := "expected next token to be SEMICOLON, got IDENT instead at row 4, column 4"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed the rest of the block
+	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.VarBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(varBlock.Declarations) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 declarations to be parsed. got=%d", len(varBlock.Declarations))
+	}
+}
+
+func TestMissingThenErrorRecovery(t *testing.T) {
+	input := `
+		IF x < y // Missing THEN
+			x := 1;
+		ELSE
+			y := 1;
+		END_IF
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "missing 'THEN' in IF statement, got IDENT"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed the full IF statement
+	if len(program.Statements) != 1 {
+		t.Fatalf("Parser did not recover, expected 1 statement to be parsed. got=%d", len(program.Statements))
+	}
+
+	ifStmt, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.IfStatement. got=%T", program.Statements[0])
+	}
+
+	if ifStmt.Consequence == nil || len(ifStmt.Consequence.Statements) != 1 {
+		t.Error("IF statement consequence was not parsed correctly after recovery.")
+	}
+	if ifStmt.Alternative == nil {
+		t.Error("IF statement alternative (ELSE) was not parsed correctly after recovery.")
+	}
+}
+
+func TestMissingDoErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			"Missing DO in FOR loop",
+			`FOR i := 1 TO 10
+				x := x + 1;
+			 END_FOR`,
+			"missing 'DO' in FOR loop",
+		},
+		{
+			"Missing DO in WHILE loop",
+			`WHILE x < 10
+				x := x + 1;
+			 END_WHILE`,
+			"missing 'DO' in WHILE loop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if len(p.Errors()) != 1 {
+				t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+			}
+
+			if !strings.Contains(p.Errors()[0], tt.expectedError) {
+				t.Errorf("Expected error message to contain %q, got %q", tt.expectedError, p.Errors()[0])
+			}
+
+			// Check that the parser recovered and parsed the loop body
+			if len(program.Statements) != 1 {
+				t.Fatalf("Parser did not recover, expected 1 statement to be parsed. got=%d", len(program.Statements))
+			}
+
+			// A simple check to see if the body was parsed at all
+			if program.Statements[0].String() == "" {
+				t.Error("Loop statement was not parsed correctly after recovery.")
+			}
+		})
+	}
+}
+
+func TestMissingEndBlockErrorRecovery(t *testing.T) {
+	input := `
+		IF x < y THEN
+			x := 1;
+		// Missing END_IF here
+
+		y := 2; // This should still be parsed
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "missing 'END_IF' for IF statement starting at row 2"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed both the IF and the subsequent assignment
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
+	}
+
+	_, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Errorf("First statement should be an IfStatement after recovery.")
+	}
+}
+
+func TestMissingEndVarErrorRecovery(t *testing.T) {
+	input := `
+		VAR
+			myVar : INT;
+		// Missing END_VAR here
+
+		IF myVar > 0 THEN
+			myVar := 0;
+		END_IF
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "expected next token to be END_VAR, got IF instead at row 6, column 3"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed both the VAR block and the IF statement
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
+	}
+
+	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	if !ok || len(varBlock.Declarations) != 1 {
+		t.Errorf("First statement should be a VarBlockDeclaration with 1 declaration.")
+	}
+
+	_, ok = program.Statements[1].(*ast.IfStatement)
+	if !ok {
+		t.Errorf("Second statement should be an IfStatement after recovery.")
+	}
+}
+
+func TestMissingEndFunctionBlockErrorRecovery(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MyFB
+			VAR
+				x : INT;
+			END_VAR
+			x := 1;
+		// Missing END_FUNCTION_BLOCK here
+
+		VAR
+			y : BOOL;
+		END_VAR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "expected next token to be END_FUNCTION_BLOCK, got VAR instead at row 9, column 3"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed both the FUNCTION_BLOCK and the subsequent VAR block
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
+	}
+
+	_, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Errorf("First statement should be a FunctionBlockDeclaration after recovery.")
+	}
+}
+
+func TestMissingEndProgramErrorRecovery(t *testing.T) {
+	input := `
+		PROGRAM MyProg
+			VAR
+				x : INT;
+			END_VAR
+			x := 1;
+		// Missing END_PROGRAM here
+
+		VAR
+			y : BOOL;
+		END_VAR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "expected next token to be END_PROGRAM, got VAR instead at row 9, column 3"
+	if !strings.Contains(p.Errors()[0], expectedError) {
+		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
+	}
+
+	// Check that the parser recovered and parsed both the PROGRAM and the subsequent VAR block
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
+	}
+
+	if _, ok := program.Statements[0].(*ast.ProgramDeclaration); !ok {
+		t.Errorf("First statement should be a ProgramDeclaration after recovery.")
 	}
 }
 

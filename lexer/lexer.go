@@ -113,7 +113,16 @@ func (l *Lexer) NextToken() token.Token {
 	case '(':
 		if l.peekChar() == '*' {
 			// This is the start of a comment, skip it and get the next token
-			return l.skipComment()
+			terminated, nested := l.skipComment()
+			if !terminated {
+				return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol}
+			}
+			if nested {
+				tok = token.Token{Type: token.ILLEGAL, Literal: "nested comment", Row: startLine, Column: startCol}
+				l.readChar() // Consume the illegal token to allow parser to continue
+				return tok
+			}
+			return l.NextToken() // Get the token after the comment
 		}
 		tok = newToken(token.LPAREN, l.ch, startLine, startCol)
 	case ')':
@@ -170,6 +179,8 @@ func (l *Lexer) NextToken() token.Token {
 				// After lookup, if it's still an IDENT, validate it.
 				if tok.Type == token.IDENT && !isValidIdentifier(ident) {
 					tok.Type = token.ILLEGAL
+				} else {
+					tok.Type = token.LookupIdent(ident)
 				}
 				tok.Literal = ident
 			}
@@ -192,21 +203,17 @@ func (l *Lexer) NextToken() token.Token {
 	return tok
 }
 
-func (l *Lexer) skipComment() token.Token {
-	startLine := l.line
-	startCol := l.col
+func (l *Lexer) skipComment() (terminated bool, nested bool) {
 	nestingLevel := 1
+	isNested := false
 	l.readChar() // consume '('
 	l.readChar() // consume '*'
 
-	for nestingLevel > 0 {
-		if l.ch == 0 { // Check for unterminated comment
-			return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol}
-		}
-
+	for nestingLevel > 0 && l.ch != 0 {
 		if l.ch == '(' && l.peekChar() == '*' {
 			l.readChar()
 			l.readChar()
+			isNested = true
 			nestingLevel++
 			continue
 		}
@@ -219,7 +226,12 @@ func (l *Lexer) skipComment() token.Token {
 		}
 		l.readChar()
 	}
-	return l.NextToken()
+
+	if nestingLevel > 0 {
+		return false, isNested
+	}
+
+	return true, isNested
 }
 
 func (l *Lexer) skipSingleLineComment() {
@@ -375,11 +387,8 @@ func (l *Lexer) readTypedLiteral(typePart string, startLine int, startCol int) t
 	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME:
 		l.readTimeDatePart(typeKeyword) // Pass typeKeyword for specific validation
 	default:
-		// Fallback for custom types (identifiers) which might be typed literals.
-		// This maintains flexibility but is less strict.
-		for isDigit(l.ch) || isLetter(l.ch) || l.ch == '_' {
-			l.readChar()
-		}
+		// If the type is not a known keyword for typed literals, it's an error.
+		return token.Token{Type: token.ILLEGAL, Literal: typePart, Row: startLine, Column: startCol}
 	}
 
 	literal := l.input[startPos:l.position]

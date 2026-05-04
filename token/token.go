@@ -9,6 +9,8 @@
  */
 package token
 
+import "strings"
+
 type TokenType string
 
 type Token struct {
@@ -111,6 +113,7 @@ const (
 	OF                = "OF"
 	END_CASE          = "END_CASE"
 	R_EDGE            = "R_EDGE"
+	CAL               = "CAL"
 	F_EDGE            = "F_EDGE"
 	TYPE              = "TYPE"
 	END_TYPE          = "END_TYPE"
@@ -211,6 +214,7 @@ var keywords = map[string]TokenType{
 	"END_REPEAT":         END_REPEAT,
 	"EXIT":               EXIT,
 	"R_EDGE":             R_EDGE,
+	"CAL":                CAL,
 	"F_EDGE":             F_EDGE,
 	"OF":                 OF,
 	"TYPE":               TYPE,
@@ -283,8 +287,9 @@ var keywords = map[string]TokenType{
 // LookupIdent checks the `keywords` table to see whether the given identifier
 // is in fact a keyword.
 func LookupIdent(ident string) TokenType {
-	if tok, ok := keywords[ident]; ok {
+	upperIdent := strings.ToUpper(ident)
+	if tok, ok := keywords[upperIdent]; ok {
 		return tok
 	}
-	return IDENT
+	return IDENT // Return the canonical (uppercase) version
 }

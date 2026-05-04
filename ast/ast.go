@@ -21,6 +21,7 @@ import (
 // The base Node interface
 type Node interface {
 	TokenLiteral() string
+	Pos() (int, int) // Returns (line, column)
 	String() string
 }
 
@@ -42,6 +43,7 @@ type TypeSpecifier struct {
 }
 
 func (ts *TypeSpecifier) expressionNode()      {}
+func (ts *TypeSpecifier) Pos() (int, int)      { return ts.Token.Row, ts.Token.Column }
 func (ts *TypeSpecifier) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TypeSpecifier) String() string       { return ts.Token.Literal }
 
@@ -55,6 +57,12 @@ func (p *Program) TokenLiteral() string {
 	} else {
 		return ""
 	}
+}
+func (p *Program) Pos() (int, int) {
+	if len(p.Statements) > 0 {
+		return p.Statements[0].Pos()
+	}
+	return 0, 0 // Default or error position
 }
 
 func (p *Program) String() string {
@@ -82,6 +90,7 @@ type VarDeclStatement struct {
 }
 
 func (vds *VarDeclStatement) statementNode()       {}
+func (vds *VarDeclStatement) Pos() (int, int)      { return vds.Token.Row, vds.Token.Column }
 func (vds *VarDeclStatement) TokenLiteral() string { return vds.Token.Literal }
 func (vds *VarDeclStatement) String() string {
 	var out bytes.Buffer
@@ -115,6 +124,7 @@ type AtDeclaration struct {
 }
 
 func (ad *AtDeclaration) statementNode()       {}
+func (ad *AtDeclaration) Pos() (int, int)      { return ad.Token.Row, ad.Token.Column }
 func (ad *AtDeclaration) TokenLiteral() string { return ad.Token.Literal }
 func (ad *AtDeclaration) String() string {
 	var out bytes.Buffer
@@ -129,6 +139,7 @@ type DirectVariable struct {
 }
 
 func (dv *DirectVariable) expressionNode()      {}
+func (dv *DirectVariable) Pos() (int, int)      { return dv.Token.Row, dv.Token.Column }
 func (dv *DirectVariable) TokenLiteral() string { return dv.Token.Literal }
 func (dv *DirectVariable) String() string {
 	return "%" + dv.Address
@@ -144,6 +155,7 @@ type ConfigurationDeclaration struct {
 }
 
 func (cd *ConfigurationDeclaration) statementNode()       {}
+func (cd *ConfigurationDeclaration) Pos() (int, int)      { return cd.Token.Row, cd.Token.Column }
 func (cd *ConfigurationDeclaration) TokenLiteral() string { return cd.Token.Literal }
 func (cd *ConfigurationDeclaration) String() string {
 	var out bytes.Buffer
@@ -163,6 +175,7 @@ type ResourceDeclaration struct {
 }
 
 func (rd *ResourceDeclaration) statementNode()       {}
+func (rd *ResourceDeclaration) Pos() (int, int)      { return rd.Token.Row, rd.Token.Column }
 func (rd *ResourceDeclaration) TokenLiteral() string { return rd.Token.Literal }
 func (rd *ResourceDeclaration) String() string {
 	var out bytes.Buffer
@@ -181,6 +194,7 @@ type TaskDeclaration struct {
 }
 
 func (td *TaskDeclaration) statementNode()       {}
+func (td *TaskDeclaration) Pos() (int, int)      { return td.Token.Row, td.Token.Column }
 func (td *TaskDeclaration) TokenLiteral() string { return td.Token.Literal }
 func (td *TaskDeclaration) String() string {
 	var out bytes.Buffer
@@ -209,6 +223,7 @@ type ProgramConfiguration struct {
 }
 
 func (pc *ProgramConfiguration) statementNode()       {}
+func (pc *ProgramConfiguration) Pos() (int, int)      { return pc.Token.Row, pc.Token.Column }
 func (pc *ProgramConfiguration) TokenLiteral() string { return pc.Token.Literal }
 func (pc *ProgramConfiguration) String() string {
 	var out bytes.Buffer
@@ -230,10 +245,11 @@ type ExpressionStatement struct {
 }
 
 func (es *ExpressionStatement) statementNode()       {}
+func (es *ExpressionStatement) Pos() (int, int)      { return es.Token.Row, es.Token.Column }
 func (es *ExpressionStatement) TokenLiteral() string { return es.Token.Literal }
 func (es *ExpressionStatement) String() string {
 	if es.Expression != nil {
-		return es.Expression.String()
+		return es.Expression.String() + ";"
 	}
 	return ""
 }
@@ -245,6 +261,7 @@ type AssignmentStatement struct {
 }
 
 func (as *AssignmentStatement) statementNode()       {}
+func (as *AssignmentStatement) Pos() (int, int)      { return as.Token.Row, as.Token.Column }
 func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
 func (as *AssignmentStatement) String() string {
 	var out bytes.Buffer
@@ -263,6 +280,7 @@ type ReturnStatement struct {
 }
 
 func (rs *ReturnStatement) statementNode()       {}
+func (rs *ReturnStatement) Pos() (int, int)      { return rs.Token.Row, rs.Token.Column }
 func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
 func (rs *ReturnStatement) String() string {
 	var out bytes.Buffer
@@ -283,6 +301,7 @@ type ExitStatement struct {
 }
 
 func (es *ExitStatement) statementNode()       {}
+func (es *ExitStatement) Pos() (int, int)      { return es.Token.Row, es.Token.Column }
 func (es *ExitStatement) TokenLiteral() string { return es.Token.Literal }
 func (es *ExitStatement) String() string {
 	var out bytes.Buffer
@@ -296,6 +315,7 @@ type BlockStatement struct {
 }
 
 func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) Pos() (int, int)      { return bs.Token.Row, bs.Token.Column }
 func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
 func (bs *BlockStatement) String() string {
 	var out bytes.Buffer
@@ -314,6 +334,7 @@ type Identifier struct {
 }
 
 func (i *Identifier) expressionNode()      {}
+func (i *Identifier) Pos() (int, int)      { return i.Token.Row, i.Token.Column }
 func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
 func (i *Identifier) String() string       { return i.Value }
 
@@ -323,6 +344,7 @@ type Boolean struct {
 }
 
 func (b *Boolean) expressionNode()      {}
+func (b *Boolean) Pos() (int, int)      { return b.Token.Row, b.Token.Column }
 func (b *Boolean) TokenLiteral() string { return b.Token.Literal }
 func (b *Boolean) String() string       { return b.Token.Literal }
 
@@ -332,8 +354,14 @@ type IntegerLiteral struct {
 }
 
 func (il *IntegerLiteral) expressionNode()      {}
+func (il *IntegerLiteral) Pos() (int, int)      { return il.Token.Row, il.Token.Column }
 func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
-func (il *IntegerLiteral) String() string       { return il.Token.Literal }
+func (il *IntegerLiteral) String() string {
+	if il.Token.Literal != "" {
+		return il.Token.Literal
+	}
+	return fmt.Sprintf("%d", il.Value)
+}
 
 type RealLiteral struct {
 	Token     token.Token
@@ -342,6 +370,7 @@ type RealLiteral struct {
 }
 
 func (rl *RealLiteral) expressionNode()      {}
+func (rl *RealLiteral) Pos() (int, int)      { return rl.Token.Row, rl.Token.Column }
 func (rl *RealLiteral) TokenLiteral() string { return rl.Token.Literal }
 func (rl *RealLiteral) String() string {
 	return rl.Token.Literal
@@ -354,6 +383,7 @@ type BitStringLiteral struct {
 }
 
 func (bsl *BitStringLiteral) expressionNode()      {}
+func (bsl *BitStringLiteral) Pos() (int, int)      { return bsl.Token.Row, bsl.Token.Column }
 func (bsl *BitStringLiteral) TokenLiteral() string { return bsl.Token.Literal }
 func (bsl *BitStringLiteral) String() string {
 	switch bsl.Width {
@@ -377,6 +407,7 @@ type PrefixExpression struct {
 }
 
 func (pe *PrefixExpression) expressionNode()      {}
+func (pe *PrefixExpression) Pos() (int, int)      { return pe.Token.Row, pe.Token.Column }
 func (pe *PrefixExpression) TokenLiteral() string { return pe.Token.Literal }
 func (pe *PrefixExpression) String() string {
 	var out bytes.Buffer
@@ -397,6 +428,7 @@ type InfixExpression struct {
 }
 
 func (ie *InfixExpression) expressionNode()      {}
+func (ie *InfixExpression) Pos() (int, int)      { return ie.Token.Row, ie.Token.Column }
 func (ie *InfixExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *InfixExpression) String() string {
 	var out bytes.Buffer
@@ -417,6 +449,7 @@ type MemberAccessExpression struct {
 }
 
 func (mae *MemberAccessExpression) expressionNode()      {}
+func (mae *MemberAccessExpression) Pos() (int, int)      { return mae.Token.Row, mae.Token.Column }
 func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Literal }
 func (mae *MemberAccessExpression) String() string {
 	var out bytes.Buffer
@@ -438,22 +471,33 @@ type IfStatement struct {
 }
 
 func (is *IfStatement) statementNode()       {}
+func (is *IfStatement) Pos() (int, int)      { return is.Token.Row, is.Token.Column }
 func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
 func (is *IfStatement) String() string {
 	var out bytes.Buffer
 
-	out.WriteString("IF ")
+	// Start with the main IF part
+	out.WriteString("IF ") // The Token.Type for the main IfStatement is always IF
 	out.WriteString(is.Condition.String())
 	out.WriteString(" THEN ")
 	out.WriteString(is.Consequence.String())
 
-	if is.Alternative != nil {
-		// The String() for IfStatement already includes "IF", so we need to adjust for ELSIF
-		altStr := is.Alternative.String()
-		if _, ok := is.Alternative.(*IfStatement); ok {
-			out.WriteString(" " + strings.Replace(altStr, "IF", "ELSIF", 1))
-		} else {
-			out.WriteString(" ELSE " + altStr)
+	// Iterate through the ELSIF/ELSE chain
+	currentAlt := is.Alternative
+	for currentAlt != nil {
+		switch alt := currentAlt.(type) {
+		case *IfStatement: // This is an ELSIF clause
+			out.WriteString(" ELSIF ")
+			out.WriteString(alt.Condition.String())
+			out.WriteString(" THEN ")
+			out.WriteString(alt.Consequence.String())
+			currentAlt = alt.Alternative // Continue to the next alternative in the chain
+		case *BlockStatement: // This is an ELSE clause
+			out.WriteString(" ELSE ")
+			out.WriteString(alt.String())
+			currentAlt = nil // End of the alternative chain
+		default:
+			currentAlt = nil // Unknown alternative type, stop processing
 		}
 	}
 	out.WriteString(" END_IF")
@@ -471,6 +515,7 @@ type ForLoopStatement struct {
 }
 
 func (fls *ForLoopStatement) statementNode()       {}
+func (fls *ForLoopStatement) Pos() (int, int)      { return fls.Token.Row, fls.Token.Column }
 func (fls *ForLoopStatement) TokenLiteral() string { return fls.Token.Literal }
 func (fls *ForLoopStatement) String() string {
 	// String representation for debugging
@@ -484,6 +529,7 @@ type WhileStatement struct {
 }
 
 func (ws *WhileStatement) statementNode()       {}
+func (ws *WhileStatement) Pos() (int, int)      { return ws.Token.Row, ws.Token.Column }
 func (ws *WhileStatement) TokenLiteral() string { return ws.Token.Literal }
 func (ws *WhileStatement) String() string {
 	var out bytes.Buffer
@@ -502,6 +548,7 @@ type RepeatStatement struct {
 }
 
 func (rs *RepeatStatement) statementNode()       {}
+func (rs *RepeatStatement) Pos() (int, int)      { return rs.Token.Row, rs.Token.Column }
 func (rs *RepeatStatement) TokenLiteral() string { return rs.Token.Literal }
 func (rs *RepeatStatement) String() string {
 	var out bytes.Buffer
@@ -520,6 +567,7 @@ type CaseBranch struct {
 }
 
 func (cb *CaseBranch) statementNode()       {}
+func (cb *CaseBranch) Pos() (int, int)      { return cb.Token.Row, cb.Token.Column }
 func (cb *CaseBranch) TokenLiteral() string { return cb.Token.Literal }
 func (cb *CaseBranch) String() string {
 	var out bytes.Buffer
@@ -541,6 +589,7 @@ type CaseStatement struct {
 }
 
 func (cs *CaseStatement) statementNode()       {}
+func (cs *CaseStatement) Pos() (int, int)      { return cs.Token.Row, cs.Token.Column }
 func (cs *CaseStatement) TokenLiteral() string { return cs.Token.Literal }
 func (cs *CaseStatement) String() string {
 	// String representation for debugging
@@ -557,6 +606,7 @@ type FunctionLiteral struct {
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
+func (fl *FunctionLiteral) Pos() (int, int)      { return fl.Token.Row, fl.Token.Column }
 func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
 func (fl *FunctionLiteral) String() string {
 	var out bytes.Buffer
@@ -582,6 +632,7 @@ type CallExpression struct {
 }
 
 func (ce *CallExpression) expressionNode()      {}
+func (ce *CallExpression) Pos() (int, int)      { return ce.Token.Row, ce.Token.Column }
 func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
 func (ce *CallExpression) String() string {
 	var out bytes.Buffer
@@ -606,6 +657,7 @@ type NamedArgument struct {
 }
 
 func (na *NamedArgument) expressionNode()      {}
+func (na *NamedArgument) Pos() (int, int)      { return na.Token.Row, na.Token.Column }
 func (na *NamedArgument) TokenLiteral() string { return na.Token.Literal }
 func (na *NamedArgument) String() string {
 	var out bytes.Buffer
@@ -622,6 +674,7 @@ type OutputArgument struct {
 }
 
 func (oa *OutputArgument) expressionNode()      {}
+func (oa *OutputArgument) Pos() (int, int)      { return oa.Token.Row, oa.Token.Column }
 func (oa *OutputArgument) TokenLiteral() string { return oa.Token.Literal }
 func (oa *OutputArgument) String() string {
 	var out bytes.Buffer
@@ -641,6 +694,7 @@ type StringLiteral struct {
 }
 
 func (sl *StringLiteral) expressionNode()      {}
+func (sl *StringLiteral) Pos() (int, int)      { return sl.Token.Row, sl.Token.Column }
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return sl.Token.Literal }
 
@@ -650,6 +704,7 @@ type TimeLiteral struct {
 }
 
 func (tl *TimeLiteral) expressionNode()      {}
+func (tl *TimeLiteral) Pos() (int, int)      { return tl.Token.Row, tl.Token.Column }
 func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
 func (tl *TimeLiteral) String() string {
 	return tl.Token.Literal
@@ -661,6 +716,7 @@ type DateLiteral struct {
 }
 
 func (dl *DateLiteral) expressionNode()      {}
+func (dl *DateLiteral) Pos() (int, int)      { return dl.Token.Row, dl.Token.Column }
 func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
 func (dl *DateLiteral) String() string {
 	return dl.Token.Literal
@@ -672,6 +728,7 @@ type TimeOfDayLiteral struct {
 }
 
 func (todl *TimeOfDayLiteral) expressionNode()      {}
+func (todl *TimeOfDayLiteral) Pos() (int, int)      { return todl.Token.Row, todl.Token.Column }
 func (todl *TimeOfDayLiteral) TokenLiteral() string { return todl.Token.Literal }
 func (todl *TimeOfDayLiteral) String() string {
 	return todl.Token.Literal
@@ -683,6 +740,7 @@ type DateAndTimeLiteral struct {
 }
 
 func (dtl *DateAndTimeLiteral) expressionNode()      {}
+func (dtl *DateAndTimeLiteral) Pos() (int, int)      { return dtl.Token.Row, dtl.Token.Column }
 func (dtl *DateAndTimeLiteral) TokenLiteral() string { return dtl.Token.Literal }
 func (dtl *DateAndTimeLiteral) String() string {
 	return dtl.Token.Literal
@@ -694,6 +752,7 @@ type ArrayLiteral struct {
 }
 
 func (al *ArrayLiteral) expressionNode()      {}
+func (na *ArrayLiteral) Pos() (int, int)      { return na.Token.Row, na.Token.Column }
 func (al *ArrayLiteral) TokenLiteral() string { return al.Token.Literal }
 func (al *ArrayLiteral) String() string {
 	var out bytes.Buffer
@@ -717,6 +776,7 @@ type IndexExpression struct {
 }
 
 func (ie *IndexExpression) expressionNode()      {}
+func (ie *IndexExpression) Pos() (int, int)      { return ie.Token.Row, ie.Token.Column }
 func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IndexExpression) String() string {
 	var out bytes.Buffer
@@ -736,13 +796,14 @@ type HashLiteral struct {
 }
 
 func (hl *HashLiteral) expressionNode()      {}
+func (hl *HashLiteral) Pos() (int, int)      { return hl.Token.Row, hl.Token.Column }
 func (hl *HashLiteral) TokenLiteral() string { return hl.Token.Literal }
 func (hl *HashLiteral) String() string {
 	var out bytes.Buffer
 
 	pairs := []string{}
-	for key, value := range hl.Pairs {
-		pairs = append(pairs, key.String()+":"+value.String())
+	for key, value := range hl.Pairs { // Iterate over the map to get key-value pairs
+		pairs = append(pairs, key.String()+": "+value.String()) // Add a space after the colon
 	}
 
 	out.WriteString("{")
@@ -759,6 +820,7 @@ type MacroLiteral struct {
 }
 
 func (ml *MacroLiteral) expressionNode()      {}
+func (ml *MacroLiteral) Pos() (int, int)      { return ml.Token.Row, ml.Token.Column }
 func (ml *MacroLiteral) TokenLiteral() string { return ml.Token.Literal }
 func (ml *MacroLiteral) String() string {
 	var out bytes.Buffer
@@ -788,6 +850,7 @@ type FunctionBlockDeclaration struct {
 }
 
 func (fbd *FunctionBlockDeclaration) statementNode()       {}
+func (fbd *FunctionBlockDeclaration) Pos() (int, int)      { return fbd.Token.Row, fbd.Token.Column }
 func (fbd *FunctionBlockDeclaration) TokenLiteral() string { return fbd.Token.Literal }
 func (fbd *FunctionBlockDeclaration) String() string {
 	var out bytes.Buffer
@@ -815,6 +878,7 @@ type ProgramDeclaration struct {
 }
 
 func (pd *ProgramDeclaration) statementNode()       {}
+func (pd *ProgramDeclaration) Pos() (int, int)      { return pd.Token.Row, pd.Token.Column }
 func (pd *ProgramDeclaration) TokenLiteral() string { return pd.Token.Literal }
 func (pd *ProgramDeclaration) String() string {
 	var out bytes.Buffer
@@ -836,6 +900,7 @@ type ExternalVarDeclaration struct {
 }
 
 func (evd *ExternalVarDeclaration) statementNode()       {}
+func (evd *ExternalVarDeclaration) Pos() (int, int)      { return evd.Token.Row, evd.Token.Column }
 func (evd *ExternalVarDeclaration) TokenLiteral() string { return evd.Token.Literal }
 func (evd *ExternalVarDeclaration) String() string {
 	var out bytes.Buffer
@@ -853,9 +918,11 @@ type ConfigVarDeclaration struct {
 }
 
 func (cvd *ConfigVarDeclaration) statementNode()       {}
+func (cvd *ConfigVarDeclaration) Pos() (int, int)      { return cvd.Token.Row, cvd.Token.Column }
 func (cvd *ConfigVarDeclaration) TokenLiteral() string { return cvd.Token.Literal }
 func (cvd *ConfigVarDeclaration) String() string {
 	var out bytes.Buffer
+	cvd.Pos() // Ensure Pos() is called
 	out.WriteString("VAR_CONFIG\n")
 	for _, v := range cvd.Vars {
 		out.WriteString("\t" + v.String() + "\n")
@@ -870,9 +937,11 @@ type TempVarDeclaration struct {
 }
 
 func (tvd *TempVarDeclaration) statementNode()       {}
+func (tvd *TempVarDeclaration) Pos() (int, int)      { return tvd.Token.Row, tvd.Token.Column }
 func (tvd *TempVarDeclaration) TokenLiteral() string { return tvd.Token.Literal }
 func (tvd *TempVarDeclaration) String() string {
 	var out bytes.Buffer
+	tvd.Pos() // Ensure Pos() is called
 	out.WriteString("VAR_TEMP\n")
 	for _, v := range tvd.Vars {
 		out.WriteString("\t" + v.String() + "\n")
@@ -887,9 +956,11 @@ type AccessVarDeclaration struct {
 }
 
 func (avd *AccessVarDeclaration) statementNode()       {}
+func (avd *AccessVarDeclaration) Pos() (int, int)      { return avd.Token.Row, avd.Token.Column }
 func (avd *AccessVarDeclaration) TokenLiteral() string { return avd.Token.Literal }
 func (avd *AccessVarDeclaration) String() string {
 	var out bytes.Buffer
+	avd.Pos() // Ensure Pos() is called
 	out.WriteString("VAR_ACCESS\n")
 	for _, v := range avd.Vars {
 		out.WriteString("\t" + v.String() + "\n")
@@ -904,9 +975,11 @@ type GlobalVarDeclaration struct {
 }
 
 func (gvd *GlobalVarDeclaration) statementNode()       {}
+func (gvd *GlobalVarDeclaration) Pos() (int, int)      { return gvd.Token.Row, gvd.Token.Column }
 func (gvd *GlobalVarDeclaration) TokenLiteral() string { return gvd.Token.Literal }
 func (gvd *GlobalVarDeclaration) String() string {
 	var out bytes.Buffer
+	gvd.Pos() // Ensure Pos() is called
 	out.WriteString("VAR_GLOBAL\n")
 	for _, v := range gvd.Vars {
 		out.WriteString("\t" + v.String() + "\n")
@@ -921,9 +994,11 @@ type VarBlockDeclaration struct {
 }
 
 func (vbd *VarBlockDeclaration) statementNode()       {}
+func (vbd *VarBlockDeclaration) Pos() (int, int)      { return vbd.Token.Row, vbd.Token.Column }
 func (vbd *VarBlockDeclaration) TokenLiteral() string { return vbd.Token.Literal }
 func (vbd *VarBlockDeclaration) String() string {
 	var out bytes.Buffer
+	vbd.Pos() // Ensure Pos() is called
 	out.WriteString("VAR\n")
 	for _, d := range vbd.Declarations {
 		out.WriteString("\t" + d.String() + "\n")
@@ -941,6 +1016,7 @@ type TypeDeclaration struct {
 }
 
 func (td *TypeDeclaration) statementNode()       {}
+func (td *TypeDeclaration) Pos() (int, int)      { return td.Token.Row, td.Token.Column }
 func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
 func (td *TypeDeclaration) String() string {
 	var out bytes.Buffer
@@ -965,9 +1041,11 @@ type TypeBlockDeclaration struct {
 }
 
 func (tbd *TypeBlockDeclaration) statementNode()       {}
+func (tbd *TypeBlockDeclaration) Pos() (int, int)      { return tbd.Token.Row, tbd.Token.Column }
 func (tbd *TypeBlockDeclaration) TokenLiteral() string { return tbd.Token.Literal }
 func (tbd *TypeBlockDeclaration) String() string {
 	var out bytes.Buffer
+	tbd.Pos() // Ensure Pos() is called
 	out.WriteString("TYPE\n")
 	for _, d := range tbd.Declarations {
 		out.WriteString("\t" + d.String() + "\n")
@@ -982,9 +1060,11 @@ type StructDefinition struct {
 }
 
 func (sd *StructDefinition) expressionNode()      {}
+func (sd *StructDefinition) Pos() (int, int)      { return sd.Token.Row, sd.Token.Column }
 func (sd *StructDefinition) TokenLiteral() string { return sd.Token.Literal }
 func (sd *StructDefinition) String() string {
 	var out bytes.Buffer
+	sd.Pos() // Ensure Pos() is called
 	out.WriteString("STRUCT\n")
 	for _, m := range sd.Members {
 		out.WriteString("\t" + m.String() + "\n")
@@ -999,9 +1079,11 @@ type EnumDefinition struct {
 }
 
 func (ed *EnumDefinition) expressionNode()      {}
+func (ed *EnumDefinition) Pos() (int, int)      { return ed.Token.Row, ed.Token.Column }
 func (ed *EnumDefinition) TokenLiteral() string { return ed.Token.Literal }
 func (ed *EnumDefinition) String() string {
 	var out bytes.Buffer
+	ed.Pos() // Ensure Pos() is called
 	vals := []string{}
 	for _, v := range ed.Values {
 		vals = append(vals, v.String())
@@ -1019,13 +1101,20 @@ type ArrayDefinition struct {
 }
 
 func (ad *ArrayDefinition) expressionNode()      {}
+func (ad *ArrayDefinition) Pos() (int, int)      { return ad.Token.Row, ad.Token.Column }
 func (ad *ArrayDefinition) TokenLiteral() string { return ad.Token.Literal }
 func (ad *ArrayDefinition) String() string {
 	var out bytes.Buffer
+	ad.Pos() // Ensure Pos() is called
 	out.WriteString("ARRAY [")
 	ranges := []string{}
 	for _, r := range ad.Ranges {
-		ranges = append(ranges, r.String())
+		if infixExp, ok := r.(*InfixExpression); ok {
+			// Format InfixExpression for range without outer parentheses
+			ranges = append(ranges, fmt.Sprintf("%s %s %s", infixExp.Left.String(), infixExp.Operator, infixExp.Right.String()))
+		} else {
+			ranges = append(ranges, r.String())
+		}
 	}
 	out.WriteString(strings.Join(ranges, ", "))
 	out.WriteString("] OF ")
@@ -1043,32 +1132,16 @@ type ActionStatement struct {
 }
 
 func (as *ActionStatement) statementNode()       {}
+func (as *ActionStatement) Pos() (int, int)      { return as.Token.Row, as.Token.Column }
 func (as *ActionStatement) TokenLiteral() string { return as.Token.Literal }
 func (as *ActionStatement) String() string {
 	var out bytes.Buffer
+	as.Pos() // Ensure Pos() is called
 	out.WriteString("ACTION ")
 	out.WriteString(as.Name.String())
 	out.WriteString("\n")
 	out.WriteString(as.Body.String())
 	out.WriteString("\nEND_ACTION")
-	return out.String()
-}
-
-type ActionAssociation struct {
-	Token      token.Token // The action name token
-	ActionName *Identifier
-	Qualifier  *Identifier // N, L, D, P, etc.
-	Indicators []*Identifier
-}
-
-func (aa *ActionAssociation) statementNode()       {}
-func (aa *ActionAssociation) TokenLiteral() string { return aa.Token.Literal }
-func (aa *ActionAssociation) String() string {
-	var out bytes.Buffer
-	out.WriteString(aa.ActionName.String())
-	out.WriteString("(")
-	out.WriteString(aa.Qualifier.String())
-	out.WriteString(")")
 	return out.String()
 }
 
@@ -1084,6 +1157,7 @@ type FunctionDeclaration struct {
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
+func (fd *FunctionDeclaration) Pos() (int, int)      { return fd.Token.Row, fd.Token.Column }
 func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
 func (fd *FunctionDeclaration) String() string {
 	var out bytes.Buffer
@@ -1108,11 +1182,12 @@ type StepStatement struct {
 	Token       token.Token // The 'STEP' or 'INITIAL_STEP' token
 	Name        *Identifier
 	IsInitial   bool
-	Actions     []*ActionAssociation // Or a similar structure for action associations
+	Actions     []*ActionBlockStatement
 	Transitions []*TransitionStatement
 }
 
 func (ss *StepStatement) statementNode()       {}
+func (ss *StepStatement) Pos() (int, int)      { return ss.Token.Row, ss.Token.Column }
 func (ss *StepStatement) TokenLiteral() string { return ss.Token.Literal }
 func (ss *StepStatement) String() string       { return "STEP " + ss.Name.String() }
 
@@ -1124,5 +1199,51 @@ type TransitionStatement struct {
 }
 
 func (ts *TransitionStatement) statementNode()       {}
+func (ts *TransitionStatement) Pos() (int, int)      { return ts.Token.Row, ts.Token.Column }
 func (ts *TransitionStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TransitionStatement) String() string       { return "TRANSITION" }
+
+// SFCProgram represents a Sequential Function Chart program.
+type SFCProgram struct {
+	Token    token.Token // The 'SFC' token or first element's token
+	Elements []Statement
+}
+
+func (sp *SFCProgram) statementNode()       {}
+func (sp *SFCProgram) TokenLiteral() string { return sp.Token.Literal }
+func (sp *SFCProgram) String() string {
+	var out bytes.Buffer
+	for _, s := range sp.Elements {
+		out.WriteString(s.String())
+	}
+	return out.String()
+}
+func (sp *SFCProgram) Pos() (int, int) {
+	if len(sp.Elements) > 0 {
+		return sp.Elements[0].Pos()
+	}
+	return sp.Token.Row, sp.Token.Column // Default or error position if no elements
+}
+
+// ActionBlockStatement represents an action associated with an SFC step.
+type ActionBlockStatement struct {
+	Token      token.Token // The action name (an IDENT token)
+	ActionName *Identifier
+	Qualifier  *Identifier
+	Duration   Expression // Optional duration for time-limited qualifiers (L, D, etc.)
+	Body       *BlockStatement
+}
+
+func (abs *ActionBlockStatement) statementNode()       {}
+func (abs *ActionBlockStatement) Pos() (int, int)      { return abs.Token.Row, abs.Token.Column }
+func (abs *ActionBlockStatement) TokenLiteral() string { return abs.Token.Literal }
+func (abs *ActionBlockStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString(abs.ActionName.String())
+	out.WriteString("(")
+	if abs.Qualifier != nil {
+		out.WriteString(abs.Qualifier.String())
+	}
+	out.WriteString(");")
+	return out.String()
+}

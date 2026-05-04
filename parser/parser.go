@@ -112,6 +112,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
 	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
 	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
 	p.registerPrefix(token.DATE_AND_TIME, p.parseTimeDateLiteral)
 	p.registerPrefix(token.TRUE, p.parseBoolean)
 	p.registerPrefix(token.FALSE, p.parseBoolean)
@@ -185,6 +186,12 @@ func (p *Parser) nextToken() {
 	case token.UNTERMINATED_COMMENT:
 		msg := fmt.Sprintf("unterminated comment starting at row %d, column %d", p.curToken.Row, p.curToken.Column)
 		p.errors = append(p.errors, msg)
+		// Error Recovery: Skip tokens until we find a potential statement boundary.
+		for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) && !isStatementEndToken(p.curToken.Type) {
+			p.curToken = p.peekToken
+			p.peekToken = p.l.NextToken()
+		}
+
 	}
 }
 
@@ -202,6 +209,17 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 		return true
 	} else {
 		p.peekError(t)
+		// If we expected a semicolon, we can often recover by just pretending it was there
+		// and continuing. For other tokens, this might not be safe.
+		if t == token.SEMICOLON {
+			// We don't advance the token, we just allow parsing to continue from the current position
+			// as if the semicolon was optional.
+			return true // "Recovered"
+		}
+		// For other errors, we might want to skip until the next semicolon or block end.
+		for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.EOF) {
+			p.nextToken()
+		}
 		return false
 	}
 }
@@ -211,9 +229,14 @@ func (p *Parser) Errors() []string {
 }
 
 func (p *Parser) peekError(t token.TokenType) {
-	msg := fmt.Sprintf("expected next token to be %s, got %s instead at row %d, column %d",
-		t, p.peekToken.Type, p.peekToken.Row, p.peekToken.Column)
-	p.errors = append(p.errors, msg)
+	p.specificError("expected next token to be %s, got %s instead", t, p.peekToken.Type)
+}
+
+// specificError creates a formatted error message with line and column numbers.
+func (p *Parser) specificError(format string, a ...interface{}) {
+	msg := fmt.Sprintf(format, a...)
+	p.errors = append(p.errors, fmt.Sprintf("%s at row %d, column %d",
+		msg, p.peekToken.Row, p.peekToken.Column))
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
@@ -544,7 +567,7 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 	}
 
 	if !p.curTokenIs(token.END_STRUCT) {
-		p.peekError(token.END_STRUCT)
+		p.specificError("missing 'END_STRUCT' for struct definition starting at row %d", structDef.Token.Row)
 		return nil
 	}
 
@@ -572,6 +595,12 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 	}
 
 	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
+		// Error Recovery: If we encounter a token that looks like the start of a new statement block,
+		// assume END_VAR was missing and stop parsing this var block.
+		if isStatementStartKeyword(p.curToken.Type) {
+			p.peekError(endToken) // Report the missing END_VAR
+			return varDecls
+		}
 		// Each iteration parses one or more variables of the same type.
 		// e.g., Var1, Var2 : INT;
 		names := p.parseIdentifierList()
@@ -846,7 +875,7 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 	}
 
 	if !p.curTokenIs(token.RBRACKET) {
-		p.peekError(token.RBRACKET)
+		p.specificError("missing ']' in array definition")
 		return nil
 	}
 
@@ -1207,10 +1236,11 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	ifStmt := &ast.IfStatement{Token: p.curToken}
 
 	p.nextToken()
-	ifStmt.Condition = p.parseExpression(LOWEST)
+	ifStmt.Condition = p.parseExpression(LOWEST) // Parse the full condition
 
+	// After parsing the condition, the next token should be THEN.
 	if !p.expectPeek(token.THEN) {
-		return nil
+		return nil // Error already reported by expectPeek
 	}
 
 	p.nextToken() // consume THEN
@@ -1226,7 +1256,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		newIf.Condition = p.parseExpression(LOWEST)
 
 		if !p.expectPeek(token.THEN) {
-			return nil
+			return nil // Error already reported by expectPeek
 		}
 
 		p.nextToken() // consume THEN
@@ -1244,9 +1274,8 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 	// The last token should be END_IF
 	if !p.curTokenIs(token.END_IF) {
-		p.peekError(token.END_IF)
-		p.nextToken() // Consume the END_IF to avoid infinite loop if error recovery is attempted
-		return nil
+		p.specificError("missing 'END_IF' for IF statement starting at row %d", ifStmt.Token.Row)
+		// Do not return nil. Return the partially parsed statement to allow recovery.
 	}
 
 	return ifStmt
@@ -1287,11 +1316,11 @@ func (p *Parser) parseForStatement() ast.Statement {
 
 	// DO
 	if !p.expectPeek(token.DO) {
+		p.specificError("missing 'DO' in FOR loop")
 		return nil
 	}
 
-	p.nextToken() // Consume DO, move to start of body
-
+	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
 
 	// After parsing the body, p.curToken should be END_FOR. We need to consume it.
@@ -1308,9 +1337,10 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.DO) {
+		p.specificError("missing 'DO' in WHILE loop at row %d, column %d", p.peekToken.Row, p.peekToken.Column)
 		return nil
 	}
-	p.nextToken() // Consume DO, move to the start of the block.
+	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
 
 	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
@@ -1662,10 +1692,10 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	}
 	p.nextToken() // consume COLON
 
-	stmt.Actions = []*ast.ActionAssociation{}
+	stmt.Actions = []*ast.ActionBlockStatement{}
 	for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.LPAREN) {
-			assoc := p.parseActionAssociation()
+			assoc := p.parseActionBlockStatement()
 			if assoc != nil {
 				stmt.Actions = append(stmt.Actions, assoc)
 			}
@@ -1677,15 +1707,14 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	}
 
 	if !p.curTokenIs(token.END_STEP) {
-		p.peekError(token.END_STEP)
-		return nil
+		p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
 	}
 
 	return stmt
 }
 
-func (p *Parser) parseActionAssociation() *ast.ActionAssociation {
-	assoc := &ast.ActionAssociation{
+func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
+	stmt := &ast.ActionBlockStatement{
 		Token:      p.curToken,
 		ActionName: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
 	}
@@ -1693,16 +1722,31 @@ func (p *Parser) parseActionAssociation() *ast.ActionAssociation {
 	if !p.expectPeek(token.LPAREN) {
 		return nil
 	}
-	p.nextToken() // consume (
 
-	// For now, we'll assume a simple qualifier, like (N)
-	assoc.Qualifier = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	// Check if there are any arguments (qualifiers, duration)
+	if !p.peekTokenIs(token.RPAREN) {
+		p.nextToken() // consume '('
 
-	if !p.expectPeek(token.RPAREN) {
+		// First argument is the qualifier
+		stmt.Qualifier = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken()
+
+		// Check for optional second argument (duration)
+		if p.curTokenIs(token.COMMA) {
+			p.nextToken() // consume ','
+			stmt.Duration = p.parseExpression(LOWEST)
+			p.nextToken()
+		}
+	} else {
+		p.nextToken() // consume '(' to move to ')'
+	}
+
+	if !p.curTokenIs(token.RPAREN) {
+		p.peekError(token.RPAREN)
 		return nil
 	}
 
-	return assoc
+	return stmt
 }
 
 func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
@@ -1750,6 +1794,42 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		p.peekError(token.UNTIL)
 	}
 	return block
+}
+
+func isStatementEndToken(tok token.TokenType) bool {
+	switch tok {
+	case token.END_VAR,
+		token.END_IF,
+		token.END_FOR,
+		token.END_WHILE,
+		token.END_REPEAT,
+		token.END_CASE:
+		return true
+	default:
+		return false
+	}
+}
+
+// isStatementStartKeyword checks if a token type is a keyword that typically starts a new statement or block.
+// This is useful for error recovery.
+func isStatementStartKeyword(tok token.TokenType) bool {
+	switch tok {
+	case token.VAR, // A new var block indicates the previous one wasn't closed.
+		token.IF,
+		token.FOR,
+		token.WHILE,
+		token.REPEAT,
+		token.CASE,
+		token.PROGRAM,
+		token.FUNCTION,
+		token.FUNCTION_BLOCK,
+		token.ACTION,
+		token.TRANSITION,
+		token.STEP:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
@@ -1822,6 +1902,7 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 
 func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	list := []ast.Expression{}
+	namedArgumentFound := false
 
 	if p.peekTokenIs(end) {
 		p.nextToken()
@@ -1830,51 +1911,62 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 
 	p.nextToken()
 
-	// Check for named arguments (IDENT := or IDENT =>)
-	if p.curTokenIs(token.IDENT) && (p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ARROW)) {
-		list = append(list, p.parseNamedArgument())
-	} else {
-		list = append(list, p.parseExpression(LOWEST))
+	arg := p.parseCallArgument()
+	if _, ok := arg.(*ast.NamedArgument); ok {
+		namedArgumentFound = true
+	} else if _, ok := arg.(*ast.OutputArgument); ok {
+		namedArgumentFound = true
 	}
+	list = append(list, arg)
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		if p.curTokenIs(token.IDENT) && (p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ARROW)) {
-			list = append(list, p.parseNamedArgument())
-		} else {
-			list = append(list, p.parseExpression(LOWEST))
+		arg := p.parseCallArgument()
+		isNamed := false
+		if _, ok := arg.(*ast.NamedArgument); ok {
+			isNamed = true
+		} else if _, ok := arg.(*ast.OutputArgument); ok {
+			isNamed = true
 		}
+
+		if namedArgumentFound && !isNamed {
+			p.specificError("positional argument follows named argument in function call")
+		} else if isNamed {
+			namedArgumentFound = true
+		}
+		list = append(list, arg)
 	}
 
 	if !p.expectPeek(end) {
-		return nil
+		// Error is reported by expectPeek. We return the parsed statement for recovery.
 	}
 
 	return list
 }
 
-func (p *Parser) parseNamedArgument() ast.Expression {
-	name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	p.nextToken() // move to := or =>
-
-	if p.curTokenIs(token.ASSIGN) {
-		arg := &ast.NamedArgument{Token: name.Token, Name: name}
-		p.nextToken() // move to expression
+func (p *Parser) parseCallArgument() ast.Expression {
+	// Check for named arguments (IDENT := or IDENT =>)
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ASSIGN) {
+		// Input argument: In1 := 10
+		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume IDENT, curToken is now ASSIGN
+		arg := &ast.NamedArgument{Token: p.curToken, Name: name}
+		p.nextToken() // consume ASSIGN, move to expression
 		arg.Value = p.parseExpression(LOWEST)
 		return arg
-	}
-
-	if p.curTokenIs(token.ARROW) {
+	} else if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ARROW) {
+		// Output argument: Out1 => Res1
+		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume IDENT, curToken is now ARROW
 		arg := &ast.OutputArgument{Token: p.curToken, Source: name}
-		p.nextToken() // move to expression
+		p.nextToken() // consume ARROW, move to expression
 		arg.Target = p.parseExpression(LOWEST)
 		return arg
 	}
 
-	// Should not happen due to checks in parseExpressionList
-	return nil
+	// Otherwise, it's a positional argument (an expression)
+	return p.parseExpression(LOWEST)
 }
 
 func (p *Parser) parseArrayLiteral() ast.Expression {
