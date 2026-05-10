@@ -14,20 +14,37 @@ import (
 	"strings"
 )
 
-var traceLevel int = 0
+var (
+	traceLevel    int  = 0
+	enableTracing bool = false // New flag to control tracing
+)
 
 const traceIdentPlaceholder string = "\t"
 
 func identLevel() string {
+	if !enableTracing {
+		return ""
+	}
 	return strings.Repeat(traceIdentPlaceholder, traceLevel-1)
 }
 
 func tracePrint(fs string) {
+	if !enableTracing {
+		return
+	}
 	fmt.Printf("%s%s\n", identLevel(), fs)
 }
 
-func incIdent() { traceLevel = traceLevel + 1 }
-func decIdent() { traceLevel = traceLevel - 1 }
+func incIdent() {
+	if enableTracing {
+		traceLevel = traceLevel + 1
+	}
+}
+func decIdent() {
+	if enableTracing {
+		traceLevel = traceLevel - 1
+	}
+}
 
 func trace(msg string) string {
 	incIdent()
@@ -38,4 +55,10 @@ func trace(msg string) string {
 func untrace(msg string) {
 	tracePrint("END " + msg)
 	decIdent()
+
+}
+
+// SetTracing enables or disables the parser tracing.
+func SetTracing(enabled bool) {
+	enableTracing = enabled
 }

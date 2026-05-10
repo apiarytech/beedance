@@ -11,14 +11,32 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/user"
 
+	"beedance/parser"
 	"beedance/repl"
 )
 
+const version = "0.1.0"
+
 func main() {
+	trace := flag.Bool("trace", false, "Enable parser tracing")
+	versionFlag := flag.Bool("version", false, "Print the application version")
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("beedance version %s\n", version)
+		os.Exit(0)
+	}
+
+	if *trace {
+		parser.SetTracing(true)
+		fmt.Println("Parser tracing enabled.")
+	}
+
 	user, err := user.Current()
 	if err != nil {
 		panic(err)

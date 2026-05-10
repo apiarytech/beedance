@@ -146,12 +146,12 @@ func (dv *DirectVariable) String() string {
 }
 
 type ConfigurationDeclaration struct {
-	Token         token.Token // The 'CONFIGURATION' token
-	Name          *Identifier
-	GlobalVars    []*GlobalVarDeclaration
-	Resources     []*ResourceDeclaration
-	AccessDecls   []*AccessVarDeclaration
-	InstanceInits *ConfigVarDeclaration
+	Token      token.Token // The 'CONFIGURATION' token
+	Name       *Identifier
+	GlobalVars []*GlobalVarDeclaration
+	Resources  []*ResourceDeclaration
+	AccessVars []*AccessVarDeclaration
+	ConfigVars []*ConfigVarDeclaration
 }
 
 func (cd *ConfigurationDeclaration) statementNode()       {}

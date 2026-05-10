@@ -930,131 +930,131 @@ func TestOperatorPrecedenceParsing(t *testing.T) {
 	}{
 		{
 			"-a * b",
-			"((-a) * b)",
+			"((-a) * b);",
 		},
 		{
 			"a + b + c",
-			"((a + b) + c)",
+			"((a + b) + c);",
 		},
 		{
 			"a + b - c",
-			"((a + b) - c)",
+			"((a + b) - c);",
 		},
 		{
 			"a * b * c",
-			"((a * b) * c)",
+			"((a * b) * c);",
 		},
 		{
 			"a * b / c",
-			"((a * b) / c)",
+			"((a * b) / c);",
 		},
 		{
 			"a + b / c",
-			"(a + (b / c))",
+			"(a + (b / c));",
 		},
 		{
 			"a + b * c + d / e - f",
-			"(((a + (b * c)) + (d / e)) - f)",
+			"(((a + (b * c)) + (d / e)) - f);",
 		},
 		{
 			"3 + 4; -5 * 5",
-			"(3 + 4)((-5) * 5)",
+			"(3 + 4);((-5) * 5);",
 		},
 		{
 			"5 > 4 = 3 < 4",
-			"((5 > 4) = (3 < 4))",
+			"((5 > 4) = (3 < 4));",
 		},
 		{
 			"5 < 4 <> 3 > 4",
-			"((5 < 4) <> (3 > 4))",
+			"((5 < 4) <> (3 > 4));",
 		},
 		{
 			"3 + 4 * 5 = 3 * 1 + 4 * 5",
-			"((3 + (4 * 5)) = ((3 * 1) + (4 * 5)))",
+			"((3 + (4 * 5)) = ((3 * 1) + (4 * 5)));",
 		},
 		{
 			"TRUE",
-			"TRUE",
+			"TRUE;",
 		},
 		{
 			"FALSE",
-			"FALSE",
+			"FALSE;",
 		},
 		{
 			"3 > 5 = FALSE",
-			"((3 > 5) = FALSE)",
+			"((3 > 5) = FALSE);",
 		},
 		{
 			"3 < 5 = TRUE",
-			"((3 < 5) = TRUE)",
+			"((3 < 5) = TRUE);",
 		},
 		{
 			"1 + (2 + 3) + 4",
-			"((1 + (2 + 3)) + 4)",
+			"((1 + (2 + 3)) + 4);",
 		},
 		{
 			"(5 + 5) * 2",
-			"((5 + 5) * 2)",
+			"((5 + 5) * 2);",
 		},
 		{
 			"2 / (5 + 5)",
-			"(2 / (5 + 5))",
+			"(2 / (5 + 5));",
 		},
 		{
 			"(5 + 5) * 2 * (5 + 5)",
-			"(((5 + 5) * 2) * (5 + 5))",
+			"(((5 + 5) * 2) * (5 + 5));",
 		},
 		{
 			"-(5 + 5)",
-			"(-(5 + 5))",
+			"(-(5 + 5));",
 		},
 		{
 			"a + add(b * c) + d",
-			"((a + add((b * c))) + d)",
+			"((a + add((b * c))) + d);",
 		},
 		{
 			"add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))",
-			"add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))",
+			"add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)));",
 		},
 		{
 			"add(a + b + c * d / f + g)",
-			"add((((a + b) + ((c * d) / f)) + g))",
+			"add((((a + b) + ((c * d) / f)) + g));",
 		},
 		{
 			"a * [1, 2, 3, 4][b * c] * d",
-			"((a * ([1, 2, 3, 4][(b * c)])) * d)",
+			"((a * ([1, 2, 3, 4][(b * c)])) * d);",
 		},
 		{
 			"add(a * b[2], b[1], 2 * [1, 2][1])",
-			"add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
+			"add((a * (b[2])), (b[1]), (2 * ([1, 2][1])));",
 		},
 		{
 			"a + b AND c * d",
-			"((a + b) AND (c * d))",
+			"((a + b) AND (c * d));",
 		},
 		{
 			"a AND b OR c",
-			"((a AND b) OR c)",
+			"((a AND b) OR c);",
 		},
 		{
 			"a OR b AND c",
-			"(a OR (b AND c))",
+			"(a OR (b AND c));",
 		},
 		{
 			"a & b OR c",
-			"((a & b) OR c)",
+			"((a & b) OR c);",
 		},
 		{
 			"a XOR b & c",
-			"(a XOR (b & c))",
+			"(a XOR (b & c));",
 		},
 		{
 			"a ** b + c",
-			"((a ** b) + c)",
+			"((a ** b) + c);",
 		},
 		{
 			"a + b ** c",
-			"(a + (b ** c))",
+			"(a + (b ** c));",
 		},
 	}
 
@@ -1288,6 +1288,47 @@ func TestIfElsifElseStatement(t *testing.T) {
 	testIdentifier(t, elseStmt.Statements[0].(*ast.ExpressionStatement).Expression, "z")
 }
 
+func TestIfStatementWithEmptyBlocks(t *testing.T) {
+	input := `
+		IF x < y THEN
+			(* This block is empty *)
+		ELSIF x > y THEN
+			do_something;
+		ELSE
+			(* This block is also empty *)
+		END_IF
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	ifStmt, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.IfStatement. got=%T", program.Statements[0])
+	}
+
+	// Check that the main IF consequence is empty
+	if len(ifStmt.Consequence.Statements) != 0 {
+		t.Errorf("Expected empty consequence for IF block, but found %d statements.", len(ifStmt.Consequence.Statements))
+	}
+
+	// Check the ELSIF part
+	elsifStmt, ok := ifStmt.Alternative.(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("Alternative is not an ELSIF (IfStatement). got=%T", ifStmt.Alternative)
+	}
+	if len(elsifStmt.Consequence.Statements) != 1 {
+		t.Errorf("Expected 1 statement in ELSIF block, but found %d.", len(elsifStmt.Consequence.Statements))
+	}
+
+	// Check that the ELSE part is empty
+}
+
 func TestFunctionDeclaration(t *testing.T) {
 	input := `
 		FUNCTION MyFunction : INT
@@ -1513,29 +1554,45 @@ func TestStringLiteralExpression(t *testing.T) {
 }
 
 func TestTimeLiteralExpression(t *testing.T) {
-	input := `T#5m_10s;`
-
-	l := lexer.New(input)
-	p := New(l)
-	program := p.ParseProgram()
-	checkParserErrors(t, p)
-
-	if len(program.Statements) != 1 {
-		t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+	tests := []struct {
+		input        string
+		expectedType interface{}
+		expectedVal  string
+	}{
+		{"T#5m_10s;", (*ast.TimeLiteral)(nil), "T#5m_10s"},
+		{"TIME#1h_30m;", (*ast.TimeLiteral)(nil), "TIME#1h_30m"},
+		{"D#2026-05-09;", (*ast.DateLiteral)(nil), "D#2026-05-09"},
+		{"DATE#1999-12-31;", (*ast.DateLiteral)(nil), "DATE#1999-12-31"},
+		{"TOD#22:45:00;", (*ast.TimeOfDayLiteral)(nil), "TOD#22:45:00"},
+		{"TIME_OF_DAY#08:30:15.5;", (*ast.TimeOfDayLiteral)(nil), "TIME_OF_DAY#08:30:15.5"},
+		{"DT#2026-05-09-22:45:00;", (*ast.DateAndTimeLiteral)(nil), "DT#2026-05-09-22:45:00"},
+		{"DATE_AND_TIME#1999-12-31-23:59:59;", (*ast.DateAndTimeLiteral)(nil), "DATE_AND_TIME#1999-12-31-23:59:59"},
 	}
 
-	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
-	if !ok {
-		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
-	}
+	for i, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
 
-	literal, ok := stmt.Expression.(*ast.TimeLiteral)
-	if !ok {
-		t.Fatalf("exp not *ast.TimeLiteral. got=%T", stmt.Expression)
-	}
+		if len(program.Statements) != 1 {
+			t.Fatalf("Test[%d]: program has not enough statements for input '%s'. got=%d", i, tt.input, len(program.Statements))
+		}
 
-	if literal.Value != "T#5m_10s" {
-		t.Errorf("literal.Value not %q. got=%q", "T#5m_10s", literal.Value)
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("Test[%d]: program.Statements[0] is not ast.ExpressionStatement for input '%s'. got=%T", i, tt.input, program.Statements[0])
+		}
+
+		if !isExpectedType(t, tt.expectedType, stmt.Expression) {
+			t.Fatalf("Test[%d]: Expression is not of expected type for input '%s'. got=%T", i, tt.input, stmt.Expression)
+		}
+
+		// Check the raw literal value stored in the AST node
+		val := stmt.Expression.(ast.Node).TokenLiteral()
+		if val != tt.expectedVal {
+			t.Errorf("Test[%d]: literal.Value not %q for input '%s'. got=%q", i, tt.expectedVal, tt.input, val)
+		}
 	}
 }
 
@@ -2592,7 +2649,7 @@ func TestMissingSemicolonErrorRecovery(t *testing.T) {
 		t.Fatalf("Expected parser to have 1 error, but it had %d", len(p.Errors()))
 	}
 
-	expectedError := "expected next token to be SEMICOLON, got IDENT instead at row 4, column 4"
+	expectedError := "expected next token to be ;, got IDENT instead at row 4, column 4"
 	if !strings.Contains(p.Errors()[0], expectedError) {
 		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
@@ -2985,4 +3042,10 @@ func checkParserErrors(t *testing.T, p *Parser) {
 		t.Errorf("parser error: %q", msg)
 	}
 	t.FailNow()
+}
+
+func isExpectedType(t *testing.T, expectedType interface{}, actual interface{}) bool {
+	expected := fmt.Sprintf("%T", expectedType)
+	result := fmt.Sprintf("%T", actual)
+	return expected == result
 }

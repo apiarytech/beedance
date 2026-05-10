@@ -245,23 +245,24 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 }
 
 func (p *Parser) ParseProgram() *ast.Program {
+	defer untrace(trace("ParseProgram"))
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
 
 	for !p.curTokenIs(token.EOF) {
+		tracePrint(fmt.Sprintf("Current Token: %s (%s) at %d:%d", p.curToken.Literal, p.curToken.Type, p.curToken.Row, p.curToken.Column))
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
-		if !p.curTokenIs(token.EOF) {
-			p.nextToken()
-		}
+		p.nextToken()
 	}
 
 	return program
 }
 
 func (p *Parser) parseStatement() ast.Statement {
+	defer untrace(trace("parseStatement"))
 	switch p.curToken.Type {
 	case token.VAR:
 		return p.parseVarBlockStatement()
@@ -306,8 +307,9 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.IDENT:
 		if p.peekTokenIs(token.ASSIGN) {
 			return p.parseAssignmentStatement()
+		} else {
+			return p.parseExpressionStatement()
 		}
-		return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -319,10 +321,12 @@ func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	if !p.expectPeek(token.SEMICOLON) {
 		return nil
 	}
+	p.nextToken()
 
 	return stmt
 }
 func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
+	defer untrace(trace("parseSingleVarDecl"))
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -375,6 +379,7 @@ func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 }
 
 func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
+	defer untrace(trace("parseVarDeclStatement"))
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -418,6 +423,7 @@ func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 }
 
 func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
+	defer untrace(trace("parseVarBlockStatement"))
 	stmt := &ast.VarBlockDeclaration{Token: p.curToken}
 
 	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
@@ -426,6 +432,7 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 }
 
 func (p *Parser) parseStructMember() *ast.VarDeclStatement {
+	defer untrace(trace("parseStructMember"))
 	// Struct members are like variable declarations but without the VAR keyword
 	// and, according to the IEC 61131-3 standard, without initial values.
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
@@ -461,31 +468,40 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 }
 
 func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
+	defer untrace(trace("parseGlobalVarDeclStatement"))
 	stmt := &ast.GlobalVarDeclaration{Token: p.curToken}
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	p.nextToken() // Consume END_VAR
 	return stmt
 }
 
 func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
+	defer untrace(trace("parseExternalVarDeclStatement"))
 	stmt := &ast.ExternalVarDeclaration{Token: p.curToken}
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	p.nextToken() // Consume END_VAR
 	return stmt
 }
 
 func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
+	defer untrace(trace("parseAccessVarDeclStatement"))
 	stmt := &ast.AccessVarDeclaration{Token: p.curToken}
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	p.nextToken() // Consume END_VAR
 	return stmt
 }
 
 func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
+	defer untrace(trace("parseTempVarDeclStatement"))
 	stmt := &ast.TempVarDeclaration{Token: p.curToken}
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	p.nextToken()
 	return stmt
 }
 
 func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
+	defer untrace(trace("parseConfigVarDeclStatement"))
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
@@ -494,6 +510,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 }
 
 func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
+	defer untrace(trace("parseTypeBlockDeclaration"))
 	block := &ast.TypeBlockDeclaration{Token: p.curToken}
 	block.Declarations = []*ast.TypeDeclaration{}
 
@@ -504,13 +521,21 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 		if decl != nil {
 			block.Declarations = append(block.Declarations, decl)
 		}
-		p.nextToken() // Move to the start of the next declaration or END_TYPE
+		p.nextToken()
+	}
+
+	// After the loop, we should be at END_TYPE. We need to consume it.
+	if p.curTokenIs(token.END_TYPE) {
+		p.nextToken() // Consume END_TYPE
+	} else {
+		p.errors = append(p.errors, fmt.Sprintf("expected END_TYPE, got %s instead at row %d, column %d", p.curToken.Type, p.curToken.Row, p.curToken.Column))
 	}
 
 	return block
 }
 
 func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
+	defer untrace(trace("parseTypeDeclaration"))
 	decl := &ast.TypeDeclaration{Token: p.curToken}
 
 	if !p.curTokenIs(token.IDENT) {
@@ -548,11 +573,11 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	if !p.expectPeek(token.SEMICOLON) {
 		return nil
 	}
-
 	return decl
 }
 
 func (p *Parser) parseStructDefinition() ast.Expression {
+	defer untrace(trace("parseStructDefinition"))
 	structDef := &ast.StructDefinition{Token: p.curToken}
 	structDef.Members = []*ast.VarDeclStatement{}
 
@@ -575,6 +600,7 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 }
 
 func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
+	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
 
 	isConstant := false
@@ -654,6 +680,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 }
 
 func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
+	defer untrace(trace("parseAtDeclaration"))
 	if !p.curTokenIs(token.AT) {
 		return nil
 	}
@@ -675,6 +702,7 @@ func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
 }
 
 func (p *Parser) parseDirectVariable() ast.Expression {
+	defer untrace(trace("parseDirectVariable"))
 	dv := &ast.DirectVariable{Token: p.curToken}
 	// The lexer now provides the full direct variable literal (e.g., "%IX1.0")
 	// We just need to strip the leading '%' for the AST node's value.
@@ -683,33 +711,41 @@ func (p *Parser) parseDirectVariable() ast.Expression {
 }
 
 func (p *Parser) parseConfigurationDeclaration() ast.Statement {
+	defer untrace(trace("parseConfigurationDeclaration"))
 	stmt := &ast.ConfigurationDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
 		return nil
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
 	p.nextToken()
 
 	for !p.curTokenIs(token.END_CONFIGURATION) && !p.curTokenIs(token.EOF) {
 		switch p.curToken.Type {
+		case token.VAR_GLOBAL:
+			// A configuration can have global variable blocks.
+			stmt.GlobalVars = append(stmt.GlobalVars, p.parseGlobalVarDeclStatement())
 		case token.RESOURCE:
 			res := p.parseResourceDeclaration()
 			if res != nil {
 				stmt.Resources = append(stmt.Resources, res)
 			}
-		case token.VAR_GLOBAL:
-			// Simplified, assumes one global block
-			stmt.GlobalVars = append(stmt.GlobalVars, p.parseGlobalVarDeclStatement())
+		case token.VAR_ACCESS:
+			// Access variable declarations for communication.
+			stmt.AccessVars = append(stmt.AccessVars, p.parseAccessVarDeclStatement())
+		case token.VAR_CONFIG:
+			// Instance-specific initializations.
+			stmt.ConfigVars = append(stmt.ConfigVars, p.parseConfigVarDeclStatement())
+		default:
+			// If we encounter a token we don't recognize at this level, we advance past it to avoid an infinite loop.
+			p.nextToken()
 		}
-		p.nextToken()
 	}
-
 	return stmt
 }
 
 func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
+	defer untrace(trace("parseResourceDeclaration"))
 	stmt := &ast.ResourceDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -748,6 +784,7 @@ func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 }
 
 func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
+	defer untrace(trace("parseTaskDeclaration"))
 	stmt := &ast.TaskDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -795,6 +832,7 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 }
 
 func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
+	defer untrace(trace("parseProgramConfiguration"))
 	stmt := &ast.ProgramConfiguration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -829,6 +867,7 @@ func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
 }
 
 func (p *Parser) parseIdentifierList() []*ast.Identifier {
+	defer untrace(trace("parseIdentifierList"))
 	list := []*ast.Identifier{}
 	list = append(list, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
 
@@ -842,6 +881,7 @@ func (p *Parser) parseIdentifierList() []*ast.Identifier {
 }
 
 func (p *Parser) parseTypeSpecifier() ast.Expression {
+	defer untrace(trace("parseTypeSpecifier"))
 	if p.curTokenIs(token.ARRAY) {
 		return p.parseArrayDefinition()
 	}
@@ -854,6 +894,7 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 }
 
 func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
+	defer untrace(trace("parseArrayDefinition"))
 	def := &ast.ArrayDefinition{Token: p.curToken}
 
 	if !p.expectPeek(token.LBRACKET) {
@@ -893,6 +934,7 @@ func (p *Parser) isDataTypeToken(tok token.Token) bool {
 }
 
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
+	defer untrace(trace("parseReturnStatement"))
 	stmt := &ast.ReturnStatement{Token: p.curToken}
 
 	p.nextToken()
@@ -903,10 +945,16 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 		p.nextToken()
 	}
 
+	// After parsing the expression and optional semicolon, we must advance
+	// to the next token so the main loop can parse the next statement.
+	if p.curTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
 	return stmt
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
+	defer untrace(trace(fmt.Sprintf("parseExpression (precedence %d)", precedence)))
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -945,10 +993,12 @@ func (p *Parser) curPrecedence() int {
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
+	defer untrace(trace("parseIdentifier"))
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
+	defer untrace(trace("parseIntegerLiteral"))
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 
 	literal := p.curToken.Literal // e.g., "INT#10", "16#FF", "10"
@@ -1013,6 +1063,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 }
 
 func (p *Parser) parseRealLiteral() ast.Expression {
+	defer untrace(trace("parseRealLiteral"))
 	lit := &ast.RealLiteral{Token: p.curToken}
 
 	literal := p.curToken.Literal
@@ -1043,6 +1094,7 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 }
 
 func (p *Parser) parseBitStringLiteral() ast.Expression {
+	defer untrace(trace("parseBitStringLiteral"))
 	lit := &ast.BitStringLiteral{Token: p.curToken}
 
 	var width int
@@ -1104,10 +1156,12 @@ func (p *Parser) parseBitStringLiteral() ast.Expression {
 }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
+	defer untrace(trace("parseStringLiteral"))
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 func (p *Parser) parseTimeDateLiteral() ast.Expression {
+	defer untrace(trace("parseTimeDateLiteral"))
 	literal := p.curToken.Literal
 	parts := strings.SplitN(literal, "#", 2)
 	if len(parts) != 2 {
@@ -1171,6 +1225,7 @@ func (p *Parser) parseTimeDateLiteral() ast.Expression {
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
+	defer untrace(trace("parsePrefixExpression"))
 	expression := &ast.PrefixExpression{
 		Token:    p.curToken,
 		Operator: p.curToken.Literal,
@@ -1184,6 +1239,7 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 }
 
 func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
+	defer untrace(trace("parseInfixExpression"))
 	expression := &ast.InfixExpression{
 		Token:    p.curToken,
 		Operator: p.curToken.Literal,
@@ -1198,6 +1254,7 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression {
+	defer untrace(trace("parseMemberAccessExpression"))
 	exp := &ast.MemberAccessExpression{
 		Token:  p.curToken,
 		Struct: left,
@@ -1217,10 +1274,12 @@ func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression
 }
 
 func (p *Parser) parseBoolean() ast.Expression {
+	defer untrace(trace("parseBoolean"))
 	return &ast.Boolean{Token: p.curToken, Value: p.curTokenIs(token.TRUE)}
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
+	defer untrace(trace("parseGroupedExpression"))
 	p.nextToken()
 
 	exp := p.parseExpression(LOWEST)
@@ -1233,14 +1292,17 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 }
 
 func (p *Parser) parseIfStatement() *ast.IfStatement {
+	defer untrace(trace("parseIfStatement"))
 	ifStmt := &ast.IfStatement{Token: p.curToken}
 
 	p.nextToken()
 	ifStmt.Condition = p.parseExpression(LOWEST) // Parse the full condition
 
 	// After parsing the condition, the next token should be THEN.
-	if !p.expectPeek(token.THEN) {
-		return nil // Error already reported by expectPeek
+	// Improved Error Recovery: Report missing THEN but continue parsing the block.
+	if !p.peekTokenIs(token.THEN) {
+		p.specificError("missing 'THEN' in IF statement, got %s instead", p.peekToken.Type)
+		// We don't return, allowing the parser to attempt to parse the consequence.
 	}
 
 	p.nextToken() // consume THEN
@@ -1255,8 +1317,10 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		p.nextToken()
 		newIf.Condition = p.parseExpression(LOWEST)
 
-		if !p.expectPeek(token.THEN) {
-			return nil // Error already reported by expectPeek
+		// Improved Error Recovery for ELSIF
+		if !p.peekTokenIs(token.THEN) {
+			p.specificError("missing 'THEN' in ELSIF statement, got %s instead", p.peekToken.Type)
+			// Continue parsing the consequence
 		}
 
 		p.nextToken() // consume THEN
@@ -1282,6 +1346,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 }
 
 func (p *Parser) parseForStatement() ast.Statement {
+	defer untrace(trace("parseForStatement"))
 	stmt := &ast.ForLoopStatement{Token: p.curToken}
 
 	// FOR <Identifier>
@@ -1315,9 +1380,10 @@ func (p *Parser) parseForStatement() ast.Statement {
 	}
 
 	// DO
-	if !p.expectPeek(token.DO) {
-		p.specificError("missing 'DO' in FOR loop")
-		return nil
+	// Improved Error Recovery: Report missing DO but continue parsing the block.
+	if !p.peekTokenIs(token.DO) {
+		p.specificError("missing 'DO' in FOR loop at row %d, column %d", p.peekToken.Row, p.peekToken.Column)
+		// Do not return, allow parsing of the body to continue.
 	}
 
 	p.nextToken() // Consume DO
@@ -1331,28 +1397,32 @@ func (p *Parser) parseForStatement() ast.Statement {
 }
 
 func (p *Parser) parseWhileStatement() ast.Statement {
+	defer untrace(trace("parseWhileStatement"))
 	stmt := &ast.WhileStatement{Token: p.curToken}
 
 	p.nextToken() // Consume WHILE
 	stmt.Condition = p.parseExpression(LOWEST)
 
-	if !p.expectPeek(token.DO) {
+	// Improved Error Recovery: Report missing DO but continue parsing the block.
+	if !p.peekTokenIs(token.DO) {
 		p.specificError("missing 'DO' in WHILE loop at row %d, column %d", p.peekToken.Row, p.peekToken.Column)
-		return nil
+		// Do not return, allow parsing of the body to continue.
 	}
 	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
 
 	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
 	if !p.curTokenIs(token.END_WHILE) {
-		p.peekError(token.END_WHILE)
-		return nil
+		p.specificError("missing 'END_WHILE' for WHILE statement starting at row %d", stmt.Token.Row)
+		// Return the partially parsed statement for better recovery
+		return stmt
 	}
 
 	return stmt
 }
 
 func (p *Parser) parseRepeatStatement() ast.Statement {
+	defer untrace(trace("parseRepeatStatement"))
 	stmt := &ast.RepeatStatement{Token: p.curToken}
 
 	p.nextToken() // consume REPEAT
@@ -1371,6 +1441,7 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 }
 
 func (p *Parser) parseCaseStatement() ast.Statement {
+	defer untrace(trace("parseCaseStatement"))
 	stmt := &ast.CaseStatement{Token: p.curToken}
 
 	p.nextToken()
@@ -1427,6 +1498,7 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 }
 
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
+	defer untrace(trace("parseBlockStatementForIf"))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 
@@ -1435,15 +1507,14 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		// parseStatement should leave us on the last token of the statement (e.g., ';')
-		// so we advance to the next one to check the loop condition.
-		p.nextToken()
+		p.nextToken() // Advance to the next token
 	}
 
 	return block
 }
 
 func (p *Parser) parsePoulDeclaration() ast.Statement {
+	defer untrace(trace("parsePoulDeclaration"))
 	switch p.curToken.Type {
 	case token.FUNCTION:
 		return p.parseFunctionDeclaration()
@@ -1456,6 +1527,7 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 }
 
 func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
+	defer untrace(trace("parseAssignmentStatement"))
 	stmt := &ast.AssignmentStatement{
 		Token: p.curToken,
 		Left:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
@@ -1476,6 +1548,7 @@ func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 }
 
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+	defer untrace(trace("parseExpressionStatement"))
 	stmt := &ast.ExpressionStatement{Token: p.curToken}
 	stmt.Expression = p.parseExpression(LOWEST)
 	if p.peekTokenIs(token.SEMICOLON) {
@@ -1485,6 +1558,7 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 }
 
 func (p *Parser) parseFunctionDeclaration() ast.Statement {
+	defer untrace(trace("parseFunctionDeclaration"))
 	stmt := &ast.FunctionDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -1524,6 +1598,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 }
 
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
+	defer untrace(trace("parseFunctionBlockDeclaration"))
 	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -1567,6 +1642,7 @@ end_var_parsing:
 }
 
 func (p *Parser) parseProgramDeclaration() ast.Statement {
+	defer untrace(trace("parseProgramDeclaration"))
 	stmt := &ast.ProgramDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -1609,6 +1685,7 @@ end_var_parsing:
 
 // parseVarBlock is a helper to parse a VAR...END_VAR block and return the declarations.
 func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatement {
+	defer untrace(trace(fmt.Sprintf("parseVarBlock (%s)", blockType)))
 	if !p.curTokenIs(blockType) {
 		return nil
 	}
@@ -1619,6 +1696,7 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 }
 
 func (p *Parser) parseActionStatement() ast.Statement {
+	defer untrace(trace("parseActionStatement"))
 	stmt := &ast.ActionStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.IDENT) {
@@ -1637,6 +1715,7 @@ func (p *Parser) parseActionStatement() ast.Statement {
 }
 
 func (p *Parser) parseTransitionStatement() ast.Statement {
+	defer untrace(trace("parseTransitionStatement"))
 	stmt := &ast.TransitionStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.FROM) {
@@ -1672,10 +1751,12 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 }
 
 func (p *Parser) parseStepStatement() ast.Statement {
+	defer untrace(trace("parseStepStatement"))
 	return p.parseStep(false)
 }
 
 func (p *Parser) parseInitialStepStatement() ast.Statement {
+	defer untrace(trace("parseInitialStepStatement"))
 	return p.parseStep(true)
 }
 
@@ -1714,6 +1795,7 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 }
 
 func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
+	defer untrace(trace("parseActionBlockStatement"))
 	stmt := &ast.ActionBlockStatement{
 		Token:      p.curToken,
 		ActionName: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
@@ -1750,6 +1832,7 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 }
 
 func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
+	defer untrace(trace(fmt.Sprintf("parseBlockStatementUntil (until %s)", end)))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 	//p.nextToken()
@@ -1765,6 +1848,7 @@ func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStateme
 }
 
 func (p *Parser) parseBlockStatementForLoop() *ast.BlockStatement {
+	defer untrace(trace("parseBlockStatementForLoop"))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 
@@ -1780,6 +1864,7 @@ func (p *Parser) parseBlockStatementForLoop() *ast.BlockStatement {
 }
 
 func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
+	defer untrace(trace("parseBlockStatementRepeatLoop"))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 
@@ -1833,6 +1918,7 @@ func isStatementStartKeyword(tok token.TokenType) bool {
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	defer untrace(trace("parseBlockStatement"))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 
@@ -1850,6 +1936,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 }
 
 func (p *Parser) parseFunctionLiteral() ast.Expression {
+	defer untrace(trace("parseFunctionLiteral"))
 	lit := &ast.FunctionLiteral{Token: p.curToken}
 
 	if !p.expectPeek(token.LPAREN) {
@@ -1868,6 +1955,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 }
 
 func (p *Parser) parseFunctionParameters() []*ast.Identifier {
+	defer untrace(trace("parseFunctionParameters"))
 	identifiers := []*ast.Identifier{}
 
 	if p.peekTokenIs(token.RPAREN) {
@@ -1895,12 +1983,14 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 }
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
+	defer untrace(trace("parseCallExpression"))
 	exp := &ast.CallExpression{Token: p.curToken, Function: function}
 	exp.Arguments = p.parseExpressionList(token.RPAREN)
 	return exp
 }
 
 func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
+	defer untrace(trace(fmt.Sprintf("parseExpressionList (until %s)", end)))
 	list := []ast.Expression{}
 	namedArgumentFound := false
 
@@ -1909,9 +1999,8 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 		return list
 	}
 
-	p.nextToken()
-
-	arg := p.parseCallArgument()
+	p.nextToken()                // Consume the opening parenthesis or bracket
+	arg := p.parseCallArgument() // Parse the first argument
 	if _, ok := arg.(*ast.NamedArgument); ok {
 		namedArgumentFound = true
 	} else if _, ok := arg.(*ast.OutputArgument); ok {
@@ -1922,8 +2011,8 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		arg := p.parseCallArgument()
-		isNamed := false
+		arg = p.parseCallArgument() // Parse the next argument
+		var isNamed bool
 		if _, ok := arg.(*ast.NamedArgument); ok {
 			isNamed = true
 		} else if _, ok := arg.(*ast.OutputArgument); ok {
@@ -1939,20 +2028,21 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	}
 
 	if !p.expectPeek(end) {
-		// Error is reported by expectPeek. We return the parsed statement for recovery.
+		return nil
 	}
 
 	return list
 }
 
 func (p *Parser) parseCallArgument() ast.Expression {
+	defer untrace(trace("parseCallArgument"))
 	// Check for named arguments (IDENT := or IDENT =>)
 	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ASSIGN) {
 		// Input argument: In1 := 10
 		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken() // consume IDENT, curToken is now ASSIGN
 		arg := &ast.NamedArgument{Token: p.curToken, Name: name}
-		p.nextToken() // consume ASSIGN, move to expression
+		p.nextToken() // consume ASSIGN
 		arg.Value = p.parseExpression(LOWEST)
 		return arg
 	} else if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ARROW) {
@@ -1960,7 +2050,7 @@ func (p *Parser) parseCallArgument() ast.Expression {
 		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken() // consume IDENT, curToken is now ARROW
 		arg := &ast.OutputArgument{Token: p.curToken, Source: name}
-		p.nextToken() // consume ARROW, move to expression
+		p.nextToken() // consume ARROW
 		arg.Target = p.parseExpression(LOWEST)
 		return arg
 	}
@@ -1970,6 +2060,7 @@ func (p *Parser) parseCallArgument() ast.Expression {
 }
 
 func (p *Parser) parseArrayLiteral() ast.Expression {
+	defer untrace(trace("parseArrayLiteral"))
 	array := &ast.ArrayLiteral{Token: p.curToken}
 
 	array.Elements = p.parseExpressionList(token.RBRACKET)
@@ -1978,6 +2069,7 @@ func (p *Parser) parseArrayLiteral() ast.Expression {
 }
 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
+	defer untrace(trace("parseIndexExpression"))
 	exp := &ast.IndexExpression{Token: p.curToken, Left: left}
 
 	p.nextToken()
@@ -1991,6 +2083,7 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseHashLiteral() ast.Expression {
+	defer untrace(trace("parseHashLiteral"))
 	hash := &ast.HashLiteral{Token: p.curToken}
 	hash.Pairs = make(map[ast.Expression]ast.Expression)
 
@@ -2020,6 +2113,7 @@ func (p *Parser) parseHashLiteral() ast.Expression {
 }
 
 func (p *Parser) parseMacroLiteral() ast.Expression {
+	defer untrace(trace("parseMacroLiteral"))
 	lit := &ast.MacroLiteral{Token: p.curToken}
 
 	if !p.expectPeek(token.LPAREN) {

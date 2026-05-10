@@ -269,6 +269,7 @@ var keywords = map[string]TokenType{
 	"REAL":               REAL,
 	"LREAL":              LREAL,
 	"TIME":               TIME,
+	"D":                  DATE,
 	"DATE":               DATE,
 	"DATE_AND_TIME":      DATE_AND_TIME,
 	"DT":                 DATE_AND_TIME, // Alias for DATE_AND_TIME

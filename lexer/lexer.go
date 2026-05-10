@@ -44,7 +44,7 @@ func (l *Lexer) NextToken() token.Token {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.ARROW, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.ARROW, Literal: literal, Row: startLine, Column: startCol} // Correctly identify '=>'
 		} else {
 			tok = newToken(token.EQ, l.ch, startLine, startCol)
 		}
