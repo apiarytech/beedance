@@ -476,31 +476,34 @@ func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
 func (is *IfStatement) String() string {
 	var out bytes.Buffer
 
-	// Start with the main IF part
-	out.WriteString("IF ") // The Token.Type for the main IfStatement is always IF
+	out.WriteString("IF ")
 	out.WriteString(is.Condition.String())
 	out.WriteString(" THEN ")
-	out.WriteString(is.Consequence.String())
+	if is.Consequence != nil {
+		out.WriteString("\n\t" + is.Consequence.String() + "\n")
+	}
 
 	// Iterate through the ELSIF/ELSE chain
 	currentAlt := is.Alternative
 	for currentAlt != nil {
 		switch alt := currentAlt.(type) {
 		case *IfStatement: // This is an ELSIF clause
-			out.WriteString(" ELSIF ")
+			out.WriteString("ELSIF ")
 			out.WriteString(alt.Condition.String())
 			out.WriteString(" THEN ")
-			out.WriteString(alt.Consequence.String())
+			if alt.Consequence != nil {
+				out.WriteString("\n\t" + alt.Consequence.String() + "\n")
+			}
 			currentAlt = alt.Alternative // Continue to the next alternative in the chain
 		case *BlockStatement: // This is an ELSE clause
-			out.WriteString(" ELSE ")
-			out.WriteString(alt.String())
+			out.WriteString("ELSE\n\t")
+			out.WriteString(alt.String() + "\n")
 			currentAlt = nil // End of the alternative chain
 		default:
 			currentAlt = nil // Unknown alternative type, stop processing
 		}
 	}
-	out.WriteString(" END_IF")
+	out.WriteString("END_IF")
 
 	return out.String()
 }

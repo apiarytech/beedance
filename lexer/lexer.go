@@ -171,16 +171,13 @@ func (l *Lexer) NextToken() token.Token {
 	default:
 		if isLetter(l.ch) {
 			ident := l.readIdentifier()
-			if l.ch == '#' {
-				// This is a typed literal, like DINT#10 or T#5s
+			// After reading an identifier, check if it's a prefix for a typed literal (e.g., "BYTE#...").
+			if l.ch == '#' && isTypedLiteralPrefix(ident) {
 				tok = l.readTypedLiteral(ident, startLine, startCol)
 			} else {
-				tok.Type = token.LookupIdent(strings.ToUpper(ident))
-				// After lookup, if it's still an IDENT, validate it.
+				tok.Type = token.LookupIdent(ident)
 				if tok.Type == token.IDENT && !isValidIdentifier(ident) {
 					tok.Type = token.ILLEGAL
-				} else {
-					tok.Type = token.LookupIdent(ident)
 				}
 				tok.Literal = ident
 			}
@@ -500,16 +497,8 @@ func isOctalDigit(ch byte) bool {
 
 // isValidIdentifier checks for invalid underscore usage according to IEC 61131-3 §2.1.2
 func isValidIdentifier(ident string) bool {
-	if strings.HasPrefix(ident, "__") { // Multiple leading underscores
-		return false
-	}
-	if strings.Contains(ident, "__") { // Multiple embedded underscores
-		return false
-	}
-	if strings.HasSuffix(ident, "_") { // Trailing underscore
-		return false
-	}
-	return true
+	// An identifier cannot contain consecutive underscores or end with an underscore.
+	return !strings.Contains(ident, "__") && !strings.HasSuffix(ident, "_") && !strings.HasPrefix(ident, "__")
 }
 
 func newToken(tokenType token.TokenType, ch byte, position int, col int) token.Token {
@@ -529,5 +518,19 @@ func getDigitCheckFn(base int) func(byte) bool {
 		return isHexDigit
 	default:
 		return func(ch byte) bool { return false } // Should not happen with pre-validation
+	}
+}
+
+// isTypedLiteralPrefix checks if an identifier is a keyword that can prefix a typed literal.
+func isTypedLiteralPrefix(ident string) bool {
+	switch token.LookupIdent(ident) {
+	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
+		token.SINT, token.INT, token.DINT, token.LINT,
+		token.USINT, token.UINT, token.UDINT, token.ULINT,
+		token.REAL, token.LREAL,
+		token.BYTE, token.WORD, token.DWORD, token.LWORD:
+		return true
+	default:
+		return false
 	}
 }

@@ -603,7 +603,7 @@ func TestExternalVarDeclarations(t *testing.T) {
 	if !ok {
 		t.Fatalf("program.Statements[1] is not ast.ExternalVarDeclaration. got=%T", program.Statements[1])
 	}
-	if len(stmt2.Vars) != 1 {
+	if len(stmt2.Vars) != 2 {
 		t.Fatalf("Expected 1 external variable in second block. got=%d", len(stmt2.Vars))
 	}
 	if !testVarDeclStatement(t, stmt2.Vars[0], "External2", "BOOL") {

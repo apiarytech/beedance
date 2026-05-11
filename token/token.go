@@ -65,6 +65,7 @@ const (
 	LBRACKET  = "["
 	PERCENT   = "%"
 	RBRACKET  = "]"
+	HASH      = "#"
 
 	// Keywords
 	TRUE  = "TRUE"
@@ -155,6 +156,7 @@ const (
 	UDINT         = "UDINT"
 	ULINT         = "ULINT"
 	LREAL         = "LREAL"
+	D             = "DATE"
 	DATE          = "DATE"
 	DATE_AND_TIME = "DATE_AND_TIME"
 	DT            = "DT"
@@ -264,15 +266,12 @@ var keywords = map[string]TokenType{
 	"USINT":              USINT,
 	"UINT":               UINT,
 	"UDINT":              UDINT,
-	"ULINT":              ULINT,
-	"T":                  TIME, // Abbreviation for TIME
+	"ULINT":              ULINT, // Abbreviation for TIME
 	"REAL":               REAL,
 	"LREAL":              LREAL,
 	"TIME":               TIME,
-	"D":                  DATE,
 	"DATE":               DATE,
 	"DATE_AND_TIME":      DATE_AND_TIME,
-	"DT":                 DATE_AND_TIME, // Alias for DATE_AND_TIME
 	"TIME_OF_DAY":        TIME_OF_DAY,
 	"TOD":                TIME_OF_DAY, // Alias for TIME_OF_DAY
 	"WSTRING":            WSTRING,

@@ -98,7 +98,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.STRING_LITERAL, p.parseStringLiteral)
 	p.registerPrefix(token.WSTRING_LITERAL, p.parseStringLiteral) // Treat WSTRING as STRING for now
 	p.registerPrefix(token.TIME, p.parseTimeDateLiteral)
-	p.registerPrefix(token.DATE, p.parseTimeDateLiteral)
+	p.registerPrefix(token.DATE, p.parseTimeDateLiteral) // This will handle D# and DATE#
 	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeDateLiteral)
 	// Specific integer types
 	p.registerPrefix(token.SINT, p.parseIntegerLiteral)
@@ -252,10 +252,16 @@ func (p *Parser) ParseProgram() *ast.Program {
 	for !p.curTokenIs(token.EOF) {
 		tracePrint(fmt.Sprintf("Current Token: %s (%s) at %d:%d", p.curToken.Literal, p.curToken.Type, p.curToken.Row, p.curToken.Column))
 		stmt := p.parseStatement()
+		isBlock := isBlockStatement(stmt)
+
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
-		p.nextToken()
+		// Block statements handle their own token advancement to the end token (e.g., END_IF).
+		// For simple statements, we need to advance to the next token here.
+		if !isBlock {
+			p.nextToken()
+		}
 	}
 
 	return program
@@ -426,7 +432,13 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	defer untrace(trace("parseVarBlockStatement"))
 	stmt := &ast.VarBlockDeclaration{Token: p.curToken}
 
-	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
+	// Check for the optional CONSTANT keyword after VAR
+	isConstant := false
+	if p.peekTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // Consume VAR, curToken is now CONSTANT
+	}
+	stmt.Declarations = p.parseVarDeclarations(token.END_VAR, isConstant)
 	p.nextToken()
 	return stmt
 }
@@ -471,7 +483,13 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	defer untrace(trace("parseGlobalVarDeclStatement"))
 	stmt := &ast.GlobalVarDeclaration{Token: p.curToken}
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	// Check for the optional CONSTANT keyword after VAR_GLOBAL
+	isConstant := false
+	if p.peekTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // Consume VAR_GLOBAL, curToken is now CONSTANT
+	}
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, isConstant)
 	p.nextToken() // Consume END_VAR
 	return stmt
 }
@@ -479,7 +497,15 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 	defer untrace(trace("parseExternalVarDeclStatement"))
 	stmt := &ast.ExternalVarDeclaration{Token: p.curToken}
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+
+	// Check for the optional CONSTANT keyword after VAR_EXTERNAL
+	isConstant := false
+	if p.peekTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // Consume VAR_EXTERNAL, curToken is now CONSTANT
+	}
+
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, isConstant)
 	p.nextToken() // Consume END_VAR
 	return stmt
 }
@@ -487,7 +513,7 @@ func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 	defer untrace(trace("parseAccessVarDeclStatement"))
 	stmt := &ast.AccessVarDeclaration{Token: p.curToken}
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, false)
 	p.nextToken() // Consume END_VAR
 	return stmt
 }
@@ -495,7 +521,7 @@ func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 	defer untrace(trace("parseTempVarDeclStatement"))
 	stmt := &ast.TempVarDeclaration{Token: p.curToken}
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, false)
 	p.nextToken()
 	return stmt
 }
@@ -504,7 +530,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	defer untrace(trace("parseConfigVarDeclStatement"))
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, false)
 	p.nextToken()
 	return stmt
 }
@@ -599,13 +625,13 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 	return structDef
 }
 
-func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
+func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant bool) []*ast.VarDeclStatement {
 	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
 
-	isConstant := false
-	isRetain := false
-	isNonRetain := false
+	isConstant := blockIsConstant
+	var isRetain bool
+	var isNonRetain bool
 
 	p.nextToken() // Consume VAR, VAR_INPUT, etc.
 
@@ -994,7 +1020,12 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) parseIdentifier() ast.Expression {
 	defer untrace(trace("parseIdentifier"))
-	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	// Check if this identifier is a prefix for a typed literal (e.g., D#)
+	if p.peekTokenIs(token.HASH) {
+		return p.parseTimeDateLiteral()
+	} else {
+		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
@@ -1248,7 +1279,14 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 
 	precedence := p.curPrecedence()
 	p.nextToken()
-	expression.Right = p.parseExpression(precedence)
+
+	// For right-associative operators like exponentiation, we need to use a slightly lower precedence
+	// to allow the right-hand side to be grouped first. e.g., a ** b ** c -> a ** (b ** c)
+	if expression.Operator == "**" {
+		expression.Right = p.parseExpression(precedence - 1)
+	} else {
+		expression.Right = p.parseExpression(precedence)
+	}
 
 	return expression
 }
@@ -1296,11 +1334,10 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	ifStmt := &ast.IfStatement{Token: p.curToken}
 
 	p.nextToken()
-	ifStmt.Condition = p.parseExpression(LOWEST) // Parse the full condition
+	ifStmt.Condition = p.parseExpression(LOWEST)
 
 	// After parsing the condition, the next token should be THEN.
-	// Improved Error Recovery: Report missing THEN but continue parsing the block.
-	if !p.peekTokenIs(token.THEN) {
+	if !p.expectPeek(token.THEN) {
 		p.specificError("missing 'THEN' in IF statement, got %s instead", p.peekToken.Type)
 		// We don't return, allowing the parser to attempt to parse the consequence.
 	}
@@ -1317,12 +1354,9 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		p.nextToken()
 		newIf.Condition = p.parseExpression(LOWEST)
 
-		// Improved Error Recovery for ELSIF
-		if !p.peekTokenIs(token.THEN) {
+		if !p.expectPeek(token.THEN) {
 			p.specificError("missing 'THEN' in ELSIF statement, got %s instead", p.peekToken.Type)
-			// Continue parsing the consequence
 		}
-
 		p.nextToken() // consume THEN
 		newIf.Consequence = p.parseBlockStatementForIf()
 
@@ -1341,6 +1375,9 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		p.specificError("missing 'END_IF' for IF statement starting at row %d", ifStmt.Token.Row)
 		// Do not return nil. Return the partially parsed statement to allow recovery.
 	}
+
+	// Consume the END_IF token to complete the statement parsing.
+	p.nextToken()
 
 	return ifStmt
 }
@@ -1387,7 +1424,7 @@ func (p *Parser) parseForStatement() ast.Statement {
 	}
 
 	p.nextToken() // Consume DO
-	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
+	stmt.Body = p.parseBlockStatementUntil(token.END_FOR, token.VAR)
 
 	// After parsing the body, p.curToken should be END_FOR. We need to consume it.
 	// parseBlockStatementUntil leaves us on END_FOR, so we just need to consume it.
@@ -1409,7 +1446,7 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 		// Do not return, allow parsing of the body to continue.
 	}
 	p.nextToken() // Consume DO
-	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
+	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE, token.VAR)
 
 	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
 	if !p.curTokenIs(token.END_WHILE) {
@@ -1417,6 +1454,8 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 		// Return the partially parsed statement for better recovery
 		return stmt
 	}
+	// Consume the END_WHILE token to complete the statement parsing.
+	p.nextToken()
 
 	return stmt
 }
@@ -1487,7 +1526,7 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	// Parse optional ELSE block
 	if p.curTokenIs(token.ELSE) {
 		p.nextToken() // consume ELSE
-		stmt.Alternative = p.parseBlockStatementUntil(token.END_CASE)
+		stmt.Alternative = p.parseBlockStatementUntil(token.END_CASE, token.VAR)
 	}
 
 	if !p.curTokenIs(token.END_CASE) {
@@ -1592,7 +1631,10 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 
 	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
+	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION, token.VAR)
+
+	// Consume END_FUNCTION
+	p.nextToken()
 
 	return stmt
 }
@@ -1627,16 +1669,14 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 end_var_parsing:
 
 	// After var blocks, we have the body
-	body := &ast.BlockStatement{Token: p.curToken}
-	body.Statements = []ast.Statement{}
-	for !p.curTokenIs(token.END_FUNCTION_BLOCK) && !p.curTokenIs(token.EOF) {
-		s := p.parseStatement()
-		if s != nil {
-			body.Statements = append(body.Statements, s)
-		}
-		p.nextToken()
+	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK, token.VAR)
+
+	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
+		p.peekError(token.END_FUNCTION_BLOCK)
 	}
-	stmt.Body = body
+
+	// Consume END_FUNCTION_BLOCK
+	p.nextToken() // Consume END_FUNCTION_BLOCK or the token that caused the error
 
 	return stmt
 }
@@ -1671,14 +1711,14 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 end_var_parsing:
 
 	// After var blocks, we have the body
-	body := &ast.BlockStatement{Token: p.curToken}
-	body.Statements = []ast.Statement{}
-	for !p.curTokenIs(token.END_PROGRAM) && !p.curTokenIs(token.EOF) {
-		s := p.parseStatement()
-		body.Statements = append(body.Statements, s)
-		p.nextToken()
+	stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM, token.VAR)
+
+	if !p.curTokenIs(token.END_PROGRAM) {
+		p.peekError(token.END_PROGRAM)
 	}
-	stmt.Body = body
+
+	// Consume END_PROGRAM
+	p.nextToken() // Consume END_PROGRAM or the token that caused the error
 
 	return stmt
 }
@@ -1689,8 +1729,16 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 	if !p.curTokenIs(blockType) {
 		return nil
 	}
+
+	// Check for the optional CONSTANT keyword after VAR
+	isConstant := false
+	if p.peekTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // Consume VAR, curToken is now CONSTANT
+	}
+
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
-	decls := p.parseVarDeclarations(token.END_VAR)
+	decls := p.parseVarDeclarations(token.END_VAR, isConstant)
 	p.nextToken() // Consume END_VAR
 	return decls
 }
@@ -1706,10 +1754,13 @@ func (p *Parser) parseActionStatement() ast.Statement {
 
 	p.nextToken() // Consume the action name identifier
 
-	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION)
+	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION, token.VAR)
 
 	if !p.curTokenIs(token.END_ACTION) {
 		p.peekError(token.END_ACTION)
+	} else {
+		// Consume END_ACTION
+		p.nextToken()
 	}
 	return stmt
 }
@@ -1831,11 +1882,14 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 	return stmt
 }
 
-func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
+func (p *Parser) parseBlockStatementUntil(end token.TokenType, recoveryToken token.TokenType) *ast.BlockStatement {
 	defer untrace(trace(fmt.Sprintf("parseBlockStatementUntil (until %s)", end)))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 	//p.nextToken()
+	if isStatementStartKeyword(p.curToken.Type) {
+		p.peekError(end)
+	}
 
 	for !p.curTokenIs(end) && !p.curTokenIs(token.EOF) {
 		stmt := p.parseStatement()
@@ -1843,6 +1897,9 @@ func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStateme
 			block.Statements = append(block.Statements, stmt)
 		}
 		p.nextToken()
+		if isStatementStartKeyword(p.curToken.Type) {
+			break
+		}
 	}
 	return block
 }
@@ -1889,6 +1946,20 @@ func isStatementEndToken(tok token.TokenType) bool {
 		token.END_WHILE,
 		token.END_REPEAT,
 		token.END_CASE:
+		return true
+	default:
+		return false
+	}
+}
+
+// isBlockStatement checks if a statement is a block-level statement
+// that manages its own token consumption until its end token.
+func isBlockStatement(stmt ast.Statement) bool {
+	switch stmt.(type) {
+	case *ast.IfStatement, *ast.ForLoopStatement, *ast.WhileStatement,
+		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration,
+		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration,
+		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement:
 		return true
 	default:
 		return false
