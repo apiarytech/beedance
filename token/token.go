@@ -18,6 +18,7 @@ type Token struct {
 	Literal string
 	Row     int
 	Column  int
+	Pos     int
 }
 
 const (

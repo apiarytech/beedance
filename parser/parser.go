@@ -255,9 +255,18 @@ func (p *Parser) ParseProgram() *ast.Program {
 	defer untrace(trace("ParseProgram"))
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
+	lastPosition := -1 // Track the last token position to detect infinite loops
 
 	for !p.curTokenIs(token.EOF) {
 		tracePrint(fmt.Sprintf("Current Token: %s (%s) at %d:%d", p.curToken.Literal, p.curToken.Type, p.curToken.Row, p.curToken.Column))
+
+		// Infinite loop detection: if the token position hasn't changed since the last iteration, we're stuck.
+		if p.curToken.Pos == lastPosition {
+			p.errors = append(p.errors, fmt.Sprintf("Infinite loop detected at row %d, column %d. Parser is not advancing past token %s (%s).", p.curToken.Row, p.curToken.Column, p.curToken.Type, p.curToken.Literal))
+			break // Break out of the loop to prevent the program from hanging.
+		}
+		lastPosition = p.curToken.Pos
+
 		numErrorsBefore := len(p.errors)
 		stmt := p.parseStatement()
 
@@ -265,12 +274,19 @@ func (p *Parser) ParseProgram() *ast.Program {
 			program.Statements = append(program.Statements, stmt)
 		}
 
-		// If no new errors were added, we advance the token.
-		// If errors were added, we assume the parsing function handled recovery
-		// and positioned the token correctly for the next statement, so we don't advance.
+		// Decide whether to advance the token.
 		numErrorsAfter := len(p.errors)
 		if numErrorsAfter == numErrorsBefore {
+			// No new errors, so we are confident we can advance.
 			p.nextToken()
+		} else {
+			// An error occurred. As a recovery strategy, if the current token is a semicolon,
+			// we can often safely consume it to move on to the next statement.
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken()
+			} else if isStatementEndToken(p.curToken.Type) {
+				p.nextToken()
+			}
 		}
 	}
 
@@ -474,14 +490,14 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	}
 
 	if p.peekTokenIs(token.ASSIGN) {
-		p.errors = append(p.errors, fmt.Sprintf("initialization is not allowed for struct members at row %d, column %d", p.peekToken.Row, p.peekToken.Column))
-		// We can try to recover by skipping the initialization part to continue parsing.
-		for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.END_STRUCT) && !p.peekTokenIs(token.EOF) {
-			p.nextToken()
-		}
+		p.nextToken() // consume data type, curToken is now ':='
+		p.nextToken() // consume ':=', move to expression start
+		stmt.Value = p.parseExpression(LOWEST)
 	}
 
-	p.expectPeek(token.SEMICOLON) // Consume semicolon
+	if !p.expectPeek(token.SEMICOLON) { // Consume semicolon for a valid declaration
+		// Allow recovery even if semicolon is missing
+	}
 	return stmt
 }
 
@@ -719,9 +735,9 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 
 		if !p.expectPeek(token.COLON) { // After this, curToken is ':'
 			return nil
+		} else {
+			p.nextToken() // Consume ':', move to data type
 		}
-
-		p.nextToken() // Consume ':', move to data type
 		dataType := p.parseTypeSpecifier()
 		if dataType == nil {
 			return nil
@@ -751,8 +767,11 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 		}
 
 		// After parsing the declaration, we should be at the semicolon.
-		p.expectPeek(token.SEMICOLON) // Consume the semicolon
-		p.nextToken()                 // Move to the start of the next declaration or end token
+		if !p.expectPeek(token.SEMICOLON) { // Consume the semicolon
+			//Do not consume but produce error, then continue.
+		} else {
+			p.nextToken() // Move to the start of the next declaration or end token
+		}
 	}
 	return varDecls
 }
@@ -909,6 +928,8 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 	if !p.curTokenIs(token.RPAREN) {
 		return nil
 	}
+
+	p.nextToken() // Consume ')'
 
 	return stmt
 }
@@ -1386,11 +1407,11 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 	// After parsing the condition, the next token should be THEN.
 	if !p.expectPeek(token.THEN) {
-		p.specificError("missing 'THEN' in IF statement, got %s instead", p.peekToken.Type)
 		// We don't return, allowing the parser to attempt to parse the consequence.
+	} else {
+		p.nextToken() // consume THEN
 	}
 
-	p.nextToken() // consume THEN
 	ifStmt.Consequence = p.parseBlockStatementForIf()
 
 	// Keep track of the current statement for chaining ELSIF

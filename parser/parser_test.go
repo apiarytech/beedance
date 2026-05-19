@@ -208,8 +208,8 @@ func TestStructTypeDeclaration(t *testing.T) {
 	input := `
 		TYPE
 			MyStruct : STRUCT
-				Field1 : INT;
-				Field2 : BOOL;
+				Field1 : INT := 10;
+				Field2 : BOOL := TRUE;
 			END_STRUCT;
 		END_TYPE
 	`
@@ -247,37 +247,14 @@ func TestStructTypeDeclaration(t *testing.T) {
 
 	// Test first member
 	member1 := structDef.Members[0]
-	if !testVarDeclStatement(t, member1, "Field1", "INT") {
+	if !testVarDeclStatement(t, member1, "Field1", "INT") || !testLiteralExpression(t, member1.Value, 10) {
 		return
 	}
 
 	// Test second member
 	member2 := structDef.Members[1]
-	if !testVarDeclStatement(t, member2, "Field2", "BOOL") {
+	if !testVarDeclStatement(t, member2, "Field2", "BOOL") || !testLiteralExpression(t, member2.Value, true) {
 		return
-	}
-}
-
-func TestStructMemberInitializationError(t *testing.T) {
-	input := `
-		TYPE
-			MyStruct : STRUCT
-				Field1 : INT;
-				Field2 : BOOL := TRUE;
-			END_STRUCT;
-		END_TYPE
-	`
-	l := lexer.New(input)
-	p := New(l)
-	p.ParseProgram()
-
-	if len(p.Errors()) == 0 {
-		t.Fatalf("Expected an error for struct member initialization, but got none")
-	}
-
-	expectedError := "initialization is not allowed for struct members"
-	if !strings.Contains(p.Errors()[0], expectedError) {
-		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 }
 
@@ -2588,11 +2565,9 @@ func TestComments(t *testing.T) {
 	}
 }
 
-func TestNestedComments(t *testing.T) {
+func TestNestedCommentsAreIllegal(t *testing.T) {
 	input := `
-		VAR
-			myVar : INT; (* outer (* middle (* inner *) middle *) outer *)
-		END_VAR
+		(* outer (* middle *) outer *)
 	`
 	l := lexer.New(input)
 	p := New(l)
@@ -2603,9 +2578,7 @@ func TestNestedComments(t *testing.T) {
 	}
 
 	expectedError := "illegal character \"nested comment\""
-	if !strings.Contains(p.Errors()[0], expectedError) {
-		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
-	}
+	assertErrorContains(t, p.Errors(), expectedError)
 }
 
 func TestUnterminatedCommentErrorRecovery(t *testing.T) {
@@ -2681,14 +2654,12 @@ func TestMissingThenErrorRecovery(t *testing.T) {
 	p := New(l)
 	program := p.ParseProgram()
 
-	if len(p.Errors()) != 4 {
-		t.Fatalf("Expected parser to have 4 errors, but it had %d: %v", len(p.Errors()), p.Errors())
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 errors, but it had %d: %v", len(p.Errors()), p.Errors())
 	}
 
 	expectedError := "expected next token to be THEN, got IDENT instead at row 3, column 4"
-	expectedError2 := "no prefix parse function for ; found"
 	assertErrorContains(t, p.Errors(), expectedError)
-	assertErrorContains(t, p.Errors(), expectedError2)
 
 	// Check that the parser recovered and parsed the full IF statement
 	if len(program.Statements) != 1 {

@@ -37,128 +37,129 @@ func (l *Lexer) NextToken() token.Token {
 	l.skipWhitespace()
 	startLine := l.line
 	startCol := l.col
-
+	startPos := l.position // Capture the absolute start position of the token
 	switch l.ch {
 	case '=':
 		if l.peekChar() == '>' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.ARROW, Literal: literal, Row: startLine, Column: startCol} // Correctly identify '=>'
+			tok = token.Token{Type: token.ARROW, Literal: literal, Row: startLine, Column: startCol, Pos: startPos} // Correctly identify '=>'
 		} else {
-			tok = newToken(token.EQ, l.ch, startLine, startCol)
+			tok = newToken(token.EQ, l.ch, startLine, startCol, startPos)
 		}
 	case '+':
-		tok = newToken(token.PLUS, l.ch, startLine, startCol)
+		tok = newToken(token.PLUS, l.ch, startLine, startCol, startPos)
 	case '-':
-		tok = newToken(token.MINUS, l.ch, startLine, startCol)
+		tok = newToken(token.MINUS, l.ch, startLine, startCol, startPos)
 	case '/':
 		if l.peekChar() == '/' {
 			// This is a single-line comment, skip to the end of the line
 			l.skipSingleLineComment()
 			return l.NextToken()
 		}
-		tok = newToken(token.SLASH, l.ch, startLine, startCol)
+		tok = newToken(token.SLASH, l.ch, startLine, startCol, startPos)
 	case '*':
 		if l.peekChar() == '*' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.EXPONENT, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.EXPONENT, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else {
-			tok = newToken(token.ASTERISK, l.ch, startLine, startCol)
+			tok = newToken(token.ASTERISK, l.ch, startLine, startCol, startPos)
 		}
 	case '<':
 		if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.LE, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.LE, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else if l.peekChar() == '>' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.NEQ, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.NEQ, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else {
-			tok = newToken(token.LT, l.ch, startLine, startCol)
+			tok = newToken(token.LT, l.ch, startLine, startCol, startPos)
 		}
 	case '&':
-		tok = newToken(token.AMPERSAND, l.ch, startLine, startCol)
+		tok = newToken(token.AMPERSAND, l.ch, startLine, startCol, startPos)
 	case '>':
 		if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.GE, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.GE, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else {
-			tok = newToken(token.GT, l.ch, startLine, startCol)
+			tok = newToken(token.GT, l.ch, startLine, startCol, startPos)
 		}
 	case ';':
-		tok = newToken(token.SEMICOLON, l.ch, startLine, startCol)
+		tok = newToken(token.SEMICOLON, l.ch, startLine, startCol, startPos)
 	case ':':
 		if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.ASSIGN, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.ASSIGN, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else {
-			tok = newToken(token.COLON, l.ch, startLine, startCol)
+			tok = newToken(token.COLON, l.ch, startLine, startCol, startPos)
 		}
 	case ',':
-		tok = newToken(token.COMMA, l.ch, startLine, startCol)
+		tok = newToken(token.COMMA, l.ch, startLine, startCol, startPos)
 	case '{':
-		tok = newToken(token.LBRACE, l.ch, startLine, startCol)
+		tok = newToken(token.LBRACE, l.ch, startLine, startCol, startPos)
 	case '}':
-		tok = newToken(token.RBRACE, l.ch, startLine, startCol)
+		tok = newToken(token.RBRACE, l.ch, startLine, startCol, startPos)
 	case '(':
 		if l.peekChar() == '*' {
 			// This is the start of a comment, skip it and get the next token
 			terminated, nested := l.skipComment()
 			if !terminated {
-				return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol}
+				return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol, Pos: startPos}
 			}
 			if nested {
-				tok = token.Token{Type: token.ILLEGAL, Literal: "nested comment", Row: startLine, Column: startCol}
-				l.readChar() // Consume the illegal token to allow parser to continue
-				return tok
+				return token.Token{Type: token.ILLEGAL, Literal: "nested comment", Row: startLine, Column: startCol, Pos: startPos}
 			}
 			return l.NextToken() // Get the token after the comment
 		}
-		tok = newToken(token.LPAREN, l.ch, startLine, startCol)
+		tok = newToken(token.LPAREN, l.ch, startLine, startCol, startPos)
 	case ')':
-		tok = newToken(token.RPAREN, l.ch, startLine, startCol)
+		tok = newToken(token.RPAREN, l.ch, startLine, startCol, startPos)
 	case '"':
 		tok.Type = token.WSTRING_LITERAL
 		tok.Literal, tok.Type = l.readString('"')
 		tok.Row = startLine
 		tok.Column = startCol
+		tok.Pos = startPos
 	case '\'':
 		tok.Type = token.STRING_LITERAL
 		tok.Literal, tok.Type = l.readString('\'')
 		tok.Row = startLine
 		tok.Column = startCol
+		tok.Pos = startPos
 	case '[':
-		tok = newToken(token.LBRACKET, l.ch, startLine, startCol)
+		tok = newToken(token.LBRACKET, l.ch, startLine, startCol, startPos)
 	case ']':
-		tok = newToken(token.RBRACKET, l.ch, startLine, startCol)
+		tok = newToken(token.RBRACKET, l.ch, startLine, startCol, startPos)
 	case 0:
 		tok.Type = token.EOF
 		tok.Literal = ""
 		tok.Row = startLine
 		tok.Column = startCol
+		tok.Pos = startPos
 	case '.':
 		if l.peekChar() == '.' {
 			ch := l.ch
 			l.readChar()
 			literal := string(ch) + string(l.ch)
-			tok = token.Token{Type: token.RANGE, Literal: literal, Row: startLine, Column: startCol}
+			tok = token.Token{Type: token.RANGE, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
 		} else if isDigit(l.peekChar()) {
-			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol)
+			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol, startPos)
 		} else {
 			// A single dot is not a valid token on its own in IEC 61131-3,
 			// except as a structure member accessor, which is handled by the parser.
 			// We'll tokenize it as DOT and let the parser decide its validity.
-			tok = newToken(token.DOT, l.ch, startLine, startCol)
+			tok = newToken(token.DOT, l.ch, startLine, startCol, startPos)
 		}
 	case '%':
 		if isLetter(l.peekChar()) {
@@ -167,13 +168,14 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Literal = l.readDirectVariable()
 			return tok // readDirectVariable advances the lexer, so we return early
 		}
-		tok = newToken(token.ILLEGAL, l.ch, startLine, startCol)
+		tok = newToken(token.ILLEGAL, l.ch, startLine, startCol, startPos)
 	default:
 		if isLetter(l.ch) {
 			ident := l.readIdentifier()
 			tok.Literal = ident
 			tok.Row = startLine
 			tok.Column = startCol
+			tok.Pos = startPos
 
 			// Check for typed literals (e.g., "INT#10", "D#2026-01-01").
 			// This is the only context where single-letter identifiers like D, T, DT, TOD
@@ -197,9 +199,10 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Type = tokType
 			tok.Row = startLine
 			tok.Column = startCol
+			tok.Pos = startPos
 			return tok
 		} else {
-			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol)
+			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol, startPos)
 
 		}
 	}
@@ -207,35 +210,30 @@ func (l *Lexer) NextToken() token.Token {
 	return tok
 }
 
+// skipComment scans through the input until it finds the comment termination characters '*)'.
 func (l *Lexer) skipComment() (terminated bool, nested bool) {
-	nestingLevel := 1
 	isNested := false
 	l.readChar() // consume '('
 	l.readChar() // consume '*'
 
-	for nestingLevel > 0 && l.ch != 0 {
+	for l.ch != 0 {
+		// Check for nested comment start
 		if l.ch == '(' && l.peekChar() == '*' {
-			l.readChar()
-			l.readChar()
 			isNested = true
-			nestingLevel++
-			continue
+			// We've found a nested comment, but we continue scanning for the end
+			// to allow the lexer to find its place. The caller will report the error.
 		}
 
 		if l.ch == '*' && l.peekChar() == ')' {
 			l.readChar()
 			l.readChar()
-			nestingLevel--
-			continue
+			return true, isNested // Terminated successfully. Report if nesting was found.
 		}
 		l.readChar()
 	}
 
-	if nestingLevel > 0 {
-		return false, isNested
-	}
-
-	return true, isNested
+	// If we reach here, it means l.ch is 0 (EOF) but we haven't found '*)'
+	return false, isNested
 }
 
 func (l *Lexer) skipSingleLineComment() {
@@ -392,7 +390,7 @@ func (l *Lexer) readTypedLiteral(typePart string, startLine int, startCol int) t
 		l.readTimeDatePart(typeKeyword) // Pass typeKeyword for specific validation
 	default:
 		// If the type is not a known keyword for typed literals, it's an error.
-		return token.Token{Type: token.ILLEGAL, Literal: typePart, Row: startLine, Column: startCol}
+		return token.Token{Type: token.ILLEGAL, Literal: typePart, Row: startLine, Column: startCol, Pos: startPos}
 	}
 
 	literal := l.input[startPos:l.position]
@@ -508,8 +506,8 @@ func isValidIdentifier(ident string) bool {
 	return !strings.Contains(ident, "__") && !strings.HasSuffix(ident, "_") && !strings.HasPrefix(ident, "__")
 }
 
-func newToken(tokenType token.TokenType, ch byte, position int, col int) token.Token {
-	return token.Token{Type: tokenType, Literal: string(ch), Row: position, Column: col}
+func newToken(tokenType token.TokenType, ch byte, row int, col int, pos int) token.Token {
+	return token.Token{Type: tokenType, Literal: string(ch), Row: row, Column: col, Pos: pos}
 }
 
 // getDigitCheckFn returns a function to validate digits for a given base.
