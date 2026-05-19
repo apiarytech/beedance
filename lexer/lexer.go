@@ -171,18 +171,25 @@ func (l *Lexer) NextToken() token.Token {
 	default:
 		if isLetter(l.ch) {
 			ident := l.readIdentifier()
-			// After reading an identifier, check if it's a prefix for a typed literal (e.g., "BYTE#...").
-			if l.ch == '#' && isTypedLiteralPrefix(ident) {
-				tok = l.readTypedLiteral(ident, startLine, startCol)
-			} else {
-				tok.Type = token.LookupIdent(ident)
-				if tok.Type == token.IDENT && !isValidIdentifier(ident) {
-					tok.Type = token.ILLEGAL
-				}
-				tok.Literal = ident
-			}
+			tok.Literal = ident
 			tok.Row = startLine
 			tok.Column = startCol
+
+			// Check for typed literals (e.g., "INT#10", "D#2026-01-01").
+			// This is the only context where single-letter identifiers like D, T, DT, TOD
+			// should be treated as keywords.
+			if l.ch == '#' {
+				// It's a typed literal like D#..., INT#..., etc.
+				tok = l.readTypedLiteral(ident, startLine, startCol) // This sets the correct token type (e.g., DATE, INT)
+			} else {
+				// Not followed by '#'. Check if it's a date/time abbreviation that should be an IDENT.
+				if isTimeDateAbbreviation(ident) {
+					tok.Type = token.IDENT
+				} else {
+					// It's a regular keyword (VAR, IF) or an identifier.
+					tok.Type = token.LookupIdent(ident)
+				}
+			}
 			return tok
 		} else if isDigit(l.ch) {
 			literal, tokType := l.readNumber()
@@ -523,7 +530,8 @@ func getDigitCheckFn(base int) func(byte) bool {
 
 // isTypedLiteralPrefix checks if an identifier is a keyword that can prefix a typed literal.
 func isTypedLiteralPrefix(ident string) bool {
-	switch token.LookupIdent(ident) {
+	// Check against both the full keyword and its abbreviation
+	switch token.LookupIdent(strings.ToUpper(ident)) {
 	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
 		token.SINT, token.INT, token.DINT, token.LINT,
 		token.USINT, token.UINT, token.UDINT, token.ULINT,
@@ -533,4 +541,15 @@ func isTypedLiteralPrefix(ident string) bool {
 	default:
 		return false
 	}
+}
+
+// isTimeDateAbbreviation checks if an identifier is one of the special
+// single- or two-letter abbreviations for date/time types.
+func isTimeDateAbbreviation(ident string) bool {
+	upper := strings.ToUpper(ident)
+	switch upper {
+	case "D", "T", "DT", "TOD":
+		return true
+	}
+	return false
 }

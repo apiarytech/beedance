@@ -87,6 +87,7 @@ type VarDeclStatement struct {
 	IsNonRetain   bool
 	IsRisingEdge  bool
 	IsFallingEdge bool
+	AccessType    string // "READ_ONLY", "READ_WRITE", or ""
 }
 
 func (vds *VarDeclStatement) statementNode()       {}
@@ -510,9 +511,8 @@ func (is *IfStatement) String() string {
 
 type ForLoopStatement struct {
 	Token      token.Token // The 'FOR' token
-	Identifier *Identifier
-	StartValue Expression
-	EndValue   Expression
+	ControlVar *AssignmentStatement
+	EndValue   Expression // The value to iterate TO
 	StepValue  Expression // Can be nil for default step of 1
 	Body       *BlockStatement
 }
@@ -522,7 +522,21 @@ func (fls *ForLoopStatement) Pos() (int, int)      { return fls.Token.Row, fls.T
 func (fls *ForLoopStatement) TokenLiteral() string { return fls.Token.Literal }
 func (fls *ForLoopStatement) String() string {
 	// String representation for debugging
-	return "FOR..."
+	var out bytes.Buffer
+	out.WriteString("FOR ")
+	out.WriteString(fls.ControlVar.String())
+	out.WriteString(" TO ")
+	out.WriteString(fls.EndValue.String())
+	if fls.StepValue != nil {
+		out.WriteString(" BY ")
+		out.WriteString(fls.StepValue.String())
+	}
+	out.WriteString(" DO ")
+	if fls.Body != nil {
+		out.WriteString(fls.Body.String())
+	}
+	out.WriteString(" END_FOR")
+	return out.String()
 }
 
 type WhileStatement struct {

@@ -32,6 +32,13 @@ const (
 	STRING_LITERAL  = "STRING_LITERAL"
 	WSTRING_LITERAL = "WSTRING_LITERAL"
 	TIME            = "TIME"
+	T               = "TIME"
+	D               = "DATE"
+	DATE            = "DATE"
+	DATE_AND_TIME   = "DATE_AND_TIME"
+	DT              = "DT"
+	TOD             = "TOD"
+	TIME_OF_DAY     = "TIME_OF_DAY"
 
 	UNTERMINATED_STRING  = "UNTERMINATED_STRING"
 	UNTERMINATED_COMMENT = "UNTERMINATED_COMMENT"
@@ -94,6 +101,8 @@ const (
 	RETAIN            = "RETAIN"
 	NON_RETAIN        = "NON_RETAIN"
 	CONSTANT          = "CONSTANT"
+	READ_ONLY         = "READ_ONLY"
+	READ_WRITE        = "READ_WRITE"
 	IF                = "IF"
 	THEN              = "THEN"
 	ELSE              = "ELSE"
@@ -149,26 +158,20 @@ const (
 	BOOL = "BOOL"
 	SINT = "SINT"
 
-	DINT          = "DINT"
-	LINT          = "LINT"
-	USINT         = "USINT"
-	UINT          = "UINT"
-	UDINT         = "UDINT"
-	ULINT         = "ULINT"
-	LREAL         = "LREAL"
-	D             = "DATE"
-	DATE          = "DATE"
-	DATE_AND_TIME = "DATE_AND_TIME"
-	DT            = "DT"
-	TOD           = "TOD"
-	TIME_OF_DAY   = "TIME_OF_DAY"
-	WSTRING       = "WSTRING"
-	BYTE          = "BYTE"
-	WORD          = "WORD"
-	DWORD         = "DWORD"
-	LWORD         = "LWORD"
-	ARRAY         = "ARRAY"
-	STRING        = "STRING"
+	DINT    = "DINT"
+	LINT    = "LINT"
+	USINT   = "USINT"
+	UINT    = "UINT"
+	UDINT   = "UDINT"
+	ULINT   = "ULINT"
+	LREAL   = "LREAL"
+	WSTRING = "WSTRING"
+	BYTE    = "BYTE"
+	WORD    = "WORD"
+	DWORD   = "DWORD"
+	LWORD   = "LWORD"
+	ARRAY   = "ARRAY"
+	STRING  = "STRING"
 )
 
 // Task-specific keywords
@@ -199,6 +202,8 @@ var keywords = map[string]TokenType{
 	"RETAIN":             RETAIN,
 	"NON_RETAIN":         NON_RETAIN,
 	"CONSTANT":           CONSTANT,
+	"READ_ONLY":          READ_ONLY,
+	"READ_WRITE":         READ_WRITE,
 	"IF":                 IF,
 	"THEN":               THEN,
 	"ELSE":               ELSE,
@@ -269,7 +274,10 @@ var keywords = map[string]TokenType{
 	"ULINT":              ULINT, // Abbreviation for TIME
 	"REAL":               REAL,
 	"LREAL":              LREAL,
+	"T":                  TIME,
+	"DT":                 DATE_AND_TIME,
 	"TIME":               TIME,
+	"D":                  DATE,
 	"DATE":               DATE,
 	"DATE_AND_TIME":      DATE_AND_TIME,
 	"TIME_OF_DAY":        TIME_OF_DAY,
