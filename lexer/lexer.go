@@ -309,11 +309,14 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 
 		// Check for a fractional part in a based literal (e.g., 16#A.B)
 		if l.ch == '.' {
-			// According to IEC 61131-3, based literals are only for integers (bit strings).
-			// However, some extensions might support this. We'll flag it as illegal for now.
-			// To support it, we would change tokType to REAL and continue parsing.
-			// For now, we stop here and let the parser report an error on the '.'
-			return l.input[position:l.position], token.ILLEGAL
+			// This is a non-standard extension for based real literals.
+			tokType = token.REAL
+			l.readChar() // consume '.'
+			// Continue reading the fractional part based on the same base.
+			for digitCheckFn(l.ch) || l.ch == '_' {
+				l.readChar()
+			}
+			return l.input[position:l.position], tokType
 		}
 
 		// Check for an exponent part, which is not allowed for based literals

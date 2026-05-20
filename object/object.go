@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type ObjectType string
 
 const (
 	INTEGER_OBJ                 = "INTEGER"
+	LREAL_OBJ                   = "LREAL"
 	REAL_OBJ                    = "REAL"
 	BOOLEAN_OBJ                 = "BOOLEAN"
 	NULL_OBJ                    = "NULL"
@@ -30,11 +32,16 @@ const (
 	ERROR_OBJ                   = "ERROR"
 	FUNCTION_OBJ                = "FUNCTION"
 	STRING_OBJ                  = "STRING"
+	WSTRING_OBJ                 = "WSTRING"
 	BUILTIN_OBJ                 = "BUILTIN"
 	ARRAY_OBJ                   = "ARRAY"
 	HASH_OBJ                    = "HASH"
 	TIME_OBJ                    = "TIME"
 	DATE_OBJ                    = "DATE"
+	LWORD_OBJ                   = "LWORD"
+	DWORD_OBJ                   = "DWORD"
+	WORD_OBJ                    = "WORD"
+	BYTE_OBJ                    = "BYTE"
 	TIME_OF_DAY_OBJ             = "TIME_OF_DAY"
 	DATE_AND_TIME_OBJ           = "DATE_AND_TIME"
 	BITSTRING_OBJ               = "BITSTRING"
@@ -44,6 +51,8 @@ const (
 	STEP_OBJ                    = "STEP"
 	TRANSITION_OBJ              = "TRANSITION"
 	FUNCTION_BLOCK_INSTANCE_OBJ = "FUNCTION_BLOCK_INSTANCE"
+	ENUMERATED_TYPE_OBJ         = "ENUMERATED_TYPE"
+	ENUMERATED_VALUE_OBJ        = "ENUMERATED_VALUE"
 )
 
 // Object is the interface that all objects in the Monkey language must implement.
@@ -79,6 +88,14 @@ type Real struct {
 
 func (r *Real) Type() ObjectType { return REAL_OBJ }
 func (r *Real) Inspect() string  { return fmt.Sprintf("%f", r.Value) }
+
+// LReal objects store 64-bit floating-point numbers (long reals).
+type LReal struct {
+	Value float64
+}
+
+func (lr *LReal) Type() ObjectType { return LREAL_OBJ }
+func (lr *LReal) Inspect() string  { return fmt.Sprintf("%f", lr.Value) }
 
 // Boolean objects store boolean values.
 type Boolean struct {
@@ -117,6 +134,14 @@ type String struct {
 
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
+
+// WString objects store wide-character string values.
+type WString struct {
+	Value string // Internally represented as a Go string, but treated as wide characters.
+}
+
+func (ws *WString) Type() ObjectType { return WSTRING_OBJ }
+func (ws *WString) Inspect() string  { return ws.Value }
 
 // BuiltinFunction is the type for a built-in function.
 type BuiltinFunction func(args ...Object) Object
@@ -173,10 +198,57 @@ func (b *Boolean) HashKey() HashKey {
 	return HashKey{Type: b.Type(), Value: value}
 }
 
+func (r *Real) HashKey() HashKey {
+	h := fnv.New64a()
+	h.Write([]byte(fmt.Sprintf("%f", r.Value)))
+	return HashKey{Type: r.Type(), Value: h.Sum64()}
+}
+
+func (lr *LReal) HashKey() HashKey {
+	return HashKey{Type: lr.Type(), Value: math.Float64bits(lr.Value)}
+}
+
 func (s *String) HashKey() HashKey {
 	h := fnv.New64a()
 	h.Write([]byte(s.Value))
 	return HashKey{Type: s.Type(), Value: h.Sum64()}
+}
+
+func (ws *WString) HashKey() HashKey {
+	h := fnv.New64a()
+	h.Write([]byte(ws.Value)) // Note: Hashing is based on byte representation.
+	return HashKey{Type: ws.Type(), Value: h.Sum64()}
+}
+
+// EnumeratedType represents the definition of an enumerated type.
+type EnumeratedType struct {
+	Name   string
+	Values map[string]*EnumeratedValue
+}
+
+func (et *EnumeratedType) Type() ObjectType { return ENUMERATED_TYPE_OBJ }
+func (et *EnumeratedType) Inspect() string {
+	var out bytes.Buffer
+	vals := []string{}
+	for valName := range et.Values {
+		vals = append(vals, valName)
+	}
+	out.WriteString(fmt.Sprintf("ENUM(%s: %s)", et.Name, strings.Join(vals, ", ")))
+	return out.String()
+}
+
+// EnumeratedValue represents a single value from an enumerated type.
+type EnumeratedValue struct {
+	TypeName string
+	Value    string
+}
+
+func (ev *EnumeratedValue) Type() ObjectType { return ENUMERATED_VALUE_OBJ }
+func (ev *EnumeratedValue) Inspect() string  { return fmt.Sprintf("%s#%s", ev.TypeName, ev.Value) }
+func (ev *EnumeratedValue) HashKey() HashKey {
+	h := fnv.New64a()
+	h.Write([]byte(ev.TypeName + "#" + ev.Value))
+	return HashKey{Type: ev.Type(), Value: h.Sum64()}
 }
 
 // HashPair stores a key-value pair in a hash map.
@@ -262,6 +334,42 @@ func (bs *BitString) Inspect() string {
 	}
 }
 
+// Byte objects store 8-bit unsigned integers.
+type Byte struct {
+	Value byte
+}
+
+func (b *Byte) Type() ObjectType { return BYTE_OBJ }
+func (b *Byte) Inspect() string  { return fmt.Sprintf("BYTE#16#%X", b.Value) }
+func (b *Byte) HashKey() HashKey { return HashKey{Type: b.Type(), Value: uint64(b.Value)} }
+
+// Word objects store 16-bit unsigned integers.
+type Word struct {
+	Value uint16
+}
+
+func (w *Word) Type() ObjectType { return WORD_OBJ }
+func (w *Word) Inspect() string  { return fmt.Sprintf("WORD#16#%X", w.Value) }
+func (w *Word) HashKey() HashKey { return HashKey{Type: w.Type(), Value: uint64(w.Value)} }
+
+// DWord objects store 32-bit unsigned integers.
+type DWord struct {
+	Value uint32
+}
+
+func (dw *DWord) Type() ObjectType { return DWORD_OBJ }
+func (dw *DWord) Inspect() string  { return fmt.Sprintf("DWORD#16#%X", dw.Value) }
+func (dw *DWord) HashKey() HashKey { return HashKey{Type: dw.Type(), Value: uint64(dw.Value)} }
+
+// LWord objects store 64-bit unsigned integers.
+type LWord struct {
+	Value uint64
+}
+
+func (lw *LWord) Type() ObjectType { return LWORD_OBJ }
+func (lw *LWord) Inspect() string  { return fmt.Sprintf("LWORD#16#%X", lw.Value) }
+func (lw *LWord) HashKey() HashKey { return HashKey{Type: lw.Type(), Value: lw.Value} }
+
 // Quote objects wrap an AST node.
 type Quote struct {
 	Node ast.Node
@@ -339,8 +447,28 @@ type Function struct {
 
 func (f *Function) Type() ObjectType { return FUNCTION_OBJ }
 func (f *Function) Inspect() string {
-	// Simplified inspect for now
-	return fmt.Sprintf("FUNCTION(%s)", f.Name.Value)
+	var out bytes.Buffer
+
+	out.WriteString("FUNCTION ")
+	out.WriteString(f.Name.Value)
+	out.WriteString(" (")
+
+	var varDecls []string
+	for _, v := range f.VarInputs {
+		varDecls = append(varDecls, v.String())
+	}
+	for _, v := range f.VarOutputs {
+		varDecls = append(varDecls, v.String())
+	}
+	for _, v := range f.VarInOuts {
+		varDecls = append(varDecls, v.String())
+	}
+
+	out.WriteString(strings.Join(varDecls, ", "))
+
+	out.WriteString(")")
+
+	return out.String()
 }
 
 // FunctionBlockInstance represents an instantiated function block.

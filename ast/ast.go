@@ -98,7 +98,7 @@ func (vds *VarDeclStatement) String() string {
 
 	// Only add the block type keyword if it's part of the token,
 	// to correctly format struct members and other declarations.
-	if vds.Token.Type == token.VAR {
+	if vds.Token.Type >= token.VAR && vds.Token.Type <= token.VAR_CONFIG {
 		out.WriteString(vds.TokenLiteral() + " ")
 	}
 	out.WriteString(vds.Name.String())
@@ -377,6 +377,42 @@ func (rl *RealLiteral) String() string {
 	return rl.Token.Literal
 }
 
+// LRealLiteral represents a literal LREAL value.
+type LRealLiteral struct {
+	Token token.Token // The 'LREAL' token
+	Value float64
+}
+
+func (lrl *LRealLiteral) expressionNode()      {}
+func (lrl *LRealLiteral) Pos() (int, int)      { return lrl.Token.Row, lrl.Token.Column }
+func (lrl *LRealLiteral) TokenLiteral() string { return lrl.Token.Literal }
+func (lrl *LRealLiteral) String() string       { return lrl.Token.Literal }
+
+// WStringLiteral represents a literal WSTRING value.
+type WStringLiteral struct {
+	Token token.Token // The 'WSTRING' token
+	Value string
+}
+
+func (wsl *WStringLiteral) expressionNode()      {}
+func (wsl *WStringLiteral) Pos() (int, int)      { return wsl.Token.Row, wsl.Token.Column }
+func (wsl *WStringLiteral) TokenLiteral() string { return wsl.Token.Literal }
+func (wsl *WStringLiteral) String() string       { return wsl.Token.Literal }
+
+// EnumeratedValueLiteral represents a qualified enumerated value, e.g., COLOR#RED.
+type EnumeratedValueLiteral struct {
+	Token    token.Token // The token for the type name, e.g., 'COLOR'
+	TypeName *Identifier
+	Value    *Identifier
+}
+
+func (evl *EnumeratedValueLiteral) expressionNode()      {}
+func (evl *EnumeratedValueLiteral) Pos() (int, int)      { return evl.Token.Row, evl.Token.Column }
+func (evl *EnumeratedValueLiteral) TokenLiteral() string { return evl.Token.Literal }
+func (evl *EnumeratedValueLiteral) String() string {
+	return evl.TypeName.String() + "#" + evl.Value.String()
+}
+
 type BitStringLiteral struct {
 	Token token.Token // The token for the literal (e.g., BYTE, WORD, DWORD, LWORD)
 	Value uint64
@@ -489,7 +525,7 @@ func (is *IfStatement) String() string {
 	for currentAlt != nil {
 		switch alt := currentAlt.(type) {
 		case *IfStatement: // This is an ELSIF clause
-			out.WriteString("ELSIF ")
+			out.WriteString(" ELSIF ")
 			out.WriteString(alt.Condition.String())
 			out.WriteString(" THEN ")
 			if alt.Consequence != nil {

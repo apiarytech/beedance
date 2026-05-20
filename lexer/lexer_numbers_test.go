@@ -37,7 +37,7 @@ func TestNumericLiterals(t *testing.T) {
 
 		// Based Real Literals
 		{"16#A.B", token.REAL, "16#A.B"},
-		{"2#101.1", token.REAL, "2#101.1"},
+		{"2#1011_0010", token.INT, "2#1011_0010"},
 
 		// Typed Literals
 		{"INT#10", token.INT, "INT#10"},

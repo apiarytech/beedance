@@ -4,307 +4,603 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"beedance/ast"
 	"beedance/token"
 )
 
 func TestStringHashKey(t *testing.T) {
-	hello1 := &String{Value: "Hello World"}
-	hello2 := &String{Value: "Hello World"}
-	diff1 := &String{Value: "My name is johnny"}
-	diff2 := &String{Value: "My name is johnny"}
-
-	if hello1.HashKey() != hello2.HashKey() {
-		t.Errorf("strings with same content have different hash keys")
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same value", &String{Value: "Hello World"}, &String{Value: "Hello World"}, true},
+		{"different value", &String{Value: "Hello World"}, &String{Value: "My name is johnny"}, false},
+		{"different types", &String{Value: "1"}, &Integer{Value: 1}, false},
 	}
 
-	if diff1.HashKey() != diff2.HashKey() {
-		t.Errorf("strings with same content have different hash keys")
-	}
-
-	if hello1.HashKey() == diff1.HashKey() {
-		t.Errorf("strings with different content have same hash keys")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
 	}
 }
 
 func TestBooleanHashKey(t *testing.T) {
-	true1 := &Boolean{Value: true}
-	true2 := &Boolean{Value: true}
-	false1 := &Boolean{Value: false}
-	false2 := &Boolean{Value: false}
-
-	if true1.HashKey() != true2.HashKey() {
-		t.Errorf("trues do not have same hash key")
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same true", &Boolean{Value: true}, &Boolean{Value: true}, true},
+		{"same false", &Boolean{Value: false}, &Boolean{Value: false}, true},
+		{"true and false", &Boolean{Value: true}, &Boolean{Value: false}, false},
 	}
 
-	if false1.HashKey() != false2.HashKey() {
-		t.Errorf("falses do not have same hash key")
-	}
-
-	if true1.HashKey() == false1.HashKey() {
-		t.Errorf("true has same hash key as false")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
 	}
 }
 
 func TestIntegerHashKey(t *testing.T) {
-	one1 := &Integer{Value: 1}
-	one2 := &Integer{Value: 1}
-	two1 := &Integer{Value: 2}
-	two2 := &Integer{Value: 2}
-
-	if one1.HashKey() != one2.HashKey() {
-		t.Errorf("integers with same content have twoerent hash keys")
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same value", &Integer{Value: 1}, &Integer{Value: 1}, true},
+		{"different value", &Integer{Value: 1}, &Integer{Value: 2}, false},
+		{"different types", &Integer{Value: 1}, &String{Value: "1"}, false},
 	}
 
-	if two1.HashKey() != two2.HashKey() {
-		t.Errorf("integers with same content have twoerent hash keys")
-	}
-
-	if one1.HashKey() == two1.HashKey() {
-		t.Errorf("integers with twoerent content have same hash keys")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
 	}
 }
 
 // TestRealHashKey tests the Real object's HashKey method.
 func TestRealHashKey(t *testing.T) {
-	onePointOne1 := &Real{Value: 1.1}
-	onePointOne2 := &Real{Value: 1.1}
-	twoPointTwo1 := &Real{Value: 2.2}
-	twoPointTwo2 := &Real{Value: 2.2}
-
-	if onePointOne1.HashKey() != onePointOne2.HashKey() {
-		t.Errorf("reals with same content have different hash keys")
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same positive value", &Real{Value: 1.1}, &Real{Value: 1.1}, true},
+		{"different positive value", &Real{Value: 1.1}, &Real{Value: 2.2}, false},
+		{"same negative value", &Real{Value: -1.1}, &Real{Value: -1.1}, true},
+		{"positive and negative", &Real{Value: 1.1}, &Real{Value: -1.1}, false},
+		{"zero", &Real{Value: 0.0}, &Real{Value: 0.0}, true},
+		{"NaN", &Real{Value: math.NaN()}, &Real{Value: math.NaN()}, true},
+		{"different types", &Real{Value: 1.1}, &String{Value: "1.1"}, false},
 	}
 
-	if twoPointTwo1.HashKey() != twoPointTwo2.HashKey() {
-		t.Errorf("reals with same content have different hash keys")
-	}
-
-	if onePointOne1.HashKey() == twoPointTwo1.HashKey() {
-		t.Errorf("reals with different content have same hash keys")
-	}
-
-	// Test with negative values
-	negOnePointOne1 := &Real{Value: -1.1}
-	negOnePointOne2 := &Real{Value: -1.1}
-	if negOnePointOne1.HashKey() != negOnePointOne2.HashKey() {
-		t.Errorf("negative reals with same content have different hash keys")
-	}
-	if negOnePointOne1.HashKey() == onePointOne1.HashKey() {
-		t.Errorf("negative real has same hash key as positive real")
-	}
-
-	// Test with zero
-	zero1 := &Real{Value: 0.0}
-	zero2 := &Real{Value: 0.0}
-	if zero1.HashKey() != zero2.HashKey() {
-		t.Errorf("zeros have different hash keys")
-	}
-
-	// Test with NaN (Not a Number) - should ideally have consistent hash for same NaN representation
-	// Note: math.NaN() always returns the same bit pattern for NaN, so its hash should be consistent.
-	nan1 := &Real{Value: math.NaN()}
-	nan2 := &Real{Value: math.NaN()}
-	if nan1.HashKey() != nan2.HashKey() {
-		t.Errorf("NaNs have different hash keys")
-	}
-}
-
-// TestNullObject tests the Null object's Type and Inspect methods.
-func TestNullObject(t *testing.T) {
-	null := &Null{}
-
-	if null.Type() != NULL_OBJ {
-		t.Errorf("null.Type() wrong. expected=%s, got=%s", NULL_OBJ, null.Type())
-	}
-
-	if null.Inspect() != "null" {
-		t.Errorf("null.Inspect() wrong. expected=%q, got=%q", "null", null.Inspect())
-	}
-}
-
-// TestRealObject tests the Real object's Type and Inspect methods.
-func TestRealObject(t *testing.T) {
-	realVal := &Real{Value: 3.14}
-
-	if realVal.Type() != REAL_OBJ {
-		t.Errorf("realVal.Type() wrong. expected=%s, got=%s", REAL_OBJ, realVal.Type())
-	}
-
-	// fmt.Sprintf("%f", 3.14) produces "3.140000" by default
-	expectedInspect := "3.140000"
-	if realVal.Inspect() != expectedInspect {
-		t.Errorf("realVal.Inspect() wrong. expected=%q, got=%q", expectedInspect, realVal.Inspect())
-	}
-
-	// Test with a different value
-	realVal2 := &Real{Value: -123.45}
-	if realVal2.Inspect() != "-123.450000" {
-		t.Errorf("realVal2.Inspect() wrong. expected=%q, got=%q", "-123.450000", realVal2.Inspect())
-	}
-}
-
-// TestReturnValueObject tests the ReturnValue object's Type and Inspect methods.
-func TestReturnValueObject(t *testing.T) {
-	rv := &ReturnValue{Value: &Integer{Value: 10}}
-
-	if rv.Type() != RETURN_VALUE_OBJ {
-		t.Errorf("rv.Type() wrong. expected=%s, got=%s", RETURN_VALUE_OBJ, rv.Type())
-	}
-
-	if rv.Inspect() != "10" {
-		t.Errorf("rv.Inspect() wrong. expected=%q, got=%q", "10", rv.Inspect())
-	}
-}
-
-// TestErrorObject tests the Error object's Type and Inspect methods.
-func TestErrorObject(t *testing.T) {
-	err := &Error{Message: "test error"}
-
-	if err.Type() != ERROR_OBJ {
-		t.Errorf("err.Type() wrong. expected=%s, got=%s", ERROR_OBJ, err.Type())
-	}
-
-	if err.Inspect() != "ERROR: test error" {
-		t.Errorf("err.Inspect() wrong. expected=%q, got=%q", "ERROR: test error", err.Inspect())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
 	}
 }
 
 // TestFunctionObject tests the Function object's Type and Inspect methods.
 func TestFunctionObject(t *testing.T) {
-	// Create dummy AST nodes for testing
-	params := []*ast.Identifier{
-		{Token: token.Token{Type: token.IDENT, Literal: "x"}, Value: "x"},
-		{Token: token.Token{Type: token.IDENT, Literal: "y"}, Value: "y"},
+	tests := []struct {
+		name        string
+		fnName      *ast.Identifier
+		varInputs   []*ast.VarDeclStatement
+		varOutputs  []*ast.VarDeclStatement
+		varInOuts   []*ast.VarDeclStatement
+		body        *ast.BlockStatement
+		wantType    ObjectType
+		wantInspect string
+	}{
+		{
+			name:        "function with no vars",
+			fnName:      &ast.Identifier{Value: "myFunc"},
+			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
+			wantType:    FUNCTION_OBJ,
+			wantInspect: "FUNCTION myFunc ()",
+		},
+		{
+			name:   "function with VarInputs",
+			fnName: &ast.Identifier{Value: "funcWithInputs"},
+			varInputs: []*ast.VarDeclStatement{
+				{
+					Token:    token.Token{Type: token.VAR, Literal: "VAR_INPUT"},
+					Name:     &ast.Identifier{Value: "in1"},
+					DataType: &ast.Identifier{Value: "INT"},
+				},
+			},
+			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
+			wantType:    FUNCTION_OBJ,
+			wantInspect: "FUNCTION funcWithInputs (VAR_INPUT in1 : INT;)",
+		},
+		{
+			name:   "function with VarOutputs",
+			fnName: &ast.Identifier{Value: "funcWithOutputs"},
+			varOutputs: []*ast.VarDeclStatement{
+				{
+					Token:    token.Token{Type: token.VAR, Literal: "VAR_OUTPUT"},
+					Name:     &ast.Identifier{Value: "out1"},
+					DataType: &ast.Identifier{Value: "BOOL"},
+				},
+			},
+			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
+			wantType:    FUNCTION_OBJ,
+			wantInspect: "FUNCTION funcWithOutputs (VAR_OUTPUT out1 : BOOL;)",
+		},
+		{
+			name:   "function with VarInOuts",
+			fnName: &ast.Identifier{Value: "funcWithInOuts"},
+			varInOuts: []*ast.VarDeclStatement{
+				{
+					Token:    token.Token{Type: token.VAR, Literal: "VAR_IN_OUT"},
+					Name:     &ast.Identifier{Value: "inout1"},
+					DataType: &ast.Identifier{Value: "REAL"},
+				},
+			},
+			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
+			wantType:    FUNCTION_OBJ,
+			wantInspect: "FUNCTION funcWithInOuts (VAR_IN_OUT inout1 : REAL;)",
+		},
 	}
-	body := &ast.BlockStatement{
-		Token:      token.Token{Type: token.LBRACE, Literal: "{"},
-		Statements: []ast.Statement{}, // Empty for simplicity
-	}
-	env := NewEnvironment() // Assuming NewEnvironment is accessible
 
-	fn := &Function{Parameters: params, Body: body, Env: env}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fn := &Function{
+				Name: tt.fnName, Body: tt.body, Env: NewEnvironment(),
+				VarInputs: tt.varInputs, VarOutputs: tt.varOutputs, VarInOuts: tt.varInOuts,
+			}
 
-	if fn.Type() != FUNCTION_OBJ {
-		t.Errorf("fn.Type() wrong. expected=%s, got=%s", FUNCTION_OBJ, fn.Type())
-	}
-
-	expectedInspect := "fn(x, y) {\n\n}" // Based on ast.BlockStatement.String() for empty body
-	if fn.Inspect() != expectedInspect {
-		t.Errorf("fn.Inspect() wrong. expected=%q, got=%q", expectedInspect, fn.Inspect())
+			if fn.Type() != tt.wantType {
+				t.Errorf("fn.Type() wrong. got=%s, want=%s", fn.Type(), tt.wantType)
+			}
+			if fn.Inspect() != tt.wantInspect {
+				t.Errorf("fn.Inspect() wrong. got=%q, want=%q", fn.Inspect(), tt.wantInspect)
+			}
+		})
 	}
 }
 
-// TestBuiltinObject tests the Builtin object's Type and Inspect methods.
-func TestBuiltinObject(t *testing.T) {
-	builtinFn := func(args ...Object) Object { return &Null{} }
-	builtin := &Builtin{Fn: builtinFn}
-
-	if builtin.Type() != BUILTIN_OBJ {
-		t.Errorf("builtin.Type() wrong. expected=%s, got=%s", BUILTIN_OBJ, builtin.Type())
+// TestSimpleObjectInspection consolidates tests for Type() and Inspect() on simple objects.
+func TestSimpleObjectInspection(t *testing.T) {
+	tests := []struct {
+		name        string
+		obj         Object
+		wantType    ObjectType
+		wantInspect string
+	}{
+		{"Null", &Null{}, NULL_OBJ, "null"},
+		{"Real positive", &Real{Value: 3.14}, REAL_OBJ, "3.140000"},
+		{"Real negative", &Real{Value: -123.45}, REAL_OBJ, "-123.450000"},
+		{"ReturnValue", &ReturnValue{Value: &Integer{Value: 10}}, RETURN_VALUE_OBJ, "10"},
+		{"Error", &Error{Message: "test error"}, ERROR_OBJ, "ERROR: test error"},
+		{"Builtin", &Builtin{Fn: func(args ...Object) Object { return nil }}, BUILTIN_OBJ, "builtin function"},
+		{"Quote", &Quote{Node: &ast.Identifier{Value: "myVar"}}, QUOTE_OBJ, "QUOTE(myVar)"},
 	}
 
-	if builtin.Inspect() != "builtin function" {
-		t.Errorf("builtin.Inspect() wrong. expected=%q, got=%q", "builtin function", builtin.Inspect())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.obj.Type() != tt.wantType {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.obj.Type(), tt.wantType)
+			}
+			if tt.obj.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
 	}
 }
 
 // TestArrayObject tests the Array object's Type and Inspect methods.
 func TestArrayObject(t *testing.T) {
-	arr := &Array{
-		Elements: []Object{
-			&Integer{Value: 1},
-			&Boolean{Value: true},
-			&String{Value: "hello"},
-		},
+	tests := []struct {
+		name        string
+		obj         Object
+		wantInspect string
+	}{
+		{"populated array", &Array{Elements: []Object{&Integer{Value: 1}, &String{Value: "hello"}}}, "[1, hello]"},
+		{"empty array", &Array{Elements: []Object{}}, "[]"},
 	}
 
-	if arr.Type() != ARRAY_OBJ {
-		t.Errorf("arr.Type() wrong. expected=%s, got=%s", ARRAY_OBJ, arr.Type())
-	}
-
-	expectedInspect := "[1, true, hello]"
-	if arr.Inspect() != expectedInspect {
-		t.Errorf("arr.Inspect() wrong. expected=%q, got=%q", expectedInspect, arr.Inspect())
-	}
-
-	// Test empty array
-	emptyArr := &Array{Elements: []Object{}}
-	if emptyArr.Inspect() != "[]" {
-		t.Errorf("emptyArr.Inspect() wrong. expected=%q, got=%q", "[]", emptyArr.Inspect())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.obj.Type() != ARRAY_OBJ {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.obj.Type(), ARRAY_OBJ)
+			}
+			if tt.obj.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
 	}
 }
 
 // TestHashObject tests the Hash object's Type and Inspect methods.
 func TestHashObject(t *testing.T) {
-	hash := &Hash{
-		Pairs: map[HashKey]HashPair{
-			(&String{Value: "key1"}).HashKey(): {Key: &String{Value: "key1"}, Value: &Integer{Value: 1}},
-			(&String{Value: "key2"}).HashKey(): {Key: &String{Value: "key2"}, Value: &Boolean{Value: false}},
+	tests := []struct {
+		name           string
+		hash           *Hash
+		expectedSubstr []string
+		exactMatch     string
+	}{
+		{
+			name: "populated hash",
+			hash: &Hash{Pairs: map[HashKey]HashPair{
+				(&String{Value: "key1"}).HashKey(): {Key: &String{Value: "key1"}, Value: &Integer{Value: 1}},
+				(&String{Value: "key2"}).HashKey(): {Key: &String{Value: "key2"}, Value: &Boolean{Value: false}},
+			}},
+			expectedSubstr: []string{"key1: 1", "key2: false"},
 		},
+		{"empty hash", &Hash{Pairs: map[HashKey]HashPair{}}, nil, "{}"},
 	}
 
-	if hash.Type() != HASH_OBJ {
-		t.Errorf("hash.Type() wrong. expected=%s, got=%s", HASH_OBJ, hash.Type())
-	}
-
-	// Inspect output for Hash is not strictly ordered, so we check for substrings.
-	inspectStr := hash.Inspect()
-	if !strings.HasPrefix(inspectStr, "{") || !strings.HasSuffix(inspectStr, "}") {
-		t.Errorf("hash.Inspect() missing braces. got=%q", inspectStr)
-	}
-	if !strings.Contains(inspectStr, "key1: 1") {
-		t.Errorf("hash.Inspect() missing 'key1: 1'. got=%q", inspectStr)
-	}
-	if !strings.Contains(inspectStr, "key2: false") {
-		t.Errorf("hash.Inspect() missing 'key2: false'. got=%q", inspectStr)
-	}
-
-	// Test empty hash
-	emptyHash := &Hash{Pairs: map[HashKey]HashPair{}}
-	if emptyHash.Inspect() != "{}" {
-		t.Errorf("emptyHash.Inspect() wrong. expected=%q, got=%q", "{}", emptyHash.Inspect())
-	}
-}
-
-// TestQuoteObject tests the Quote object's Type and Inspect methods.
-func TestQuoteObject(t *testing.T) {
-	// Use an ast.Identifier as a dummy ast.Node
-	node := &ast.Identifier{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Value: "myVar"}
-	quote := &Quote{Node: node}
-
-	if quote.Type() != QUOTE_OBJ {
-		t.Errorf("quote.Type() wrong. expected=%s, got=%s", QUOTE_OBJ, quote.Type())
-	}
-
-	expectedInspect := "QUOTE(myVar)"
-	if quote.Inspect() != expectedInspect {
-		t.Errorf("quote.Inspect() wrong. expected=%q, got=%q", expectedInspect, quote.Inspect())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inspectStr := tt.hash.Inspect()
+			for _, substr := range tt.expectedSubstr {
+				if !strings.Contains(inspectStr, substr) {
+					t.Errorf("Inspect() missing substring %q. got=%q", substr, inspectStr)
+				}
+			}
+			if tt.exactMatch != "" && inspectStr != tt.exactMatch {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", inspectStr, tt.exactMatch)
+			}
+		})
 	}
 }
 
 // TestMacroObject tests the Macro object's Type and Inspect methods.
 func TestMacroObject(t *testing.T) {
-	// Create dummy AST nodes for testing
-	params := []*ast.Identifier{
-		{Token: token.Token{Type: token.IDENT, Literal: "a"}, Value: "a"},
-		{Token: token.Token{Type: token.IDENT, Literal: "b"}, Value: "b"},
+	tests := []struct {
+		name        string
+		params      []*ast.Identifier
+		wantInspect string
+	}{
+		{
+			"two parameters",
+			[]*ast.Identifier{{Value: "a"}, {Value: "b"}},
+			"macro(a, b) {\n\n}",
+		},
+		{
+			"no parameters",
+			[]*ast.Identifier{},
+			"macro() {\n\n}",
+		},
 	}
-	body := &ast.BlockStatement{
-		Token:      token.Token{Type: token.LBRACE, Literal: "{"},
-		Statements: []ast.Statement{}, // Empty for simplicity
-	}
-	env := NewEnvironment()
 
-	macro := &Macro{Parameters: params, Body: body, Env: env}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &ast.BlockStatement{Statements: []ast.Statement{}}
+			macro := &Macro{Parameters: tt.params, Body: body, Env: NewEnvironment()}
 
-	if macro.Type() != MACRO_OBJ {
-		t.Errorf("macro.Type() wrong. expected=%s, got=%s", MACRO_OBJ, macro.Type())
+			if macro.Type() != MACRO_OBJ {
+				t.Errorf("macro.Type() wrong. got=%s, want=%s", macro.Type(), MACRO_OBJ)
+			}
+			if macro.Inspect() != tt.wantInspect {
+				t.Errorf("macro.Inspect() wrong. got=%q, want=%q", macro.Inspect(), tt.wantInspect)
+			}
+		})
+	}
+}
+
+func TestTimeDateObjects(t *testing.T) {
+	timeVal, _ := time.ParseDuration("5s300ms")
+	dateVal, _ := time.Parse("2006-01-02", "2026-05-20")
+	todVal, _ := time.Parse("15:04:05.999", "14:30:05.123")
+	dtVal, _ := time.Parse("2006-01-02-15:04:05.999", "2026-05-20-14:30:05.123")
+
+	tests := []struct {
+		name        string
+		obj         Object
+		wantType    ObjectType
+		wantInspect string
+	}{
+		{"Time", &Time{Value: timeVal}, TIME_OBJ, "T#5.3s"},
+		{"Date", &Date{Value: dateVal}, DATE_OBJ, "D#2026-05-20"},
+		{"TimeOfDay", &TimeOfDay{Value: todVal}, TIME_OF_DAY_OBJ, "TOD#14:30:05.123"},
+		{"DateAndTime", &DateAndTime{Value: dtVal}, DATE_AND_TIME_OBJ, "DT#2026-05-20-14:30:05.123"},
 	}
 
-	expectedInspect := "macro(a, b) {\n\n}"
-	if macro.Inspect() != expectedInspect {
-		t.Errorf("macro.Inspect() wrong. expected=%q, got=%q", expectedInspect, macro.Inspect())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.obj.Type() != tt.wantType {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.obj.Type(), tt.wantType)
+			}
+			if tt.obj.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
 	}
+}
+
+func TestSfcObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		obj         Object
+		wantType    ObjectType
+		wantInspect string
+	}{
+		{"SFC", &SFC{}, SFC_OBJ, "SFC"},
+		{"Step", &Step{Name: &ast.Identifier{Value: "S1"}}, STEP_OBJ, "STEP S1"},
+		{"Transition", &Transition{}, TRANSITION_OBJ, "TRANSITION"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.obj.Type() != tt.wantType {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.obj.Type(), tt.wantType)
+			}
+			if tt.obj.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
+	}
+}
+
+func TestFunctionBlockInstanceObject(t *testing.T) {
+	fbDef := &FunctionBlock{
+		Name: &ast.Identifier{Value: "MyFB"},
+	}
+	fbInstance := &FunctionBlockInstance{
+		Definition: fbDef,
+		Env:        NewEnvironment(),
+	}
+
+	if fbInstance.Type() != FUNCTION_BLOCK_INSTANCE_OBJ {
+		t.Errorf("fbInstance.Type() wrong. got=%s, want=%s", fbInstance.Type(), FUNCTION_BLOCK_INSTANCE_OBJ)
+	}
+
+	expectedInspect := "FUNCTION_BLOCK_INSTANCE(MyFB)"
+	if fbInstance.Inspect() != expectedInspect {
+		t.Errorf("fbInstance.Inspect() wrong. got=%q, want=%q", fbInstance.Inspect(), expectedInspect)
+	}
+}
+
+func TestBitStringObject(t *testing.T) {
+	tests := []struct {
+		name        string
+		bitstring   *BitString
+		wantInspect string
+	}{
+		{
+			name:        "width 8",
+			bitstring:   &BitString{Value: 0xAB, Width: 8},
+			wantInspect: "BYTE#16#AB",
+		},
+		{
+			name:        "width 16",
+			bitstring:   &BitString{Value: 0xABCD, Width: 16},
+			wantInspect: "WORD#16#ABCD",
+		},
+		{
+			name:        "width 32",
+			bitstring:   &BitString{Value: 0xABCDEF01, Width: 32},
+			wantInspect: "DWORD#16#ABCDEF01",
+		},
+		{
+			name:        "width 64",
+			bitstring:   &BitString{Value: 0x1234567890ABCDEF, Width: 64},
+			wantInspect: "LWORD#16#1234567890ABCDEF",
+		},
+		{
+			name:        "default width",
+			bitstring:   &BitString{Value: 0xFF, Width: 12}, // Custom width
+			wantInspect: "BITSTRING#12#FF",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.bitstring.Type() != BITSTRING_OBJ {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.bitstring.Type(), BITSTRING_OBJ)
+			}
+			if tt.bitstring.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.bitstring.Inspect(), tt.wantInspect)
+			}
+		})
+	}
+}
+
+func TestLRealObject(t *testing.T) {
+	lreal := &LReal{Value: 123.456}
+
+	if lreal.Type() != LREAL_OBJ {
+		t.Errorf("lreal.Type() wrong. expected=%s, got=%s", LREAL_OBJ, lreal.Type())
+	}
+
+	expectedInspect := "123.456000"
+	if lreal.Inspect() != expectedInspect {
+		t.Errorf("lreal.Inspect() wrong. expected=%q, got=%q", expectedInspect, lreal.Inspect())
+	}
+
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same value", &LReal{Value: 1.1}, &LReal{Value: 1.1}, true},
+		{"different value", &LReal{Value: 1.1}, &LReal{Value: 2.2}, false},
+		{"different types", &LReal{Value: 1.1}, &Real{Value: 1.1}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" hashkey", func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
+	}
+}
+
+func TestWStringObject(t *testing.T) {
+	wstr := &WString{Value: "wide string"}
+
+	if wstr.Type() != WSTRING_OBJ {
+		t.Errorf("wstr.Type() wrong. expected=%s, got=%s", WSTRING_OBJ, wstr.Type())
+	}
+
+	if wstr.Inspect() != "wide string" {
+		t.Errorf("wstr.Inspect() wrong. expected=%q, got=%q", "wide string", wstr.Inspect())
+	}
+
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		{"same value", &WString{Value: "hello"}, &WString{Value: "hello"}, true},
+		{"different value", &WString{Value: "hello"}, &WString{Value: "world"}, false},
+		{"different types", &WString{Value: "hello"}, &String{Value: "hello"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" hashkey", func(t *testing.T) {
+			if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+					tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+			}
+		})
+	}
+}
+
+func TestBitStringObjects(t *testing.T) {
+	testCases := []struct {
+		name        string
+		obj         Object
+		wantType    ObjectType
+		wantInspect string
+	}{
+		{"Byte", &Byte{Value: 0x1A}, BYTE_OBJ, "BYTE#16#1A"},
+		{"Word", &Word{Value: 0x1234}, WORD_OBJ, "WORD#16#1234"},
+		{"DWord", &DWord{Value: 0x12345678}, DWORD_OBJ, "DWORD#16#12345678"},
+		{"LWord", &LWord{Value: 0x123456789ABCDEF0}, LWORD_OBJ, "LWORD#16#123456789ABCDEF0"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name+" type and inspect", func(t *testing.T) {
+			if tc.obj.Type() != tc.wantType {
+				t.Errorf("Type() wrong. got=%s, want=%s", tc.obj.Type(), tc.wantType)
+			}
+			if tc.obj.Inspect() != tc.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tc.obj.Inspect(), tc.wantInspect)
+			}
+		})
+	}
+}
+
+func TestBitStringHashKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		// Byte
+		{"same byte", &Byte{Value: 1}, &Byte{Value: 1}, true},
+		{"different byte", &Byte{Value: 1}, &Byte{Value: 2}, false},
+		{"byte vs integer", &Byte{Value: 1}, &Integer{Value: 1}, false},
+
+		// Word
+		{"same word", &Word{Value: 100}, &Word{Value: 100}, true},
+		{"different word", &Word{Value: 100}, &Word{Value: 200}, false},
+		{"word vs integer", &Word{Value: 100}, &Integer{Value: 100}, false},
+
+		// DWord
+		{"same dword", &DWord{Value: 1000}, &DWord{Value: 1000}, true},
+		{"different dword", &DWord{Value: 1000}, &DWord{Value: 2000}, false},
+		{"dword vs integer", &DWord{Value: 1000}, &Integer{Value: 1000}, false},
+
+		// LWord
+		{"same lword", &LWord{Value: 10000}, &LWord{Value: 10000}, true},
+		{"different lword", &LWord{Value: 10000}, &LWord{Value: 20000}, false},
+		{"lword vs integer", &LWord{Value: 10000}, &Integer{Value: 10000}, false},
+
+		// Cross bit-string types
+		{"byte vs word", &Byte{Value: 1}, &Word{Value: 1}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hashA := tt.a.(Hashable).HashKey()
+			hashB := tt.b.(Hashable).HashKey()
+			if (hashA == hashB) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s (%v) and %s (%v) was %v, want %v",
+					tt.a.Inspect(), hashA, tt.b.Inspect(), hashB, !tt.wantEqual, tt.wantEqual)
+			}
+		})
+	}
+}
+
+func TestEnumeratedObjects(t *testing.T) {
+	// Setup for the test
+	red := &EnumeratedValue{TypeName: "COLOR", Value: "RED"}
+	green := &EnumeratedValue{TypeName: "COLOR", Value: "GREEN"}
+
+	colorType := &EnumeratedType{
+		Name: "COLOR",
+		Values: map[string]*EnumeratedValue{
+			"RED":   red,
+			"GREEN": green,
+		},
+	}
+
+	t.Run("EnumeratedType inspection", func(t *testing.T) {
+		if colorType.Type() != ENUMERATED_TYPE_OBJ {
+			t.Errorf("colorType.Type() wrong. got=%s, want=%s", colorType.Type(), ENUMERATED_TYPE_OBJ)
+		}
+		inspectStr := colorType.Inspect()
+		if !strings.HasPrefix(inspectStr, "ENUM(COLOR: ") {
+			t.Errorf("Inspect() should start with 'ENUM(COLOR: '. got=%q", inspectStr)
+		}
+		if !strings.Contains(inspectStr, "RED") || !strings.Contains(inspectStr, "GREEN") {
+			t.Errorf("Inspect() should contain all enum values. got=%q", inspectStr)
+		}
+	})
+
+	t.Run("EnumeratedValue inspection", func(t *testing.T) {
+		if red.Type() != ENUMERATED_VALUE_OBJ {
+			t.Errorf("red.Type() wrong. got=%s, want=%s", red.Type(), ENUMERATED_VALUE_OBJ)
+		}
+		if red.Inspect() != "COLOR#RED" {
+			t.Errorf("red.Inspect() wrong. got=%q, want=%q", red.Inspect(), "COLOR#RED")
+		}
+	})
+
+	t.Run("EnumeratedValue hashkey", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			a, b      Object
+			wantEqual bool
+		}{
+			{"same enum value", &EnumeratedValue{TypeName: "COLOR", Value: "RED"}, &EnumeratedValue{TypeName: "COLOR", Value: "RED"}, true},
+			{"different enum value", &EnumeratedValue{TypeName: "COLOR", Value: "RED"}, &EnumeratedValue{TypeName: "COLOR", Value: "BLUE"}, false},
+			{"different enum type", &EnumeratedValue{TypeName: "COLOR", Value: "RED"}, &EnumeratedValue{TypeName: "SHADE", Value: "RED"}, false},
+			{"enum vs string", &EnumeratedValue{TypeName: "COLOR", Value: "RED"}, &String{Value: "COLOR#RED"}, false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if (tt.a.(Hashable).HashKey() == tt.b.(Hashable).HashKey()) != tt.wantEqual {
+					t.Errorf("HashKey() equality for %s and %s was %v, want %v",
+						tt.a.Inspect(), tt.b.Inspect(), !tt.wantEqual, tt.wantEqual)
+				}
+			})
+		}
+	})
 }

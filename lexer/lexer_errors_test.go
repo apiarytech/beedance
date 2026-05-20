@@ -17,7 +17,7 @@ func TestErrorLexing(t *testing.T) {
 		{"'unterminated", token.UNTERMINATED_STRING, "unterminated", 1, 1},
 		{"\"another one", token.UNTERMINATED_STRING, "another one", 1, 1},
 		{"(* comment that never ends", token.UNTERMINATED_COMMENT, "(*", 1, 1},
-		{"(* nested (* comment *) that never ends", token.UNTERMINATED_COMMENT, "(*", 1, 1},
+		{"(* nested (* comment *) that never ends", token.ILLEGAL, "nested comment", 1, 1},
 		{"VAR myVar : INT := ?;", token.ILLEGAL, "?", 1, 20},
 		{"!", token.ILLEGAL, "!", 1, 1},
 		{"@", token.ILLEGAL, "@", 1, 1},

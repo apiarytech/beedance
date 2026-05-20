@@ -1089,12 +1089,25 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) parseIdentifier() ast.Expression {
 	defer untrace(trace("parseIdentifier"))
-	// Check if this identifier is a prefix for a typed literal (e.g., D#)
+	// Check for qualified enumerated value: TypeName#Value
 	if p.peekTokenIs(token.HASH) {
-		return p.parseTimeDateLiteral()
-	} else {
-		return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		typeName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume IDENT, curToken is now HASH
+		p.nextToken() // consume HASH, curToken is now the value IDENT
+
+		if !p.curTokenIs(token.IDENT) {
+			p.currentError("expected identifier after '#' for enumerated value, got %s", p.curToken.Type)
+			return nil
+		}
+
+		valueName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		return &ast.EnumeratedValueLiteral{
+			Token:    typeName.Token,
+			TypeName: typeName,
+			Value:    valueName,
+		}
 	}
+	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
