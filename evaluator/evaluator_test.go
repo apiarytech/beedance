@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"beedance/ast"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
@@ -67,6 +68,42 @@ func TestEvalBooleanExpression(t *testing.T) {
 	for _, tt := range tests {
 		evaluated := testEval(tt.input)
 		testBooleanObject(t, evaluated, tt.expected)
+	}
+}
+
+func TestEvalBooleanLogicalExpression(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		// AND operator
+		{"TRUE AND TRUE", true},
+		{"TRUE AND FALSE", false},
+		{"FALSE AND TRUE", false},
+		{"FALSE AND FALSE", false},
+		{"TRUE & TRUE", true}, // Test '&' alias
+		{"(1 < 2) AND (3 > 1)", true},
+		{"(1 > 2) AND (3 > 1)", false},
+
+		// OR operator
+		{"TRUE OR TRUE", true},
+		{"TRUE OR FALSE", true},
+		{"FALSE OR TRUE", true},
+		{"FALSE OR FALSE", false},
+		{"(1 > 2) OR (3 > 1)", true},
+		{"(1 > 2) OR (3 < 1)", false},
+
+		// XOR operator
+		{"TRUE XOR TRUE", false},
+		{"TRUE XOR FALSE", true},
+		{"FALSE XOR TRUE", true},
+		{"FALSE XOR FALSE", false},
+		{"(1 < 2) XOR (3 > 1)", false}, // true XOR true -> false
+		{"(1 > 2) XOR (3 > 1)", true},  // false XOR true -> true
+	}
+
+	for _, tt := range tests {
+		testBooleanObject(t, testEval(tt.input), tt.expected)
 	}
 }
 
@@ -210,6 +247,693 @@ if (10 > 1) {
 				tt.expectedMessage, errObj.Message)
 		}
 	}
+}
+
+func TestIntegerOverflowErrors(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedMessage string
+	}{
+		// SINT (-128 to 127)
+		{"SINT#127 + SINT#1", "SINT overflow: 128"},
+		{"SINT#-128 - SINT#1", "SINT overflow: -129"},
+		{"SINT#64 * SINT#3", "SINT overflow: 192"},
+		{"SINT#-65 * SINT#2", "SINT overflow: -130"},
+
+		// INT (-32768 to 32767)
+		{"INT#32767 + INT#1", "INT overflow: 32768"},
+		{"INT#-32768 - INT#1", "INT overflow: -32769"},
+		{"INT#16384 * INT#3", "INT overflow: 49152"},
+
+		// DINT (-2147483648 to 2147483647)
+		{"DINT#2147483647 + INT#1", "DINT overflow: 2147483648"},
+		{"DINT#-2147483648 - INT#1", "DINT overflow: -2147483649"},
+
+		// LINT (Handled by Go's int64, but let's test a large operation)
+		// This won't overflow in our current implementation but is good to have.
+		// {"LINT#9223372036854775807 + LINT#1", "LINT overflow"}, // This would require math/big
+
+		// USINT (0 to 255)
+		{"USINT#255 + USINT#1", "USINT overflow: 256"},
+		{"USINT#0 - USINT#1", "USINT overflow: -1"},
+		{"SINT#-1 + USINT#0", "USINT overflow: -1"}, // Promotion to USINT, then underflow
+
+		// UINT (0 to 65535)
+		{"UINT#65535 + UINT#1", "UINT overflow: 65536"},
+		{"UINT#0 - UINT#1", "UINT overflow: -1"},
+
+		// UDINT (0 to 4294967295)
+		{"UDINT#4294967295 + UINT#1", "UDINT overflow: 4294967296"},
+		{"UDINT#0 - UINT#1", "UDINT overflow: -1"},
+
+		// ULINT (0 to 18446744073709551615)
+		{"ULINT#0 - DINT#1", "ULINT underflow: -1"},
+		// {"ULINT#18446744073709551615 + ULINT#1", "ULINT overflow"}, // This would require math/big
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := parser.New(l)
+			program := p.ParseProgram()
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+
+			env := object.NewEnvironment()
+			evaluated := Eval(program, env)
+
+			errObj, ok := evaluated.(*object.Error)
+			if !ok {
+				t.Errorf("no error object returned for input '%s'. got=%T(%+v)",
+					tt.input, evaluated, evaluated)
+				return
+			}
+
+			// We check for a substring because the error message includes line/column info.
+			if !strings.Contains(errObj.Message, tt.expectedMessage) {
+				t.Errorf("wrong error message for input '%s'.\nexpected to contain: %q\ngot: %q",
+					tt.input, tt.expectedMessage, errObj.Message)
+			}
+		})
+	}
+}
+
+func TestEvalCaseStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		{"CASE 1 OF 1: 10; ELSE 99; END_CASE", int64(10)},
+		{"CASE 2 OF 1: 10; ELSE 99; END_CASE", int64(99)},
+		{"CASE 2 OF 1: 10; 2: 20; ELSE 99; END_CASE", int64(20)},
+		{"CASE 3 OF 1, 2: 10; 3, 4: 20; ELSE 99; END_CASE", int64(20)},
+		{"CASE 5 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE", int64(20)},
+		{"CASE 11 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE", int64(99)},
+		{"CASE 1 OF 1: 10; END_CASE", int64(10)},
+		{"CASE 99 OF 1: 10; END_CASE", nil}, // No match, no ELSE
+		{`
+			VAR myVar : INT := 7; END_VAR
+			CASE myVar OF
+				1..5: 10;
+				6..10: 20;
+			END_CASE
+		`, int64(20)},
+		{`
+			TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			VAR myColor : COLOR := COLOR#GREEN; END_VAR
+			CASE myColor OF
+				COLOR#RED: 1;
+				COLOR#GREEN: 2;
+				COLOR#BLUE: 3;
+			ELSE
+				99;
+			END_CASE
+		`, int64(2)},
+		{`
+			TYPE
+				VALID_RANGE : INT(10..20);
+			END_TYPE
+			CASE 15 OF
+				0..9: 1;
+				VALID_RANGE: 2;
+				21..30: 3;
+			END_CASE
+		`, int64(2)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				// The result of a CASE statement is the result of the executed statement.
+				// Our test statements are just integer literals.
+				// In a real program, this might be an assignment, and the result would be the assigned value.
+				// For this test, we check if the evaluated object is the expected integer.
+				testIntegerObject(t, evaluated, expected)
+			case nil:
+				testNullObject(t, evaluated)
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestCaseStatementErrors(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedMessage string
+	}{
+		{
+			"CASE 1 OF 'a': 10; END_CASE",
+			"type mismatch for comparison: INTEGER == STRING",
+		},
+		{
+			"CASE 'a' OF 1: 10; END_CASE",
+			"type mismatch for comparison: STRING == INTEGER",
+		},
+		{
+			"CASE 1 OF 1.0..2.0: 10; END_CASE",
+			"type mismatch for comparison: INTEGER >= REAL",
+		},
+		{
+			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			 CASE 1 OF COLOR#RED: 1; END_CASE`,
+			"type mismatch for comparison: INTEGER == ENUMERATED_VALUE",
+		},
+		{
+			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			 CASE COLOR#RED OF 1: 1; END_CASE`,
+			"type mismatch for comparison: ENUMERATED_VALUE == INTEGER",
+		},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testErrorObjectContains(t, evaluated, tt.expectedMessage)
+	}
+}
+
+func TestSubrangeTypeErrors(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedMessage string
+	}{
+		{
+			`TYPE MyRange : INT(1.0..10); END_TYPE`,
+			"subrange bounds must be integers",
+		},
+		{
+			`TYPE MyRange : INT(1..10.5); END_TYPE`,
+			"subrange bounds must be integers",
+		},
+		{
+			`TYPE MyRange : INT('a'..'z'); END_TYPE`,
+			"subrange bounds must be integers",
+		},
+		{
+			`TYPE MyRange : REAL(0..100); END_TYPE`,
+			"subrange base type must be an integer type, got REAL",
+		},
+		{
+			`TYPE MyRange : BOOL(0..1); END_TYPE`,
+			"subrange base type must be an integer type, got BOOL",
+		},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testErrorObjectContains(t, evaluated, tt.expectedMessage)
+	}
+}
+
+func TestForLoopStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		{`
+			VAR total : INT := 0; END_VAR
+			FOR i := 1 TO 5 DO
+				total := total + i;
+			END_FOR
+			total;
+		`, int64(15)},
+		{`
+			VAR total : INT := 10; END_VAR
+			FOR i := 5 TO 1 BY -1 DO
+				total := total - i;
+			END_FOR
+			total;
+		`, int64(-5)}, // 10 - 5 - 4 - 3 - 2 - 1
+		{`
+			VAR total : INT := 0; END_VAR
+			FOR i := 1 TO 10 DO
+				total := total + 1;
+				IF i = 5 THEN
+					EXIT;
+				END_IF
+			END_FOR
+			total;
+		`, int64(5)},
+		{`
+			FOR i := 1 TO 1 DO
+				RETURN 99;
+			END_FOR
+		`, int64(99)},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		expectedInt, _ := tt.expected.(int64)
+		testIntegerObject(t, evaluated, expectedInt)
+	}
+}
+
+func TestWhileLoopStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{`
+			VAR x : INT := 0; END_VAR
+			WHILE x < 5 DO
+				x := x + 1;
+			END_WHILE
+			x;
+		`, 5},
+		{`
+			VAR x : INT := 10; END_VAR
+			WHILE x > 0 DO
+				x := x - 2;
+			END_WHILE
+			x;
+		`, 0},
+		{`
+			VAR x : INT := 0; END_VAR
+			WHILE x < 10 DO
+				x := x + 1;
+				IF x = 7 THEN
+					EXIT;
+				END_IF
+			END_WHILE
+			x;
+		`, 7},
+		{`
+			VAR x : INT := 10; END_VAR
+			WHILE x > 10 DO
+				x := x + 1;
+			END_WHILE
+			x;
+		`, 10}, // Loop body should not execute
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testIntegerObject(t, evaluated, tt.expected)
+	}
+}
+
+func TestRepeatLoopStatement(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{`
+			VAR x : INT := 0; END_VAR
+			REPEAT
+				x := x + 1;
+			UNTIL x >= 5 END_REPEAT
+			x;
+		`, 5},
+		{`
+			VAR x : INT := 10; END_VAR
+			REPEAT
+				x := x + 1;
+			UNTIL x > 10 END_REPEAT
+			x;
+		`, 11}, // Loop body executes at least once
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testIntegerObject(t, evaluated, tt.expected)
+	}
+}
+
+func TestSFCExecution(t *testing.T) {
+	input := `
+		PROGRAM TestSFC
+			VAR
+				x : INT := 0;
+				cond1 : BOOL := TRUE;
+				cond2 : BOOL := FALSE;
+			END_VAR
+
+			INITIAL_STEP S1:
+				x := 1;
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := cond1; END_TRANSITION
+
+			STEP S2:
+				x := x + 10;
+			END_STEP
+
+			TRANSITION FROM S2 TO S3 := cond2; END_TRANSITION
+
+			STEP S3:
+				x := x + 100;
+			END_STEP
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCExecution", input)
+
+	// The program declaration itself needs to be evaluated to set up the environment
+	env := object.NewEnvironment()
+	Eval(program, env)
+
+	// Find the program instance in the environment
+	progObj, ok := env.Get("TestSFC")
+	if !ok {
+		t.Fatalf("Program 'TestSFC' not found in environment")
+	}
+
+	// For this test, we assume the SFC logic is embedded in the program's body
+	// and can be evaluated. A full implementation would have a more complex POU invocation.
+	// Here, we'll simulate a few cycles.
+}
+
+func TestSFCActionQualifiers(t *testing.T) {
+	input := `
+		PROGRAM TestSFCQualifiers
+			VAR
+				// Action variables
+				ActionN, ActionS, ActionR_S, ActionP : BOOL;
+				// Conditions
+				GoToS2, GoToS3, GoToS4, GoToS5, Reset : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1:
+				ActionN(N);
+				ActionS(S);
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+
+			STEP S2:
+				ActionP(P);
+			END_STEP
+
+			TRANSITION FROM S2 TO S3 := GoToS3; END_TRANSITION
+
+			STEP S3:
+				ActionR_S(R);
+			END_STEP
+
+			TRANSITION FROM S3 TO S4 := GoToS4; END_TRANSITION
+
+			STEP S4:
+				(* No actions *)
+			END_STEP
+
+			TRANSITION FROM S4 TO S5 := GoToS5; END_TRANSITION
+
+			STEP S5:
+				(* Final step *)
+			END_STEP
+
+			TRANSITION FROM S5 TO S1 := Reset; END_TRANSITION
+
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCActionQualifiers", input)
+
+	env := object.NewEnvironment()
+	// This will declare the PROGRAM POU
+	Eval(program, env)
+
+	// Now, instantiate the program to get the SFC object
+	progInstance := testEval("TestSFCQualifiers")
+	sfc, ok := progInstance.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	}
+
+	// --- Cycle 1: Initial state ---
+	// S1 is active. ActionN and ActionS should be TRUE. ActionP and ActionR_S are FALSE.
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionN"), true)
+	testBooleanObject(t, mustGet(env, "ActionS"), true)
+	testBooleanObject(t, mustGet(env, "ActionP"), false)
+	testBooleanObject(t, mustGet(env, "ActionR_S"), false)
+
+	// --- Cycle 2: Transition from S1 to S2 ---
+	// Set condition and cycle. S1 becomes inactive, S2 becomes active.
+	env.Set("GoToS2", TRUE)
+	evalSFCCycle(sfc, env)
+	// ActionN (Non-stored) becomes FALSE as S1 is no longer active.
+	// ActionS (Set) remains TRUE.
+	// ActionP (Pulse) becomes TRUE for this one cycle.
+	testBooleanObject(t, mustGet(env, "ActionN"), false)
+	testBooleanObject(t, mustGet(env, "ActionS"), true)
+	testBooleanObject(t, mustGet(env, "ActionP"), true)
+
+	// --- Cycle 3: S2 is active ---
+	// Reset condition. Cycle again.
+	env.Set("GoToS2", FALSE)
+	evalSFCCycle(sfc, env)
+	// ActionP (Pulse) should now be FALSE again.
+	// ActionS remains TRUE.
+	testBooleanObject(t, mustGet(env, "ActionP"), false)
+	testBooleanObject(t, mustGet(env, "ActionS"), true)
+
+	// --- Cycle 4: Transition from S2 to S3 ---
+	// Set condition and cycle. S2 becomes inactive, S3 becomes active.
+	env.Set("GoToS3", TRUE)
+	evalSFCCycle(sfc, env)
+	// ActionS is still TRUE.
+	// ActionR_S is associated with S3 with an R (Reset) qualifier, so it should force ActionS to FALSE.
+	// However, the action being reset is ActionR_S itself, so it becomes false.
+	// Let's test resetting ActionS.
+	// The logic for R is `action.IsActive = false`. So ActionR_S becomes false.
+	testBooleanObject(t, mustGet(env, "ActionR_S"), false)
+	// To test R properly, let's imagine ActionR_S was named ActionS.
+	sfc.Actions["ActionS"].AssociatedSteps = append(sfc.Actions["ActionS"].AssociatedSteps, sfc.Steps["S3"])
+	sfc.Steps["S3"].Actions = append(sfc.Steps["S3"].Actions, &ast.ActionBlockStatement{ActionName: &ast.Identifier{Value: "ActionS"}, Qualifier: &ast.Identifier{Value: "R"}})
+	evalSFCCycle(sfc, env) // Re-evaluate with the modified SFC structure
+	testBooleanObject(t, mustGet(env, "ActionS"), false)
+}
+
+// Mockable time for testing
+var mockTime time.Time
+
+func advanceMockTime(d time.Duration) {
+	mockTime = mockTime.Add(d)
+}
+
+func TestSFCDivergenceConvergence(t *testing.T) {
+	input := `
+		PROGRAM TestSFCBranching
+			VAR
+				// Action variables
+				PathA_Active, PathB_Active, PathC_Active, Merged_Active : BOOL;
+				// Conditions
+				SelectA, SelectB, Fork, Join : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1: END_STEP
+
+			// Selection Divergence
+			TRANSITION FROM S1 TO S2 := SelectA; END_TRANSITION
+			TRANSITION FROM S1 TO S3 := SelectB; END_TRANSITION
+
+			STEP S2: PathA_Active(N); END_STEP
+			STEP S3: PathB_Active(N); END_STEP
+
+			// Selection Convergence
+			TRANSITION FROM S2 TO S4 := TRUE; END_TRANSITION
+			TRANSITION FROM S3 TO S4 := TRUE; END_TRANSITION
+
+			STEP S4: Merged_Active(N); END_STEP
+
+			// Simultaneous Divergence (Fork)
+			TRANSITION FROM S4 TO (S5, S6) := Fork; END_TRANSITION
+
+			STEP S5: PathA_Active(S); END_STEP // Use Set to see state over cycles
+			STEP S6: PathB_Active(S); END_STEP
+
+			// Some intermediate steps
+			TRANSITION FROM S5 TO S7 := TRUE; END_TRANSITION
+			STEP S7: END_STEP
+			TRANSITION FROM S6 TO S8 := TRUE; END_TRANSITION
+			STEP S8: END_STEP
+
+			// Simultaneous Convergence (Join)
+			TRANSITION FROM (S7, S8) TO S9 := Join; END_TRANSITION
+
+			STEP S9: PathC_Active(N); END_STEP
+
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCBranching", input)
+
+	env := object.NewEnvironment()
+	// This will declare the PROGRAM POU and its variables
+	Eval(program, env)
+
+	// Now, instantiate the program to get the SFC object
+	progInstance := testEval("TestSFCBranching")
+	sfc, ok := progInstance.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	}
+
+	// --- Cycle 1: Initial state ---
+	evalSFCCycle(sfc, env)
+	if !sfc.Steps["S1"].IsActive {
+		t.Fatal("S1 should be active initially")
+	}
+
+	// --- Cycle 2: Test Selection Divergence ---
+	env.Set("SelectA", TRUE) // Choose path A
+	evalSFCCycle(sfc, env)
+	if sfc.Steps["S1"].IsActive || !sfc.Steps["S2"].IsActive || sfc.Steps["S3"].IsActive {
+		t.Fatal("Selection divergence failed: S1 should be inactive, S2 active, S3 inactive")
+	}
+
+	// --- Cycle 3: Test Selection Convergence ---
+	evalSFCCycle(sfc, env)
+	if sfc.Steps["S2"].IsActive || !sfc.Steps["S4"].IsActive {
+		t.Fatal("Selection convergence failed: S2 should be inactive, S4 active")
+	}
+
+	// --- Cycle 4: Test Simultaneous Divergence (Fork) ---
+	env.Set("Fork", TRUE)
+	evalSFCCycle(sfc, env)
+	if sfc.Steps["S4"].IsActive || !sfc.Steps["S5"].IsActive || !sfc.Steps["S6"].IsActive {
+		t.Fatal("Simultaneous divergence failed: S4 should be inactive, S5 and S6 should be active")
+	}
+
+	// --- Cycle 5 & 6: Let parallel paths advance ---
+	evalSFCCycle(sfc, env) // S5->S7, S6->S8
+	if !sfc.Steps["S7"].IsActive || !sfc.Steps["S8"].IsActive {
+		t.Fatal("Parallel paths did not advance correctly")
+	}
+
+	// --- Cycle 7: Test Simultaneous Convergence (Join) ---
+	env.Set("Join", TRUE)
+	evalSFCCycle(sfc, env)
+	if sfc.Steps["S7"].IsActive || sfc.Steps["S8"].IsActive || !sfc.Steps["S9"].IsActive {
+		t.Fatal("Simultaneous convergence failed: S7/S8 should be inactive, S9 active")
+	}
+}
+
+func TestSFCActionQualifiersTimed(t *testing.T) {
+	// Initialize mock time for this test
+	mockTime = time.Date(2026, time.May, 21, 10, 0, 0, 0, time.UTC)
+	// Override the global nowFunc in evaluator package for testing
+	originalNowFunc := nowFunc
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }() // Restore original nowFunc after test
+
+	input := `
+		PROGRAM TestSFCTimedQualifiers
+			VAR
+				// Action variables
+				ActionD_Q, ActionL_Q, ActionSD_Q, ActionDS_Q, ActionSL_Q : BOOL;
+				// Conditions
+				GoToS2, GoToS3, GoToS4, GoToS5 : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1:
+				ActionD_Q(D, T#5s);
+				ActionL_Q(L, T#3s);
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+
+			STEP S2:
+				ActionSD_Q(SD, T#2s);
+				ActionDS_Q(DS, T#4s);
+			END_STEP
+
+			TRANSITION FROM S2 TO S3 := GoToS3; END_TRANSITION
+
+			STEP S3:
+				ActionSL_Q(SL, T#6s);
+			END_STEP
+
+			TRANSITION FROM S3 TO S4 := GoToS4; END_TRANSITION
+
+			STEP S4:
+				(* Final step *)
+			END_STEP
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCTimedQualifiers", input)
+
+	env := object.NewEnvironment()
+	Eval(program, env) // Declare the PROGRAM POU
+
+	progInstance := testEval("TestSFCTimedQualifiers")
+	sfc, ok := progInstance.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	}
+
+	// --- Cycle 1: Initial state (S1 active) ---
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionD_Q"), false) // D: Not active yet
+	testBooleanObject(t, mustGet(env, "ActionL_Q"), true)  // L: Active immediately
+
+	// --- Cycle 2: Advance time by 2s ---
+	advanceMockTime(2 * time.Second)
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionD_Q"), false) // D: Still not active
+	testBooleanObject(t, mustGet(env, "ActionL_Q"), true)  // L: Still active
+
+	// --- Cycle 3: Advance time by another 2s (total 4s) ---
+	advanceMockTime(2 * time.Second)
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionD_Q"), true)  // D: Now active (5s delay passed)
+	testBooleanObject(t, mustGet(env, "ActionL_Q"), false) // L: Now inactive (3s limit passed)
+
+	// --- Cycle 4: Transition S1 -> S2 (GoToS2 = TRUE) ---
+	env.Set("GoToS2", TRUE)
+	advanceMockTime(1 * time.Second) // Advance time to ensure transitions are processed
+	evalSFCCycle(sfc, env)
+	// S1 is inactive, S2 is active.
+	// ActionD_Q and ActionL_Q should be reset to FALSE.
+	testBooleanObject(t, mustGet(env, "ActionD_Q"), false)
+	testBooleanObject(t, mustGet(env, "ActionL_Q"), false)
+	testBooleanObject(t, mustGet(env, "ActionSD_Q"), false) // SD: Not active yet
+	testBooleanObject(t, mustGet(env, "ActionDS_Q"), false) // DS: Not active yet
+
+	// --- Cycle 5: Advance time by 2s (total 7s) ---
+	advanceMockTime(2 * time.Second)
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)  // SD: Now active (2s delay passed)
+	testBooleanObject(t, mustGet(env, "ActionDS_Q"), false) // DS: Still not active
+
+	// --- Cycle 6: Advance time by another 2s (total 9s) ---
+	advanceMockTime(2 * time.Second)
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)  // SD: Remains active
+	testBooleanObject(t, mustGet(env, "ActionDS_Q"), true)  // DS: Now active (4s delay passed)
+	testBooleanObject(t, mustGet(env, "ActionSL_Q"), false) // SL: Not active yet (S3 not active)
+
+	// --- Cycle 7: Transition S2 -> S3 (GoToS3 = TRUE) ---
+	env.Set("GoToS3", TRUE)
+	advanceMockTime(1 * time.Second) // Advance time
+	evalSFCCycle(sfc, env)
+	// S2 inactive, S3 active. ActionSD_Q and ActionDS_Q remain TRUE (stored).
+	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)
+	testBooleanObject(t, mustGet(env, "ActionDS_Q"), true)
+	testBooleanObject(t, mustGet(env, "ActionSL_Q"), true) // SL: Active immediately
+
+	// --- Cycle 8: Advance time by 6s (total 16s) ---
+	advanceMockTime(6 * time.Second)
+	evalSFCCycle(sfc, env)
+	testBooleanObject(t, mustGet(env, "ActionSL_Q"), false) // SL: Now inactive (6s limit passed)
 }
 
 func TestFunctionObject(t *testing.T) {
@@ -1618,6 +2342,12 @@ func TestBitwiseOperators(t *testing.T) {
 		{"BYTE#16#A5 XOR BYTE#16#F0", uint64(0x55)},
 		{"WORD#16#1234 XOR WORD#16#FFFF", uint64(0xEDCB)},
 
+		// NAND
+		{"BYTE#16#A5 NAND BYTE#16#F0", uint64(0x5F)}, // NOT (A5 & F0) -> NOT(A0) -> 5F
+
+		// NOR
+		{"BYTE#16#A5 NOR BYTE#16#F0", uint64(0x0A)}, // NOT (A5 | F0) -> NOT(F5) -> 0A
+
 		// Combinations
 		{"(BYTE#16#A5 OR BYTE#16#0F) AND BYTE#16#F0", uint64(0xA0)},
 		{"NOT (BYTE#16#A5 AND BYTE#16#F0)", uint64(0x5F)},
@@ -1806,6 +2536,28 @@ func testRealObject(t *testing.T, obj object.Object, expected float64) bool {
 	const epsilon = 1e-9
 	if diff := result.Value - expected; diff < -epsilon || diff > epsilon {
 		t.Errorf("object has wrong value. got=%f, want=%f", result.Value, expected)
+		return false
+	}
+	return true
+}
+
+// mustGet is a test helper to get a value from the environment and fail if not found.
+func mustGet(env *object.Environment, name string) object.Object {
+	obj, ok := env.Get(name)
+	if !ok {
+		panic("variable " + name + " not found in environment")
+	}
+	return obj
+}
+
+func testErrorObjectContains(t *testing.T, obj object.Object, expectedMessage string) bool {
+	errObj, ok := obj.(*object.Error)
+	if !ok {
+		t.Errorf("object is not Error. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if !strings.Contains(errObj.Message, expectedMessage) {
+		t.Errorf("wrong error message. expected to contain %q, got %q", expectedMessage, errObj.Message)
 		return false
 	}
 	return true

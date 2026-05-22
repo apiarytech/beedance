@@ -2887,6 +2887,67 @@ func TestMissingEndProgramErrorRecovery(t *testing.T) {
 	}
 }
 
+func TestIlProgramParsing(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MyIlProgram
+			VAR
+				Start : BOOL;
+				Counter : INT;
+				Result : INT;
+			END_VAR
+
+			LD    Start
+			ADD   Counter
+			ST    Result
+		END_FUNCTION_BLOCK
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestIlProgramParsing", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(fb.Body.Statements) != 3 {
+		t.Fatalf("Function block body does not have 3 statements. got=%d", len(fb.Body.Statements))
+	}
+
+	// Test instruction 1: LD Start
+	inst1, ok := fb.Body.Statements[0].(*ast.IlInstructionStatement)
+	if !ok {
+		t.Fatalf("Statement 1 is not IlInstructionStatement. got=%T", fb.Body.Statements[0])
+	}
+	if inst1.Operator != "LD" || inst1.Operand.String() != "Start" {
+		t.Errorf("Instruction 1 is incorrect. Expected 'LD Start', got '%s %s'", inst1.Operator, inst1.Operand)
+	}
+
+	// Test instruction 2: ADD Counter
+	inst2, ok := fb.Body.Statements[1].(*ast.IlInstructionStatement)
+	if !ok {
+		t.Fatalf("Statement 2 is not IlInstructionStatement. got=%T", fb.Body.Statements[1])
+	}
+	if inst2.Operator != "ADD" || inst2.Operand.String() != "Counter" {
+		t.Errorf("Instruction 2 is incorrect. Expected 'ADD Counter', got '%s %s'", inst2.Operator, inst2.Operand)
+	}
+
+	// Test instruction 3: ST Result
+	inst3, ok := fb.Body.Statements[2].(*ast.IlInstructionStatement)
+	if !ok {
+		t.Fatalf("Statement 3 is not IlInstructionStatement. got=%T", fb.Body.Statements[2])
+	}
+	if inst3.Operator != "ST" || inst3.Operand.String() != "Result" {
+		t.Errorf("Instruction 3 is incorrect. Expected 'ST Result', got '%s %s'", inst3.Operator, inst3.Operand)
+	}
+}
+
 func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, dataType string) bool {
 	if s.TokenLiteral() != name && s.Token.Type != token.VAR {
 		t.Errorf("s.TokenLiteral not '%s' or 'VAR'. got=%q", name, s.TokenLiteral())

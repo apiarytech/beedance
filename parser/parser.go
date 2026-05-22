@@ -101,13 +101,13 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.DATE, p.parseTimeDateLiteral) // This will handle D# and DATE#
 	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeDateLiteral)
 	// Specific integer types
-	p.registerPrefix(token.SINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.DINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.LINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.USINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.UINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.UDINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.ULINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.SINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.DINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.LINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.USINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.UINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.UDINT, p.parseTypedIntegerLiteral)
+	p.registerPrefix(token.ULINT, p.parseTypedIntegerLiteral)
 	p.registerPrefix(token.BYTE, p.parseBitStringLiteral)
 	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
 	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
@@ -649,6 +649,8 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 
 	if p.curTokenIs(token.STRUCT) {
 		decl.DataType = p.parseStructDefinition()
+	} else if p.curTokenIs(token.LPAREN) {
+		decl.DataType = p.parseEnumDefinition()
 	} else {
 		decl.DataType = p.parseTypeSpecifier() // Can be ARRAY or simple type
 	}
@@ -693,6 +695,33 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 	}
 
 	return structDef
+}
+
+func (p *Parser) parseEnumDefinition() ast.Expression {
+	defer untrace(trace("parseEnumDefinition"))
+	enumDef := &ast.EnumDefinition{Token: p.curToken}
+	enumDef.Values = []*ast.Identifier{}
+
+	// Current token is '('. We expect a list of identifiers.
+	p.nextToken() // consume '('
+
+	// Parse the first identifier
+	if p.curTokenIs(token.IDENT) {
+		enumDef.Values = append(enumDef.Values, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
+		p.nextToken()
+	}
+
+	// Parse subsequent identifiers separated by commas
+	for p.curTokenIs(token.COMMA) {
+		p.nextToken() // consume ','
+		if p.curTokenIs(token.IDENT) {
+			enumDef.Values = append(enumDef.Values, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
+			p.nextToken()
+		}
+	}
+
+	p.expectPeek(token.RPAREN) // Expect and consume ')'
+	return enumDef
 }
 
 func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant bool) []*ast.VarDeclStatement {
@@ -1173,6 +1202,77 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit.Value = value
 
 	return lit
+}
+
+func (p *Parser) parseTypedIntegerLiteral() ast.Expression {
+	defer untrace(trace("parseTypedIntegerLiteral"))
+
+	tok := p.curToken
+	literal := tok.Literal
+	base := 10
+	var bitSize int
+	var isUnsigned bool
+
+	// Determine properties from token type
+	switch tok.Type {
+	case token.SINT:
+		bitSize = 8
+	case token.INT:
+		bitSize = 16
+	case token.DINT:
+		bitSize = 32
+	case token.LINT:
+		bitSize = 64
+	case token.USINT:
+		bitSize, isUnsigned = 8, true
+	case token.UINT:
+		bitSize, isUnsigned = 16, true
+	case token.UDINT:
+		bitSize, isUnsigned = 32, true
+	case token.ULINT:
+		bitSize, isUnsigned = 64, true
+	default:
+		// Fallback to generic integer if called with a non-specific type
+		return p.parseIntegerLiteral()
+	}
+
+	// The lexer provides the full literal, e.g., "SINT#10" or "UINT#16#FF"
+	parts := strings.SplitN(literal, "#", 2)
+	if len(parts) != 2 {
+		p.currentError("invalid typed integer literal format: %q", literal)
+		return nil
+	}
+	valuePart := parts[1]
+
+	// Check for an explicit base in the value part
+	if strings.Contains(valuePart, "#") {
+		baseParts := strings.SplitN(valuePart, "#", 2)
+		parsedBase, err := strconv.Atoi(baseParts[0])
+		if err != nil {
+			p.currentError("invalid base in typed integer literal: %q", baseParts[0])
+			return nil
+		}
+		base = parsedBase
+		valuePart = baseParts[1]
+	}
+
+	valuePart = strings.ReplaceAll(valuePart, "_", "")
+
+	if isUnsigned {
+		value, err := strconv.ParseUint(valuePart, base, bitSize)
+		if err != nil {
+			p.currentError("could not parse %q as unsigned integer (base %d, size %d): %v", valuePart, base, bitSize, err)
+			return nil
+		}
+		return &ast.UnsignedIntegerLiteral{Token: tok, Value: value, Type: tok.Type}
+	} else {
+		value, err := strconv.ParseInt(valuePart, base, bitSize)
+		if err != nil {
+			p.currentError("could not parse %q as signed integer (base %d, size %d): %v", valuePart, base, bitSize, err)
+			return nil
+		}
+		return &ast.IntegerLiteral{Token: tok, Value: value, Type: tok.Type}
+	}
 }
 
 func (p *Parser) parseRealLiteral() ast.Expression {
@@ -1746,8 +1846,13 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	}
 end_var_parsing:
 
-	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK, token.VAR)
+	// After var blocks, we have the body. Check if it's IL or ST.
+	// A simple heuristic: if it starts with an IL operator, parse as IL.
+	if isIlOperator(p.curToken.Type) {
+		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
+	} else {
+		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK, token.VAR)
+	}
 
 	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
 		// Error Recovery: If we see a keyword that could start a new statement,
@@ -1791,8 +1896,13 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 	}
 end_var_parsing:
 
-	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM, token.VAR)
+	// After var blocks, we have the body. Check if it's IL or ST.
+	// A simple heuristic: if it starts with an IL operator, parse as IL.
+	if isIlOperator(p.curToken.Type) {
+		stmt.Body = p.parseIlProgramBody(token.END_PROGRAM)
+	} else {
+		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM, token.VAR)
+	}
 
 	if !p.curTokenIs(token.END_PROGRAM) {
 		p.peekError(token.END_PROGRAM)
@@ -1950,8 +2060,8 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 		if p.curTokenIs(token.COMMA) {
 			p.nextToken() // consume ','
 			stmt.Duration = p.parseExpression(LOWEST)
-			p.nextToken()
 		}
+
 	} else {
 		p.nextToken() // consume '(' to move to ')'
 	}
@@ -2002,6 +2112,87 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		p.peekError(token.UNTIL)
 	}
 	return block
+}
+
+// parseIlProgramBody parses the body of a POU written in Instruction List.
+// It expects to be called when the parser is at the beginning of the IL body
+// and will parse until it encounters the specified endToken.
+func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatement {
+	// The body of an IL program is a block of IL instructions.
+	body := &ast.BlockStatement{Token: p.curToken}
+	body.Statements = []ast.Statement{}
+
+	// Loop until we hit the end of the block (e.g., END_FUNCTION_BLOCK) or EOF.
+	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) {
+		stmt := p.parseIlInstruction()
+		if stmt != nil {
+			body.Statements = append(body.Statements, stmt)
+		}
+
+		// In IL, each instruction is typically on a new line, ending with a semicolon
+		// or implicitly ended by the newline. We advance to the next token to start
+		// parsing the next instruction. If a semicolon is present, it will be consumed.
+		// If not, we move to the next token on the new line.
+		if p.peekTokenIs(token.SEMICOLON) {
+			p.nextToken()
+		}
+		p.nextToken()
+	}
+
+	return body
+}
+
+// parseIlInstruction parses a single instruction line in an IL program.
+// An IL instruction has the general form: [label:] operator [operand] [(modifier)]
+func (p *Parser) parseIlInstruction() ast.Statement {
+	stmt := &ast.IlInstructionStatement{Token: p.curToken}
+
+	// 1. Check for an optional label (e.g., "MyLabel:").
+	// A label is an identifier followed by a colon.
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
+		stmt.Label = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume the identifier
+		p.nextToken() // consume the ':'
+	}
+
+	// 2. Parse the operator (e.g., LD, ST, ADD).
+	// The operator is expected to be an identifier.
+	if !p.curTokenIs(token.IDENT) {
+		// In a more robust implementation, we would check against a list of valid IL operators.
+		// For now, we assume any identifier here is an operator.
+		p.currentError("expected IL operator (e.g., LD, ST), got %s", p.curToken.Type)
+		return nil
+	}
+	stmt.Operator = p.curToken.Literal
+
+	// 3. Parse the optional operand.
+	// The operand is an expression that follows the operator.
+	// Not all operators have operands (e.g., RET).
+	// We can check if the next token could start an expression.
+	if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
+		p.nextToken()
+		stmt.Operand = p.parseExpression(LOWEST)
+	}
+
+	// 4. Parse optional modifiers (e.g., JMPC, CALCN).
+	// This is a placeholder for future implementation. Modifiers are typically
+	// handled by checking for 'C', 'N', or '(' after the operator/operand.
+	// For example, `JMPCN` would be parsed as operator `JMP` with modifiers `C` and `N`.
+	// A simple implementation might just attach them to the operator string.
+
+	return stmt
+}
+
+// isIlOperator checks if a token type is a common IL operator.
+// This is used as a heuristic to decide whether to parse a POU body as IL or ST.
+func isIlOperator(tok token.TokenType) bool {
+	switch tok {
+	case token.LD, token.ST, token.S, token.R,
+		token.AND, token.OR, token.XOR, token.NOT: // Also common IL operators
+		return true
+	default:
+		return false
+	}
 }
 
 func isStatementEndToken(tok token.TokenType) bool {

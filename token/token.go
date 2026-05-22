@@ -85,6 +85,12 @@ const (
 	NAND  = "NAND"
 	NOR   = "NOR"
 	MOD   = "MOD"
+
+	// Instruction List (IL) Operators
+	LD    = "LD"
+	ST    = "ST"
+	S     = "S"
+	R     = "R"
 	MACRO = "MACRO"
 
 	// New IEC 61131-3 Keywords
@@ -237,6 +243,10 @@ var keywords = map[string]TokenType{
 	"OR":                 OR,
 	"XOR":                XOR,
 	"NAND":               NAND,
+	"LD":                 LD,
+	"ST":                 ST,
+	"S":                  S,
+	"R":                  R,
 	"MOD":                MOD,
 	"NOR":                NOR,
 	"RETURN":             RETURN,

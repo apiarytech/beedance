@@ -352,6 +352,7 @@ func (b *Boolean) String() string       { return b.Token.Literal }
 type IntegerLiteral struct {
 	Token token.Token
 	Value int64
+	Type  token.TokenType
 }
 
 func (il *IntegerLiteral) expressionNode()      {}
@@ -362,6 +363,19 @@ func (il *IntegerLiteral) String() string {
 		return il.Token.Literal
 	}
 	return fmt.Sprintf("%d", il.Value)
+}
+
+type UnsignedIntegerLiteral struct {
+	Token token.Token
+	Type  token.TokenType
+	Value uint64
+}
+
+func (ul *UnsignedIntegerLiteral) expressionNode()      {}
+func (ul *UnsignedIntegerLiteral) Pos() (int, int)      { return ul.Token.Row, ul.Token.Column }
+func (ul *UnsignedIntegerLiteral) TokenLiteral() string { return ul.Token.Literal }
+func (ul *UnsignedIntegerLiteral) String() string {
+	return ul.Token.Literal
 }
 
 type RealLiteral struct {
@@ -1228,6 +1242,33 @@ func (fd *FunctionDeclaration) String() string {
 		out.WriteString(fd.Body.String())
 	}
 	out.WriteString("\nEND_FUNCTION")
+	return out.String()
+}
+
+// IlInstructionStatement represents a single instruction in an Instruction List program.
+// It implements the Statement interface.
+type IlInstructionStatement struct {
+	Token    token.Token // The first token of the instruction (label or operator)
+	Label    *Identifier // Optional label for the instruction (e.g., "MyLabel:")
+	Operator string      // The instruction operator (e.g., "LD", "ST", "ADD")
+	Operand  Expression  // The operand for the instruction, which can be any expression
+	Modifier string      // Optional modifier (e.g., "N", "C")
+}
+
+func (ils *IlInstructionStatement) statementNode()       {}
+func (ils *IlInstructionStatement) Pos() (int, int)      { return ils.Token.Row, ils.Token.Column }
+func (ils *IlInstructionStatement) TokenLiteral() string { return ils.Token.Literal }
+func (ils *IlInstructionStatement) String() string {
+	var out bytes.Buffer
+
+	if ils.Label != nil {
+		out.WriteString(ils.Label.String() + ": ")
+	}
+	out.WriteString(ils.Operator)
+	if ils.Operand != nil {
+		out.WriteString(" " + ils.Operand.String())
+	}
+
 	return out.String()
 }
 

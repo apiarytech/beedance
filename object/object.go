@@ -24,11 +24,20 @@ type ObjectType string
 
 const (
 	INTEGER_OBJ                 = "INTEGER"
+	SINT_OBJ                    = "SINT"
+	INT_OBJ                     = "INT"
+	DINT_OBJ                    = "DINT"
+	LINT_OBJ                    = "LINT"
+	USINT_OBJ                   = "USINT"
+	UINT_OBJ                    = "UINT"
+	UDINT_OBJ                   = "UDINT"
+	ULINT_OBJ                   = "ULINT"
 	LREAL_OBJ                   = "LREAL"
 	REAL_OBJ                    = "REAL"
 	BOOLEAN_OBJ                 = "BOOLEAN"
 	NULL_OBJ                    = "NULL"
 	RETURN_VALUE_OBJ            = "RETURN_VALUE"
+	EXIT_OBJ                    = "EXIT"
 	ERROR_OBJ                   = "ERROR"
 	FUNCTION_OBJ                = "FUNCTION"
 	STRING_OBJ                  = "STRING"
@@ -47,12 +56,16 @@ const (
 	BITSTRING_OBJ               = "BITSTRING"
 	QUOTE_OBJ                   = "QUOTE"
 	MACRO_OBJ                   = "MACRO"
+	JUMP_OBJ                    = "JUMP"
+	RETURN_OBJ                  = "RETURN"
 	SFC_OBJ                     = "SFC"
 	STEP_OBJ                    = "STEP"
 	TRANSITION_OBJ              = "TRANSITION"
 	FUNCTION_BLOCK_INSTANCE_OBJ = "FUNCTION_BLOCK_INSTANCE"
 	ENUMERATED_TYPE_OBJ         = "ENUMERATED_TYPE"
 	ENUMERATED_VALUE_OBJ        = "ENUMERATED_VALUE"
+	ACTION_OBJ                  = "ACTION"
+	SUBRANGE_TYPE_OBJ           = "SUBRANGE_TYPE"
 )
 
 // Object is the interface that all objects in the Monkey language must implement.
@@ -80,6 +93,54 @@ type Integer struct {
 
 func (i *Integer) Type() ObjectType { return INTEGER_OBJ }
 func (i *Integer) Inspect() string  { return fmt.Sprintf("%d", i.Value) }
+
+// SInt objects store 8-bit signed integers.
+type SInt struct {
+	Value int8
+}
+
+func (si *SInt) Type() ObjectType { return SINT_OBJ }
+func (si *SInt) Inspect() string  { return fmt.Sprintf("%d", si.Value) }
+
+// Int objects store 16-bit signed integers.
+type Int struct {
+	Value int16
+}
+
+func (i *Int) Type() ObjectType { return INT_OBJ }
+func (i *Int) Inspect() string  { return fmt.Sprintf("%d", i.Value) }
+
+// DInt objects store 32-bit signed integers.
+type DInt struct {
+	Value int32
+}
+
+func (di *DInt) Type() ObjectType { return DINT_OBJ }
+func (di *DInt) Inspect() string  { return fmt.Sprintf("%d", di.Value) }
+
+// LInt objects store 64-bit signed integers.
+type LInt struct {
+	Value int64
+}
+
+func (li *LInt) Type() ObjectType { return LINT_OBJ }
+func (li *LInt) Inspect() string  { return fmt.Sprintf("%d", li.Value) }
+
+// USInt objects store 8-bit unsigned integers.
+type USInt struct {
+	Value uint8
+}
+
+func (usi *USInt) Type() ObjectType { return USINT_OBJ }
+func (usi *USInt) Inspect() string  { return fmt.Sprintf("%d", usi.Value) }
+
+// UInt objects store 16-bit unsigned integers.
+type UInt struct {
+	Value uint16
+}
+
+func (ui *UInt) Type() ObjectType { return UINT_OBJ }
+func (ui *UInt) Inspect() string  { return fmt.Sprintf("%d", ui.Value) }
 
 // Real objects store 64-bit floating-point numbers.
 type Real struct {
@@ -118,6 +179,28 @@ type ReturnValue struct {
 
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_OBJ }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
+
+// Exit objects are used to signal an exit from a loop.
+type Exit struct{}
+
+func (e *Exit) Type() ObjectType { return EXIT_OBJ }
+func (e *Exit) Inspect() string  { return "EXIT" }
+
+// It is an internal object used by the evaluator and not exposed to the user.
+type Jump struct {
+	TargetLabel string
+}
+
+// Return objects are used to signal a return from an IL program.
+type Return struct{}
+
+func (r *Return) Type() ObjectType { return RETURN_OBJ }
+func (r *Return) Inspect() string  { return "RETURN" }
+func (r *Return) HashKey() HashKey { return HashKey{} } // Not hashable
+
+func (j *Jump) Type() ObjectType { return JUMP_OBJ }
+func (j *Jump) Inspect() string  { return "JUMP to " + j.TargetLabel }
+func (j *Jump) HashKey() HashKey { return HashKey{} } // Not hashable
 
 // Error objects store error messages.
 type Error struct {
@@ -188,6 +271,21 @@ func (i *Integer) HashKey() HashKey {
 	return HashKey{Type: i.Type(), Value: uint64(i.Value)}
 }
 
+func (si *SInt) HashKey() HashKey { return HashKey{Type: si.Type(), Value: uint64(si.Value)} }
+func (i *Int) HashKey() HashKey   { return HashKey{Type: i.Type(), Value: uint64(i.Value)} }
+func (di *DInt) HashKey() HashKey { return HashKey{Type: di.Type(), Value: uint64(di.Value)} }
+func (li *LInt) HashKey() HashKey { return HashKey{Type: li.Type(), Value: uint64(li.Value)} }
+
+func (usi *USInt) HashKey() HashKey { return HashKey{Type: usi.Type(), Value: uint64(usi.Value)} }
+func (ui *UInt) HashKey() HashKey   { return HashKey{Type: ui.Type(), Value: uint64(ui.Value)} }
+
+// UDInt objects store 32-bit unsigned integers.
+type UDInt struct{ Value uint32 }
+
+func (udi *UDInt) Type() ObjectType { return UDINT_OBJ }
+func (udi *UDInt) Inspect() string  { return fmt.Sprintf("%d", udi.Value) }
+func (udi *UDInt) HashKey() HashKey { return HashKey{Type: udi.Type(), Value: uint64(udi.Value)} }
+
 func (b *Boolean) HashKey() HashKey {
 	var value uint64
 	if b.Value {
@@ -197,6 +295,13 @@ func (b *Boolean) HashKey() HashKey {
 	}
 	return HashKey{Type: b.Type(), Value: value}
 }
+
+// ULInt objects store 64-bit unsigned integers.
+type ULInt struct{ Value uint64 }
+
+func (uli *ULInt) Type() ObjectType { return ULINT_OBJ }
+func (uli *ULInt) Inspect() string  { return fmt.Sprintf("%d", uli.Value) }
+func (uli *ULInt) HashKey() HashKey { return HashKey{Type: uli.Type(), Value: uli.Value} }
 
 func (r *Real) HashKey() HashKey {
 	h := fnv.New64a()
@@ -235,6 +340,20 @@ func (et *EnumeratedType) Inspect() string {
 	}
 	out.WriteString(fmt.Sprintf("ENUM(%s: %s)", et.Name, strings.Join(vals, ", ")))
 	return out.String()
+}
+
+// SubrangeType represents the definition of a subrange type.
+type SubrangeType struct {
+	Name       string
+	BaseType   ObjectType
+	LowerBound int64
+	UpperBound int64
+}
+
+func (st *SubrangeType) Type() ObjectType { return SUBRANGE_TYPE_OBJ }
+func (st *SubrangeType) Inspect() string {
+	return fmt.Sprintf("SUBRANGE %s (%s..%s)", st.BaseType,
+		(&Integer{Value: st.LowerBound}).Inspect(), (&Integer{Value: st.UpperBound}).Inspect())
 }
 
 // EnumeratedValue represents a single value from an enumerated type.
@@ -408,7 +527,8 @@ type SFC struct {
 	Steps           map[string]*Step
 	Transitions     []*Transition
 	InitialStepName string
-	ActiveSteps     map[string]bool // Map of step name to active status
+	Actions         map[string]*Action // Map of action name to action object
+	ActiveSteps     map[string]bool    // Map of step name to active status
 }
 
 func (s *SFC) Type() ObjectType { return SFC_OBJ }
@@ -433,6 +553,23 @@ type Transition struct {
 
 func (t *Transition) Type() ObjectType { return TRANSITION_OBJ }
 func (t *Transition) Inspect() string  { return "TRANSITION" }
+
+// Action represents a declared action within an SFC.
+type Action struct {
+	Name *ast.Identifier
+	Body *ast.BlockStatement
+
+	// State for action control logic
+	IsActive        bool // The 'Q' flag from the ACTION_CONTROL block
+	ActivationCount int  // For handling 'P' qualifier
+	AssociatedSteps []*Step
+	Qualifier       string
+	Duration        time.Duration
+	TimerStart      time.Time // When the timer for D, L, etc. started
+}
+
+func (a *Action) Type() ObjectType { return ACTION_OBJ }
+func (a *Action) Inspect() string  { return "ACTION " + a.Name.Value }
 
 // Function objects represent user-defined functions.
 type Function struct {

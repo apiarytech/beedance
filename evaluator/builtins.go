@@ -819,18 +819,6 @@ func selBuiltin(g, in0, in1 object.Object) object.Object {
 	return in0
 }
 
-// Helper to get a float64 value from an INTEGER or REAL object.
-func getFloat64Value(obj object.Object) (float64, bool) {
-	switch o := obj.(type) {
-	case *object.Integer:
-		return float64(o.Value), true
-	case *object.Real:
-		return o.Value, true
-	default:
-		return 0, false
-	}
-}
-
 func minMaxBuiltin(op string, args ...object.Object) object.Object {
 	if len(args) == 0 {
 		return newBuiltinError("wrong number of arguments for %s. got=0, want>=1", op)
