@@ -322,10 +322,6 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseRepeatStatement()
 	case token.CASE:
 		return p.parseCaseStatement()
-	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
-		return p.parsePoulDeclaration()
-	case token.ACTION:
-		return p.parseActionStatement()
 	case token.TRANSITION:
 		return p.parseTransitionStatement()
 	case token.STEP:
@@ -334,6 +330,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseInitialStepStatement()
 	case token.CONFIGURATION:
 		return p.parseConfigurationDeclaration() // No semicolon expected after this block
+	case token.ACTION:
+		return p.parseActionStatement()
+	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
+		return p.parsePoulDeclaration()
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
@@ -959,41 +959,6 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 	}
 
 	p.nextToken() // Consume ')'
-
-	return stmt
-}
-
-func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
-	defer untrace(trace("parseProgramConfiguration"))
-	stmt := &ast.ProgramConfiguration{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected program instance name
-	}
-	stmt.InstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	// Check for optional WITH clause
-	if p.peekTokenIs(token.WITH) {
-		p.nextToken() // consume instance name, move to WITH
-		if !p.expectPeek(token.IDENT) {
-			return nil // Expected task name
-		}
-		stmt.TaskName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-	}
-
-	if !p.expectPeek(token.COLON) {
-		return nil
-	}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected program type name
-	}
-	stmt.TypeName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	// TODO: Parse optional parenthesized connection list `(...)`
-
-	// Program configuration must end with a semicolon
-	p.expectPeek(token.SEMICOLON) // Consume semicolon
 
 	return stmt
 }
@@ -1732,19 +1697,6 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	return block
 }
 
-func (p *Parser) parsePoulDeclaration() ast.Statement {
-	defer untrace(trace("parsePoulDeclaration"))
-	switch p.curToken.Type {
-	case token.FUNCTION:
-		return p.parseFunctionDeclaration()
-	case token.FUNCTION_BLOCK:
-		return p.parseFunctionBlockDeclaration()
-	case token.PROGRAM:
-		return p.parseProgramDeclaration()
-	}
-	return nil // Should not be reached
-}
-
 func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 	defer untrace(trace("parseAssignmentStatement"))
 	stmt := &ast.AssignmentStatement{
@@ -1777,140 +1729,6 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	return stmt
 }
 
-func (p *Parser) parseFunctionDeclaration() ast.Statement {
-	defer untrace(trace("parseFunctionDeclaration"))
-	stmt := &ast.FunctionDeclaration{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected function name
-	}
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	if !p.expectPeek(token.COLON) {
-		return nil // Expected return type separator
-	}
-
-	p.nextToken() // Consume ':', move to return type
-	stmt.ReturnType = p.parseTypeSpecifier().(*ast.TypeSpecifier)
-
-	p.nextToken() // Consume return type
-
-	// Loop to parse all variable declaration blocks
-	for !p.curTokenIs(token.END_FUNCTION) && !p.curTokenIs(token.EOF) {
-		if p.curTokenIs(token.VAR_INPUT) {
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
-		} else if p.curTokenIs(token.VAR_OUTPUT) {
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
-		} else if p.curTokenIs(token.VAR_IN_OUT) {
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
-		} else if p.curTokenIs(token.VAR) {
-			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
-		} else {
-			// No more VAR blocks, break the loop to parse the body
-			break
-		}
-	}
-
-	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION, token.VAR)
-
-	return stmt
-}
-
-func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
-	defer untrace(trace("parseFunctionBlockDeclaration"))
-	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected function block name
-	}
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	p.nextToken()
-
-	// Loop to parse all variable declaration blocks
-	for {
-		switch p.curToken.Type {
-		case token.VAR_INPUT:
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
-		case token.VAR_OUTPUT:
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
-		case token.VAR_IN_OUT:
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
-		case token.VAR:
-			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
-		default:
-			// No more VAR blocks, break the loop to parse the body
-			goto end_var_parsing
-		}
-	}
-end_var_parsing:
-
-	// After var blocks, we have the body. Check if it's IL or ST.
-	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if isIlOperator(p.curToken.Type) {
-		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
-	} else {
-		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK, token.VAR)
-	}
-
-	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
-		// Error Recovery: If we see a keyword that could start a new statement,
-		// report the missing END_FUNCTION_BLOCK and return without advancing.
-		if isStatementStartKeyword(p.curToken.Type) {
-			p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
-		} else {
-			p.peekError(token.END_FUNCTION_BLOCK)
-		}
-	}
-
-	return stmt
-}
-
-func (p *Parser) parseProgramDeclaration() ast.Statement {
-	defer untrace(trace("parseProgramDeclaration"))
-	stmt := &ast.ProgramDeclaration{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected program name
-	}
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	p.nextToken()
-
-	// Loop to parse all variable declaration blocks
-	for {
-		switch p.curToken.Type {
-		case token.VAR_INPUT:
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
-		case token.VAR_OUTPUT:
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
-		case token.VAR_IN_OUT:
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
-		case token.VAR:
-			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
-		default:
-			// No more VAR blocks, break the loop to parse the body
-			goto end_var_parsing
-		}
-	}
-end_var_parsing:
-
-	// After var blocks, we have the body. Check if it's IL or ST.
-	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if isIlOperator(p.curToken.Type) {
-		stmt.Body = p.parseIlProgramBody(token.END_PROGRAM)
-	} else {
-		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM, token.VAR)
-	}
-
-	if !p.curTokenIs(token.END_PROGRAM) {
-		p.peekError(token.END_PROGRAM)
-	}
-
-	return stmt
-}
-
 // parseVarBlock is a helper to parse a VAR...END_VAR block and return the declarations.
 func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatement {
 	defer untrace(trace(fmt.Sprintf("parseVarBlock (%s)", blockType)))
@@ -1936,142 +1754,6 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 		p.nextToken() // Consume END_VAR
 	}
 	return decls
-}
-
-func (p *Parser) parseActionStatement() ast.Statement {
-	defer untrace(trace("parseActionStatement"))
-	stmt := &ast.ActionStatement{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected action name
-	}
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	p.nextToken() // Consume the action name identifier
-
-	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION, token.VAR)
-
-	if !p.curTokenIs(token.END_ACTION) {
-		p.peekError(token.END_ACTION)
-	}
-	return stmt
-}
-
-func (p *Parser) parseTransitionStatement() ast.Statement {
-	defer untrace(trace("parseTransitionStatement"))
-	stmt := &ast.TransitionStatement{Token: p.curToken}
-
-	if !p.expectPeek(token.FROM) {
-		return nil
-	}
-
-	p.nextToken() // consume FROM
-	stmt.From = p.parseIdentifierList()
-
-	if !p.expectPeek(token.TO) {
-		return nil
-	}
-
-	p.nextToken() // consume TO
-	stmt.To = p.parseIdentifierList()
-
-	if !p.expectPeek(token.ASSIGN) {
-		return nil
-	}
-
-	p.nextToken() // consume :=
-	stmt.Condition = p.parseExpression(LOWEST)
-
-	if !p.expectPeek(token.SEMICOLON) {
-		return nil
-	}
-
-	if !p.expectPeek(token.END_TRANSITION) {
-		return nil
-	}
-
-	return stmt
-}
-
-func (p *Parser) parseStepStatement() ast.Statement {
-	defer untrace(trace("parseStepStatement"))
-	return p.parseStep(false)
-}
-
-func (p *Parser) parseInitialStepStatement() ast.Statement {
-	defer untrace(trace("parseInitialStepStatement"))
-	return p.parseStep(true)
-}
-
-func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
-	stmt := &ast.StepStatement{Token: p.curToken, IsInitial: isInitial}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil
-	}
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	if !p.expectPeek(token.COLON) {
-		return nil
-	}
-	p.nextToken() // consume COLON
-
-	stmt.Actions = []*ast.ActionBlockStatement{}
-	for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
-		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.LPAREN) {
-			assoc := p.parseActionBlockStatement()
-			if assoc != nil {
-				stmt.Actions = append(stmt.Actions, assoc)
-			}
-		}
-		if !p.expectPeek(token.SEMICOLON) {
-			break // Or handle error
-		}
-		p.nextToken()
-	}
-
-	if !p.curTokenIs(token.END_STEP) {
-		p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
-	}
-
-	return stmt
-}
-
-func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
-	defer untrace(trace("parseActionBlockStatement"))
-	stmt := &ast.ActionBlockStatement{
-		Token:      p.curToken,
-		ActionName: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
-	}
-
-	if !p.expectPeek(token.LPAREN) {
-		return nil
-	}
-
-	// Check if there are any arguments (qualifiers, duration)
-	if !p.peekTokenIs(token.RPAREN) {
-		p.nextToken() // consume '('
-
-		// First argument is the qualifier
-		stmt.Qualifier = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken()
-
-		// Check for optional second argument (duration)
-		if p.curTokenIs(token.COMMA) {
-			p.nextToken() // consume ','
-			stmt.Duration = p.parseExpression(LOWEST)
-		}
-
-	} else {
-		p.nextToken() // consume '(' to move to ')'
-	}
-
-	if !p.curTokenIs(token.RPAREN) {
-		p.peekError(token.RPAREN)
-		return nil
-	}
-
-	return stmt
 }
 
 func (p *Parser) parseBlockStatementUntil(end token.TokenType, recoveryToken token.TokenType) *ast.BlockStatement {
@@ -2112,87 +1794,6 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		p.peekError(token.UNTIL)
 	}
 	return block
-}
-
-// parseIlProgramBody parses the body of a POU written in Instruction List.
-// It expects to be called when the parser is at the beginning of the IL body
-// and will parse until it encounters the specified endToken.
-func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatement {
-	// The body of an IL program is a block of IL instructions.
-	body := &ast.BlockStatement{Token: p.curToken}
-	body.Statements = []ast.Statement{}
-
-	// Loop until we hit the end of the block (e.g., END_FUNCTION_BLOCK) or EOF.
-	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) {
-		stmt := p.parseIlInstruction()
-		if stmt != nil {
-			body.Statements = append(body.Statements, stmt)
-		}
-
-		// In IL, each instruction is typically on a new line, ending with a semicolon
-		// or implicitly ended by the newline. We advance to the next token to start
-		// parsing the next instruction. If a semicolon is present, it will be consumed.
-		// If not, we move to the next token on the new line.
-		if p.peekTokenIs(token.SEMICOLON) {
-			p.nextToken()
-		}
-		p.nextToken()
-	}
-
-	return body
-}
-
-// parseIlInstruction parses a single instruction line in an IL program.
-// An IL instruction has the general form: [label:] operator [operand] [(modifier)]
-func (p *Parser) parseIlInstruction() ast.Statement {
-	stmt := &ast.IlInstructionStatement{Token: p.curToken}
-
-	// 1. Check for an optional label (e.g., "MyLabel:").
-	// A label is an identifier followed by a colon.
-	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
-		stmt.Label = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken() // consume the identifier
-		p.nextToken() // consume the ':'
-	}
-
-	// 2. Parse the operator (e.g., LD, ST, ADD).
-	// The operator is expected to be an identifier.
-	if !p.curTokenIs(token.IDENT) {
-		// In a more robust implementation, we would check against a list of valid IL operators.
-		// For now, we assume any identifier here is an operator.
-		p.currentError("expected IL operator (e.g., LD, ST), got %s", p.curToken.Type)
-		return nil
-	}
-	stmt.Operator = p.curToken.Literal
-
-	// 3. Parse the optional operand.
-	// The operand is an expression that follows the operator.
-	// Not all operators have operands (e.g., RET).
-	// We can check if the next token could start an expression.
-	if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
-		p.nextToken()
-		stmt.Operand = p.parseExpression(LOWEST)
-	}
-
-	// 4. Parse optional modifiers (e.g., JMPC, CALCN).
-	// This is a placeholder for future implementation. Modifiers are typically
-	// handled by checking for 'C', 'N', or '(' after the operator/operand.
-	// For example, `JMPCN` would be parsed as operator `JMP` with modifiers `C` and `N`.
-	// A simple implementation might just attach them to the operator string.
-
-	return stmt
-}
-
-// isIlOperator checks if a token type is a common IL operator.
-// This is used as a heuristic to decide whether to parse a POU body as IL or ST.
-func isIlOperator(tok token.TokenType) bool {
-	switch tok {
-	case token.LD, token.ST, token.S, token.R,
-		token.AND, token.OR, token.XOR, token.NOT: // Also common IL operators
-		return true
-	default:
-		return false
-	}
 }
 
 func isStatementEndToken(tok token.TokenType) bool {

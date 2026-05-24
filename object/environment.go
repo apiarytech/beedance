@@ -24,7 +24,22 @@ func (e *Environment) Get(name string) (Object, bool) {
 	return obj, ok
 }
 
+// GetRaw retrieves an object from the environment without dereferencing pointers.
+func (e *Environment) GetRaw(name string) (Object, bool) {
+	obj, ok := e.store[name]
+	return obj, ok
+}
+
 func (e *Environment) Set(name string, val Object) Object {
 	e.store[name] = val
 	return val
+}
+
+// Names returns a slice of all variable names in the environment's store.
+func (e *Environment) Names() []string {
+	names := make([]string, 0, len(e.store))
+	for name := range e.store {
+		names = append(names, name)
+	}
+	return names
 }

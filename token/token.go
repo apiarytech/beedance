@@ -89,8 +89,13 @@ const (
 	// Instruction List (IL) Operators
 	LD    = "LD"
 	ST    = "ST"
+	CAL   = "CAL"
 	S     = "S"
 	R     = "R"
+	JMP   = "JMP"
+	RET   = "RET"
+	EN    = "EN"
+	ENO   = "ENO"
 	MACRO = "MACRO"
 
 	// New IEC 61131-3 Keywords
@@ -130,7 +135,6 @@ const (
 	OF                = "OF"
 	END_CASE          = "END_CASE"
 	R_EDGE            = "R_EDGE"
-	CAL               = "CAL"
 	F_EDGE            = "F_EDGE"
 	TYPE              = "TYPE"
 	END_TYPE          = "END_TYPE"
@@ -160,6 +164,8 @@ const (
 	END_STEP           = "END_STEP"
 	INITIAL_STEP       = "INITIAL_STEP"
 	RETURN             = "RETURN"
+	MOVE               = "MOVE"
+	NIL                = "NIL"
 
 	// Data Type Keywords
 	BOOL = "BOOL"
@@ -228,7 +234,6 @@ var keywords = map[string]TokenType{
 	"END_REPEAT":         END_REPEAT,
 	"EXIT":               EXIT,
 	"R_EDGE":             R_EDGE,
-	"CAL":                CAL,
 	"F_EDGE":             F_EDGE,
 	"OF":                 OF,
 	"TYPE":               TYPE,
@@ -246,7 +251,12 @@ var keywords = map[string]TokenType{
 	"LD":                 LD,
 	"ST":                 ST,
 	"S":                  S,
+	"CAL":                CAL,
+	"JMP":                JMP,
+	"RET":                RET,
 	"R":                  R,
+	"EN":                 EN,
+	"ENO":                ENO,
 	"MOD":                MOD,
 	"NOR":                NOR,
 	"RETURN":             RETURN,
@@ -271,6 +281,8 @@ var keywords = map[string]TokenType{
 	"ON":                 ON,
 	"WITH":               WITH,
 	"TASK":               TASK,
+	"MOVE":               MOVE,
+	"NIL":                NIL,
 	"SINGLE":             SINGLE,
 	"INTERVAL":           INTERVAL,
 	"PRIORITY":           PRIORITY,

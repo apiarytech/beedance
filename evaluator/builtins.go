@@ -1156,11 +1156,11 @@ func comparisonBuiltin(op string) object.BuiltinFunction {
 func evalComparison(op string, left, right object.Object) object.Object {
 	// Type promotion for REAL and INTEGER
 	if l, ok := left.(*object.Integer); ok {
-		if r, ok := right.(*object.Real); ok {
+		if _, ok := right.(*object.Real); ok {
 			left = &object.Real{Value: float64(l.Value)}
 		}
 	}
-	if l, ok := left.(*object.Real); ok {
+	if _, ok := left.(*object.Real); ok {
 		if r, ok := right.(*object.Integer); ok {
 			right = &object.Real{Value: float64(r.Value)}
 		}
@@ -1505,4 +1505,183 @@ func bcdToInt(input object.Object) object.Object {
 	}
 
 	return &object.Integer{Value: result}
+}
+
+// evalTON implements the logic for the TON (Timer On-Delay) standard function block.
+func evalTON(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get inputs from the instance environment (set by applyFunction)
+	in, _ := instanceEnv.Get("IN")
+	pt, _ := instanceEnv.Get("PT")
+
+	// 2. Get internal state variables from the instance environment
+	startTimeObj, _ := instanceEnv.Get("__startTime")
+	timerActiveObj, _ := instanceEnv.Get("__timerActive")
+
+	// Type assertions
+	inBool, _ := in.(*object.Boolean)
+	ptDuration, _ := pt.(*object.Time)
+	if inBool == nil || ptDuration == nil {
+		return newBuiltinError("TON requires IN (BOOL) and PT (TIME) inputs")
+	}
+
+	var startTime time.Time
+	if startTimeObj != nil {
+		startTime = startTimeObj.(*object.TimeOfDay).Value
+	}
+	timerActive := timerActiveObj == TRUE
+
+	var et time.Duration
+	q := FALSE
+
+	if inBool == TRUE {
+		if !timerActive {
+			// Rising edge of IN: start the timer
+			instanceEnv.Set("__startTime", &object.TimeOfDay{Value: nowFunc()})
+			instanceEnv.Set("__timerActive", TRUE)
+			timerActive = true
+			startTime = nowFunc()
+		}
+
+		if timerActive {
+			et = nowFunc().Sub(startTime)
+			if et >= ptDuration.Value {
+				et = ptDuration.Value
+				q = TRUE
+			}
+		}
+	} else {
+		// IN is FALSE: reset the timer
+		instanceEnv.Set("__timerActive", FALSE)
+		instanceEnv.Set("__startTime", nil)
+		et = 0
+		q = FALSE
+	}
+
+	// 3. Set outputs in the instance environment
+	instanceEnv.Set("Q", q)
+	instanceEnv.Set("ET", &object.Time{Value: et})
+
+	return q // The primary output of TON is Q
+}
+
+// evalTOF implements the logic for the TOF (Timer Off-Delay) standard function block.
+func evalTOF(instanceEnv, callEnv *object.Environment) object.Object {
+	in, _ := instanceEnv.Get("IN")
+	pt, _ := instanceEnv.Get("PT")
+	stopTimeObj, _ := instanceEnv.Get("__stopTime")
+
+	inBool, _ := in.(*object.Boolean)
+	ptDuration, _ := pt.(*object.Time)
+	if inBool == nil || ptDuration == nil {
+		return newBuiltinError("TOF requires IN (BOOL) and PT (TIME) inputs")
+	}
+
+	var stopTime time.Time
+	if stopTimeObj != nil {
+		stopTime = stopTimeObj.(*object.TimeOfDay).Value
+	}
+
+	var et time.Duration
+	q := FALSE
+
+	if inBool == TRUE {
+		instanceEnv.Set("__stopTime", nil)
+		q = TRUE
+		et = 0
+	} else {
+		// Falling edge of IN
+		if stopTime.IsZero() {
+			stopTime = nowFunc()
+			instanceEnv.Set("__stopTime", &object.TimeOfDay{Value: stopTime})
+		}
+
+		et = nowFunc().Sub(stopTime)
+		if et < ptDuration.Value {
+			q = TRUE
+		} else {
+			et = ptDuration.Value
+			q = FALSE
+		}
+	}
+
+	instanceEnv.Set("Q", q)
+	instanceEnv.Set("ET", &object.Time{Value: et})
+
+	return q
+}
+
+// evalCTU implements the logic for the CTU (Counter Up) standard function block.
+func evalCTU(instanceEnv, callEnv *object.Environment) object.Object {
+	cu, _ := instanceEnv.Get("CU")
+	r, _ := instanceEnv.Get("R")
+	pv, _ := instanceEnv.Get("PV")
+	lastCU, _ := instanceEnv.Get("__lastCU")
+	cvObj, _ := instanceEnv.Get("CV")
+
+	cuBool, _ := cu.(*object.Boolean)
+	rBool, _ := r.(*object.Boolean)
+	pvInt, _ := pv.(*object.Integer)
+	if cuBool == nil || rBool == nil || pvInt == nil {
+		return newBuiltinError("CTU requires CU (BOOL), R (BOOL), and PV (INT) inputs")
+	}
+
+	lastCUBool := lastCU == TRUE
+	var cv int64
+	if cvInt, ok := cvObj.(*object.Integer); ok {
+		cv = cvInt.Value
+	}
+
+	if rBool == TRUE {
+		cv = 0
+	} else if cuBool == TRUE && !lastCUBool { // Rising edge on CU
+		if cv < pvInt.Value { // Standard says count up to max value, but PV is a practical limit
+			cv++
+		}
+	}
+
+	q := nativeBoolToBooleanObject(cv >= pvInt.Value)
+
+	instanceEnv.Set("__lastCU", cuBool)
+	instanceEnv.Set("Q", q)
+	instanceEnv.Set("CV", &object.Integer{Value: cv})
+
+	return q
+}
+
+// evalCTD implements the logic for the CTD (Counter Down) standard function block.
+func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
+	cd, _ := instanceEnv.Get("CD")
+	ld, _ := instanceEnv.Get("LD")
+	pv, _ := instanceEnv.Get("PV")
+	lastCD, _ := instanceEnv.Get("__lastCD")
+	cvObj, _ := instanceEnv.Get("CV")
+
+	cdBool, _ := cd.(*object.Boolean)
+	ldBool, _ := ld.(*object.Boolean)
+	pvInt, _ := pv.(*object.Integer)
+	if cdBool == nil || ldBool == nil || pvInt == nil {
+		return newBuiltinError("CTD requires CD (BOOL), LD (BOOL), and PV (INT) inputs")
+	}
+
+	lastCDBool := lastCD == TRUE
+	var cv int64
+	if cvInt, ok := cvObj.(*object.Integer); ok {
+		cv = cvInt.Value
+	}
+
+	if ldBool == TRUE {
+		cv = pvInt.Value
+	} else if cdBool == TRUE && !lastCDBool { // Rising edge on CD
+		if cv > 0 { // Standard says count down to min value
+			cv--
+		}
+	}
+
+	q := nativeBoolToBooleanObject(cv <= 0)
+
+	instanceEnv.Set("__lastCD", cdBool)
+	instanceEnv.Set("Q", q)
+	instanceEnv.Set("CV", &object.Integer{Value: cv})
+
+	return q
 }

@@ -13,6 +13,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 
 	"beedance/token"
@@ -220,7 +221,7 @@ type ProgramConfiguration struct {
 	InstanceName *Identifier
 	TaskName     *Identifier // Optional: from WITH clause
 	TypeName     *Identifier
-	// TODO: Add connections/arguments for programs, e.g. (Input1 := Value1)
+	Parameters   []Expression // <-- Add this line
 }
 
 func (pc *ProgramConfiguration) statementNode()       {}
@@ -316,6 +317,7 @@ type BlockStatement struct {
 }
 
 func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) expressionNode()      {} // Allow blocks to be treated as expressions (e.g., in IL)
 func (bs *BlockStatement) Pos() (int, int)      { return bs.Token.Row, bs.Token.Column }
 func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
 func (bs *BlockStatement) String() string {
@@ -868,9 +870,20 @@ func (hl *HashLiteral) TokenLiteral() string { return hl.Token.Literal }
 func (hl *HashLiteral) String() string {
 	var out bytes.Buffer
 
+	// Create a slice of keys from the map to allow sorting.
+	keys := make([]Expression, 0, len(hl.Pairs))
+	for key := range hl.Pairs {
+		keys = append(keys, key)
+	}
+
+	// Sort the keys based on their string representation for deterministic output.
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].String() < keys[j].String()
+	})
+
 	pairs := []string{}
-	for key, value := range hl.Pairs { // Iterate over the map to get key-value pairs
-		pairs = append(pairs, key.String()+": "+value.String()) // Add a space after the colon
+	for _, key := range keys {
+		pairs = append(pairs, key.String()+": "+hl.Pairs[key].String())
 	}
 
 	out.WriteString("{")
@@ -913,7 +926,7 @@ type FunctionBlockDeclaration struct {
 	VarOutputs []*VarDeclStatement
 	VarInOuts  []*VarDeclStatement
 	Vars       []*VarDeclStatement
-	Body       *BlockStatement
+	Body       Statement
 }
 
 func (fbd *FunctionBlockDeclaration) statementNode()       {}
@@ -941,7 +954,7 @@ type ProgramDeclaration struct {
 	VarOutputs []*VarDeclStatement
 	VarInOuts  []*VarDeclStatement
 	Vars       []*VarDeclStatement
-	Body       *BlockStatement
+	Body       Statement
 }
 
 func (pd *ProgramDeclaration) statementNode()       {}
@@ -1220,7 +1233,7 @@ type FunctionDeclaration struct {
 	VarOutputs []*VarDeclStatement
 	VarInOuts  []*VarDeclStatement
 	Vars       []*VarDeclStatement
-	Body       *BlockStatement
+	Body       Statement
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}

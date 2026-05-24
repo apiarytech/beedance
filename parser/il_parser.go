@@ -135,6 +135,18 @@ func (p *Parser) parseIlParenthesizedExpression() ast.Expression {
 	return block
 }
 
+// isIlOperator checks if a token type is a common IL operator.
+// This is used as a heuristic to decide whether to parse a POU body as IL or ST.
+func isIlOperator(tok token.TokenType) bool {
+	switch tok {
+	case token.LD, token.ST, token.S, token.R,
+		token.AND, token.OR, token.XOR, token.NOT: // Also common IL operators
+		return true
+	default:
+		return false
+	}
+}
+
 // To integrate this, you would modify the POU parsing functions in `parser.go`.
 // For example, `parseFunctionBlockDeclaration` would need to detect if the body
 // is ST or IL and call the appropriate body parser.

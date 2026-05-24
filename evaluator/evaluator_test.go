@@ -600,7 +600,7 @@ func TestSFCExecution(t *testing.T) {
 	Eval(program, env)
 
 	// Find the program instance in the environment
-	progObj, ok := env.Get("TestSFC")
+	_, ok := env.Get("TestSFC")
 	if !ok {
 		t.Fatalf("Program 'TestSFC' not found in environment")
 	}
@@ -934,6 +934,128 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	advanceMockTime(6 * time.Second)
 	evalSFCCycle(sfc, env)
 	testBooleanObject(t, mustGet(env, "ActionSL_Q"), false) // SL: Now inactive (6s limit passed)
+}
+
+func TestSFCActionWithSTBody(t *testing.T) {
+	input := `
+		PROGRAM TestSFC_ST_Action
+			VAR
+				Counter : INT := 0;
+				GoToStep2 : BOOL := FALSE;
+				GoToStep1 : BOOL := FALSE;
+			END_VAR
+
+			ACTION IncrementCounter:
+				Counter := Counter + 1;
+			END_ACTION
+
+			INITIAL_STEP S1:
+				(* Do nothing *)
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := GoToStep2;
+			END_TRANSITION
+
+			STEP S2:
+				IncrementCounter(N); (* Non-stored action *)
+			END_STEP
+
+			TRANSITION FROM S2 TO S1 := GoToStep1;
+			END_TRANSITION
+
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCActionWithSTBody", input)
+
+	env := object.NewEnvironment()
+	// This will declare the PROGRAM POU and its variables
+	Eval(program, env)
+
+	// Now, instantiate the program to get the SFC object
+	progInstance := testEval("TestSFC_ST_Action")
+	sfc, ok := progInstance.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	}
+
+	// --- Cycle 1: Initial state (S1 active) ---
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 0) // Action body should not have run
+
+	// --- Cycle 2: Transition to S2 ---
+	env.Set("GoToStep2", TRUE)
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 1) // Action body runs for the first time
+
+	// --- Cycle 3: Still in S2 ---
+	env.Set("GoToStep2", FALSE) // Prevent immediate re-transition
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 2) // Action body runs again
+}
+
+func TestSFCActionWithSTBody(t *testing.T) {
+	input := `
+		PROGRAM TestSFC_ST_Action
+			VAR
+				Counter : INT := 0;
+				GoToStep2 : BOOL := FALSE;
+				GoToStep1 : BOOL := FALSE;
+			END_VAR
+
+			ACTION IncrementCounter:
+				Counter := Counter + 1;
+			END_ACTION
+
+			INITIAL_STEP S1:
+				(* Do nothing *)
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := GoToStep2;
+			END_TRANSITION
+
+			STEP S2:
+				IncrementCounter(N); (* Non-stored action *)
+			END_STEP
+
+			TRANSITION FROM S2 TO S1 := GoToStep1;
+			END_TRANSITION
+
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCActionWithSTBody", input)
+
+	env := object.NewEnvironment()
+	// This will declare the PROGRAM POU and its variables
+	Eval(program, env)
+
+	// Now, instantiate the program to get the SFC object
+	progInstance := testEval("TestSFC_ST_Action")
+	sfc, ok := progInstance.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	}
+
+	// --- Cycle 1: Initial state (S1 active) ---
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 0) // Action body should not have run
+
+	// --- Cycle 2: Transition to S2 ---
+	env.Set("GoToStep2", TRUE)
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 1) // Action body runs for the first time
+
+	// --- Cycle 3: Still in S2 ---
+	env.Set("GoToStep2", FALSE) // Prevent immediate re-transition
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "Counter"), 2) // Action body runs again
 }
 
 func TestFunctionObject(t *testing.T) {
@@ -2484,12 +2606,323 @@ func TestFunctionCallWithMixedArguments(t *testing.T) {
 	testIntegerObject(t, outputVar, 60)
 }
 
+func TestStandardFunctionBlocks(t *testing.T) {
+	// Mock time for timer tests
+	originalNowFunc := nowFunc
+	mockTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	// Helper to advance mock time
+	advanceTime := func(d time.Duration) {
+		mockTime = mockTime.Add(d)
+	}
+
+	t.Run("TON - Timer On-Delay", func(t *testing.T) {
+		input := `
+			PROGRAM TestTON
+				VAR
+					MyTimer : TON;
+					Start : BOOL;
+					TimerDone : BOOL;
+					ET : TIME;
+				END_VAR
+
+				MyTimer(IN := Start, PT := T#5s, Q => TimerDone, ET => ET);
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		// First, evaluate the whole program to set up the environment
+		testEval(input)
+
+		// Helper to run one "scan"
+		runScan := func() {
+			// In a real app, you'd re-evaluate the program body.
+			// For this test, we just need to evaluate the FB call.
+			testEval(`MyTimer(IN := Start, PT := T#5s, Q => TimerDone, ET => ET);`)
+		}
+
+		// --- Cycle 1: Initial state ---
+		env.Set("Start", FALSE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), false)
+		testTimeObject(t, mustGet(env, "ET"), 0)
+
+		// --- Cycle 2: Rising edge on IN ---
+		env.Set("Start", TRUE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q is still false
+		testTimeObject(t, mustGet(env, "ET"), 0)               // ET is still 0 on the first scan
+
+		// --- Cycle 3: Time advances (3s) ---
+		advanceTime(3 * time.Second)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q is still false
+		testTimeObject(t, mustGet(env, "ET"), 3*time.Second)
+
+		// --- Cycle 4: Time reaches PT (5s) ---
+		advanceTime(2 * time.Second)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), true) // Q is now true
+		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)  // ET is capped at PT
+
+		// --- Cycle 5: IN is still true, time advances further ---
+		advanceTime(2 * time.Second)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), true) // Q remains true
+		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)  // ET remains capped at PT
+
+		// --- Cycle 6: Falling edge on IN ---
+		env.Set("Start", FALSE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q resets to false
+		testTimeObject(t, mustGet(env, "ET"), 0)               // ET resets to 0
+	})
+
+	t.Run("CTU - Counter Up", func(t *testing.T) {
+		input := `
+			PROGRAM TestCTU
+				VAR
+					MyCounter : CTU;
+					CountUp : BOOL;
+					Reset : BOOL;
+					IsDone : BOOL;
+					CurrentValue : INT;
+				END_VAR
+
+				MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		testEval(input)
+
+		runScan := func() {
+			testEval(`MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`)
+		}
+
+		// --- Cycle 1: Initial state ---
+		env.Set("CountUp", FALSE)
+		env.Set("Reset", FALSE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "IsDone"), false)
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
+
+		// --- Cycle 2: First rising edge on CU ---
+		env.Set("CountUp", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
+		testBooleanObject(t, mustGet(env, "IsDone"), false)
+
+		// --- Cycle 3: CU is still high (no change) ---
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
+
+		// --- Cycle 4: Falling edge on CU ---
+		env.Set("CountUp", FALSE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
+
+		// --- Cycle 5: Second rising edge ---
+		env.Set("CountUp", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 2)
+		env.Set("CountUp", FALSE)
+		runScan()
+
+		// --- Cycle 6: Third rising edge (reaches PV) ---
+		env.Set("CountUp", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 3)
+		testBooleanObject(t, mustGet(env, "IsDone"), true) // Q is now true
+
+		// --- Cycle 7: Fourth rising edge (CV does not exceed PV in this implementation) ---
+		env.Set("CountUp", FALSE)
+		runScan()
+		env.Set("CountUp", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 3) // CV is capped
+		testBooleanObject(t, mustGet(env, "IsDone"), true)
+
+		// --- Cycle 8: Reset ---
+		env.Set("CountUp", FALSE)
+		env.Set("Reset", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
+		testBooleanObject(t, mustGet(env, "IsDone"), false)
+	})
+
+	t.Run("TOF - Timer Off-Delay", func(t *testing.T) {
+		input := `
+			PROGRAM TestTOF
+				VAR
+					MyTimer : TOF;
+					Input : BOOL;
+					TimerActive : BOOL;
+					ET : TIME;
+				END_VAR
+
+				MyTimer(IN := Input, PT := T#5s, Q => TimerActive, ET => ET);
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		testEval(input)
+
+		runScan := func() {
+			testEval(`MyTimer(IN := Input, PT := T#5s, Q => TimerActive, ET => ET);`)
+		}
+
+		// --- Cycle 1: IN is high ---
+		env.Set("Input", TRUE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerActive"), true)
+		testTimeObject(t, mustGet(env, "ET"), 0)
+
+		// --- Cycle 2: Falling edge on IN ---
+		env.Set("Input", FALSE)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerActive"), true) // Q remains true
+		testTimeObject(t, mustGet(env, "ET"), 0)
+
+		// --- Cycle 3: Time advances (3s) ---
+		advanceTime(3 * time.Second)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerActive"), true) // Q still true
+		testTimeObject(t, mustGet(env, "ET"), 3*time.Second)
+
+		// --- Cycle 4: Time reaches PT (5s) ---
+		advanceTime(2 * time.Second)
+		runScan()
+		testBooleanObject(t, mustGet(env, "TimerActive"), false) // Q is now false
+		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)     // ET is capped
+	})
+
+	t.Run("CTD - Counter Down", func(t *testing.T) {
+		input := `
+			PROGRAM TestCTD
+				VAR
+					MyCounter : CTD;
+					CountDown : BOOL;
+					Load : BOOL;
+					IsDone : BOOL;
+					CurrentValue : INT;
+				END_VAR
+
+				MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		testEval(input)
+
+		runScan := func() {
+			testEval(`MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`)
+		}
+
+		// --- Cycle 1: Load the counter ---
+		env.Set("Load", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 3)
+		testBooleanObject(t, mustGet(env, "IsDone"), false)
+
+		// --- Cycle 2: First rising edge on CD ---
+		env.Set("Load", FALSE)
+		env.Set("CountDown", TRUE)
+		runScan()
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 2)
+		env.Set("CountDown", FALSE)
+		runScan()
+
+		// --- Cycle 3: Count down to 0 ---
+		env.Set("CountDown", TRUE)
+		runScan() // CV = 1
+		env.Set("CountDown", FALSE)
+		runScan()
+		env.Set("CountDown", TRUE)
+		runScan() // CV = 0
+		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
+		testBooleanObject(t, mustGet(env, "IsDone"), true) // Q is now true
+	})
+}
+
+func TestFunctionBlockWithSFCBody(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MySFC_FB
+			VAR_INPUT
+				EnableTransition : BOOL;
+			END_VAR
+			VAR_OUTPUT
+				ActiveStepOut : INT;
+			END_VAR
+
+			INITIAL_STEP S1:
+				ActiveStepOut := 1;
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := EnableTransition;
+			END_TRANSITION
+
+			STEP S2:
+				ActiveStepOut := 2;
+			END_STEP
+		END_FUNCTION_BLOCK
+
+		PROGRAM TestSFCinFB
+			VAR
+				myFb : MySFC_FB;
+				doTransition : BOOL := FALSE;
+				currentActiveStep : INT;
+			END_VAR
+
+			myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockWithSFCBody", input)
+
+	env := object.NewEnvironment()
+	// Evaluate the entire program to declare the FB type and the main program POU.
+	Eval(program, env)
+
+	// Helper to run one "scan" by re-evaluating the call to the FB instance.
+	runScan := func() {
+		// In a real PLC, the program body would be re-evaluated.
+		// For this test, we just need to re-evaluate the FB call.
+		testEvalWithEnv(`myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);`, env)
+	}
+
+	// --- Cycle 1: Initial state ---
+	// The FB is called with doTransition = FALSE.
+	// The SFC should be in S1, and ActiveStepOut should be 1.
+	runScan()
+	testIntegerObject(t, mustGet(env, "currentActiveStep"), 1)
+
+	// --- Cycle 2: Still in S1 ---
+	// doTransition is still FALSE, so no transition should occur.
+	runScan()
+	testIntegerObject(t, mustGet(env, "currentActiveStep"), 1)
+
+	// --- Cycle 3: Transition to S2 ---
+	// Set the input condition to TRUE and run the scan.
+	env.Set("doTransition", TRUE)
+	runScan()
+	testIntegerObject(t, mustGet(env, "currentActiveStep"), 2)
+}
+
 func testEval(input string) object.Object {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
 	env := object.NewEnvironment()
 
+	return Eval(program, env)
+}
+
+func testEvalWithEnv(input string, env *object.Environment) object.Object {
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
 	return Eval(program, env)
 }
 
@@ -2536,6 +2969,19 @@ func testRealObject(t *testing.T, obj object.Object, expected float64) bool {
 	const epsilon = 1e-9
 	if diff := result.Value - expected; diff < -epsilon || diff > epsilon {
 		t.Errorf("object has wrong value. got=%f, want=%f", result.Value, expected)
+		return false
+	}
+	return true
+}
+
+func testTimeObject(t *testing.T, obj object.Object, expected time.Duration) bool {
+	result, ok := obj.(*object.Time)
+	if !ok {
+		t.Errorf("object is not Time. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if result.Value != expected {
+		t.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
 		return false
 	}
 	return true

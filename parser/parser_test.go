@@ -1356,20 +1356,25 @@ func TestFunctionDeclaration(t *testing.T) {
 	}
 	testVarDeclStatement(t, stmt.Vars[0], "C", "INT")
 
-	if len(stmt.Body.Statements) != 2 {
-		t.Fatalf("Function body does not have 2 statements. got=%d", len(stmt.Body.Statements))
+	body, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Function body is not a BlockStatement. got=%T", stmt.Body)
+	}
+
+	if len(body.Statements) != 2 {
+		t.Fatalf("Function body does not have 2 statements. got=%d", len(body.Statements))
 	}
 	// Test first statement in body: C := A + B;
-	stmt1, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
+	stmt1, ok := body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement 1 is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement 1 is not ast.AssignmentStatement. got=%T", body.Statements[0])
 	}
 	testIdentifier(t, stmt1.Left, "C")
 
 	// Test second statement in body: MyFunction := C * 2;
-	stmt2, ok := stmt.Body.Statements[1].(*ast.AssignmentStatement)
+	stmt2, ok := body.Statements[1].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement 2 is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[1])
+		t.Fatalf("Body statement 2 is not ast.AssignmentStatement. got=%T", body.Statements[1])
 	}
 	testIdentifier(t, stmt2.Left, "MyFunction")
 }
@@ -1415,8 +1420,9 @@ func TestFunctionWithMultipleVarBlocks(t *testing.T) {
 	}
 	testVarDeclStatement(t, stmt.VarOutputs[0], "Out1", "REAL")
 
-	if len(stmt.Body.Statements) != 1 {
-		t.Fatalf("Function body should have 1 statement. got=%d", len(stmt.Body.Statements))
+	body, ok := stmt.Body.(*ast.BlockStatement)
+	if len(body.Statements) != 1 {
+		t.Fatalf("Function body should have 1 statement. got=%d", len(body.Statements))
 	}
 }
 
@@ -2189,13 +2195,18 @@ func TestFunctionBlockDeclaration(t *testing.T) {
 	}
 	testVarDeclStatement(t, stmt.Vars[0], "Internal1", "REAL")
 
-	if len(stmt.Body.Statements) != 1 {
-		t.Fatalf("Function block body does not have 1 statement. got=%d", len(stmt.Body.Statements))
+	body, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Function block body is not a BlockStatement. got=%T", stmt.Body)
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
+	if len(body.Statements) != 1 {
+		t.Fatalf("Function block body does not have 1 statement. got=%d", len(body.Statements))
+	}
+
+	bodyStmt, ok := body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", body.Statements[0])
 	}
 	testIdentifier(t, bodyStmt.Left, "Out1")
 	testInfixExpression(t, 0, bodyStmt.Value, "In1", "+", "Internal1")
@@ -2259,13 +2270,18 @@ func TestProgramDeclaration(t *testing.T) {
 	}
 	testVarDeclStatement(t, stmt.Vars[0], "LocalVar", "INT")
 
-	if len(stmt.Body.Statements) != 1 {
-		t.Fatalf("Program body does not have 1 statement. got=%d", len(stmt.Body.Statements))
+	body, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Program body is not a BlockStatement. got=%T", stmt.Body)
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
+	if len(body.Statements) != 1 {
+		t.Fatalf("Program body does not have 1 statement. got=%d", len(body.Statements))
+	}
+
+	bodyStmt, ok := body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", body.Statements[0])
 	}
 	testIdentifier(t, bodyStmt.Left, "LocalVar")
 	testIntegerLiteral(t, bodyStmt.Value, 10)
@@ -2287,7 +2303,7 @@ func TestActionStatement(t *testing.T) {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
 	}
 
-	stmt, ok := program.Statements[0].(*ast.ActionStatement)
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
 	if !ok {
 		t.Fatalf("program.Statements[0] is not ast.ActionStatement. got=%T", program.Statements[0])
 	}
@@ -2296,13 +2312,18 @@ func TestActionStatement(t *testing.T) {
 		t.Fatalf("Action name is not 'MyAction'. got=%s", stmt.Name.Value)
 	}
 
-	if len(stmt.Body.Statements) != 1 {
-		t.Fatalf("Action body does not have 1 statement. got=%d", len(stmt.Body.Statements))
+	body, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Action body is not a BlockStatement. got=%T", stmt.Body)
 	}
 
-	bodyStmt, ok := stmt.Body.Statements[0].(*ast.AssignmentStatement)
+	if len(body.Statements) != 1 {
+		t.Fatalf("Action body does not have 1 statement. got=%d", len(body.Statements))
+	}
+
+	bodyStmt, ok := body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", stmt.Body.Statements[0])
+		t.Fatalf("Body statement is not ast.AssignmentStatement. got=%T", body.Statements[0])
 	}
 
 	testIdentifier(t, bodyStmt.Left, "x")
@@ -2916,32 +2937,37 @@ func TestIlProgramParsing(t *testing.T) {
 		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
 	}
 
-	if len(fb.Body.Statements) != 3 {
-		t.Fatalf("Function block body does not have 3 statements. got=%d", len(fb.Body.Statements))
+	body, ok := fb.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Function block body is not a BlockStatement. got=%T", fb.Body)
+	}
+
+	if len(body.Statements) != 3 {
+		t.Fatalf("Function block body does not have 3 statements. got=%d", len(body.Statements))
 	}
 
 	// Test instruction 1: LD Start
-	inst1, ok := fb.Body.Statements[0].(*ast.IlInstructionStatement)
+	inst1, ok := body.Statements[0].(*ast.IlInstructionStatement)
 	if !ok {
-		t.Fatalf("Statement 1 is not IlInstructionStatement. got=%T", fb.Body.Statements[0])
+		t.Fatalf("Statement 1 is not IlInstructionStatement. got=%T", body.Statements[0])
 	}
 	if inst1.Operator != "LD" || inst1.Operand.String() != "Start" {
 		t.Errorf("Instruction 1 is incorrect. Expected 'LD Start', got '%s %s'", inst1.Operator, inst1.Operand)
 	}
 
 	// Test instruction 2: ADD Counter
-	inst2, ok := fb.Body.Statements[1].(*ast.IlInstructionStatement)
+	inst2, ok := body.Statements[1].(*ast.IlInstructionStatement)
 	if !ok {
-		t.Fatalf("Statement 2 is not IlInstructionStatement. got=%T", fb.Body.Statements[1])
+		t.Fatalf("Statement 2 is not IlInstructionStatement. got=%T", body.Statements[1])
 	}
 	if inst2.Operator != "ADD" || inst2.Operand.String() != "Counter" {
 		t.Errorf("Instruction 2 is incorrect. Expected 'ADD Counter', got '%s %s'", inst2.Operator, inst2.Operand)
 	}
 
 	// Test instruction 3: ST Result
-	inst3, ok := fb.Body.Statements[2].(*ast.IlInstructionStatement)
+	inst3, ok := body.Statements[2].(*ast.IlInstructionStatement)
 	if !ok {
-		t.Fatalf("Statement 3 is not IlInstructionStatement. got=%T", fb.Body.Statements[2])
+		t.Fatalf("Statement 3 is not IlInstructionStatement. got=%T", body.Statements[2])
 	}
 	if inst3.Operator != "ST" || inst3.Operand.String() != "Result" {
 		t.Errorf("Instruction 3 is incorrect. Expected 'ST Result', got '%s %s'", inst3.Operator, inst3.Operand)

@@ -43,6 +43,8 @@ const (
 	STRING_OBJ                  = "STRING"
 	WSTRING_OBJ                 = "WSTRING"
 	BUILTIN_OBJ                 = "BUILTIN"
+	POINTER_OBJ                 = "POINTER"
+	BUILTIN_FUNCTION_BLOCK_OBJ  = "BUILTIN_FUNCTION_BLOCK"
 	ARRAY_OBJ                   = "ARRAY"
 	HASH_OBJ                    = "HASH"
 	TIME_OBJ                    = "TIME"
@@ -61,29 +63,20 @@ const (
 	SFC_OBJ                     = "SFC"
 	STEP_OBJ                    = "STEP"
 	TRANSITION_OBJ              = "TRANSITION"
+	FUNCTION_BLOCK_OBJ          = "FUNCTION_BLOCK"
 	FUNCTION_BLOCK_INSTANCE_OBJ = "FUNCTION_BLOCK_INSTANCE"
 	ENUMERATED_TYPE_OBJ         = "ENUMERATED_TYPE"
 	ENUMERATED_VALUE_OBJ        = "ENUMERATED_VALUE"
 	ACTION_OBJ                  = "ACTION"
 	SUBRANGE_TYPE_OBJ           = "SUBRANGE_TYPE"
+	PROGRAM_OBJ                 = "PROGRAM"
+	PROGRAM_INSTANCE_OBJ        = "PROGRAM_INSTANCE"
 )
 
 // Object is the interface that all objects in the Monkey language must implement.
 type Object interface {
 	Type() ObjectType
 	Inspect() string
-}
-
-// FunctionBlock represents the definition of a function block.
-// It's like a class blueprint.
-type FunctionBlock struct {
-	Body       *ast.BlockStatement
-	Env        *Environment
-	Name       *ast.Identifier // The name of the function block
-	VarInputs  []*ast.VarDeclStatement
-	VarOutputs []*ast.VarDeclStatement
-	VarInOuts  []*ast.VarDeclStatement
-	Vars       []*ast.VarDeclStatement
 }
 
 // Integer objects store 64-bit integers.
@@ -236,6 +229,30 @@ type Builtin struct {
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }
 func (b *Builtin) Inspect() string  { return "builtin function" }
+
+// BuiltinFunctionBlockFunction is the type for a built-in function block's execution logic.
+// It receives the instance's environment and the calling environment.
+type BuiltinFunctionBlockFunction func(instanceEnv, callEnv *Environment) Object
+
+// BuiltinFunctionBlock represents a pre-defined, stateful function block like TON or CTU.
+type BuiltinFunctionBlock struct {
+	Fn BuiltinFunctionBlockFunction
+}
+
+func (bfb *BuiltinFunctionBlock) Type() ObjectType { return BUILTIN_FUNCTION_BLOCK_OBJ }
+func (bfb *BuiltinFunctionBlock) Inspect() string  { return "builtin function block" }
+
+// Pointer is an object that holds a reference to another variable in an environment.
+// This is the mechanism for implementing VAR_IN_OUT (pass-by-reference).
+type Pointer struct {
+	Name string       // The name of the variable in the Env.
+	Env  *Environment // The environment where the variable is stored.
+}
+
+func (p *Pointer) Type() ObjectType { return POINTER_OBJ }
+func (p *Pointer) Inspect() string {
+	return fmt.Sprintf("POINTER(%s)", p.Name)
+}
 
 // Array objects store a slice of other objects.
 type Array struct {
@@ -571,6 +588,41 @@ type Action struct {
 func (a *Action) Type() ObjectType { return ACTION_OBJ }
 func (a *Action) Inspect() string  { return "ACTION " + a.Name.Value }
 
+// Task represents a runtime task with its configuration and state.
+type Task struct {
+	Name     string
+	Priority int64
+	Trigger  ast.Expression // The 'SINGLE' condition
+	Interval time.Duration
+	Programs []*ProgramInstance
+
+	// Runtime state
+	LastExecution    time.Time
+	LastTriggerValue bool // To detect rising edge for SINGLE
+	RunChannel       chan bool
+}
+
+func (t *Task) Type() ObjectType { return "TASK" } // Custom type for tasks
+func (t *Task) Inspect() string {
+	return fmt.Sprintf("TASK(%s, Priority: %d, Interval: %s)", t.Name, t.Priority, t.Interval)
+}
+
+// Scheduler manages all tasks and program instances within a resource.
+type Scheduler struct {
+	Tasks []*Task
+}
+
+func (s *Scheduler) Type() ObjectType { return "SCHEDULER" } // Custom type for scheduler
+func (s *Scheduler) Inspect() string {
+	var out bytes.Buffer
+	tasks := []string{}
+	for _, t := range s.Tasks {
+		tasks = append(tasks, t.Inspect())
+	}
+	out.WriteString(fmt.Sprintf("SCHEDULER(%s)", strings.Join(tasks, ", ")))
+	return out.String()
+}
+
 // Function objects represent user-defined functions.
 type Function struct {
 	Name       *ast.Identifier // Name of the function (nil for anonymous functions)
@@ -578,7 +630,7 @@ type Function struct {
 	VarOutputs []*ast.VarDeclStatement
 	VarInOuts  []*ast.VarDeclStatement
 	Vars       []*ast.VarDeclStatement
-	Body       *ast.BlockStatement
+	Body       ast.Statement
 	Env        *Environment
 }
 
@@ -608,6 +660,44 @@ func (f *Function) Inspect() string {
 	return out.String()
 }
 
+// FunctionBlock represents the definition of a function block.
+// It's like a class blueprint.
+type FunctionBlock struct {
+	Body       ast.Statement
+	Env        *Environment
+	Name       *ast.Identifier // The name of the function block
+	VarInputs  []*ast.VarDeclStatement
+	VarOutputs []*ast.VarDeclStatement
+	VarInOuts  []*ast.VarDeclStatement
+	Vars       []*ast.VarDeclStatement
+}
+
+func (fb *FunctionBlock) Type() ObjectType { return FUNCTION_BLOCK_OBJ }
+func (fb *FunctionBlock) Inspect() string {
+	var out bytes.Buffer
+
+	out.WriteString("FUNCTION_BLOCK ")
+	out.WriteString(fb.Name.Value)
+	out.WriteString(" (")
+
+	var varDecls []string
+	for _, v := range fb.VarInputs {
+		varDecls = append(varDecls, v.String())
+	}
+	for _, v := range fb.VarOutputs {
+		varDecls = append(varDecls, v.String())
+	}
+	for _, v := range fb.VarInOuts {
+		varDecls = append(varDecls, v.String())
+	}
+
+	out.WriteString(strings.Join(varDecls, ", "))
+
+	out.WriteString(")")
+
+	return out.String()
+}
+
 // FunctionBlockInstance represents an instantiated function block.
 type FunctionBlockInstance struct {
 	Definition *FunctionBlock
@@ -617,4 +707,46 @@ type FunctionBlockInstance struct {
 func (fbi *FunctionBlockInstance) Type() ObjectType { return FUNCTION_BLOCK_INSTANCE_OBJ }
 func (fbi *FunctionBlockInstance) Inspect() string {
 	return fmt.Sprintf("FUNCTION_BLOCK_INSTANCE(%s)", fbi.Definition.Name.Value)
+}
+
+// Program represents the definition of a PROGRAM POU.
+// It's a template for creating program instances.
+type Program struct {
+	Name       *ast.Identifier
+	VarInputs  []*ast.VarDeclStatement
+	VarOutputs []*ast.VarDeclStatement
+	VarInOuts  []*ast.VarDeclStatement
+	Vars       []*ast.VarDeclStatement
+	Body       ast.Statement
+	Env        *Environment
+}
+
+func (p *Program) Type() ObjectType { return PROGRAM_OBJ }
+func (p *Program) Inspect() string {
+	if p.Name != nil {
+		return "PROGRAM " + p.Name.Value
+	}
+	return "PROGRAM"
+}
+
+// OutputMapping stores the `=>` mapping for a program instance's output.
+type OutputMapping struct {
+	SourceParamName string
+	TargetVarName   string
+}
+
+// ProgramInstance represents a configured instance of a PROGRAM type.
+type ProgramInstance struct {
+	Definition     *Program
+	Env            *Environment
+	TaskName       string
+	OutputMappings []OutputMapping
+}
+
+func (pi *ProgramInstance) Type() ObjectType { return PROGRAM_INSTANCE_OBJ }
+func (pi *ProgramInstance) Inspect() string {
+	if pi.Definition != nil && pi.Definition.Name != nil {
+		return fmt.Sprintf("INSTANCE OF %s", pi.Definition.Name.Value)
+	}
+	return "PROGRAM_INSTANCE"
 }

@@ -6,6 +6,7 @@ import (
 	"beedance/token"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,15 @@ var (
 	nowFunc = time.Now
 )
 
+// standardFBs holds the definitions for standard function blocks like TON, CTU, etc.
+var standardFBs = map[string]*object.BuiltinFunctionBlock{
+	"TON": {Fn: evalTON},
+	"TOF": {Fn: evalTOF},
+	"CTU": {Fn: evalCTU},
+	"CTD": {Fn: evalCTD},
+	// Other standard FBs like R_TRIG, F_TRIG can be added here in the future.
+}
+
 func Eval(node ast.Node, env *object.Environment) object.Object {
 	switch node := node.(type) {
 
@@ -32,7 +42,22 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.Program:
 		return evalProgram(node, env)
 
+	case *ast.SFCProgram:
+		return evalSFCProgram(node, env)
+
+	case *ast.ConfigurationDeclaration:
+		return evalConfigurationDeclaration(node, env)
+
+	case *ast.TaskDeclaration:
+		return evalTaskDeclaration(node, env)
+
 	case *ast.BlockStatement:
+		// Check if this is an IL program body
+		if len(node.Statements) > 0 {
+			if _, ok := node.Statements[0].(*ast.IlInstructionStatement); ok {
+				return evalIlProgram(node.Statements, env)
+			}
+		}
 		return evalBlockStatement(node, env)
 
 	// SFC elements are handled within the context of a program/function block body, not as standalone statements.
@@ -231,10 +256,18 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return evalIdentifier(node, env)
 
 	case *ast.FunctionLiteral:
-		params := node.Parameters
+		// Convert the simple identifiers from the function literal into
+		// VarDeclStatements to match the structure of a formal Function object.
+		varInputs := make([]*ast.VarDeclStatement, len(node.Parameters))
+		for i, p := range node.Parameters {
+			varInputs[i] = &ast.VarDeclStatement{
+				Name: p,
+				// DataType would be ANY or inferred in a more advanced system.
+			}
+		}
 		body := node.Body
 		return &object.Function{
-			Parameters: params, Env: env, Body: body,
+			VarInputs: varInputs, Env: env, Body: body,
 		}
 
 	case *ast.CallExpression:
@@ -272,14 +305,6 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.HashLiteral:
 		return evalHashLiteral(node, env)
 
-	case *ast.BlockStatement:
-		// Check if this is an IL program body
-		if len(node.Statements) > 0 {
-			if _, ok := node.Statements[0].(*ast.IlInstructionStatement); ok {
-				return evalIlProgram(node.Statements, env)
-			}
-		}
-		return evalBlockStatement(node, env)
 	case *ast.IlInstructionStatement:
 		return evalIlInstructionStatement(node, env)
 
@@ -304,8 +329,10 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 	// 1. Build the SFC structure from the AST
 	for _, element := range program.Elements {
 		switch elem := element.(type) {
-		case *ast.InitialStepStatement: // Initial steps are also regular steps
-			sfc.InitialStepName = elem.Name.Value
+		case *ast.StepStatement: // Initial steps are also regular steps
+			if elem.IsInitial {
+				sfc.InitialStepName = elem.Name.Value
+			}
 			step := &object.Step{Name: elem.Name, Actions: elem.Actions, IsActive: false}
 			sfc.Steps[elem.Name.Value] = step
 			for _, actionBlock := range elem.Actions {
@@ -322,27 +349,6 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 					durationObj := Eval(actionBlock.Duration, env)
 					if isError(durationObj) {
 						// This should probably be a fatal error during setup
-						return durationObj
-					}
-					if timeObj, ok := durationObj.(*object.Time); ok {
-						sfc.Actions[actionName].Duration = timeObj.Value
-					} else {
-						return newError(actionBlock, "action qualifier duration must be of type TIME, got %s", durationObj.Type())
-					}
-				}
-			}
-		case *ast.StepStatement:
-			step := &object.Step{Name: elem.Name, Actions: elem.Actions, IsActive: false}
-			sfc.Steps[elem.Name.Value] = step
-			for _, actionBlock := range elem.Actions {
-				actionName := actionBlock.ActionName.Value
-				if _, ok := sfc.Actions[actionName]; !ok {
-					sfc.Actions[actionName] = &object.Action{Name: actionBlock.ActionName}
-				}
-				sfc.Actions[actionName].AssociatedSteps = append(sfc.Actions[actionName].AssociatedSteps, step)
-				if actionBlock.Duration != nil {
-					durationObj := Eval(actionBlock.Duration, env)
-					if isError(durationObj) {
 						return durationObj
 					}
 					if timeObj, ok := durationObj.(*object.Time); ok {
@@ -878,25 +884,9 @@ func evalInfixExpression(
 	left, right object.Object,
 ) object.Object {
 	switch {
-	case left.Type() == object.INTEGER_OBJ && right.Type() == object.INTEGER_OBJ:
-		return evalIntegerInfixExpression(node, left, right) // Keep this for pure integer operations
-
 	// Handle all REAL, LREAL, and mixed INTEGER operations here.
 	case isNumeric(left) && isNumeric(right):
-		// If either operand is LREAL, the result is LREAL.
-		if left.Type() == object.LREAL_OBJ || right.Type() == object.LREAL_OBJ {
-			return evalLRealInfixExpression(node, left, right)
-		}
-		// If either is REAL (and none are LREAL), the result is REAL.
-		if left.Type() == object.REAL_OBJ || right.Type() == object.REAL_OBJ {
-			return evalRealInfixExpression(node, left, right)
-		}
-		// If we are here, both must be some form of integer.
-		// This case is already handled above, but we keep it for logical completeness.
-		// The logic can be simplified if evalIntegerInfixExpression is merged,
-		// but this separation is also clear.
-		return evalIntegerInfixExpression(node, left, right)
-
+		return evalNumericInfixExpression(node, left, right)
 	case left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ:
 		return evalBooleanInfixExpression(node, left, right)
 	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ:
@@ -911,6 +901,18 @@ func evalInfixExpression(
 	default:
 		return newError(node, "unknown operator: %s %s %s",
 			left.Type(), node.Operator, right.Type())
+	}
+}
+
+func evalPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
+	switch node.Operator {
+	case "NOT":
+		return evalNotOperatorExpression(node, right)
+	case "-":
+		return evalMinusPrefixOperatorExpression(node, right)
+	default:
+		return newError(node, "unknown operator: %s%s", node.Operator,
+			right.Type())
 	}
 }
 
@@ -961,92 +963,6 @@ func evalBitStringPrefixExpression(node *ast.PrefixExpression, right object.Obje
 	}
 }
 
-// evalLRealInfixExpression handles operations where at least one operand is an LREAL.
-// The result is always an LREAL.
-func evalLRealInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftVal, ok := getFloat64Value(left)
-	if !ok {
-		return newError(node, "type mismatch: expected numeric type for left operand, got %s", left.Type())
-	}
-	rightVal, ok := getFloat64Value(right)
-	if !ok {
-		return newError(node, "type mismatch: expected numeric type for right operand, got %s", right.Type())
-	}
-
-	switch node.Operator {
-	case "+":
-		return &object.LReal{Value: leftVal + rightVal}
-	case "-":
-		return &object.LReal{Value: leftVal - rightVal}
-	case "*":
-		return &object.LReal{Value: leftVal * rightVal}
-	case "/":
-		if rightVal == 0.0 {
-			return newError(node, "division by zero")
-		}
-		return &object.LReal{Value: leftVal / rightVal}
-	case "<":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "==":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-}
-
-func evalRealInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftVal, ok := getFloat64Value(left)
-	if !ok {
-		return newError(node, "type mismatch: expected numeric type for left operand, got %s", left.Type())
-	}
-	rightVal, ok := getFloat64Value(right)
-	if !ok {
-		return newError(node, "type mismatch: expected numeric type for right operand, got %s", right.Type())
-	}
-
-	switch node.Operator {
-	case "+":
-		return &object.Real{Value: leftVal + rightVal}
-	case "-":
-		return &object.Real{Value: leftVal - rightVal}
-	case "*":
-		return &object.Real{Value: leftVal * rightVal}
-	case "/":
-		if rightVal == 0.0 {
-			return newError(node, "division by zero")
-		}
-		return &object.Real{Value: leftVal / rightVal}
-	case "<":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "==":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-}
-
 func evalBooleanInfixExpression(
 	node *ast.InfixExpression,
 	left, right object.Object,
@@ -1068,6 +984,70 @@ func evalBooleanInfixExpression(
 	default:
 		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
 	}
+}
+
+// evalNumericInfixExpression handles all numeric operations, including type promotion.
+func evalNumericInfixExpression(node *ast.InfixExpression, left, right object.Object) object.Object {
+	// If either operand is LREAL, the result is LREAL.
+	if left.Type() == object.LREAL_OBJ || right.Type() == object.LREAL_OBJ {
+		leftVal, okL := getFloat64Value(left)
+		rightVal, okR := getFloat64Value(right)
+		if !okL || !okR {
+			return newError(node, "type mismatch in LREAL expression")
+		}
+		return evalFloatInfixExpression(node, leftVal, rightVal, true)
+	}
+
+	// If either is REAL (and none are LREAL), the result is REAL.
+	if left.Type() == object.REAL_OBJ || right.Type() == object.REAL_OBJ {
+		leftVal, okL := getFloat64Value(left)
+		rightVal, okR := getFloat64Value(right)
+		if !okL || !okR {
+			return newError(node, "type mismatch in REAL expression")
+		}
+		return evalFloatInfixExpression(node, leftVal, rightVal, false)
+	}
+
+	// Otherwise, both are integer types.
+	return evalIntegerInfixExpression(node, left, right)
+}
+
+// evalFloatInfixExpression performs the actual operation for REAL and LREAL types.
+func evalFloatInfixExpression(node *ast.InfixExpression, leftVal, rightVal float64, isLReal bool) object.Object {
+	var result object.Object
+	switch node.Operator {
+	case "+":
+		result = &object.Real{Value: leftVal + rightVal}
+	case "-":
+		result = &object.Real{Value: leftVal - rightVal}
+	case "*":
+		result = &object.Real{Value: leftVal * rightVal}
+	case "/":
+		if rightVal == 0.0 {
+			return newError(node, "division by zero")
+		}
+		result = &object.Real{Value: leftVal / rightVal}
+	case "<", "LT":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
+	case "==", "EQ":
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=", "NE":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<=", "LE":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=", "GE":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	default:
+		return newError(node, "unknown operator for REAL/LREAL: %s", node.Operator)
+	}
+
+	// If the result should be LREAL, convert it.
+	if isLReal {
+		return &object.LReal{Value: result.(*object.Real).Value}
+	}
+	return result
 }
 
 func evalBitStringInfixExpression(
@@ -1375,11 +1355,11 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 	if infix, ok := valueNode.(*ast.InfixExpression); ok && infix.Operator == ".." {
 		lowerBound := Eval(infix.Left, env)
 		if isError(lowerBound) {
-			return false, lowerBound
+			return false, lowerBound.(*object.Error)
 		}
 		upperBound := Eval(infix.Right, env)
 		if isError(upperBound) {
-			return false, upperBound
+			return false, upperBound.(*object.Error)
 		}
 
 		// Check selector >= lowerBound
@@ -1562,6 +1542,130 @@ func evalStringInfixExpression(
 	return &object.String{Value: leftVal + rightVal}
 }
 
+func evalTaskDeclaration(taskDecl *ast.TaskDeclaration, env *object.Environment) object.Object {
+	// Evaluate interval and priority expressions.
+	var interval time.Duration
+	if taskDecl.Interval != nil {
+		intervalObj := Eval(taskDecl.Interval, env)
+		if isError(intervalObj) {
+			return intervalObj
+		}
+		if t, ok := intervalObj.(*object.Time); ok {
+			interval = t.Value
+		} else {
+			return newError(taskDecl, "task INTERVAL must be of type TIME, got %s", intervalObj.Type())
+		}
+	}
+
+	var priority int64
+	if taskDecl.Priority != nil {
+		priorityObj := Eval(taskDecl.Priority, env)
+		if isError(priorityObj) {
+			return priorityObj
+		}
+		if p, ok := priorityObj.(*object.Integer); ok {
+			priority = p.Value
+		} else {
+			return newError(taskDecl, "task PRIORITY must be of type INTEGER, got %s", priorityObj.Type())
+		}
+	}
+
+	task := &object.Task{
+		Name:     taskDecl.Name.Value,
+		Priority: priority,
+		Interval: interval,
+		Trigger:  taskDecl.Single, // Store the AST expression for the trigger
+	}
+	return env.Set(task.Name, task)
+}
+
+func evalConfigurationDeclaration(config *ast.ConfigurationDeclaration, env *object.Environment) object.Object {
+	// Create a new environment for the configuration to hold its resources and globals.
+	configEnv := object.NewEnclosedEnvironment(env)
+
+	// 1. Evaluate Global Vars first, so they are available to resources.
+	for _, globalVarBlock := range config.GlobalVars {
+		Eval(globalVarBlock, configEnv)
+	}
+
+	// 2. Evaluate each resource.
+	for _, resNode := range config.Resources {
+		evalResourceDeclaration(resNode, configEnv)
+	}
+
+	// In a real runtime, the configuration object would be returned and managed by a scheduler.
+	return NULL
+}
+
+func evalResourceDeclaration(res *ast.ResourceDeclaration, configEnv *object.Environment) object.Object {
+	// Each resource has its own scope within the configuration.
+	resourceEnv := object.NewEnclosedEnvironment(configEnv)
+
+	// Evaluate task declarations within the resource.
+	for _, taskDecl := range res.Tasks {
+		Eval(taskDecl, resourceEnv)
+	}
+
+	// Evaluate program instances within the resource.
+	for _, progConfig := range res.Programs {
+		evalProgramConfiguration(progConfig, resourceEnv)
+	}
+
+	// Store the resource environment if needed for later access.
+	configEnv.Set(res.Name.Value, resourceEnv)
+
+	return NULL
+}
+
+func evalProgramConfiguration(progConfig *ast.ProgramConfiguration, resourceEnv *object.Environment) object.Object {
+	// 1. Find the program's definition (the template).
+	progDefObj, ok := resourceEnv.Get(progConfig.TypeName.Value)
+	if !ok {
+		return newError(progConfig, "program type '%s' not defined", progConfig.TypeName.Value)
+	}
+	progDef, ok := progDefObj.(*object.Program)
+	if !ok {
+		return newError(progConfig, "'%s' is not a PROGRAM", progConfig.TypeName.Value)
+	}
+
+	// 2. Create a new instance with its own environment.
+	instanceEnv := object.NewEnclosedEnvironment(progDef.Env)
+	progInstance := &object.ProgramInstance{
+		Definition: progDef,
+		// Store the task name on the instance itself.
+		TaskName: progConfig.TaskName.Value,
+		Env:      instanceEnv,
+	}
+
+	// 3. Initialize default values for all variables in the instance.
+	// (This would be a more complex function that iterates all VAR blocks in progDef).
+	// for _, varDecl := range progDef.AllVars {
+	//     instanceEnv.Set(varDecl.Name.Value, getDefaultValue(varDecl.DataType))
+	// }
+
+	// 4. Apply instance-specific parameters from the configuration.
+	for _, param := range progConfig.Parameters {
+		if namedArg, ok := param.(*ast.NamedArgument); ok {
+			// This is an input assignment: `InputVar := Value`
+			val := Eval(namedArg.Value, resourceEnv) // Evaluate value in the resource/config scope
+			if isError(val) {
+				return val
+			}
+			// Set the value inside the program instance's environment.
+			instanceEnv.Set(namedArg.Name.Value, val)
+		} else if outputArg, ok := param.(*ast.OutputArgument); ok {
+			// This is an output mapping: `OutputVar => TargetVar`
+			// Here you would store this mapping in the program instance object
+			// for the runtime to handle after each cycle.
+			// e.g., progInstance.OutputMappings = append(progInstance.OutputMappings, ...)
+		}
+	}
+
+	// 5. Store the fully configured instance in the resource's environment.
+	resourceEnv.Set(progConfig.InstanceName.Value, progInstance)
+	return progInstance
+}
+
 func evalIfStatement(
 	ie *ast.IfStatement,
 	env *object.Environment,
@@ -1585,11 +1689,26 @@ func evalIdentifier(
 	env *object.Environment,
 ) object.Object {
 	if val, ok := env.Get(node.Value); ok {
+		// If the identifier holds a pointer, dereference it to get the actual value.
+		if ptr, isPtr := val.(*object.Pointer); isPtr {
+			dereferenced, ok := ptr.Env.Get(ptr.Name)
+			if !ok {
+				return newError(node, "internal error: dangling pointer for %s", ptr.Name)
+			}
+			return dereferenced
+		}
 		return val
 	}
 
 	if builtin, ok := builtins[node.Value]; ok {
 		return builtin
+	}
+
+	// Check for standard function blocks (TON, CTU, etc.)
+	if fb, ok := standardFBs[node.Value]; ok {
+		// We return the BuiltinFunctionBlock definition. The evaluator will then create
+		// an instance when it sees a variable declaration of this type.
+		return fb
 	}
 
 	// Check for generic type conversion functions like `INT_TO_REAL`
@@ -1704,14 +1823,16 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			returnValue, ok = extendedEnv.Get(fn.Name.Value)
 		} else {
 			// For anonymous functions (FunctionLiteral), the return value is the result of the last statement.
-			if len(fn.Body.Statements) > 0 {
-				lastStmt := fn.Body.Statements[len(fn.Body.Statements)-1]
-				returnValue = Eval(lastStmt, extendedEnv)
-				if _, isReturn := returnValue.(*object.ReturnValue); isReturn {
-					returnValue = unwrapReturnValue(returnValue)
+			if body, ok := fn.Body.(*ast.BlockStatement); ok {
+				if len(body.Statements) > 0 {
+					lastStmt := body.Statements[len(body.Statements)-1]
+					returnValue = Eval(lastStmt, extendedEnv)
+					if _, isReturn := returnValue.(*object.ReturnValue); isReturn {
+						returnValue = unwrapReturnValue(returnValue)
+					}
+				} else {
+					returnValue = NULL
 				}
-			} else {
-				returnValue = NULL
 			}
 			ok = true // Assume anonymous functions always "return" something, even if NULL
 		}
@@ -1720,6 +1841,96 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			// For simplicity, we'll return NULL, but a stricter implementation might error.
 		}
 		return returnValue
+
+	case *object.BuiltinFunctionBlock:
+		// This case is hit when a variable is declared with a standard FB type, e.g., `MyTimer : TON;`
+		// We need to create an instance of it.
+		instanceEnv := object.NewEnclosedEnvironment(fn.Env)
+		// The 'Definition' for a built-in FB instance is the BuiltinFunctionBlock object itself.
+		// We need a way to link the instance back to its execution logic.
+		// A simple way is to store the function pointer in the instance's environment.
+		instanceEnv.Set("__fb_logic__", fn)
+		// We can reuse FunctionBlockInstance, but the Definition field will be nil.
+		// The logic is now self-contained in the instance's environment.
+		return &object.FunctionBlockInstance{
+			Definition: nil, // Or a placeholder definition if needed
+			Env:        instanceEnv,
+		}
+
+	case *object.FunctionBlockInstance:
+		// Check for EN input. If not provided, it defaults to TRUE.
+		enValue := TRUE
+		enProvided := false
+		for _, arg := range args {
+			if namedArg, ok := arg.(*ast.NamedArgument); ok && namedArg.Name.Value == "EN" {
+				evaluatedEn := Eval(namedArg.Value, callEnv)
+				if isError(evaluatedEn) {
+					return evaluatedEn
+				}
+				if boolVal, ok := evaluatedEn.(*object.Boolean); ok {
+					enValue = boolVal
+				} else {
+					return newError(arg, "EN input must be of type BOOL, got %s", evaluatedEn.Type())
+				}
+				enProvided = true
+				break
+			}
+		}
+
+		// Set ENO to the value of EN by default.
+		fn.Env.Set("ENO", enValue)
+
+		// If EN is FALSE, do not execute the function block body.
+		if enValue == FALSE {
+			// Return the primary output of the FB if it exists, otherwise NULL.
+			// The outputs are not updated.
+			if primaryOutput, ok := fn.Env.Get(fn.Definition.Name.Value); ok {
+				return primaryOutput
+			}
+			return NULL
+		}
+
+		// For built-in FBs, the definition is nil, and logic is stored in the env.
+		if fn.Definition == nil {
+			// It's a built-in FB instance.
+			// 1. Copy input arguments into the instance environment.
+			_, _, err := extendFunctionEnv(nil, args, callEnv, fn.Env)
+			if err != nil {
+				return err
+			}
+
+			// 2. Execute the built-in logic.
+			logicFnObj, _ := fn.Env.Get("__fb_logic__")
+			logicFn := logicFnObj.(*object.BuiltinFunctionBlock).Fn
+			return logicFn(fn.Env, callEnv)
+
+		} else {
+			// It's a user-defined FB instance.
+			extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env)
+			if err != nil {
+				return err
+			}
+
+			// Execute the function block body.
+			Eval(fn.Definition.Body, extendedEnv)
+
+			// Handle output arguments (=>).
+			for _, mapping := range outputMappings {
+				val, ok := extendedEnv.Get(mapping.SourceParamName)
+				if !ok {
+					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
+				}
+				if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
+					callEnv.Set(targetIdent.Value, val)
+				} else {
+					return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
+				}
+			}
+
+			// The result of an FB call is its primary output (if one exists with the same name as the FB type).
+			// For simplicity, we return NULL as the direct result of the call expression.
+			return NULL
+		}
 
 	case *object.Builtin:
 		// For built-in functions, we evaluate all arguments first.
@@ -1737,10 +1948,17 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 // extendFunctionEnv creates a new environment for a function call, populating it
 // with parameters based on the provided arguments.
-func extendFunctionEnv(fn object.Object, args []ast.Expression, callEnv *object.Environment, paramDecls []*ast.VarDeclStatement) (*object.Environment, []outputArgMapping, *object.Error) {
-	env := object.NewEnclosedEnvironment(fn.Env)
+func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object.Environment, targetEnv *object.Environment) (*object.Environment, []outputArgMapping, *object.Error) {
 	outputMappings := []outputArgMapping{}
 	positionalParamIndex := 0 // Index for positional parameters in paramDecls
+
+	var paramDecls []*ast.VarDeclStatement
+	if fbDef, ok := def.(*object.FunctionBlock); ok {
+		paramDecls = fbDef.VarInputs
+	} else if fDef, ok := def.(*object.Function); ok {
+		paramDecls = fDef.VarInputs
+	}
+	// If def is nil, it's a built-in FB, and we just write to the targetEnv.
 
 	for _, argNode := range args {
 		switch arg := argNode.(type) {
@@ -1749,7 +1967,7 @@ func extendFunctionEnv(fn object.Object, args []ast.Expression, callEnv *object.
 			if isError(val) {
 				return nil, nil, val.(*object.Error)
 			}
-			env.Set(arg.Name.Value, val)
+			targetEnv.Set(arg.Name.Value, val)
 
 		case *ast.OutputArgument: // Handle `OutputName => TargetVar`
 			// The target variable is an AST node (e.g., Identifier), not an evaluated object yet.
@@ -1769,23 +1987,46 @@ func extendFunctionEnv(fn object.Object, args []ast.Expression, callEnv *object.
 				return nil, nil, val.(*object.Error)
 			}
 
-			// Special handling for VAR_IN_OUT: pass by reference.
-			// For now, we'll treat it as pass-by-value for simplicity,
-			// but a proper implementation would involve storing a reference.
-			// The `paramDecls` here contains both VAR_INPUT and VAR_IN_OUT.
-			// We need to distinguish them. For now, we just set the value.
-			// If `paramDecl` has a `VarInOut` flag, we could handle it differently.
-			// Since `ast.VarDeclStatement` doesn't have a `VarInOut` flag,
-			// we'll just set the value.
-			env.Set(paramDecl.Name.Value, val) // This is pass-by-value
-
-			// TODO: Implement proper VAR_IN_OUT (pass by reference)
-			// This would involve storing a reference to the variable in the callEnv.
+			// Check if the parameter is VAR_IN_OUT
+			if isInOutParam(paramDecl.Name.Value, def) {
+				// The argument must be a variable identifier to be passed by reference.
+				argIdent, ok := arg.(*ast.Identifier)
+				if !ok {
+					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramDecl.Name.Value)
+				}
+				// Create a pointer to the variable in the calling environment.
+				ptr := &object.Pointer{Name: argIdent.Value, Env: callEnv}
+				targetEnv.Set(paramDecl.Name.Value, ptr)
+			} else {
+				// It's a VAR_INPUT, so pass by value.
+				val := Eval(arg, callEnv)
+				if isError(val) {
+					return nil, nil, val.(*object.Error)
+				}
+				targetEnv.Set(paramDecl.Name.Value, val)
+			}
 			positionalParamIndex++
 		}
 	}
 
-	return env, outputMappings, nil
+	return targetEnv, outputMappings, nil
+}
+
+// isInOutParam checks if a parameter name is declared as VAR_IN_OUT in a function/FB definition.
+func isInOutParam(paramName string, def object.Object) bool {
+	var inOutDecls []*ast.VarDeclStatement
+	if fbDef, ok := def.(*object.FunctionBlock); ok {
+		inOutDecls = fbDef.VarInOuts
+	} else if fDef, ok := def.(*object.Function); ok {
+		inOutDecls = fDef.VarInOuts
+	}
+
+	for _, decl := range inOutDecls {
+		if decl.Name.Value == paramName {
+			return true
+		}
+	}
+	return false
 }
 
 func unwrapReturnValue(obj object.Object) object.Object {
@@ -1925,44 +2166,15 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 	if left.Type() == object.TIME_OBJ && right.Type() == object.TIME_OBJ {
 		leftVal := left.(*object.Time).Value
 		rightVal := right.(*object.Time).Value
-		switch node.Operator {
-		case "==":
-			return nativeBoolToBooleanObject(leftVal == rightVal)
-		case "!=":
-			return nativeBoolToBooleanObject(leftVal != rightVal)
-		case "<":
-			return nativeBoolToBooleanObject(leftVal < rightVal)
-		case ">":
-			return nativeBoolToBooleanObject(leftVal > rightVal)
-		case "<=":
-			return nativeBoolToBooleanObject(leftVal <= rightVal)
-		case ">=":
-			return nativeBoolToBooleanObject(leftVal >= rightVal)
-		default:
-			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-		}
+		return evalGenericComparison(node.Operator, int64(leftVal), int64(rightVal))
 	}
 
 	// Handle Date comparisons
 	if left.Type() == object.DATE_OBJ && right.Type() == object.DATE_OBJ {
 		leftVal := left.(*object.Date).Value
 		rightVal := right.(*object.Date).Value
-		switch node.Operator {
-		case "==":
-			return nativeBoolToBooleanObject(leftVal.Equal(rightVal))
-		case "!=":
-			return nativeBoolToBooleanObject(!leftVal.Equal(rightVal))
-		case "<":
-			return nativeBoolToBooleanObject(leftVal.Before(rightVal))
-		case ">":
-			return nativeBoolToBooleanObject(leftVal.After(rightVal))
-		case "<=":
-			return nativeBoolToBooleanObject(leftVal.Before(rightVal) || leftVal.Equal(rightVal))
-		case ">=":
-			return nativeBoolToBooleanObject(leftVal.After(rightVal) || leftVal.Equal(rightVal))
-		default:
-			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-		}
+		// Compare using Unix nanoseconds for a consistent integer-based comparison
+		return evalGenericComparison(node.Operator, leftVal.UnixNano(), rightVal.UnixNano())
 	}
 
 	// Handle TimeOfDay comparisons
@@ -1972,45 +2184,15 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 		// Convert to nanoseconds since midnight for comparison, ignoring date part
 		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
 		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
-
-		switch node.Operator {
-		case "==":
-			return nativeBoolToBooleanObject(leftNs == rightNs)
-		case "!=":
-			return nativeBoolToBooleanObject(leftNs != rightNs)
-		case "<":
-			return nativeBoolToBooleanObject(leftNs < rightNs)
-		case ">":
-			return nativeBoolToBooleanObject(leftNs > rightNs)
-		case "<=":
-			return nativeBoolToBooleanObject(leftNs <= rightNs)
-		case ">=":
-			return nativeBoolToBooleanObject(leftNs >= rightNs)
-		default:
-			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-		}
+		return evalGenericComparison(node.Operator, leftNs, rightNs)
 	}
 
 	// Handle DateAndTime comparisons
 	if left.Type() == object.DATE_AND_TIME_OBJ && right.Type() == object.DATE_AND_TIME_OBJ {
 		leftVal := left.(*object.DateAndTime).Value
 		rightVal := right.(*object.DateAndTime).Value
-		switch node.Operator {
-		case "==":
-			return nativeBoolToBooleanObject(leftVal.Equal(rightVal))
-		case "!=":
-			return nativeBoolToBooleanObject(!leftVal.Equal(rightVal))
-		case "<":
-			return nativeBoolToBooleanObject(leftVal.Before(rightVal))
-		case ">":
-			return nativeBoolToBooleanObject(leftVal.After(rightVal))
-		case "<=":
-			return nativeBoolToBooleanObject(leftVal.Before(rightVal) || leftVal.Equal(rightVal))
-		case ">=":
-			return nativeBoolToBooleanObject(leftVal.After(rightVal) || leftVal.Equal(rightVal))
-		default:
-			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-		}
+		// Compare using Unix nanoseconds for a consistent integer-based comparison
+		return evalGenericComparison(node.Operator, leftVal.UnixNano(), rightVal.UnixNano())
 	}
 
 	// Handle EnumeratedValue comparisons
@@ -2032,6 +2214,149 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 
 	// If types are different, it's a type mismatch for comparison
 	return newError(node, "type mismatch for comparison: %s %s %s", left.Type(), node.Operator, right.Type())
+}
+
+// NewScheduler creates a scheduler from a fully evaluated configuration environment.
+func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Error) {
+	scheduler := &object.Scheduler{Tasks: []*object.Task{}}
+
+	// This assumes a single resource for simplicity. A full implementation would iterate all resources.
+	// Let's find the first resource environment.
+	var resourceEnv *object.Environment
+	for _, name := range configEnv.Names() {
+		obj, _ := configEnv.Get(name)
+		if env, ok := obj.(*object.Environment); ok {
+			resourceEnv = env
+			break
+		}
+	}
+	if resourceEnv == nil {
+		return nil, newBuiltinError("no resource found in configuration")
+	}
+
+	// Gather all TaskDeclarations and ProgramConfigurations
+	tasks := make(map[string]*object.Task)
+	programs := make(map[string]*object.ProgramInstance)
+
+	for _, name := range resourceEnv.Names() {
+		obj, _ := resourceEnv.Get(name)
+		switch obj := obj.(type) {
+		case *object.Task: // Assuming TaskDeclarations are evaluated into object.Task
+			tasks[obj.Name] = obj
+		case *object.ProgramInstance:
+			programs[name] = obj
+		}
+	}
+
+	// Associate programs with tasks
+	for _, progInstance := range programs {
+		if progInstance.TaskName != "" {
+			if task, ok := tasks[progInstance.TaskName]; ok {
+				task.Programs = append(task.Programs, progInstance)
+			}
+		} else {
+			// Handle programs with no task association (run once or continuously at low priority)
+		}
+	}
+
+	for _, task := range tasks {
+		scheduler.Tasks = append(scheduler.Tasks, task)
+	}
+
+	// Sort tasks by priority (lower number = higher priority)
+	sort.Slice(scheduler.Tasks, func(i, j int) bool {
+		return scheduler.Tasks[i].Priority < scheduler.Tasks[j].Priority
+	})
+
+	return scheduler, nil
+}
+
+// Run starts the scheduler's main execution loop.
+func (s *object.Scheduler) Run(env *object.Environment, scanCycle time.Duration) {
+	ticker := time.NewTicker(scanCycle)
+	defer ticker.Stop()
+
+	fmt.Println("Scheduler started. Press Ctrl+C to stop.")
+
+	for range ticker.C {
+		now := time.Now()
+		readyTasks := []*object.Task{}
+
+		// 1. Check for triggers and identify ready tasks
+		for _, task := range s.Tasks {
+			isReady := false
+			if task.Interval > 0 {
+				// Periodic task
+				if now.Sub(task.LastExecution) >= task.Interval {
+					isReady = true
+					task.LastExecution = now
+				}
+			} else if task.Trigger != nil {
+				// Event-driven task
+				triggerValObj := Eval(task.Trigger, env)
+				currentTriggerVal := isTruthy(triggerValObj)
+				// Check for rising edge
+				if currentTriggerVal && !task.LastTriggerValue {
+					isReady = true
+				}
+				task.LastTriggerValue = currentTriggerVal
+			}
+
+			if isReady {
+				readyTasks = append(readyTasks, task)
+			}
+		}
+
+		// No need to re-sort, as the main list is already prioritized.
+		// We just need to execute them in the order they appear in s.Tasks.
+
+		// 2. Execute ready tasks according to priority
+		for _, task := range s.Tasks {
+			isTaskReady := false
+			for _, readyTask := range readyTasks {
+				if task == readyTask {
+					isTaskReady = true
+					break
+				}
+			}
+
+			if isTaskReady {
+				fmt.Printf("Executing Task: %s (Priority: %d)\n", task.Name, task.Priority)
+				for _, prog := range task.Programs {
+					// Execute the program body in its own instance environment
+					Eval(prog.Definition.Body, prog.Env)
+
+					// Handle output mappings (=>)
+					for _, mapping := range prog.OutputMappings {
+						val, _ := prog.Env.Get(mapping.SourceParamName)
+						env.Set(mapping.TargetVarName, val) // Set in the global/resource scope
+					}
+				}
+			}
+		}
+	}
+}
+
+// evalGenericComparison centralizes comparison logic for types that can be represented as int64.
+func evalGenericComparison(op string, leftVal, rightVal int64) object.Object {
+	switch op {
+	case "==":
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
+	case "<=":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	default:
+		// This path should ideally not be hit if called from evalComparisonInfix,
+		// but it's here for robustness.
+		return newBuiltinError("unknown operator '%s' for generic comparison", op)
+	}
 }
 
 // isNumeric checks if an object is one of the numeric types.
