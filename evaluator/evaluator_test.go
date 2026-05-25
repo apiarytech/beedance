@@ -997,67 +997,6 @@ func TestSFCActionWithSTBody(t *testing.T) {
 	testIntegerObject(t, mustGet(env, "Counter"), 2) // Action body runs again
 }
 
-func TestSFCActionWithSTBody(t *testing.T) {
-	input := `
-		PROGRAM TestSFC_ST_Action
-			VAR
-				Counter : INT := 0;
-				GoToStep2 : BOOL := FALSE;
-				GoToStep1 : BOOL := FALSE;
-			END_VAR
-
-			ACTION IncrementCounter:
-				Counter := Counter + 1;
-			END_ACTION
-
-			INITIAL_STEP S1:
-				(* Do nothing *)
-			END_STEP
-
-			TRANSITION FROM S1 TO S2 := GoToStep2;
-			END_TRANSITION
-
-			STEP S2:
-				IncrementCounter(N); (* Non-stored action *)
-			END_STEP
-
-			TRANSITION FROM S2 TO S1 := GoToStep1;
-			END_TRANSITION
-
-		END_PROGRAM
-	`
-
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCActionWithSTBody", input)
-
-	env := object.NewEnvironment()
-	// This will declare the PROGRAM POU and its variables
-	Eval(program, env)
-
-	// Now, instantiate the program to get the SFC object
-	progInstance := testEval("TestSFC_ST_Action")
-	sfc, ok := progInstance.(*object.SFC)
-	if !ok {
-		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
-	}
-
-	// --- Cycle 1: Initial state (S1 active) ---
-	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 0) // Action body should not have run
-
-	// --- Cycle 2: Transition to S2 ---
-	env.Set("GoToStep2", TRUE)
-	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 1) // Action body runs for the first time
-
-	// --- Cycle 3: Still in S2 ---
-	env.Set("GoToStep2", FALSE) // Prevent immediate re-transition
-	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 2) // Action body runs again
-}
-
 func TestFunctionObject(t *testing.T) {
 	input := "fn(x) { x + 2; };"
 

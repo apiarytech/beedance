@@ -1208,7 +1208,7 @@ func (ad *ArrayDefinition) String() string {
 type ActionStatement struct {
 	Token token.Token // The 'ACTION' token
 	Name  *Identifier
-	Body  *BlockStatement
+	Body  Statement
 }
 
 func (as *ActionStatement) statementNode()       {}

@@ -816,13 +816,15 @@ func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
 		return nil
 	}
 
-	// p.curToken is now the DIRECT_VAR token.
-	// We don't call parseDirectVariable here because that's a prefix function.
-	// We just build the AST node directly.
-	loc := &ast.DirectVariable{Token: p.curToken, Address: strings.TrimPrefix(p.curToken.Literal, "%")}
-	if loc == nil {
+	// p.curToken is now the DIRECT_VAR token. We can use the registered prefix
+	// parsing function to create the direct variable expression.
+	locExp := p.parseDirectVariable()
+	loc, ok := locExp.(*ast.DirectVariable)
+	if !ok {
+		p.currentError("expected a direct variable for AT declaration, but got %T", locExp)
 		return nil
 	}
+
 	decl.Location = loc
 	return decl
 }

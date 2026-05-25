@@ -370,9 +370,16 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 				Condition: elem.Condition,
 			})
 		case *ast.ActionStatement:
-			// Store the full action definition
-			action := &object.Action{Name: elem.Name, Body: elem.Body}
-			sfc.Actions[elem.Name.Value] = action
+			// An action can be referenced in a STEP before it is fully defined.
+			// We need to find the existing action object and update its body.
+			action, ok := sfc.Actions[elem.Name.Value]
+			if !ok {
+				// This case is unlikely if steps are parsed correctly, but it's safe to handle.
+				action = &object.Action{Name: elem.Name}
+				sfc.Actions[elem.Name.Value] = action
+			}
+			// The parser ensures the body of an ACTION is a BlockStatement.
+			action.Body, _ = elem.Body.(*ast.BlockStatement)
 
 		}
 	}
@@ -1622,8 +1629,13 @@ func evalResourceDeclaration(res *ast.ResourceDeclaration, configEnv *object.Env
 		evalProgramConfiguration(progConfig, resourceEnv)
 	}
 
-	// Store the resource environment if needed for later access.
-	configEnv.Set(res.Name.Value, resourceEnv)
+	// To store the resource's environment, we wrap it in an object that implements
+	// the object.Object interface. A FunctionBlockInstance is a suitable container.
+	resourceInstance := &object.FunctionBlockInstance{
+		Env: resourceEnv,
+	}
+
+	configEnv.Set(res.Name.Value, resourceInstance)
 
 	return NULL
 }
@@ -1665,10 +1677,17 @@ func evalProgramConfiguration(progConfig *ast.ProgramConfiguration, resourceEnv 
 			// Set the value inside the program instance's environment.
 			instanceEnv.Set(namedArg.Name.Value, val)
 		} else if outputArg, ok := param.(*ast.OutputArgument); ok {
-			// This is an output mapping: `OutputVar => TargetVar`
-			// Here you would store this mapping in the program instance object
-			// for the runtime to handle after each cycle.
-			// e.g., progInstance.OutputMappings = append(progInstance.OutputMappings, ...)
+			// This is an output mapping: `OutputVar => TargetVar`.
+			// The target must be an identifier.
+			targetIdent, ok := outputArg.Target.(*ast.Identifier)
+			if !ok {
+				return newError(outputArg, "target of an output mapping '=>' must be a variable identifier")
+			}
+			mapping := object.OutputMapping{
+				SourceParamName: outputArg.Source.Value,
+				TargetVarName:   targetIdent.Value,
+			}
+			progInstance.OutputMappings = append(progInstance.OutputMappings, mapping)
 		}
 	}
 
@@ -1793,8 +1812,9 @@ type outputArgMapping struct {
 func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Environment) object.Object {
 	switch fn := fn.(type) {
 	case *object.Function:
-		// Create the function's execution environment, mapping arguments to parameters.
-		extendedEnv, outputMappings, err := extendFunctionEnv(fn, args, callEnv, fn.VarInputs) // Pass fn.VarInputs as parameter declarations
+		// Create a new environment for the function's execution, enclosed by the function's definition environment.
+		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, extendedEnv)
 		if err != nil {
 			return err
 		}
@@ -1855,7 +1875,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 	case *object.BuiltinFunctionBlock:
 		// This case is hit when a variable is declared with a standard FB type, e.g., `MyTimer : TON;`
 		// We need to create an instance of it.
-		instanceEnv := object.NewEnclosedEnvironment(fn.Env)
+		instanceEnv := object.NewEnclosedEnvironment(callEnv)
 		// The 'Definition' for a built-in FB instance is the BuiltinFunctionBlock object itself.
 		// We need a way to link the instance back to its execution logic.
 		// A simple way is to store the function pointer in the instance's environment.
@@ -1870,7 +1890,6 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 	case *object.FunctionBlockInstance:
 		// Check for EN input. If not provided, it defaults to TRUE.
 		enValue := TRUE
-		enProvided := false
 		for _, arg := range args {
 			if namedArg, ok := arg.(*ast.NamedArgument); ok && namedArg.Name.Value == "EN" {
 				evaluatedEn := Eval(namedArg.Value, callEnv)
@@ -1882,7 +1901,6 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				} else {
 					return newError(arg, "EN input must be of type BOOL, got %s", evaluatedEn.Type())
 				}
-				enProvided = true
 				break
 			}
 		}
@@ -2264,8 +2282,11 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 	var resourceEnv *object.Environment
 	for _, name := range configEnv.Names() {
 		obj, _ := configEnv.Get(name)
-		if env, ok := obj.(*object.Environment); ok {
-			resourceEnv = env
+		// A resource is stored as a FunctionBlockInstance that holds its environment.
+		if resInstance, ok := obj.(*object.FunctionBlockInstance); ok {
+			// We found our resource. For now, we only support one.
+			// A more advanced implementation would check the type of the instance.
+			resourceEnv = resInstance.Env
 			break
 		}
 	}
@@ -2311,7 +2332,7 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 }
 
 // Run starts the scheduler's main execution loop.
-func (s *object.Scheduler) Run(env *object.Environment, scanCycle time.Duration) {
+func RunScheduler(s *object.Scheduler, env *object.Environment, scanCycle time.Duration) {
 	ticker := time.NewTicker(scanCycle)
 	defer ticker.Stop()
 
