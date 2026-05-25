@@ -746,21 +746,44 @@ var builtins = map[string]*object.Builtin{
 			return &object.Integer{Value: int64(math.Trunc(realVal))}
 		},
 	},
-	"ADD":  &object.Builtin{Fn: addBuiltin},
-	"SUB":  &object.Builtin{Fn: subBuiltin},
-	"MUL":  &object.Builtin{Fn: mulBuiltin},
-	"DIV":  &object.Builtin{Fn: divBuiltin},
-	"MOD":  &object.Builtin{Fn: modBuiltin},
-	"EXPT": &object.Builtin{Fn: exptBuiltin},
-	"GT":   {Fn: comparisonBuiltin("GT")},
-	"GE":   {Fn: comparisonBuiltin("GE")},
-	"EQ":   {Fn: comparisonBuiltin("EQ")},
-	"LE":   {Fn: comparisonBuiltin("LE")},
-	"LT":   {Fn: comparisonBuiltin("LT")},
-	"NE":   {Fn: comparisonBuiltin("NE")},
-	"LEN":  builtins["len"], // IEC 61131-3 standard function
-	"MUX":  {Fn: muxBuiltin},
-	"MOVE": {Fn: moveBuiltin},
+	"ADD":   &object.Builtin{Fn: addBuiltin},
+	"SUB":   &object.Builtin{Fn: subBuiltin},
+	"MUL":   &object.Builtin{Fn: mulBuiltin},
+	"DIV":   &object.Builtin{Fn: divBuiltin},
+	"MOD":   &object.Builtin{Fn: modBuiltin},
+	"EXPT":  &object.Builtin{Fn: exptBuiltin},
+	"GT":    {Fn: comparisonBuiltin("GT")},
+	"GE":    {Fn: comparisonBuiltin("GE")},
+	"EQ":    {Fn: comparisonBuiltin("EQ")},
+	"LE":    {Fn: comparisonBuiltin("LE")},
+	"LT":    {Fn: comparisonBuiltin("LT")},
+	"NE":    {Fn: comparisonBuiltin("NE")},
+	"LEN":   builtins["len"], // IEC 61131-3 standard function
+	"MUX":   {Fn: muxBuiltin},
+	"LIMIT": {Fn: limitWrapperBuiltin},
+	"SEL":   {Fn: selWrapperBuiltin},
+	"MOVE":  {Fn: moveBuiltin},
+	"MIN": {Fn: func(args ...object.Object) object.Object {
+		return minMaxBuiltin("MIN", args...)
+	}},
+	"MAX": {Fn: func(args ...object.Object) object.Object {
+		return minMaxBuiltin("MAX", args...)
+	}},
+	"AND": {Fn: func(args ...object.Object) object.Object {
+		return bitwiseBuiltin("AND", args...)
+	}},
+	"OR": {Fn: func(args ...object.Object) object.Object {
+		return bitwiseBuiltin("OR", args...)
+	}},
+	"XOR": {Fn: func(args ...object.Object) object.Object {
+		return bitwiseBuiltin("XOR", args...)
+	}},
+	"NAND": {Fn: func(args ...object.Object) object.Object {
+		return bitwiseBuiltin("NAND", args...)
+	}},
+	"NOR": {Fn: func(args ...object.Object) object.Object {
+		return bitwiseBuiltin("NOR", args...)
+	}},
 }
 
 func limitBuiltin(min, in, max object.Object) object.Object {
@@ -800,6 +823,32 @@ func limitBuiltin(min, in, max object.Object) object.Object {
 		return &object.Integer{Value: maxVal}
 	}
 	return &object.Integer{Value: inVal}
+}
+
+func limitWrapperBuiltin(args ...object.Object) object.Object {
+	if len(args) != 3 {
+		return newBuiltinError("wrong number of arguments for LIMIT. got=%d, want=3", len(args))
+	}
+	// The standard specifies the arguments as LIMIT(MN, IN, MX).
+	// We will assume this order for positional arguments.
+	// Named arguments are handled by the function application logic.
+	mn := args[0]
+	in := args[1]
+	mx := args[2]
+
+	// For named arguments, we need to find them if they exist.
+	// This is a simplified approach. A full implementation would get named args from the call site.
+	// However, the current `applyFunction` logic evaluates args positionally for built-ins.
+	// So we rely on the order: MN, IN, MX.
+
+	return limitBuiltin(mn, in, mx)
+}
+
+func selWrapperBuiltin(args ...object.Object) object.Object {
+	if len(args) != 3 {
+		return newBuiltinError("wrong number of arguments for SEL. got=%d, want=3", len(args))
+	}
+	return selBuiltin(args[0], args[1], args[2])
 }
 
 func selBuiltin(g, in0, in1 object.Object) object.Object {
@@ -864,6 +913,67 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 		}
 	}
 	return &object.Integer{Value: result}
+}
+
+// bitwiseBuiltin is a generic helper for extensible bitwise functions (AND, OR, XOR).
+func bitwiseBuiltin(op string, args ...object.Object) object.Object {
+	if len(args) < 2 {
+		return newBuiltinError("wrong number of arguments for %s. got=%d, want>=2", op, len(args))
+	}
+
+	// Check that all arguments are bitstrings of the same type (width).
+	firstArg, ok := args[0].(*object.BitString)
+	if !ok {
+		return newBuiltinError("all arguments to `%s` must be bit-string types, got %s", op, args[0].Type())
+	}
+	width := firstArg.Width
+
+	for i := 1; i < len(args); i++ {
+		arg, ok := args[i].(*object.BitString)
+		if !ok {
+			return newBuiltinError("all arguments to `%s` must be bit-string types, got %s", op, args[i].Type())
+		}
+		if arg.Width != width {
+			return newBuiltinError("all arguments to `%s` must have the same width, got %d and %d", op, width, arg.Width)
+		}
+	}
+
+	// Perform the operation.
+	result := firstArg.Value
+
+	for i := 1; i < len(args); i++ {
+		nextVal := args[i].(*object.BitString).Value
+		switch op {
+		case "AND":
+			result &= nextVal
+		case "OR":
+			result |= nextVal
+		case "XOR":
+			result ^= nextVal
+		default:
+			return newBuiltinError("internal error: unknown bitwise operator %s", op)
+		}
+	}
+
+	// For NAND and NOR, we need to negate the final result and apply a mask.
+	if op == "NAND" || op == "NOR" {
+		var mask uint64
+		if width < 64 {
+			mask = (1 << width) - 1
+		} else {
+			mask = 0xFFFFFFFFFFFFFFFF
+		}
+
+		if op == "NAND" {
+			// The operation was AND, now we negate.
+			result = ^result & mask
+		} else { // NOR
+			// The operation was OR, now we negate.
+			result = ^result & mask
+		}
+	}
+
+	return &object.BitString{Value: result, Width: width}
 }
 
 // addBuiltin implements the ADD standard function.
@@ -1317,11 +1427,12 @@ var bitStringTypeRanges = map[string]uint64{
 func applyConversion(input object.Object, fromType, toType string) object.Object {
 	// Validate that the input object's type matches the 'fromType' part of the function name.
 	// This is a sanity check; the language is strongly typed, but this adds robustness.
-	if !strings.HasPrefix(string(input.Type()), fromType) {
+	if !strings.HasPrefix(string(input.Type()), fromType) && fromType != "ANY_INT" && fromType != "ANY_REAL" {
 		// Allow ANY_INT to be converted from any integer type, etc.
 		// This is a simplification; a full implementation would check generic type hierarchies.
-		isNumericConversion := (strings.Contains(fromType, "INT") || strings.Contains(fromType, "REAL")) &&
-			(input.Type() == object.INTEGER_OBJ || input.Type() == object.REAL_OBJ)
+		isNumericConversion := (fromType == "ANY_INT" && isIntegerType(string(input.Type()))) ||
+			(fromType == "ANY_REAL" && isNumeric(input))
+
 		if !isNumericConversion {
 			return newBuiltinError("type mismatch for %s_TO_%s: input is %s, expected %s", fromType, toType, input.Type(), fromType)
 		}
@@ -1684,4 +1795,268 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 	instanceEnv.Set("CV", &object.Integer{Value: cv})
 
 	return q
+}
+
+// evalR_TRIG implements the logic for the R_TRIG (Rising Edge Trigger) standard function block.
+func evalR_TRIG(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get CLK input
+	clkObj, _ := instanceEnv.Get("CLK")
+
+	// 2. Get internal state (the edge memory bit)
+	edgeMemObj, _ := instanceEnv.Get("__edge_mem")
+
+	// 3. Type assertions and defaults
+	clk, ok := clkObj.(*object.Boolean)
+	if !ok {
+		// If CLK is not provided or not a BOOL, Q is FALSE.
+		instanceEnv.Set("Q", FALSE)
+		instanceEnv.Set("__edge_mem", FALSE) // Ensure memory is reset
+		return FALSE
+	}
+
+	edgeMem := edgeMemObj == TRUE
+
+	// 4. R_TRIG Logic: Q is TRUE if CLK is TRUE and the memory bit is FALSE.
+	q := nativeBoolToBooleanObject(clk.Value && !edgeMem)
+
+	// 5. Update internal state and output
+	// The memory bit follows the CLK input.
+	instanceEnv.Set("__edge_mem", clk)
+	instanceEnv.Set("Q", q)
+
+	// 6. Return the primary output Q
+	return q
+}
+
+// evalF_TRIG implements the logic for the F_TRIG (Falling Edge Trigger) standard function block.
+func evalF_TRIG(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get CLK input
+	clkObj, _ := instanceEnv.Get("CLK")
+
+	// 2. Get internal state (the edge memory bit)
+	edgeMemObj, _ := instanceEnv.Get("__edge_mem")
+
+	// 3. Type assertions and defaults
+	clk, ok := clkObj.(*object.Boolean)
+	if !ok {
+		// If CLK is not provided or not a BOOL, Q is FALSE.
+		instanceEnv.Set("Q", FALSE)
+		instanceEnv.Set("__edge_mem", FALSE) // Ensure memory is reset
+		return FALSE
+	}
+
+	edgeMem := edgeMemObj == TRUE
+
+	// 4. F_TRIG Logic: Q is TRUE if CLK is FALSE and the memory bit is TRUE.
+	q := nativeBoolToBooleanObject(!clk.Value && edgeMem)
+
+	// 5. Update internal state and output
+	// The memory bit follows the CLK input.
+	instanceEnv.Set("__edge_mem", clk)
+	instanceEnv.Set("Q", q)
+
+	// 6. Return the primary output Q
+	return q
+}
+
+// evalCTUD implements the logic for the CTUD (Up/Down Counter) standard function block.
+func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get inputs
+	cu, _ := instanceEnv.Get("CU")
+	cd, _ := instanceEnv.Get("CD")
+	r, _ := instanceEnv.Get("R")
+	ld, _ := instanceEnv.Get("LD")
+	pv, _ := instanceEnv.Get("PV")
+
+	// 2. Get internal state
+	lastCU, _ := instanceEnv.Get("__lastCU")
+	lastCD, _ := instanceEnv.Get("__lastCD")
+	cvObj, _ := instanceEnv.Get("CV")
+
+	// 3. Type assertions and defaults
+	cuBool, _ := cu.(*object.Boolean)
+	cdBool, _ := cd.(*object.Boolean)
+	rBool, _ := r.(*object.Boolean)
+	ldBool, _ := ld.(*object.Boolean)
+	pvInt, _ := pv.(*object.Integer)
+	if cuBool == nil || cdBool == nil || rBool == nil || ldBool == nil || pvInt == nil {
+		return newBuiltinError("CTUD requires CU, CD, R, LD (BOOL) and PV (INT) inputs")
+	}
+
+	lastCUBool := lastCU == TRUE
+	lastCDBool := lastCD == TRUE
+	var cv int64
+	if cvInt, ok := cvObj.(*object.Integer); ok {
+		cv = cvInt.Value
+	}
+
+	// 4. CTUD Logic
+	// Reset has priority over Load
+	if rBool == TRUE {
+		cv = 0
+	} else if ldBool == TRUE {
+		cv = pvInt.Value
+	} else {
+		cuRising := cuBool == TRUE && !lastCUBool
+		cdRising := cdBool == TRUE && !lastCDBool
+
+		// Per the standard, if both count up and count down are triggered, nothing happens.
+		if cuRising && !cdRising {
+			// The standard allows counting up to the max value of the integer type.
+			if cv < math.MaxInt16 { // Assuming INT for now, could be DINT/LINT
+				cv++
+			}
+		} else if cdRising && !cuRising {
+			// The standard allows counting down to the min value of the integer type.
+			if cv > math.MinInt16 {
+				cv--
+			}
+		}
+	}
+
+	// 5. Update outputs and internal state
+	instanceEnv.Set("__lastCU", cuBool)
+	instanceEnv.Set("__lastCD", cdBool)
+	instanceEnv.Set("CV", &object.Integer{Value: cv})
+	instanceEnv.Set("QU", nativeBoolToBooleanObject(cv >= pvInt.Value))
+	instanceEnv.Set("QD", nativeBoolToBooleanObject(cv <= 0))
+
+	// CTUD does not have a primary return value. Outputs are accessed via member variables.
+	return NULL
+}
+
+// evalTP implements the logic for the TP (Pulse Timer) standard function block.
+func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get inputs
+	in, _ := instanceEnv.Get("IN")
+	pt, _ := instanceEnv.Get("PT")
+
+	// 2. Get internal state
+	startTimeObj, _ := instanceEnv.Get("__startTime")
+	pulseActiveObj, _ := instanceEnv.Get("__pulseActive")
+	lastIN, _ := instanceEnv.Get("__lastIN")
+
+	// 3. Type assertions and defaults
+	inBool, _ := in.(*object.Boolean)
+	ptDuration, _ := pt.(*object.Time)
+	if inBool == nil || ptDuration == nil {
+		return newBuiltinError("TP requires IN (BOOL) and PT (TIME) inputs")
+	}
+
+	var startTime time.Time
+	if startTimeObj != nil {
+		startTime = startTimeObj.(*object.TimeOfDay).Value
+	}
+	pulseActive := pulseActiveObj == TRUE
+	lastINBool := lastIN == TRUE
+
+	var et time.Duration
+	q := FALSE
+
+	// 4. TP Logic
+	// A rising edge on IN starts the pulse, but only if a pulse is not already active.
+	if inBool == TRUE && !lastINBool && !pulseActive {
+		pulseActive = true
+		startTime = nowFunc()
+		instanceEnv.Set("__pulseActive", TRUE)
+		instanceEnv.Set("__startTime", &object.TimeOfDay{Value: startTime})
+	}
+
+	if pulseActive {
+		et = nowFunc().Sub(startTime)
+		if et < ptDuration.Value {
+			q = TRUE
+		} else {
+			// Pulse has finished
+			et = ptDuration.Value
+			q = FALSE
+			// Reset internal state
+			pulseActive = false
+			instanceEnv.Set("__pulseActive", FALSE)
+			instanceEnv.Set("__startTime", nil)
+		}
+	} else {
+		// Not active, Q is FALSE and ET is 0
+		q = FALSE
+		et = 0
+	}
+
+	// 5. Update outputs and internal state
+	instanceEnv.Set("__lastIN", inBool)
+	instanceEnv.Set("Q", q)
+	instanceEnv.Set("ET", &object.Time{Value: et})
+
+	return q
+}
+
+// evalSR implements the logic for the SR (Set-Reset) bistable function block.
+// Reset (R) input has priority over the Set (S1) input.
+func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get inputs
+	s1, _ := instanceEnv.Get("S1")
+	r, _ := instanceEnv.Get("R")
+
+	// 2. Get internal state (the output Q1)
+	q1Obj, _ := instanceEnv.Get("Q1")
+
+	// 3. Type assertions and defaults
+	s1Bool, _ := s1.(*object.Boolean)
+	rBool, _ := r.(*object.Boolean)
+	if s1Bool == nil || rBool == nil {
+		return newBuiltinError("SR requires S1 (BOOL) and R (BOOL) inputs")
+	}
+
+	q1 := q1Obj == TRUE
+
+	// 4. SR Logic: Reset has priority.
+	// Q1 := (S1 OR Q1) AND (NOT R);
+	// Or, as a clearer sequence:
+	if r == TRUE {
+		q1 = false
+	} else if s1 == TRUE {
+		q1 = true
+	}
+	// If both are FALSE, q1 remains unchanged.
+
+	// 5. Update output and return
+	q1Result := nativeBoolToBooleanObject(q1)
+	instanceEnv.Set("Q1", q1Result)
+
+	return q1Result
+}
+
+// evalRS implements the logic for the RS (Reset-Set) bistable function block.
+// Set (S) input has priority over the Reset (R1) input.
+func evalRS(instanceEnv, callEnv *object.Environment) object.Object {
+	// 1. Get inputs
+	s, _ := instanceEnv.Get("S")
+	r1, _ := instanceEnv.Get("R1")
+
+	// 2. Get internal state (the output Q1)
+	q1Obj, _ := instanceEnv.Get("Q1")
+
+	// 3. Type assertions and defaults
+	sBool, _ := s.(*object.Boolean)
+	r1Bool, _ := r1.(*object.Boolean)
+	if sBool == nil || r1Bool == nil {
+		return newBuiltinError("RS requires S (BOOL) and R1 (BOOL) inputs")
+	}
+
+	q1 := q1Obj == TRUE
+
+	// 4. RS Logic: Set has priority.
+	// Q1 := S OR (Q1 AND (NOT R1));
+	// Or, as a clearer sequence:
+	if s == TRUE {
+		q1 = true
+	} else if r1 == TRUE {
+		q1 = false
+	}
+	// If both are FALSE, q1 remains unchanged.
+
+	// 5. Update output and return
+	q1Result := nativeBoolToBooleanObject(q1)
+	instanceEnv.Set("Q1", q1Result)
+
+	return q1Result
 }

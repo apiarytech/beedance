@@ -28,11 +28,16 @@ var (
 
 // standardFBs holds the definitions for standard function blocks like TON, CTU, etc.
 var standardFBs = map[string]*object.BuiltinFunctionBlock{
-	"TON": {Fn: evalTON},
-	"TOF": {Fn: evalTOF},
-	"CTU": {Fn: evalCTU},
-	"CTD": {Fn: evalCTD},
-	// Other standard FBs like R_TRIG, F_TRIG can be added here in the future.
+	"TON":    {Fn: evalTON},
+	"TOF":    {Fn: evalTOF},
+	"CTU":    {Fn: evalCTU},
+	"CTD":    {Fn: evalCTD},
+	"R_TRIG": {Fn: evalR_TRIG},
+	"F_TRIG": {Fn: evalF_TRIG},
+	"CTUD":   {Fn: evalCTUD},
+	"TP":     {Fn: evalTP},
+	"SR":     {Fn: evalSR},
+	"RS":     {Fn: evalRS},
 }
 
 func Eval(node ast.Node, env *object.Environment) object.Object {
@@ -386,107 +391,8 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	// Phase 1: Evaluate Action Control Logic
 	for _, action := range sfc.Actions {
-		isAssociatedStepActive := false
-		var activeQualifier string
-
-		// Find if any associated step is active and get its qualifier for this action
-		for _, step := range action.AssociatedSteps {
-			if step.IsActive {
-				isAssociatedStepActive = true
-				for _, actionBlock := range step.Actions {
-					if actionBlock.ActionName.Value == action.Name.Value {
-						if actionBlock.Qualifier != nil {
-							activeQualifier = actionBlock.Qualifier.Value
-						} else {
-							activeQualifier = "N" // Default qualifier
-						}
-						break
-					}
-				}
-				break
-			}
-		}
-
-		// Apply action control logic based on the standard
-		switch activeQualifier {
-		case "N":
-			action.IsActive = isAssociatedStepActive
-		case "S":
-			if isAssociatedStepActive {
-				action.IsActive = true
-			}
-		case "R":
-			if isAssociatedStepActive {
-				action.IsActive = false
-			}
-		case "P":
-			if isAssociatedStepActive && action.ActivationCount == 0 {
-				action.IsActive = true
-				action.ActivationCount++
-			} else {
-				action.IsActive = false
-			}
-			if !isAssociatedStepActive {
-				action.ActivationCount = 0 // Reset for next activation
-			}
-		case "D": // Delayed
-			if isAssociatedStepActive {
-				if action.TimerStart.IsZero() {
-					action.TimerStart = nowFunc()
-				}
-				if time.Since(action.TimerStart) >= action.Duration {
-					action.IsActive = true
-				}
-			} else {
-				action.IsActive = false
-				action.TimerStart = time.Time{} // Reset timer
-			}
-		case "L": // Time-Limited
-			if isAssociatedStepActive {
-				if action.TimerStart.IsZero() {
-					action.TimerStart = nowFunc()
-				}
-				if time.Since(action.TimerStart) < action.Duration {
-					action.IsActive = true
-				} else {
-					action.IsActive = false // Time limit expired
-				}
-			} else {
-				action.IsActive = false
-				action.TimerStart = time.Time{} // Reset timer
-			}
-		case "SD": // Stored and Delayed
-			if isAssociatedStepActive {
-				if action.TimerStart.IsZero() {
-					action.TimerStart = nowFunc()
-				}
-				if time.Since(action.TimerStart) >= action.Duration {
-					action.IsActive = true
-				}
-			} // Note: No else clause, so IsActive is not reset on step deactivation
-		case "DS": // Delayed and Stored
-			// This is effectively the same as SD for our implementation.
-			// The standard makes a subtle distinction that is hard to model without a full PLC scan cycle.
-			if isAssociatedStepActive {
-				if action.TimerStart.IsZero() {
-					action.TimerStart = nowFunc()
-				}
-				if time.Since(action.TimerStart) >= action.Duration {
-					action.IsActive = true
-				}
-			}
-		case "SL": // Stored and Time-Limited
-			if isAssociatedStepActive {
-				if action.TimerStart.IsZero() {
-					action.TimerStart = nowFunc()
-				}
-				action.IsActive = time.Since(action.TimerStart) < action.Duration
-			} // No else clause, so IsActive is not reset on step deactivation
-		default:
-			action.IsActive = isAssociatedStepActive // Default to 'N' behavior
-		}
+		evaluateAction(action)
 	}
-
 	// Phase 2: Evaluate Transitions
 	transitionsToClear := []*object.Transition{}
 	for _, transition := range sfc.Transitions {
@@ -511,11 +417,15 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	for _, transition := range transitionsToClear {
 		for _, fromStep := range transition.FromSteps {
 			delete(sfc.ActiveSteps, fromStep.Value)
-			sfc.Steps[fromStep.Value].IsActive = false
+			step := sfc.Steps[fromStep.Value]
+			step.IsActive = false
+			step.ActivationTime = time.Time{} // Reset timer when step deactivates
 		}
 		for _, toStep := range transition.ToSteps {
 			sfc.ActiveSteps[toStep.Value] = true
-			sfc.Steps[toStep.Value].IsActive = true
+			step := sfc.Steps[toStep.Value]
+			step.IsActive = true
+			step.ActivationTime = nowFunc() // Set activation time
 		}
 	}
 
@@ -534,6 +444,107 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	}
 
 	return NULL // A single cycle completes successfully
+}
+
+// evaluateAction determines the state of a single action based on its associated active steps and qualifiers.
+func evaluateAction(action *object.Action) {
+	qualifier, isStepActive := getHighestPriorityActiveQualifier(action)
+
+	// The action is not influenced by any active step in this cycle.
+	// For non-stored actions, this means they become inactive.
+	// For stored actions, they maintain their state unless reset by another step.
+	if !isStepActive {
+		switch qualifier {
+		case "N", "P", "D", "L":
+			action.IsActive = false
+		}
+		// Reset timers and pulse counts for non-stored actions when their steps deactivate.
+		if qualifier == "D" || qualifier == "L" {
+			action.TimerStart = time.Time{}
+		}
+		if qualifier == "P" {
+			action.ActivationCount = 0
+		}
+		return
+	}
+
+	// Apply action control logic based on the highest priority active qualifier.
+	switch qualifier {
+	case "R":
+		action.IsActive = false
+		// Resetting a stored action should also reset its timer.
+		action.TimerStart = time.Time{}
+	case "S":
+		action.IsActive = true
+	case "N":
+		action.IsActive = true
+	case "P":
+		// Activate only on the first scan cycle that the step is active.
+		if action.ActivationCount == 0 {
+			action.IsActive = true
+		} else {
+			action.IsActive = false
+		}
+		action.ActivationCount++
+	case "D":
+		if action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		action.IsActive = time.Since(action.TimerStart) >= action.Duration
+	case "L":
+		if action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		action.IsActive = time.Since(action.TimerStart) < action.Duration
+	case "SD", "DS": // Stored and Delayed (DS is functionally identical in this model)
+		if action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		if time.Since(action.TimerStart) >= action.Duration {
+			action.IsActive = true
+		}
+	case "SL":
+		if action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		// The action becomes active immediately but is stored. It will only be deactivated
+		// by an 'R' qualifier or when the time limit expires.
+		if time.Since(action.TimerStart) >= action.Duration {
+			action.IsActive = false
+		} else {
+			action.IsActive = true
+		}
+	}
+}
+
+// getHighestPriorityActiveQualifier finds the highest priority qualifier for an action among all its active associated steps.
+// IEC 61131-3 specifies the precedence: R > S > (all others).
+func getHighestPriorityActiveQualifier(action *object.Action) (qualifier string, isStepActive bool) {
+	qualifierPrecedence := map[string]int{"R": 2, "S": 1}
+	highestQualifier := "N" // Default qualifier
+	highestPrecedence := 0
+	anyStepActive := false
+
+	for _, step := range action.AssociatedSteps {
+		if step.IsActive {
+			anyStepActive = true
+			for _, actionBlock := range step.Actions {
+				if actionBlock.ActionName.Value == action.Name.Value {
+					q := "N" // Default
+					if actionBlock.Qualifier != nil {
+						q = actionBlock.Qualifier.Value
+					}
+					if precedence, ok := qualifierPrecedence[q]; ok && precedence > highestPrecedence {
+						highestPrecedence = precedence
+						highestQualifier = q
+					} else if highestPrecedence == 0 { // If no R or S found yet, take the current one.
+						highestQualifier = q
+					}
+				}
+			}
+		}
+	}
+	return highestQualifier, anyStepActive
 }
 
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
@@ -1781,7 +1792,6 @@ type outputArgMapping struct {
 
 func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Environment) object.Object {
 	switch fn := fn.(type) {
-
 	case *object.Function:
 		// Create the function's execution environment, mapping arguments to parameters.
 		extendedEnv, outputMappings, err := extendFunctionEnv(fn, args, callEnv, fn.VarInputs) // Pass fn.VarInputs as parameter declarations
@@ -1890,6 +1900,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			return NULL
 		}
 
+		var result object.Object
+		//var err *object.Error
+
 		// For built-in FBs, the definition is nil, and logic is stored in the env.
 		if fn.Definition == nil {
 			// It's a built-in FB instance.
@@ -1912,7 +1925,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			}
 
 			// Execute the function block body.
-			Eval(fn.Definition.Body, extendedEnv)
+			result = Eval(fn.Definition.Body, extendedEnv)
 
 			// Handle output arguments (=>).
 			for _, mapping := range outputMappings {
@@ -1920,17 +1933,21 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				if !ok {
 					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
 				}
+
 				if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
 					callEnv.Set(targetIdent.Value, val)
 				} else {
 					return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
 				}
 			}
-
-			// The result of an FB call is its primary output (if one exists with the same name as the FB type).
-			// For simplicity, we return NULL as the direct result of the call expression.
-			return NULL
 		}
+
+		// If the block execution resulted in an error, set ENO to FALSE.
+		if isError(result) {
+			fn.Env.Set("ENO", FALSE)
+		}
+
+		return result
 
 	case *object.Builtin:
 		// For built-in functions, we evaluate all arguments first.
@@ -2120,6 +2137,28 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 			return newError(node, "member '%s' not found in function block instance '%s'", member, l.Definition.Name.Value)
 		}
 		return val
+	case *object.Step:
+		member := node.Member.Value
+		switch member {
+		case "T":
+			if !l.IsActive || l.ActivationTime.IsZero() {
+				return &object.Time{Value: 0}
+			}
+			elapsed := nowFunc().Sub(l.ActivationTime)
+			return &object.Time{Value: elapsed}
+		case "X": // The 'X' flag is equivalent to IsActive
+			return nativeBoolToBooleanObject(l.IsActive)
+		default:
+			return newError(node, "member '%s' not found for type STEP", member)
+		}
+	case *object.Action:
+		member := node.Member.Value
+		switch member {
+		case "Q":
+			return nativeBoolToBooleanObject(l.IsActive)
+		default:
+			return newError(node, "member '%s' not found for type ACTION", member)
+		}
 	default:
 		return newError(node, "member access not supported for type %s", left.Type())
 	}

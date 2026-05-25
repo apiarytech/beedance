@@ -1266,6 +1266,55 @@ func TestIfElsifElseStatement(t *testing.T) {
 	testIdentifier(t, elseStmt.Statements[0].(*ast.ExpressionStatement).Expression, "z")
 }
 
+func TestProgramWithSFCBody(t *testing.T) {
+	input := `
+		PROGRAM MySFCProgram
+			VAR
+				cond : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1:
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := cond; END_TRANSITION
+
+			STEP S2:
+			END_STEP
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramWithSFCBody", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	progDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ProgramDeclaration. got=%T", program.Statements[0])
+	}
+
+	if progDecl.Name.Value != "MySFCProgram" {
+		t.Fatalf("Program name is not 'MySFCProgram'. got=%s", progDecl.Name.Value)
+	}
+
+	sfcBody, ok := progDecl.Body.(*ast.SFCProgram)
+	if !ok {
+		t.Fatalf("Program body is not ast.SFCProgram. got=%T", progDecl.Body)
+	}
+
+	// Check if the SFC body contains the expected elements
+	// 1 initial step, 1 transition, 1 step = 3 elements
+	if len(sfcBody.Elements) != 3 {
+		t.Fatalf("SFC body does not have 3 elements. got=%d", len(sfcBody.Elements))
+	}
+
+	// Further checks could be added here to inspect the details of each SFC element.
+}
+
 func TestIfStatementWithEmptyBlocks(t *testing.T) {
 	input := `
 		IF x < y THEN
@@ -2303,7 +2352,7 @@ func TestActionStatement(t *testing.T) {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
 	}
 
-	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	stmt, ok := program.Statements[0].(*ast.ActionStatement)
 	if !ok {
 		t.Fatalf("program.Statements[0] is not ast.ActionStatement. got=%T", program.Statements[0])
 	}

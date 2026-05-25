@@ -73,6 +73,19 @@ const (
 	PROGRAM_INSTANCE_OBJ        = "PROGRAM_INSTANCE"
 )
 
+// Generic ANY types
+const (
+	ANY_TYPE       = "ANY"
+	ANY_ELEMENTARY = "ANY_ELEMENTARY"
+	ANY_MAGNITUDE  = "ANY_MAGNITUDE"
+	ANY_NUM        = "ANY_NUM"
+	ANY_INT        = "ANY_INT"
+	ANY_REAL       = "ANY_REAL"
+	ANY_BIT        = "ANY_BIT"
+	ANY_STRING     = "ANY_STRING"
+	ANY_DATE       = "ANY_DATE"
+)
+
 // Object is the interface that all objects in the Monkey language must implement.
 type Object interface {
 	Type() ObjectType
@@ -553,9 +566,10 @@ func (s *SFC) Inspect() string  { return "SFC" }
 
 // Step objects represent a step in an SFC.
 type Step struct {
-	Name     *ast.Identifier
-	Actions  []*ast.ActionBlockStatement
-	IsActive bool
+	Name           *ast.Identifier
+	Actions        []*ast.ActionBlockStatement
+	IsActive       bool
+	ActivationTime time.Time // Time when the step became active
 }
 
 func (s *Step) Type() ObjectType { return STEP_OBJ }

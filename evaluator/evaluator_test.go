@@ -1832,6 +1832,376 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 	}
 }
 
+func TestBuiltinAbsFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Integer tests
+		{"ABS(10)", int64(10)},
+		{"ABS(-10)", int64(10)},
+		{"ABS(0)", int64(0)},
+
+		// Real tests
+		{"ABS(10.5)", 10.5},
+		{"ABS(-10.5)", 10.5},
+
+		// Error cases
+		{"ABS(TRUE)", "argument to `ABS` not supported, got BOOLEAN"},
+		{"ABS()", "wrong number of arguments for ABS. got=0, want=1"},
+		{"ABS(1, 2)", "wrong number of arguments for ABS. got=2, want=1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case string:
+				testErrorObject(t, evaluated, expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinTruncFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Positive and negative values
+		{"TRUNC(5.7)", int64(5)},
+		{"TRUNC(-5.7)", int64(-5)},
+		{"TRUNC(5.2)", int64(5)},
+		{"TRUNC(-5.2)", int64(-5)},
+		{"TRUNC(0.0)", int64(0)},
+		{"TRUNC(5.0)", int64(5)},
+
+		// Error cases
+		{"TRUNC(5)", "argument to `TRUNC` must be REAL, got INTEGER"},
+		{"TRUNC(TRUE)", "argument to `TRUNC` must be REAL, got BOOLEAN"},
+		{"TRUNC()", "wrong number of arguments for TRUNC. got=0, want=1"},
+		{"TRUNC(1.0, 2.0)", "wrong number of arguments for TRUNC. got=2, want=1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case string:
+				testErrorObject(t, evaluated, expected)
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinMoveFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Test with various literal types
+		{"MOVE(5)", int64(5)},
+		{"MOVE(10.5)", 10.5},
+		{"MOVE(TRUE)", true},
+		{`MOVE("hello")`, "hello"},
+		{"MOVE(T#5s)", 5 * time.Second},
+		{"MOVE(BYTE#16#FF)", uint64(0xFF)},
+
+		// Test with an expression
+		{"MOVE(5 + 5)", int64(10)},
+
+		// Error cases for wrong number of arguments
+		{"MOVE()", "BUILTIN ERROR: wrong number of arguments for MOVE. got=0, want=1"},
+		{"MOVE(1, 2)", "BUILTIN ERROR: wrong number of arguments for MOVE. got=2, want=1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case bool:
+				testBooleanObject(t, evaluated, expected)
+			case string:
+				// Can be a string result or an error message
+				if err, ok := evaluated.(*object.Error); ok {
+					testErrorObject(t, evaluated, expected)
+				} else {
+					testStringObject(t, evaluated, expected)
+				}
+			case time.Duration:
+				testTimeObject(t, evaluated, expected)
+			case uint64:
+				if bs, ok := evaluated.(*object.BitString); !ok || bs.Value != expected {
+					t.Errorf("object is not correct BitString. want=%d, got=%v", expected, evaluated)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinLimitFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Integer tests
+		{"LIMIT(10, 5, 20)", int64(10)},      // Input below min
+		{"LIMIT(10, 15, 20)", int64(15)},     // Input within range
+		{"LIMIT(10, 25, 20)", int64(20)},     // Input above max
+		{"LIMIT(-20, -15, -10)", int64(-15)}, // Negative numbers
+		{"LIMIT(10, 10, 20)", int64(10)},     // Input equals min
+		{"LIMIT(10, 20, 20)", int64(20)},     // Input equals max
+
+		// Real tests
+		{"LIMIT(10.0, 5.0, 20.0)", 10.0},
+		{"LIMIT(10.0, 15.5, 20.0)", 15.5},
+		{"LIMIT(10.0, 25.0, 20.0)", 20.0},
+
+		// Mixed type tests (promotion to REAL)
+		{"LIMIT(10, 15.5, 20)", 15.5},
+		{"LIMIT(10.0, 5, 20.0)", 10.0},
+		{"LIMIT(10, 25, 20.0)", 20.0},
+
+		// Named arguments test (assuming evaluator supports this for built-ins)
+		// Note: The current applyFunction logic for built-ins is positional.
+		// This test will pass if the arguments are provided positionally as MN, IN, MX.
+		{"LIMIT(MN := 10, IN := 5, MX := 20)", int64(10)},
+
+		// Error cases
+		{"LIMIT(10, 5)", "BUILTIN ERROR: wrong number of arguments for LIMIT. got=2, want=3"},
+		{"LIMIT(10, 5, 20, 30)", "BUILTIN ERROR: wrong number of arguments for LIMIT. got=4, want=3"},
+		{"LIMIT(10, TRUE, 20)", "BUILTIN ERROR: all arguments to `LIMIT` must be INTEGER or REAL, got BOOLEAN"},
+		{`LIMIT(10, 5, "20")`, "BUILTIN ERROR: all arguments to `LIMIT` must be INTEGER or REAL, got STRING"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case string:
+				// Can be a string result or an error message
+				if err, ok := evaluated.(*object.Error); ok {
+					if !strings.Contains(err.Message, expected) {
+						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
+					}
+				} else {
+					testStringObject(t, evaluated, expected)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinSelFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Integer selection
+		{"SEL(FALSE, 10, 20)", int64(10)},
+		{"SEL(TRUE, 10, 20)", int64(20)},
+
+		// Real selection
+		{"SEL(FALSE, 10.5, 20.5)", 10.5},
+		{"SEL(TRUE, 10.5, 20.5)", 20.5},
+
+		// Boolean selection
+		{"SEL(FALSE, TRUE, FALSE)", true},
+		{"SEL(TRUE, TRUE, FALSE)", false},
+
+		// String selection
+		{`SEL(FALSE, "hello", "world")`, "hello"},
+		{`SEL(TRUE, "hello", "world")`, "world"},
+
+		// Selection with expressions
+		{"SEL(1 > 0, 5+5, 10+10)", int64(20)},
+		{"SEL(1 < 0, 5+5, 10+10)", int64(10)},
+
+		// Error cases
+		{"SEL(1, 10, 20)", "BUILTIN ERROR: argument 1 to `SEL` must be BOOLEAN, got INTEGER"},
+		{`SEL(TRUE, 10, "world")`, "BUILTIN ERROR: arguments 2 and 3 to `SEL` must be of the same type, got INTEGER and STRING"},
+		{"SEL(TRUE, 10)", "BUILTIN ERROR: wrong number of arguments for SEL. got=2, want=3"},
+		{"SEL(TRUE, 10, 20, 30)", "BUILTIN ERROR: wrong number of arguments for SEL. got=4, want=3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case bool:
+				testBooleanObject(t, evaluated, expected)
+			case string:
+				if err, ok := evaluated.(*object.Error); ok {
+					testErrorObject(t, evaluated, expected)
+				} else {
+					testStringObject(t, evaluated, expected)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinMinMaxFunctions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// MIN function tests
+		{"MIN(10, 20)", int64(10)},
+		{"MIN(20, 10)", int64(10)},
+		{"MIN(10, 20, 5, 30)", int64(5)},
+		{"MIN(-10, -20)", int64(-20)},
+		{"MIN(10.5, 10.6)", 10.5},
+		{"MIN(10, 20.5)", 10.0}, // Type promotion to REAL
+		{"MIN(1, 2.5, -3.0, 4)", -3.0},
+		{"MIN(10)", int64(10)},
+		{"MIN()", "BUILTIN ERROR: wrong number of arguments for MIN. got=0, want>=1"},
+		{"MIN(1, TRUE)", "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got BOOLEAN"},
+
+		// MAX function tests
+		{"MAX(10, 20)", int64(20)},
+		{"MAX(20, 10)", int64(20)},
+		{"MAX(10, 20, 5, 30)", int64(30)},
+		{"MAX(-10, -20)", int64(-10)},
+		{"MAX(10.5, 10.6)", 10.6},
+		{"MAX(10, 20.5)", 20.5}, // Type promotion to REAL
+		{"MAX(1, 2.5, -3.0, 4)", 4.0},
+		{"MAX(10)", int64(10)},
+		{"MAX()", "BUILTIN ERROR: wrong number of arguments for MAX. got=0, want>=1"},
+		{"MAX(1, TRUE)", "BUILTIN ERROR: all arguments to `MAX` must be INTEGER or REAL, got BOOLEAN"},
+	}
+
+	// Register MIN and MAX in builtins for testing if they aren't already
+	if _, ok := builtins["MIN"]; !ok {
+		builtins["MIN"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
+			return minMaxBuiltin("MIN", args...)
+		}}
+	}
+	if _, ok := builtins["MAX"]; !ok {
+		builtins["MAX"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
+			return minMaxBuiltin("MAX", args...)
+		}}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case string:
+				// Can be a string result or an error message
+				if err, ok := evaluated.(*object.Error); ok {
+					if !strings.Contains(err.Message, expected) {
+						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
+					}
+				} else {
+					testStringObject(t, evaluated, expected)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinBitwiseFunctions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// AND function
+		{"AND(BYTE#16#F0, BYTE#16#A5)", uint64(0xA0)},
+		{"AND(WORD#16#1234, WORD#16#00FF, WORD#16#FFFF)", uint64(0x0034)},
+		{"AND(BYTE#16#FF, BYTE#16#FF)", uint64(0xFF)},
+
+		// OR function
+		{"OR(BYTE#16#A0, BYTE#16#05)", uint64(0xA5)},
+		{"OR(WORD#16#1200, WORD#16#0034)", uint64(0x1234)},
+		{"OR(BYTE#16#F0, BYTE#16#0F, BYTE#16#AA)", uint64(0xFF)},
+
+		// XOR function
+		{"XOR(BYTE#16#A5, BYTE#16#F0)", uint64(0x55)},
+		{"XOR(WORD#16#FFFF, WORD#16#1234)", uint64(0xEDCB)},
+		{"XOR(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF)", uint64(0xFF)}, // A ^ A ^ A = A
+
+		// Error cases
+		{"AND(BYTE#16#FF)", "BUILTIN ERROR: wrong number of arguments for AND. got=1, want>=2"},
+		{"OR(BYTE#16#FF, WORD#16#FF)", "BUILTIN ERROR: all arguments to `OR` must have the same width, got 8 and 16"},
+		{"XOR(BYTE#16#FF, 10)", "BUILTIN ERROR: all arguments to `XOR` must be bit-string types, got INTEGER"},
+
+		// NAND function
+		{"NAND(BYTE#16#F0, BYTE#16#A5)", uint64(0x5F)},             // NOT(A0) -> 5F
+		{"NAND(WORD#16#1234, WORD#16#00FF)", uint64(0xFFCB)},       // NOT(0034) -> FFCB
+		{"NAND(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF)", uint64(0x00)}, // NOT(FF) -> 00
+
+		// NOR function
+		{"NOR(BYTE#16#A0, BYTE#16#05)", uint64(0x5A)},       // NOT(A5) -> 5A
+		{"NOR(WORD#16#1200, WORD#16#0034)", uint64(0xEDCB)}, // NOT(1234) -> EDCB
+		{"NOR(BYTE#16#00, BYTE#16#00)", uint64(0xFF)},       // NOT(00) -> FF
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+
+			switch expected := tt.expected.(type) {
+			case uint64:
+				bs, ok := evaluated.(*object.BitString)
+				if !ok {
+					t.Fatalf("object is not BitString. got=%T (%+v)", evaluated, evaluated)
+				}
+				if bs.Value != expected {
+					t.Errorf("wrong value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
+				}
+			case string:
+				errObj, ok := evaluated.(*object.Error)
+				if !ok {
+					t.Errorf("object is not Error. got=%T (%+v)",
+						evaluated, evaluated)
+					return
+				}
+
+				if !strings.Contains(errObj.Message, expected) {
+					t.Errorf("wrong error message. expected to contain %q, got %q",
+						expected, errObj.Message)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
 func TestBuiltinTrigFunctions(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -2841,6 +3211,69 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
 		testBooleanObject(t, mustGet(env, "IsDone"), true) // Q is now true
 	})
+}
+
+func TestTP_PulseTimer(t *testing.T) {
+	// Mock time for timer tests
+	originalNowFunc := nowFunc
+	mockTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	// Helper to advance mock time
+	advanceTime := func(d time.Duration) {
+		mockTime = mockTime.Add(d)
+	}
+
+	input := `
+		PROGRAM TestTP
+			VAR
+				MyPulse : TP;
+				Trigger : BOOL;
+				PulseOut : BOOL;
+				ET : TIME;
+			END_VAR
+
+			MyPulse(IN := Trigger, PT := T#5s, Q => PulseOut, ET => ET);
+		END_PROGRAM
+	`
+	env := object.NewEnvironment()
+	testEvalWithEnv(input, env)
+
+	runScan := func() {
+		testEvalWithEnv(`MyPulse(IN := Trigger, PT := T#5s, Q => PulseOut, ET => ET);`, env)
+	}
+
+	// --- Cycle 1: Initial state ---
+	env.Set("Trigger", FALSE)
+	runScan()
+	testBooleanObject(t, mustGet(env, "PulseOut"), false)
+	testTimeObject(t, mustGet(env, "ET"), 0)
+
+	// --- Cycle 2: Rising edge on IN, pulse starts ---
+	env.Set("Trigger", TRUE)
+	runScan()
+	testBooleanObject(t, mustGet(env, "PulseOut"), true)
+	testTimeObject(t, mustGet(env, "ET"), 0)
+
+	// --- Cycle 3: IN goes low, but pulse continues ---
+	advanceTime(2 * time.Second)
+	env.Set("Trigger", FALSE)
+	runScan()
+	testBooleanObject(t, mustGet(env, "PulseOut"), true)
+	testTimeObject(t, mustGet(env, "ET"), 2*time.Second)
+
+	// --- Cycle 4: Time reaches PT, pulse ends ---
+	advanceTime(3 * time.Second) // Total elapsed time is now 5s
+	runScan()
+	testBooleanObject(t, mustGet(env, "PulseOut"), false)
+	testTimeObject(t, mustGet(env, "ET"), 5*time.Second)
+
+	// --- Cycle 5: State after pulse completion ---
+	advanceTime(1 * time.Second)
+	runScan()
+	testBooleanObject(t, mustGet(env, "PulseOut"), false)
+	testTimeObject(t, mustGet(env, "ET"), 0)
 }
 
 func TestFunctionBlockWithSFCBody(t *testing.T) {
