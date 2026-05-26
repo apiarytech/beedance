@@ -41,11 +41,11 @@ func TestFunctionBlock_EN_ENO(t *testing.T) {
 	`
 	env := object.NewEnvironment()
 	// First, evaluate the whole program to set up the environment and FB instance.
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	// Helper to run one "scan" by re-evaluating the FB call.
 	runScan := func() {
-		testEvalWithEnv(`MyTimer(EN := EnableExecution, ENO => EnableOut, IN := Start, PT := T#5s, Q => TimerDone, ET => ElapsedTime);`, env)
+		testEvalWithEnv(t, `MyTimer(EN := EnableExecution, ENO => EnableOut, IN := Start, PT := T#5s, Q => TimerDone, ET => ElapsedTime);`, env)
 	}
 
 	// --- Cycle 1: Start the timer while it is enabled. ---

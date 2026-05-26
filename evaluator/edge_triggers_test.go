@@ -19,11 +19,11 @@ func TestR_TRIG(t *testing.T) {
 	`
 	env := object.NewEnvironment()
 	// Evaluate the program to set up the environment and FB instance
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	// Helper to run one "scan" by re-evaluating the FB call
 	runScan := func() {
-		testEvalWithEnv(`MyTrigger(CLK := InputSignal, Q => RisingEdgeDetected);`, env)
+		testEvalWithEnv(t, `MyTrigger(CLK := InputSignal, Q => RisingEdgeDetected);`, env)
 	}
 
 	// --- Cycle 1: Initial state, Input is FALSE ---
@@ -77,11 +77,11 @@ func TestF_TRIG(t *testing.T) {
 	`
 	env := object.NewEnvironment()
 	// Evaluate the program to set up the environment and FB instance
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	// Helper to run one "scan" by re-evaluating the FB call
 	runScan := func() {
-		testEvalWithEnv(`MyTrigger(CLK := InputSignal, Q => FallingEdgeDetected);`, env)
+		testEvalWithEnv(t, `MyTrigger(CLK := InputSignal, Q => FallingEdgeDetected);`, env)
 	}
 
 	// --- Cycle 1: Initial state, Input is TRUE ---
@@ -136,10 +136,10 @@ func TestCTU(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
+		testEvalWithEnv(t, `MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
 	}
 
 	// --- Cycle 1: Initial state ---
@@ -200,10 +200,10 @@ func TestCTD(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
+		testEvalWithEnv(t, `MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
 	}
 
 	// --- Cycle 1: Load the counter ---
@@ -246,10 +246,10 @@ func TestCTUD(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyCounter(CU := CountUp, CD := CountDown, R := Reset, LD := Load, PV := 5, QU => IsFull, QD => IsEmpty, CV => CurrentValue);`, env)
+		testEvalWithEnv(t, `MyCounter(CU := CountUp, CD := CountDown, R := Reset, LD := Load, PV := 5, QU => IsFull, QD => IsEmpty, CV => CurrentValue);`, env)
 	}
 
 	// Helper for rising edge pulse

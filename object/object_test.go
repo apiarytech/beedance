@@ -123,9 +123,9 @@ func TestFunctionObject(t *testing.T) {
 			fnName: &ast.Identifier{Value: "funcWithInputs"},
 			varInputs: []*ast.VarDeclStatement{
 				{
-					Token:    token.Token{Type: token.VAR, Literal: "VAR_INPUT"},
+					Token:    token.Token{Type: token.VAR_INPUT, Literal: "VAR_INPUT"},
 					Name:     &ast.Identifier{Value: "in1"},
-					DataType: &ast.Identifier{Value: "INT"},
+					DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
 				},
 			},
 			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
@@ -137,9 +137,9 @@ func TestFunctionObject(t *testing.T) {
 			fnName: &ast.Identifier{Value: "funcWithOutputs"},
 			varOutputs: []*ast.VarDeclStatement{
 				{
-					Token:    token.Token{Type: token.VAR, Literal: "VAR_OUTPUT"},
+					Token:    token.Token{Type: token.VAR_OUTPUT, Literal: "VAR_OUTPUT"},
 					Name:     &ast.Identifier{Value: "out1"},
-					DataType: &ast.Identifier{Value: "BOOL"},
+					DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}},
 				},
 			},
 			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
@@ -151,9 +151,9 @@ func TestFunctionObject(t *testing.T) {
 			fnName: &ast.Identifier{Value: "funcWithInOuts"},
 			varInOuts: []*ast.VarDeclStatement{
 				{
-					Token:    token.Token{Type: token.VAR, Literal: "VAR_IN_OUT"},
+					Token:    token.Token{Type: token.VAR_IN_OUT, Literal: "VAR_IN_OUT"},
 					Name:     &ast.Identifier{Value: "inout1"},
-					DataType: &ast.Identifier{Value: "REAL"},
+					DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.REAL, Literal: "REAL"}},
 				},
 			},
 			body:        &ast.BlockStatement{Statements: []ast.Statement{}},
@@ -324,6 +324,80 @@ func TestTimeDateObjects(t *testing.T) {
 			}
 			if tt.obj.Inspect() != tt.wantInspect {
 				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
+	}
+}
+
+func TestFunctionBlockObject(t *testing.T) {
+	tests := []struct {
+		name        string
+		fb          *FunctionBlock
+		wantInspect string
+	}{
+		{
+			name: "FB with no vars",
+			fb: &FunctionBlock{
+				Name: &ast.Identifier{Value: "MyFB"},
+			},
+			wantInspect: "FUNCTION_BLOCK MyFB ()",
+		},
+		{
+			name: "FB with VarInputs",
+			fb: &FunctionBlock{
+				Name: &ast.Identifier{Value: "FB_Inputs"},
+				VarInputs: []*ast.VarDeclStatement{{
+					Name:     &ast.Identifier{Value: "In1"},
+					DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+				}},
+			},
+			wantInspect: "FUNCTION_BLOCK FB_Inputs (VAR_INPUT In1 : INT;)",
+		},
+		{
+			name: "FB with VarOutputs",
+			fb: &FunctionBlock{
+				Name:       &ast.Identifier{Value: "FB_Outputs"},
+				VarOutputs: []*ast.VarDeclStatement{{Name: &ast.Identifier{Value: "Out1"}, DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}}}},
+			},
+			wantInspect: "FUNCTION_BLOCK FB_Outputs (VAR_OUTPUT Out1 : BOOL;)",
+		},
+		{
+			name: "FB with VarInOuts",
+			fb: &FunctionBlock{
+				Name:      &ast.Identifier{Value: "FB_InOuts"},
+				VarInOuts: []*ast.VarDeclStatement{{Name: &ast.Identifier{Value: "InOut1"}, DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.REAL, Literal: "REAL"}}}},
+			},
+			wantInspect: "FUNCTION_BLOCK FB_InOuts (VAR_IN_OUT InOut1 : REAL;)",
+		},
+		{
+			name: "FB with all var types",
+			fb: &FunctionBlock{
+				Name: &ast.Identifier{Value: "FB_Complex"},
+				VarInputs: []*ast.VarDeclStatement{
+					{Name: &ast.Identifier{Value: "In1"}, DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}},
+				},
+				VarOutputs: []*ast.VarDeclStatement{
+					{Name: &ast.Identifier{Value: "Out1"}, DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}}},
+				},
+				VarInOuts: []*ast.VarDeclStatement{
+					{Name: &ast.Identifier{Value: "InOut1"}, DataType: &ast.TypeSpecifier{Token: token.Token{Type: token.REAL, Literal: "REAL"}}},
+				},
+			},
+			wantInspect: "FUNCTION_BLOCK FB_Complex (VAR_INPUT In1 : INT; VAR_OUTPUT Out1 : BOOL; VAR_IN_OUT InOut1 : REAL;)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set a dummy environment and body, as they are not used by Inspect()
+			tt.fb.Env = NewEnvironment()
+			tt.fb.Body = &ast.BlockStatement{}
+
+			if tt.fb.Type() != FUNCTION_BLOCK_OBJ {
+				t.Errorf("fb.Type() wrong. got=%s, want=%s", tt.fb.Type(), FUNCTION_BLOCK_OBJ)
+			}
+			if tt.fb.Inspect() != tt.wantInspect {
+				t.Errorf("fb.Inspect() wrong.\ngot:  %q\nwant: %q", tt.fb.Inspect(), tt.wantInspect)
 			}
 		})
 	}
@@ -533,6 +607,103 @@ func TestBitStringHashKeys(t *testing.T) {
 
 		// Cross bit-string types
 		{"byte vs word", &Byte{Value: 1}, &Word{Value: 1}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hashA := tt.a.(Hashable).HashKey()
+			hashB := tt.b.(Hashable).HashKey()
+			if (hashA == hashB) != tt.wantEqual {
+				t.Errorf("HashKey() equality for %s (%v) and %s (%v) was %v, want %v",
+					tt.a.Inspect(), hashA, tt.b.Inspect(), hashB, !tt.wantEqual, tt.wantEqual)
+			}
+		})
+	}
+}
+
+func TestExtendedObjectInspection(t *testing.T) {
+	fbDef := &FunctionBlock{Name: &ast.Identifier{Value: "MyFB"}}
+	progDef := &Program{Name: &ast.Identifier{Value: "MyProg"}}
+
+	tests := []struct {
+		name        string
+		obj         Object
+		wantType    ObjectType
+		wantInspect string
+	}{
+		// Specific Integer Types
+		{"SInt", &SInt{Value: -8}, SINT_OBJ, "-8"},
+		{"Int", &Int{Value: -16}, INT_OBJ, "-16"},
+		{"DInt", &DInt{Value: -32}, DINT_OBJ, "-32"},
+		{"LInt", &LInt{Value: -64}, LINT_OBJ, "-64"},
+		{"USInt", &USInt{Value: 8}, USINT_OBJ, "8"},
+		{"UInt", &UInt{Value: 16}, UINT_OBJ, "16"},
+		{"UDInt", &UDInt{Value: 32}, UDINT_OBJ, "32"},
+		{"ULInt", &ULInt{Value: 64}, ULINT_OBJ, "64"},
+
+		// Internal/Flow Control Objects
+		{"Exit", &Exit{}, EXIT_OBJ, "EXIT"},
+		{"Jump", &Jump{TargetLabel: "LBL1"}, JUMP_OBJ, "JUMP to LBL1"},
+		{"Return", &Return{}, RETURN_OBJ, "RETURN"},
+
+		// POU and Instance Objects
+		{"BuiltinFunctionBlock", &BuiltinFunctionBlock{}, BUILTIN_FUNCTION_BLOCK_OBJ, "builtin function block"},
+		{"Pointer", &Pointer{Name: "targetVar"}, POINTER_OBJ, "POINTER(targetVar)"},
+		{"SubrangeType", &SubrangeType{Name: "MyRange", BaseType: INT_OBJ, LowerBound: 0, UpperBound: 100}, SUBRANGE_TYPE_OBJ, "SUBRANGE INT (0..100)"},
+		{"Action", &Action{Name: &ast.Identifier{Value: "MyAction"}}, ACTION_OBJ, "ACTION MyAction"},
+		{"Task", &Task{Name: "MyTask", Priority: 1, Interval: time.Second}, "TASK", "TASK(MyTask, Priority: 1, Interval: 1s)"},
+		{"Scheduler", &Scheduler{}, "SCHEDULER", "SCHEDULER()"},
+		{"FunctionBlock", fbDef, FUNCTION_BLOCK_OBJ, "FUNCTION_BLOCK MyFB ()"},
+		{"Program", progDef, PROGRAM_OBJ, "PROGRAM MyProg"},
+		{"ProgramInstance", &ProgramInstance{Definition: progDef}, PROGRAM_INSTANCE_OBJ, "INSTANCE OF MyProg"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.obj.Type() != tt.wantType {
+				t.Errorf("Type() wrong. got=%s, want=%s", tt.obj.Type(), tt.wantType)
+			}
+			if tt.obj.Inspect() != tt.wantInspect {
+				t.Errorf("Inspect() wrong. got=%q, want=%q", tt.obj.Inspect(), tt.wantInspect)
+			}
+		})
+	}
+}
+
+func TestIntegerTypesHashKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		a, b      Object
+		wantEqual bool
+	}{
+		// SInt
+		{"same sint", &SInt{Value: 1}, &SInt{Value: 1}, true},
+		{"different sint", &SInt{Value: 1}, &SInt{Value: 2}, false},
+		// Int
+		{"same int", &Int{Value: 1}, &Int{Value: 1}, true},
+		{"different int", &Int{Value: 1}, &Int{Value: 2}, false},
+		// DInt
+		{"same dint", &DInt{Value: 1}, &DInt{Value: 1}, true},
+		{"different dint", &DInt{Value: 1}, &DInt{Value: 2}, false},
+		// LInt
+		{"same lint", &LInt{Value: 1}, &LInt{Value: 1}, true},
+		{"different lint", &LInt{Value: 1}, &LInt{Value: 2}, false},
+		// USInt
+		{"same usint", &USInt{Value: 1}, &USInt{Value: 1}, true},
+		{"different usint", &USInt{Value: 1}, &USInt{Value: 2}, false},
+		// UInt
+		{"same uint", &UInt{Value: 1}, &UInt{Value: 1}, true},
+		{"different uint", &UInt{Value: 1}, &UInt{Value: 2}, false},
+		// UDInt
+		{"same udint", &UDInt{Value: 1}, &UDInt{Value: 1}, true},
+		{"different udint", &UDInt{Value: 1}, &UDInt{Value: 2}, false},
+		// ULInt
+		{"same ulint", &ULInt{Value: 1}, &ULInt{Value: 1}, true},
+		{"different ulint", &ULInt{Value: 1}, &ULInt{Value: 2}, false},
+		// Cross-type
+		{"sint vs int", &SInt{Value: 1}, &Int{Value: 1}, false},
+		{"usint vs uint", &USInt{Value: 1}, &UInt{Value: 1}, false},
+		{"sint vs usint", &SInt{Value: 1}, &USInt{Value: 1}, false},
 	}
 
 	for _, tt := range tests {

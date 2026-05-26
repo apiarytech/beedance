@@ -105,3 +105,62 @@ func TestEnclosedEnvironmentGet(t *testing.T) {
 		t.Errorf("outer.Get() variable changed by inner environment. expected=%+v, got=%+v", outerVar, obj)
 	}
 }
+
+func TestEnvironmentGetRaw(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("outerVar", &Integer{Value: 1})
+
+	inner := NewEnclosedEnvironment(outer)
+	inner.Set("innerVar", &Integer{Value: 2})
+
+	// 1. GetRaw should find a variable in the current environment.
+	obj, ok := inner.GetRaw("innerVar")
+	if !ok {
+		t.Fatal("GetRaw() failed to retrieve variable from current environment")
+	}
+	if obj.(*Integer).Value != 2 {
+		t.Fatalf("GetRaw() retrieved wrong value. want=2, got=%d", obj.(*Integer).Value)
+	}
+
+	// 2. GetRaw should NOT find a variable in the outer environment.
+	_, ok = inner.GetRaw("outerVar")
+	if ok {
+		t.Fatal("GetRaw() unexpectedly found a variable in the outer environment")
+	}
+
+	// 3. For contrast, confirm Get() DOES find the outer variable.
+	obj, ok = inner.Get("outerVar")
+	if !ok {
+		t.Fatal("Get() failed to retrieve variable from outer environment for comparison")
+	}
+	if obj.(*Integer).Value != 1 {
+		t.Fatalf("Get() retrieved wrong value from outer environment. want=1, got=%d", obj.(*Integer).Value)
+	}
+}
+
+func TestEnvironmentNames(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("var1", &Integer{Value: 1})
+	outer.Set("var2", &Boolean{Value: true})
+
+	inner := NewEnclosedEnvironment(outer)
+	inner.Set("var3", &String{Value: "test"})
+	inner.Set("var1", &Integer{Value: 99}) // Shadow outer var
+
+	names := inner.Names()
+
+	if len(names) != 2 {
+		t.Fatalf("Names() returned wrong number of names. want=2, got=%d", len(names))
+	}
+
+	expectedNames := map[string]bool{
+		"var3": true,
+		"var1": true,
+	}
+
+	for _, name := range names {
+		if !expectedNames[name] {
+			t.Errorf("Names() returned unexpected name: %s", name)
+		}
+	}
+}

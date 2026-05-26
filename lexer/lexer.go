@@ -303,7 +303,7 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 
 		// Read the value part based on the detected base
 		digitCheckFn := getDigitCheckFn(base)
-		for digitCheckFn(l.ch) || l.ch == '_' {
+		for (digitCheckFn(l.ch) || l.ch == '_') && (l.ch != 'e' && l.ch != 'E') {
 			l.readChar()
 		}
 

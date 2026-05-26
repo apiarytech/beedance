@@ -3023,6 +3023,48 @@ func TestIlProgramParsing(t *testing.T) {
 	}
 }
 
+func TestDirectVariableParsing(t *testing.T) {
+	input := `
+		VAR
+			myInput AT %IX0.1 : BOOL;
+		END_VAR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestDirectVariableParsing", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.VarBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(varBlock.Declarations) != 1 {
+		t.Fatalf("Expected 1 declaration. got=%d", len(varBlock.Declarations))
+	}
+
+	decl := varBlock.Declarations[0]
+	if decl.Location == nil {
+		t.Fatalf("Expected AT clause to be parsed, but it was nil.")
+	}
+
+	// No type assertions are needed, as the compiler guarantees the concrete types
+	// for both decl.Location and atDecl.Location from the struct definitions.
+	atDecl := decl.Location
+	directVar := atDecl.Location
+	if directVar == nil {
+		t.Fatalf("atDecl.Location is nil, expected *ast.DirectVariable")
+	}
+
+	if directVar.Address != "IX0.1" { // cspell:disable-line
+		t.Errorf("DirectVariable address is not 'IX0.1'. got=%q", directVar.Address) // cspell:disable-line
+	}
+}
+
 func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, dataType string) bool {
 	if s.TokenLiteral() != name && s.Token.Type != token.VAR {
 		t.Errorf("s.TokenLiteral not '%s' or 'VAR'. got=%q", name, s.TokenLiteral())

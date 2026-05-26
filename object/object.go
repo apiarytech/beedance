@@ -656,18 +656,30 @@ func (f *Function) Inspect() string {
 	out.WriteString(f.Name.Value)
 	out.WriteString(" (")
 
-	var varDecls []string
-	for _, v := range f.VarInputs {
-		varDecls = append(varDecls, v.String())
+	var allParams []string
+	if len(f.VarInputs) > 0 {
+		params := []string{}
+		for _, p := range f.VarInputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_INPUT "+strings.Join(params, "; ")+";")
 	}
-	for _, v := range f.VarOutputs {
-		varDecls = append(varDecls, v.String())
+	if len(f.VarOutputs) > 0 {
+		params := []string{}
+		for _, p := range f.VarOutputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_OUTPUT "+strings.Join(params, "; ")+";")
 	}
-	for _, v := range f.VarInOuts {
-		varDecls = append(varDecls, v.String())
+	if len(f.VarInOuts) > 0 {
+		params := []string{}
+		for _, p := range f.VarInOuts {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_IN_OUT "+strings.Join(params, "; ")+";")
 	}
 
-	out.WriteString(strings.Join(varDecls, ", "))
+	out.WriteString(strings.Join(allParams, " "))
 
 	out.WriteString(")")
 
@@ -694,18 +706,30 @@ func (fb *FunctionBlock) Inspect() string {
 	out.WriteString(fb.Name.Value)
 	out.WriteString(" (")
 
-	var varDecls []string
-	for _, v := range fb.VarInputs {
-		varDecls = append(varDecls, v.String())
+	var allParams []string
+	if len(fb.VarInputs) > 0 {
+		params := []string{}
+		for _, p := range fb.VarInputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_INPUT "+strings.Join(params, "; ")+";")
 	}
-	for _, v := range fb.VarOutputs {
-		varDecls = append(varDecls, v.String())
+	if len(fb.VarOutputs) > 0 {
+		params := []string{}
+		for _, p := range fb.VarOutputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_OUTPUT "+strings.Join(params, "; ")+";")
 	}
-	for _, v := range fb.VarInOuts {
-		varDecls = append(varDecls, v.String())
+	if len(fb.VarInOuts) > 0 {
+		params := []string{}
+		for _, p := range fb.VarInOuts {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_IN_OUT "+strings.Join(params, "; ")+";")
 	}
 
-	out.WriteString(strings.Join(varDecls, ", "))
+	out.WriteString(strings.Join(allParams, " "))
 
 	out.WriteString(")")
 

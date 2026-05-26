@@ -764,9 +764,9 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 
 		if !p.expectPeek(token.COLON) { // After this, curToken is ':'
 			return nil
-		} else {
-			p.nextToken() // Consume ':', move to data type
 		}
+
+		p.nextToken() // Consume ':', move to data type
 		dataType := p.parseTypeSpecifier()
 		if dataType == nil {
 			return nil
@@ -807,25 +807,21 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 
 func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
 	defer untrace(trace("parseAtDeclaration"))
-	if !p.curTokenIs(token.AT) {
-		return nil
-	}
+	// This function is called when p.curToken is AT.
 	decl := &ast.AtDeclaration{Token: p.curToken}
 
 	if !p.expectPeek(token.DIRECT_VAR) {
 		return nil
 	}
 
-	// p.curToken is now the DIRECT_VAR token. We can use the registered prefix
-	// parsing function to create the direct variable expression.
-	locExp := p.parseDirectVariable()
-	loc, ok := locExp.(*ast.DirectVariable)
+	dvExp := p.parseDirectVariable()
+	dv, ok := dvExp.(*ast.DirectVariable)
 	if !ok {
-		p.currentError("expected a direct variable for AT declaration, but got %T", locExp)
+		p.currentError("expected a direct variable for AT declaration, but got %T", dvExp)
 		return nil
 	}
 
-	decl.Location = loc
+	decl.Location = dv
 	return decl
 }
 

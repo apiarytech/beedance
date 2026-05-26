@@ -58,9 +58,8 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 
 	// 2. Parse the operator (e.g., LD, ST, ADD).
 	// The operator is expected to be an identifier.
-	if !p.curTokenIs(token.IDENT) {
-		// In a more robust implementation, we would check against a list of valid IL operators.
-		// For now, we assume any identifier here is an operator.
+	// We check for IDENT or a known IL operator keyword.
+	if !p.curTokenIs(token.IDENT) && !isIlOperator(p.curToken.Type) {
 		p.currentError("expected IL operator (e.g., LD, ST), got %s", p.curToken.Type)
 		return nil
 	}

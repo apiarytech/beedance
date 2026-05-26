@@ -56,21 +56,28 @@ func (p *Parser) parseActionStatement() ast.Statement {
 
 	p.nextToken() // Consume the action name identifier
 
-	// Create a block statement and parse statements into it until END_ACTION.
-	// This ensures the body is always a BlockStatement.
-	body := &ast.BlockStatement{Token: p.curToken}
-	body.Statements = []ast.Statement{}
-	for !p.curTokenIs(token.END_ACTION) && !p.curTokenIs(token.EOF) {
-		stmt := p.parseStatement()
-		if stmt != nil {
-			body.Statements = append(body.Statements, stmt)
-		}
-	}
-	stmt.Body = body
+	/* 	// Create a block statement and parse statements into it until END_ACTION.
+	   	// This ensures the body is always a BlockStatement.
+	   	body := &ast.BlockStatement{Token: p.curToken}
+	   	body.Statements = []ast.Statement{}
+	   	for !p.curTokenIs(token.END_ACTION) && !p.curTokenIs(token.EOF) {
+	   		stmt := p.parseStatement()
+	   		if stmt != nil {
+	   			body.Statements = append(body.Statements, stmt)
+	   		}
+	   	}
+	   	stmt.Body = body
+
+	   	if !p.curTokenIs(token.END_ACTION) {
+	   		p.peekError(token.END_ACTION)
+	   	} */
+
+	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION, token.VAR)
 
 	if !p.curTokenIs(token.END_ACTION) {
 		p.peekError(token.END_ACTION)
 	}
+
 	return stmt
 }
 

@@ -43,9 +43,14 @@ func TestStringMethods(t *testing.T) {
 		{&DateLiteral{Token: token.Token{Type: token.DATE, Literal: "D#2026-01-01"}, Value: "D#2026-01-01"}, "D#2026-01-01"},
 		{&TimeOfDayLiteral{Token: token.Token{Type: token.TIME_OF_DAY, Literal: "TOD#12:30:00"}, Value: "TOD#12:30:00"}, "TOD#12:30:00"},
 		{&DateAndTimeLiteral{Token: token.Token{Type: token.DATE_AND_TIME, Literal: "DT#2026-01-01-12:30:00"}, Value: "DT#2026-01-01-12:30:00"}, "DT#2026-01-01-12:30:00"},
+		{&LRealLiteral{Token: token.Token{Type: token.LREAL, Literal: "LREAL#1.23"}, Value: 1.23}, "LREAL#1.23"},
+		{&WStringLiteral{Token: token.Token{Type: token.WSTRING_LITERAL, Literal: `"wide"`}, Value: "wide"}, `"wide"`},
 		{&BitStringLiteral{Token: token.Token{Type: token.BYTE, Literal: "BYTE#16#FF"}, Value: 255, Width: 8}, "BYTE#16#FF"},
+		{&UnsignedIntegerLiteral{Token: token.Token{Type: token.UINT, Literal: "UINT#65535"}, Value: 65535}, "UINT#65535"},
+		{&EnumeratedValueLiteral{TypeName: &Identifier{Value: "MyEnum"}, Value: &Identifier{Value: "EnumValue"}}, "MyEnum#EnumValue"},
 		{&TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}, "INT"},
 		{&DirectVariable{Token: token.Token{Type: token.DIRECT_VAR, Literal: "%IX0.0"}, Address: "IX0.0"}, "%IX0.0"},
+		{&AtDeclaration{Location: &DirectVariable{Address: "QX1.2"}}, "AT %QX1.2"},
 
 		// Expressions
 		{&PrefixExpression{Token: token.Token{Type: token.MINUS, Literal: "-"}, Operator: "-", Right: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "5"}, Value: 5}}, "(-5)"},
@@ -57,6 +62,7 @@ func TestStringMethods(t *testing.T) {
 		{&ArrayLiteral{Elements: []Expression{&IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "1"}, Value: 1}, &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "2"}, Value: 2}}}, "[1, 2]"},
 		{&IndexExpression{Left: &Identifier{Token: token.Token{Type: token.IDENT, Literal: "myArr"}, Value: "myArr"}, Index: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "0"}, Value: 0}}, "(myArr[0])"},
 		{&HashLiteral{Pairs: map[Expression]Expression{&StringLiteral{Token: token.Token{Type: token.STRING_LITERAL, Literal: `"key"`}, Value: "key"}: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "1"}, Value: 1}}}, `{"key": 1}`},
+		{&FunctionLiteral{Token: token.Token{Type: token.FUNCTION, Literal: "FUNCTION"}, Parameters: []*Identifier{{Value: "x"}}, Body: &BlockStatement{}}, "FUNCTION(x) "},
 		{&MacroLiteral{Token: token.Token{Type: token.MACRO, Literal: "macro"}, Parameters: []*Identifier{{Token: token.Token{Type: token.IDENT, Literal: "x"}, Value: "x"}}, Body: &BlockStatement{Statements: []Statement{}}}, "macro(x) "}, // Corrected in previous turn
 
 		// Statements
@@ -74,6 +80,7 @@ func TestStringMethods(t *testing.T) {
 		{&ActionStatement{Name: &Identifier{Value: "MyAction"}, Body: &BlockStatement{Statements: []Statement{}}}, "ACTION MyAction\n\nEND_ACTION"},
 		{&StepStatement{Name: &Identifier{Value: "MyStep"}}, "STEP MyStep"}, // Simplified
 		{&TransitionStatement{}, "TRANSITION"},                              // Simplified
+		{&IlInstructionStatement{Label: &Identifier{Value: "Loop"}, Operator: "LD", Operand: &Identifier{Value: "myVar"}}, "Loop: LD myVar"},
 		{&ActionBlockStatement{ActionName: &Identifier{Value: "Action1"}, Qualifier: &Identifier{Value: "N"}}, "Action1(N);"},
 
 		// Declarations

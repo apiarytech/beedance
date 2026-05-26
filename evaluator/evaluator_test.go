@@ -34,7 +34,7 @@ func TestEvalIntegerExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testIntegerObject(t, evaluated, tt.expected)
 	}
 }
@@ -66,7 +66,7 @@ func TestEvalBooleanExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testBooleanObject(t, evaluated, tt.expected)
 	}
 }
@@ -103,7 +103,7 @@ func TestEvalBooleanLogicalExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		testBooleanObject(t, testEval(tt.input), tt.expected)
+		testBooleanObject(t, testEval(t, tt.input), tt.expected)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestBangOperator(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testBooleanObject(t, evaluated, tt.expected)
 	}
 }
@@ -141,7 +141,7 @@ func TestIfElseExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
 			testIntegerObject(t, evaluated, int64(integer))
@@ -164,7 +164,7 @@ func TestReturnStatements(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testIntegerObject(t, evaluated, tt.expected)
 	}
 }
@@ -233,13 +233,12 @@ if (10 > 1) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 
 		errObj, ok := evaluated.(*object.Error)
 		if !ok {
 			t.Errorf("no error object returned. got=%T(%+v)",
 				evaluated, evaluated)
-			continue
 		}
 
 		if errObj.Message != tt.expectedMessage {
@@ -293,21 +292,12 @@ func TestIntegerOverflowErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			l := lexer.New(tt.input)
-			p := parser.New(l)
-			program := p.ParseProgram()
-			if len(p.Errors()) > 0 {
-				t.Fatalf("parser errors: %v", p.Errors())
-			}
-
-			env := object.NewEnvironment()
-			evaluated := Eval(program, env)
+			evaluated := testEval(t, tt.input)
 
 			errObj, ok := evaluated.(*object.Error)
 			if !ok {
 				t.Errorf("no error object returned for input '%s'. got=%T(%+v)",
 					tt.input, evaluated, evaluated)
-				return
 			}
 
 			// We check for a substring because the error message includes line/column info.
@@ -364,7 +354,7 @@ func TestEvalCaseStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				// The result of a CASE statement is the result of the executed statement.
@@ -411,7 +401,7 @@ func TestCaseStatementErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testErrorObjectContains(t, evaluated, tt.expectedMessage)
 	}
 }
@@ -444,7 +434,7 @@ func TestSubrangeTypeErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testErrorObjectContains(t, evaluated, tt.expectedMessage)
 	}
 }
@@ -486,7 +476,7 @@ func TestForLoopStatement(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		expectedInt, _ := tt.expected.(int64)
 		testIntegerObject(t, evaluated, expectedInt)
 	}
@@ -531,7 +521,7 @@ func TestWhileLoopStatement(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testIntegerObject(t, evaluated, tt.expected)
 	}
 }
@@ -558,7 +548,7 @@ func TestRepeatLoopStatement(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		testIntegerObject(t, evaluated, tt.expected)
 	}
 }
@@ -593,14 +583,14 @@ func TestSFCExecution(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCExecution", input)
+	checkEvaluatorErrors(t, p, "TestSFCExecution", input)
 
 	// The program declaration itself needs to be evaluated to set up the environment
 	env := object.NewEnvironment()
 	Eval(program, env)
 
 	// Find the program instance in the environment
-	_, ok := env.Get("TestSFC")
+	sfcObj, ok := env.Get("TestSFC")
 	if !ok {
 		t.Fatalf("Program 'TestSFC' not found in environment")
 	}
@@ -608,6 +598,11 @@ func TestSFCExecution(t *testing.T) {
 	// For this test, we assume the SFC logic is embedded in the program's body
 	// and can be evaluated. A full implementation would have a more complex POU invocation.
 	// Here, we'll simulate a few cycles.
+	sfc, ok := sfcObj.(*object.SFC)
+	if !ok {
+		t.Fatalf("TestSFC is not an SFC object, got %T", sfcObj)
+	}
+	evalSFCCycle(sfc, env)
 }
 
 func TestSFCActionQualifiers(t *testing.T) {
@@ -657,14 +652,14 @@ func TestSFCActionQualifiers(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCActionQualifiers", input)
+	checkEvaluatorErrors(t, p, "TestSFCActionQualifiers", input)
 
 	env := object.NewEnvironment()
 	// This will declare the PROGRAM POU
 	Eval(program, env)
 
 	// Now, instantiate the program to get the SFC object
-	progInstance := testEval("TestSFCQualifiers")
+	progInstance := testEval(t, "TestSFCQualifiers")
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -770,14 +765,14 @@ func TestSFCDivergenceConvergence(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCBranching", input)
+	checkEvaluatorErrors(t, p, "TestSFCBranching", input)
 
 	env := object.NewEnvironment()
 	// This will declare the PROGRAM POU and its variables
 	Eval(program, env)
 
 	// Now, instantiate the program to get the SFC object
-	progInstance := testEval("TestSFCBranching")
+	progInstance := testEval(t, "TestSFCBranching")
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -869,12 +864,12 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCTimedQualifiers", input)
+	checkEvaluatorErrors(t, p, "TestSFCTimedQualifiers", input)
 
 	env := object.NewEnvironment()
 	Eval(program, env) // Declare the PROGRAM POU
 
-	progInstance := testEval("TestSFCTimedQualifiers")
+	progInstance := testEval(t, "TestSFCTimedQualifiers")
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -969,14 +964,14 @@ func TestSFCActionWithSTBody(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestSFCActionWithSTBody", input)
+	checkEvaluatorErrors(t, p, "TestSFCActionWithSTBody", input)
 
 	env := object.NewEnvironment()
 	// This will declare the PROGRAM POU and its variables
 	Eval(program, env)
 
 	// Now, instantiate the program to get the SFC object
-	progInstance := testEval("TestSFC_ST_Action")
+	progInstance := testEval(t, "TestSFC_ST_Action")
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -1000,22 +995,22 @@ func TestSFCActionWithSTBody(t *testing.T) {
 func TestFunctionObject(t *testing.T) {
 	input := "fn(x) { x + 2; };"
 
-	evaluated := testEval(input)
+	evaluated := testEval(t, input)
 	fn, ok := evaluated.(*object.Function)
 	if !ok {
 		t.Fatalf("object is not Function. got=%T (%+v)", evaluated, evaluated)
 	}
 
-	if len(fn.Parameters) != 1 {
+	if len(fn.VarInputs) != 1 {
 		t.Fatalf("function has wrong parameters. Parameters=%+v",
-			fn.Parameters)
+			fn.VarInputs)
 	}
 
-	if fn.Parameters[0].String() != "x" {
-		t.Fatalf("parameter is not 'x'. got=%q", fn.Parameters[0])
+	if fn.VarInputs[0].Name.Value != "x" {
+		t.Fatalf("parameter is not 'x'. got=%q", fn.VarInputs[0].Name.Value)
 	}
 
-	expectedBody := "(x + 2)"
+	expectedBody := "(x + 2);"
 
 	if fn.Body.String() != expectedBody {
 		t.Fatalf("body is not %q. got=%q", expectedBody, fn.Body.String())
@@ -1031,14 +1026,14 @@ func TestFunctionApplication(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		testIntegerObject(t, testEval(tt.input), tt.expected)
+		testIntegerObject(t, testEval(t, tt.input), tt.expected)
 	}
 }
 
 func TestStringLiteral(t *testing.T) {
 	input := `"Hello World!"`
 
-	evaluated := testEval(input)
+	evaluated := testEval(t, input)
 	str, ok := evaluated.(*object.String)
 	if !ok {
 		t.Fatalf("object is not String. got=%T (%+v)", evaluated, evaluated)
@@ -1052,7 +1047,7 @@ func TestStringLiteral(t *testing.T) {
 func TestStringConcatenation(t *testing.T) {
 	input := `"Hello" + " " + "World!"`
 
-	evaluated := testEval(input)
+	evaluated := testEval(t, input)
 	str, ok := evaluated.(*object.String)
 	if !ok {
 		t.Fatalf("object is not String. got=%T (%+v)", evaluated, evaluated)
@@ -1089,7 +1084,7 @@ func TestBuiltinFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 
 		switch expected := tt.expected.(type) {
 		case int:
@@ -1101,7 +1096,6 @@ func TestBuiltinFunctions(t *testing.T) {
 			if !ok {
 				t.Errorf("object is not Error. got=%T (%+v)",
 					evaluated, evaluated)
-				continue
 			}
 			if errObj.Message != expected {
 				t.Errorf("wrong error message. expected=%q, got=%q",
@@ -1111,7 +1105,6 @@ func TestBuiltinFunctions(t *testing.T) {
 			array, ok := evaluated.(*object.Array)
 			if !ok {
 				t.Errorf("obj not Array. got=%T (%+v)", evaluated, evaluated)
-				continue
 			}
 
 			if len(array.Elements) != len(expected) {
@@ -1130,7 +1123,7 @@ func TestBuiltinFunctions(t *testing.T) {
 func TestArrayLiterals(t *testing.T) {
 	input := "[1, 2 * 2, 3 + 3]"
 
-	evaluated := testEval(input)
+	evaluated := testEval(t, input)
 	result, ok := evaluated.(*object.Array)
 	if !ok {
 		t.Fatalf("object is not Array. got=%T (%+v)", evaluated, evaluated)
@@ -1178,7 +1171,7 @@ func TestArrayIndexExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
 			testIntegerObject(t, evaluated, int64(integer))
@@ -1220,7 +1213,7 @@ func TestHashIndexExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
 			testIntegerObject(t, evaluated, int64(integer))
@@ -1257,7 +1250,7 @@ func TestEvalTimeDateLiterals(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 
 		switch expected := tt.expected.(type) {
 		case time.Duration:
@@ -1333,7 +1326,7 @@ func TestBuiltinAddSub(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 
 		switch expected := tt.expected.(type) {
 		case time.Duration:
@@ -1431,7 +1424,7 @@ func TestBuiltinMulDiv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -1491,7 +1484,7 @@ func TestBuiltinModExpt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -1609,7 +1602,7 @@ func TestBuiltinComparisonFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case bool:
 				testBooleanObject(t, evaluated, expected)
@@ -1653,7 +1646,7 @@ func TestBuiltinSQRTAndROUND(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case int64:
 			testIntegerObject(t, evaluated, expected)
@@ -1733,7 +1726,7 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case uint64:
@@ -1750,7 +1743,6 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 				realObj, ok := evaluated.(*object.Real)
 				if !ok {
 					t.Errorf("input: %q, object is not Real. got=%T (%+v)", tt.input, evaluated, evaluated)
-					continue
 				}
 				const epsilon = 1e-9
 				if diff := realObj.Value - expected; diff < -epsilon || diff > epsilon {
@@ -1793,7 +1785,7 @@ func TestBuiltinAbsFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
@@ -1828,7 +1820,7 @@ func TestBuiltinTruncFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
@@ -1864,7 +1856,7 @@ func TestBuiltinMoveFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
@@ -1874,7 +1866,7 @@ func TestBuiltinMoveFunction(t *testing.T) {
 				testBooleanObject(t, evaluated, expected)
 			case string:
 				// Can be a string result or an error message
-				if err, ok := evaluated.(*object.Error); ok {
+				if _, ok := evaluated.(*object.Error); ok {
 					testErrorObject(t, evaluated, expected)
 				} else {
 					testStringObject(t, evaluated, expected)
@@ -1929,7 +1921,7 @@ func TestBuiltinLimitFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
@@ -1985,7 +1977,7 @@ func TestBuiltinSelFunction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
@@ -1994,7 +1986,7 @@ func TestBuiltinSelFunction(t *testing.T) {
 			case bool:
 				testBooleanObject(t, evaluated, expected)
 			case string:
-				if err, ok := evaluated.(*object.Error); ok {
+				if _, ok := evaluated.(*object.Error); ok {
 					testErrorObject(t, evaluated, expected)
 				} else {
 					testStringObject(t, evaluated, expected)
@@ -2050,7 +2042,7 @@ func TestBuiltinMinMaxFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -2111,7 +2103,7 @@ func TestBuiltinBitwiseFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case uint64:
@@ -2167,7 +2159,7 @@ func TestBuiltinTrigFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEvalWithPi(tt.input) // Use a helper that defines PI
+		evaluated := testEvalWithPi(t, tt.input) // Use a helper that defines PI
 		switch expected := tt.expected.(type) {
 		case float64:
 			testRealObject(t, evaluated, expected)
@@ -2220,7 +2212,7 @@ func TestBuiltinInverseTrigFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case float64:
 			testRealObject(t, evaluated, expected)
@@ -2256,7 +2248,7 @@ func TestBuiltinLogFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEvalWithBuiltinVars(tt.input) // Use a helper that defines E
+		evaluated := testEvalWithBuiltinVars(t, tt.input) // Use a helper that defines E
 		switch expected := tt.expected.(type) {
 		case float64:
 			testRealObject(t, evaluated, expected)
@@ -2283,7 +2275,7 @@ func TestBuiltinExpFunction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case float64:
 			testRealObject(t, evaluated, expected)
@@ -2394,12 +2386,12 @@ func TestBuiltinStringFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(tt.input)
+		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case string:
 			if expected == "" {
 				// Could be an empty string object or an error message for an empty string
-				if err, ok := evaluated.(*object.Error); ok {
+				if _, ok := evaluated.(*object.Error); ok {
 					testErrorObject(t, evaluated, expected)
 				} else {
 					strObj, ok := evaluated.(*object.String)
@@ -2462,7 +2454,7 @@ func TestBuiltinMinMax(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -2484,31 +2476,31 @@ func TestBuiltinBitShiftFunctions(t *testing.T) {
 		expected interface{} // Can be uint64 or string for error
 	}{
 		// SHL (Shift Left)
-		{"SHL(BYTE#2#1010_0101, 1)", uint64(0b01010010)}, // 165 << 1 = 330, but BYTE wraps to 74
-		{"SHL(BYTE#16#A5, 1)", uint64(0x4A)},             // Same as above
+		{"SHL(BYTE#2#1010_0101, 1)", uint64(0x4A)}, // 0xA5 << 1 = 0x14A, masked to 8 bits is 0x4A
+		{"SHL(BYTE#16#A5, 1)", uint64(0x4A)},       // Same as above
 		{"SHL(WORD#16#FF00, 8)", uint64(0x0000)},
 		{"SHL(WORD#16#00FF, 8)", uint64(0xFF00)},
 		{"SHL(DWORD#16#1, 31)", uint64(1 << 31)},
 		{"SHL(DWORD#16#1, 32)", uint64(0)}, // Shifted out
-		{"SHL(BYTE#10, 2)", "argument 1 to `SHL` must be a bitstring type, got INTEGER"},
-		{"SHL(BYTE#10, -1)", "shift amount for `SHL` must be non-negative, got -1"},
-		{"SHL(BYTE#10)", "wrong number of arguments for SHL. got=1, want=2"},
+		{"SHL(10, 2)", "argument 1 to `SHL` must be a bitstring type, got INTEGER"},
+		{"SHL(BYTE#16#10, -1)", "shift amount for `SHL` must be non-negative, got -1"},
+		{"SHL(BYTE#16#10)", "wrong number of arguments for SHL. got=1, want=2"},
 
 		// SHR (Shift Right)
-		{"SHR(BYTE#2#1010_0101, 1)", uint64(0b01010010)}, // 165 >> 1 = 82
-		{"SHR(BYTE#16#A5, 1)", uint64(0x52)},             // Same as above
+		{"SHR(BYTE#2#1010_0101, 1)", uint64(0x52)}, // 0xA5 >> 1 = 0x52 (82)
+		{"SHR(BYTE#16#A5, 1)", uint64(0x52)},       // Same as above
 		{"SHR(WORD#16#FF00, 8)", uint64(0x00FF)},
 		{"SHR(WORD#16#00FF, 8)", uint64(0x0000)},
 		{"SHR(DWORD#16#80000000, 31)", uint64(1)},
 		{"SHR(DWORD#16#FFFFFFFF, 32)", uint64(0)}, // Shifted out
-		{"SHR(BYTE#10, 2.5)", "argument 2 to `SHR` must be INTEGER, got REAL"},
-		{"SHR(BYTE#10, -1)", "shift amount for `SHR` must be non-negative, got -1"},
+		{"SHR(BYTE#16#10, 2.5)", "argument 2 to `SHR` must be INTEGER, got REAL"},
+		{"SHR(BYTE#16#10, -1)", "shift amount for `SHR` must be non-negative, got -1"},
 		{"SHR()", "wrong number of arguments for SHR. got=0, want=2"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case uint64:
@@ -2525,7 +2517,9 @@ func TestBuiltinBitShiftFunctions(t *testing.T) {
 					t.Errorf("wrong value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
 				}
 			case string:
-				testErrorObject(t, evaluated, expected)
+				if !testErrorObjectContains(t, evaluated, expected) {
+					t.Errorf("error message did not contain expected text")
+				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
 			}
@@ -2539,31 +2533,31 @@ func TestBuiltinBitRotateFunctions(t *testing.T) {
 		expected interface{} // Can be uint64 or string for error
 	}{
 		// ROL (Rotate Left)
-		{"ROL(BYTE#2#1010_0101, 1)", uint64(0b010100101)}, // ROL(165, 1) -> 75
-		{"ROL(BYTE#16#A5, 1)", uint64(0x4B)},              // ROL(165, 1) -> 75
+		{"ROL(BYTE#2#1010_0101, 1)", uint64(0x4B)}, // ROL(0xA5, 1) -> 0x4B
+		{"ROL(BYTE#16#A5, 1)", uint64(0x4B)},
 		{"ROL(WORD#16#FF00, 8)", uint64(0x00FF)},
 		{"ROL(WORD#16#C0F0, 4)", uint64(0x0F0C)},
 		{"ROL(DWORD#16#1, 31)", uint64(1 << 31)},
 		{"ROL(DWORD#16#1, 32)", uint64(1)}, // Rotated full circle
-		{"ROL(BYTE#10, 2)", "argument 1 to `ROL` must be a bitstring type, got INTEGER"},
-		{"ROL(BYTE#10, -1)", "rotate amount for `ROL` must be non-negative, got -1"},
-		{"ROL(BYTE#10)", "wrong number of arguments for ROL. got=1, want=2"},
+		{"ROL(10, 2)", "argument 1 to `ROL` must be a bitstring type, got INTEGER"},
+		{"ROL(BYTE#16#10, -1)", "rotate amount for `ROL` must be non-negative, got -1"},
+		{"ROL(BYTE#16#10)", "wrong number of arguments for ROL. got=1, want=2"},
 
 		// ROR (Rotate Right)
-		{"ROR(BYTE#2#1010_0101, 1)", uint64(0b11010010)}, // ROR(165, 1) -> 210
-		{"ROR(BYTE#16#A5, 1)", uint64(0xD2)},             // ROR(165, 1) -> 210
+		{"ROR(BYTE#2#1010_0101, 1)", uint64(0xD2)}, // ROR(0xA5, 1) -> 0xD2
+		{"ROR(BYTE#16#A5, 1)", uint64(0xD2)},
 		{"ROR(WORD#16#FF00, 8)", uint64(0x00FF)},
 		{"ROR(WORD#16#0F0C, 4)", uint64(0xC0F0)},
 		{"ROR(DWORD#16#80000000, 31)", uint64(1)},
 		{"ROR(DWORD#16#FFFFFFFF, 32)", uint64(0xFFFFFFFF)}, // Rotated full circle
-		{"ROR(BYTE#10, 2.5)", "argument 2 to `ROR` must be INTEGER, got REAL"},
-		{"ROR(BYTE#10, -1)", "rotate amount for `ROR` must be non-negative, got -1"},
+		{"ROR(BYTE#16#10, 2.5)", "argument 2 to `ROR` must be INTEGER, got REAL"},
+		{"ROR(BYTE#16#10, -1)", "rotate amount for `ROR` must be non-negative, got -1"},
 		{"ROR()", "wrong number of arguments for ROR. got=0, want=2"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case uint64:
@@ -2576,11 +2570,13 @@ func TestBuiltinBitRotateFunctions(t *testing.T) {
 				if bs.Width < 64 {
 					mask = (1 << bs.Width) - 1
 				}
-				if (bs.Value & mask) != expected {
-					t.Errorf("wrong value. want=%d (0b%b), got=%d (0b%b)", expected, expected, bs.Value&mask, bs.Value&mask)
+				if (bs.Value & mask) != (expected & mask) {
+					t.Errorf("wrong value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value&mask, bs.Value&mask)
 				}
 			case string:
-				testErrorObject(t, evaluated, expected)
+				if !testErrorObjectContains(t, evaluated, expected) {
+					t.Errorf("error message did not contain expected text")
+				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
 			}
@@ -2641,7 +2637,7 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case string:
@@ -2727,7 +2723,7 @@ func TestBuiltinSelectionFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -2736,7 +2732,7 @@ func TestBuiltinSelectionFunctions(t *testing.T) {
 				testRealObject(t, evaluated, expected)
 			case string:
 				// Can be a string result or an error message
-				if err, ok := evaluated.(*object.Error); ok {
+				if _, ok := evaluated.(*object.Error); ok {
 					testErrorObject(t, evaluated, expected)
 				} else {
 					testStringObject(t, evaluated, expected)
@@ -2790,7 +2786,7 @@ func TestBitwiseOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case uint64:
@@ -2837,7 +2833,7 @@ func TestBuiltinMove(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(tt.input)
+			evaluated := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case int64:
@@ -2942,13 +2938,13 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		`
 		env := object.NewEnvironment()
 		// First, evaluate the whole program to set up the environment
-		testEval(input)
+		testEvalWithEnv(t, input, env)
 
 		// Helper to run one "scan"
 		runScan := func() {
 			// In a real app, you'd re-evaluate the program body.
 			// For this test, we just need to evaluate the FB call.
-			testEval(`MyTimer(IN := Start, PT := T#5s, Q => TimerDone, ET => ET);`)
+			testEvalWithEnv(t, `MyTimer(IN := Start, PT := T#5s, Q => TimerDone, ET => ET);`, env)
 		}
 
 		// --- Cycle 1: Initial state ---
@@ -3003,10 +2999,10 @@ func TestStandardFunctionBlocks(t *testing.T) {
 			END_PROGRAM
 		`
 		env := object.NewEnvironment()
-		testEval(input)
+		testEvalWithEnv(t, input, env)
 
 		runScan := func() {
-			testEval(`MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`)
+			testEvalWithEnv(t, `MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
 		}
 
 		// --- Cycle 1: Initial state ---
@@ -3074,10 +3070,10 @@ func TestStandardFunctionBlocks(t *testing.T) {
 			END_PROGRAM
 		`
 		env := object.NewEnvironment()
-		testEval(input)
+		testEvalWithEnv(t, input, env)
 
 		runScan := func() {
-			testEval(`MyTimer(IN := Input, PT := T#5s, Q => TimerActive, ET => ET);`)
+			testEvalWithEnv(t, `MyTimer(IN := Input, PT := T#5s, Q => TimerActive, ET => ET);`, env)
 		}
 
 		// --- Cycle 1: IN is high ---
@@ -3120,10 +3116,10 @@ func TestStandardFunctionBlocks(t *testing.T) {
 			END_PROGRAM
 		`
 		env := object.NewEnvironment()
-		testEval(input)
+		testEvalWithEnv(t, input, env)
 
 		runScan := func() {
-			testEval(`MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`)
+			testEvalWithEnv(t, `MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
 		}
 
 		// --- Cycle 1: Load the counter ---
@@ -3177,10 +3173,10 @@ func TestTP_PulseTimer(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyPulse(IN := Trigger, PT := T#5s, Q => PulseOut, ET => ET);`, env)
+		testEvalWithEnv(t, `MyPulse(IN := Trigger, PT := T#5s, Q => PulseOut, ET => ET);`, env)
 	}
 
 	// --- Cycle 1: Initial state ---
@@ -3251,7 +3247,7 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestFunctionBlockWithSFCBody", input)
+	checkEvaluatorErrors(t, p, "TestFunctionBlockWithSFCBody", input)
 
 	env := object.NewEnvironment()
 	// Evaluate the entire program to declare the FB type and the main program POU.
@@ -3261,7 +3257,7 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	runScan := func() {
 		// In a real PLC, the program body would be re-evaluated.
 		// For this test, we just need to re-evaluate the FB call.
-		testEvalWithEnv(`myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);`, env)
+		testEvalWithEnv(t, `myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);`, env)
 	}
 
 	// --- Cycle 1: Initial state ---
@@ -3282,23 +3278,25 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	testIntegerObject(t, mustGet(env, "currentActiveStep"), 2)
 }
 
-func testEval(input string) object.Object {
+func testEval(t *testing.T, input string) object.Object {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
+	checkEvaluatorErrors(t, p, t.Name(), input)
 	env := object.NewEnvironment()
 
 	return Eval(program, env)
 }
 
-func testEvalWithEnv(input string, env *object.Environment) object.Object {
+func testEvalWithEnv(t *testing.T, input string, env *object.Environment) object.Object {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
+	checkEvaluatorErrors(t, p, t.Name(), input)
 	return Eval(program, env)
 }
 
-func testEvalWithPi(input string) object.Object {
+func testEvalWithPi(t *testing.T, input string) object.Object {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -3307,7 +3305,7 @@ func testEvalWithPi(input string) object.Object {
 	return Eval(program, env)
 }
 
-func testEvalWithBuiltinVars(input string) object.Object {
+func testEvalWithBuiltinVars(t *testing.T, input string) object.Object {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -3417,6 +3415,20 @@ func testNullObject(t *testing.T, obj object.Object) bool {
 	return true
 }
 
+func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input string) {
+	t.Helper()
+	errors := p.Errors()
+	if len(errors) == 0 {
+		return
+	}
+
+	t.Errorf("FAIL: %s - parser has %d errors for input:\n%s", testName, len(errors), input)
+	for _, msg := range errors {
+		t.Errorf("Evaluator error: %q", msg)
+	}
+	t.FailNow()
+}
+
 func testErrorObject(t *testing.T, obj object.Object, expectedMessage string) bool {
 	errObj, ok := obj.(*object.Error)
 	if !ok {
@@ -3428,4 +3440,57 @@ func testErrorObject(t *testing.T, obj object.Object, expectedMessage string) bo
 		return false
 	}
 	return true
+}
+
+func TestNestedInOutVarPassing(t *testing.T) {
+	input := `
+		// Inner function that modifies the IN_OUT variable
+		FUNCTION InnerFunc : INT
+			VAR_IN_OUT
+				InnerVar : INT;
+			END_VAR
+			InnerVar := InnerVar * 2;
+			InnerFunc := InnerVar;
+		END_FUNCTION
+
+		// Outer function that calls the inner function
+		FUNCTION OuterFunc : INT
+			VAR_IN_OUT
+				OuterVar : INT;
+			END_VAR
+			// Pass the IN_OUT variable to the inner function
+			OuterFunc := InnerFunc(InnerVar := OuterVar);
+		END_FUNCTION
+
+		PROGRAM TestProg
+			VAR
+				OriginalVar : INT := 5;
+				Result1 : INT;
+				Result2 : INT;
+			END_VAR
+
+			// Call the outer function, which calls the inner one
+			Result1 := OuterFunc(OuterVar := OriginalVar);
+			// For verification, call the inner function directly
+			Result2 := InnerFunc(InnerVar := OriginalVar);
+		END_PROGRAM
+	`
+
+	env := object.NewEnvironment()
+	evaluated := testEvalWithEnv(t, input, env)
+	if err, ok := evaluated.(*object.Error); ok {
+		t.Fatalf("Evaluator error: %s", err.Message)
+	}
+
+	// After the first call `OuterFunc(OuterVar := OriginalVar)`:
+	// OriginalVar starts at 5.
+	// OuterFunc passes it to InnerFunc.
+	// InnerFunc modifies it to 5 * 2 = 10.
+	// This change should propagate all the way back to OriginalVar.
+	testIntegerObject(t, mustGet(env, "OriginalVar"), 10)
+
+	// After the second call `InnerFunc(InnerVar := OriginalVar)`:
+	// OriginalVar is now 10.
+	// InnerFunc modifies it to 10 * 2 = 20.
+	testIntegerObject(t, mustGet(env, "OriginalVar"), 20)
 }

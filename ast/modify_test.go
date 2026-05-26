@@ -92,6 +92,10 @@ func TestModify(t *testing.T) {
 			&ReturnStatement{ReturnValue: two()},
 		},
 		{
+			&VarDeclStatement{Value: one()},
+			&VarDeclStatement{Value: two()},
+		},
+		{
 			&FunctionLiteral{
 				Parameters: []*Identifier{},
 				Body: &BlockStatement{

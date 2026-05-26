@@ -1719,15 +1719,7 @@ func evalIdentifier(
 	env *object.Environment,
 ) object.Object {
 	if val, ok := env.Get(node.Value); ok {
-		// If the identifier holds a pointer, dereference it to get the actual value.
-		if ptr, isPtr := val.(*object.Pointer); isPtr {
-			dereferenced, ok := ptr.Env.Get(ptr.Name)
-			if !ok {
-				return newError(node, "internal error: dangling pointer for %s", ptr.Name)
-			}
-			return dereferenced
-		}
-		return val
+		return dereferencePointer(node, val)
 	}
 
 	if builtin, ok := builtins[node.Value]; ok {
@@ -1750,6 +1742,23 @@ func evalIdentifier(
 	}
 
 	return newError(node, "identifier not found: %s", node.Value)
+}
+
+// dereferencePointer recursively follows a chain of pointers until it finds a non-pointer object.
+func dereferencePointer(node ast.Node, obj object.Object) object.Object {
+	ptr, isPtr := obj.(*object.Pointer)
+	if !isPtr {
+		return obj // Not a pointer, return the object as is.
+	}
+
+	// It's a pointer, so get the object it points to.
+	dereferenced, ok := ptr.Env.Get(ptr.Name)
+	if !ok {
+		return newError(node, "internal error: dangling pointer for %s", ptr.Name)
+	}
+
+	// Recursively dereference in case the target is also a pointer.
+	return dereferencePointer(node, dereferenced)
 }
 
 func isTruthy(obj object.Object) bool {
@@ -2025,16 +2034,26 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 			// Check if the parameter is VAR_IN_OUT
 			if isInOutParam(paramDecl.Name.Value, def) {
 				// The argument must be a variable identifier to be passed by reference.
-				argIdent, ok := arg.(*ast.Identifier)
-				if !ok {
+				if argIdent, ok := arg.(*ast.Identifier); ok {
+					// Check if the argument being passed is itself a VAR_IN_OUT from the calling function's perspective.
+					// If so, we need to pass the pointer, not the value.
+					if val, ok := callEnv.Get(argIdent.Value); ok {
+						if ptr, isPtr := val.(*object.Pointer); isPtr {
+							// It's a nested IN_OUT pass. Propagate the pointer.
+							targetEnv.Set(paramDecl.Name.Value, ptr)
+							positionalParamIndex++
+							continue
+						}
+					}
+					// It's a direct variable, so create a new pointer to it.
+					ptr := &object.Pointer{Name: argIdent.Value, Env: callEnv}
+					targetEnv.Set(paramDecl.Name.Value, ptr)
+				} else {
 					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramDecl.Name.Value)
 				}
-				// Create a pointer to the variable in the calling environment.
-				ptr := &object.Pointer{Name: argIdent.Value, Env: callEnv}
-				targetEnv.Set(paramDecl.Name.Value, ptr)
 			} else {
 				// It's a VAR_INPUT, so pass by value.
-				val := Eval(arg, callEnv)
+				val := Eval(arg, callEnv) // This correctly dereferences pointers for VAR_INPUT.
 				if isError(val) {
 					return nil, nil, val.(*object.Error)
 				}

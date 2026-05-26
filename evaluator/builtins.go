@@ -20,21 +20,6 @@ import (
 )
 
 var builtins = map[string]*object.Builtin{
-	"len": &object.Builtin{Fn: func(args ...object.Object) object.Object {
-		if len(args) != 1 {
-			return newBuiltinError("wrong number of arguments. got=%d, want=1", len(args))
-		}
-
-		switch arg := args[0].(type) {
-		case *object.Array:
-			return &object.Integer{Value: int64(len(arg.Elements))}
-		case *object.String:
-			return &object.Integer{Value: int64(len(arg.Value))}
-		default:
-			return newBuiltinError("argument to `len` not supported, got %s", args[0].Type())
-		}
-	},
-	},
 	"puts": &object.Builtin{
 		Fn: func(args ...object.Object) object.Object {
 			for _, arg := range args {
@@ -746,19 +731,31 @@ var builtins = map[string]*object.Builtin{
 			return &object.Integer{Value: int64(math.Trunc(realVal))}
 		},
 	},
-	"ADD":   &object.Builtin{Fn: addBuiltin},
-	"SUB":   &object.Builtin{Fn: subBuiltin},
-	"MUL":   &object.Builtin{Fn: mulBuiltin},
-	"DIV":   &object.Builtin{Fn: divBuiltin},
-	"MOD":   &object.Builtin{Fn: modBuiltin},
-	"EXPT":  &object.Builtin{Fn: exptBuiltin},
-	"GT":    {Fn: comparisonBuiltin("GT")},
-	"GE":    {Fn: comparisonBuiltin("GE")},
-	"EQ":    {Fn: comparisonBuiltin("EQ")},
-	"LE":    {Fn: comparisonBuiltin("LE")},
-	"LT":    {Fn: comparisonBuiltin("LT")},
-	"NE":    {Fn: comparisonBuiltin("NE")},
-	"LEN":   builtins["len"], // IEC 61131-3 standard function
+	"ADD":  &object.Builtin{Fn: addBuiltin},
+	"SUB":  &object.Builtin{Fn: subBuiltin},
+	"MUL":  &object.Builtin{Fn: mulBuiltin},
+	"DIV":  &object.Builtin{Fn: divBuiltin},
+	"MOD":  &object.Builtin{Fn: modBuiltin},
+	"EXPT": &object.Builtin{Fn: exptBuiltin},
+	"GT":   {Fn: comparisonBuiltin("GT")},
+	"GE":   {Fn: comparisonBuiltin("GE")},
+	"EQ":   {Fn: comparisonBuiltin("EQ")},
+	"LE":   {Fn: comparisonBuiltin("LE")},
+	"LT":   {Fn: comparisonBuiltin("LT")},
+	"NE":   {Fn: comparisonBuiltin("NE")},
+	"LEN": {Fn: func(args ...object.Object) object.Object {
+		if len(args) != 1 {
+			return newBuiltinError("wrong number of arguments for LEN. got=%d, want=1", len(args))
+		}
+		switch arg := args[0].(type) {
+		case *object.Array:
+			return &object.Integer{Value: int64(len(arg.Elements))}
+		case *object.String:
+			return &object.Integer{Value: int64(len(arg.Value))}
+		default:
+			return newBuiltinError("argument to `LEN` not supported, got %s", args[0].Type())
+		}
+	}},
 	"MUX":   {Fn: muxBuiltin},
 	"LIMIT": {Fn: limitWrapperBuiltin},
 	"SEL":   {Fn: selWrapperBuiltin},
@@ -1520,7 +1517,7 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 		case *object.Integer:
 			bcd, err := intToBcd(val.Value)
 			if err != nil {
-				return newBuiltinError(err.Error())
+				return newBuiltinError("%s", err.Error())
 			}
 			// BCD is represented as a WORD (16-bit)
 			return &object.BitString{Value: uint64(bcd), Width: 16}
@@ -1585,7 +1582,7 @@ func intToBcd(val int64) (uint16, error) {
 	}
 
 	tempVal := val
-	for i := 0; i < 4; i++ {
+	for tempVal > 0 {
 		digit := tempVal % 10
 		bcd |= uint16(digit) << shift
 		tempVal /= 10

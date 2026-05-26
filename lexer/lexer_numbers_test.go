@@ -47,6 +47,16 @@ func TestNumericLiterals(t *testing.T) {
 		{"T#5s", token.TIME, "T#5s"},               // Short form for TIME
 		{"T#5m_10s", token.TIME, "T#5m_10s"},       // With underscore
 		{"TIME#1h_30m", token.TIME, "TIME#1h_30m"}, // Long form with underscore
+		{"DATE#2026-05-21", token.DATE, "DATE#2026-05-21"},
+		{"D#2026-05-21", token.DATE, "D#2026-05-21"},
+		{"TIME_OF_DAY#14:21:00", token.TIME_OF_DAY, "TIME_OF_DAY#14:21:00"},
+		{"TOD#14:21:00.123", token.TIME_OF_DAY, "TOD#14:21:00.123"},
+		{"DATE_AND_TIME#2026-05-21-14:21:00", token.DATE_AND_TIME, "DATE_AND_TIME#2026-05-21-14:21:00"},
+		{"DT#2026-05-21-14:21:00", token.DATE_AND_TIME, "DT#2026-05-21-14:21:00"},
+
+		// Invalid literals
+		{"16#FFe10", token.ILLEGAL, "16#FFe10"},
+		{"INVALID#123", token.ILLEGAL, "INVALID"},
 	}
 
 	for _, tt := range tests {

@@ -107,6 +107,49 @@ myVar <> 10;
 	}
 }
 
+func TestSingleLineComments(t *testing.T) {
+	input := `
+		VAR // This is a variable block
+			myVar : INT; // This is a variable declaration
+		END_VAR
+		// This is a full line comment
+		myVar := 5; // Trailing comment
+	`
+
+	tests := []struct {
+		expectedType    token.TokenType
+		expectedLiteral string
+	}{
+		{token.VAR, "VAR"},
+		{token.IDENT, "myVar"},
+		{token.COLON, ":"},
+		{token.INT, "INT"},
+		{token.SEMICOLON, ";"},
+		{token.END_VAR, "END_VAR"},
+		{token.IDENT, "myVar"},
+		{token.ASSIGN, ":="},
+		{token.INT, "5"},
+		{token.SEMICOLON, ";"},
+		{token.EOF, ""},
+	}
+
+	l := New(input)
+
+	for i, tt := range tests {
+		tok := l.NextToken()
+
+		if tok.Type != tt.expectedType {
+			t.Fatalf("tests[%d] - tokentype wrong. expected=%q, got=%q",
+				i, tt.expectedType, tok.Type)
+		}
+
+		if tok.Literal != tt.expectedLiteral {
+			t.Fatalf("tests[%d] - literal wrong. expected=%q, got=%q",
+				i, tt.expectedLiteral, tok.Literal)
+		}
+	}
+}
+
 func TestNextToken(t *testing.T) {
 	input := `=+(){},;[]<,>:**`
 

@@ -125,7 +125,7 @@ type AtDeclaration struct {
 	Location *DirectVariable
 }
 
-func (ad *AtDeclaration) statementNode()       {}
+func (ad *AtDeclaration) expressionNode()      {}
 func (ad *AtDeclaration) Pos() (int, int)      { return ad.Token.Row, ad.Token.Column }
 func (ad *AtDeclaration) TokenLiteral() string { return ad.Token.Literal }
 func (ad *AtDeclaration) String() string {

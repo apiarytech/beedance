@@ -19,10 +19,10 @@ func TestSR_FunctionBlock(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyLatch(S1 := SetInput, R := ResetInput, Q1 => OutputQ1);`, env)
+		testEvalWithEnv(t, `MyLatch(S1 := SetInput, R := ResetInput, Q1 => OutputQ1);`, env)
 	}
 
 	// --- Cycle 1: Initial state (S1=F, R=F) -> Q1=F ---
@@ -77,10 +77,10 @@ func TestRS_FunctionBlock(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyLatch(S := SetInput, R1 := ResetInput, Q1 => OutputQ1);`, env)
+		testEvalWithEnv(t, `MyLatch(S := SetInput, R1 := ResetInput, Q1 => OutputQ1);`, env)
 	}
 
 	// --- Cycle 1: Initial state (S=F, R1=F) -> Q1=F ---
@@ -132,10 +132,10 @@ func TestSR_FunctionBlock_EN_ENO(t *testing.T) {
 		END_PROGRAM
 	`
 	env := object.NewEnvironment()
-	testEvalWithEnv(input, env)
+	testEvalWithEnv(t, input, env)
 
 	runScan := func() {
-		testEvalWithEnv(`MyLatch(EN := EnableExecution, ENO => EnableOut, S1 := SetInput, R := ResetInput, Q1 => OutputQ1);`, env)
+		testEvalWithEnv(t, `MyLatch(EN := EnableExecution, ENO => EnableOut, S1 := SetInput, R := ResetInput, Q1 => OutputQ1);`, env)
 	}
 
 	// --- Cycle 1: Enabled, Set the latch ---
