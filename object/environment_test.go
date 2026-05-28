@@ -18,7 +18,7 @@ func TestNewEnvironment(t *testing.T) {
 
 func TestEnvironmentGetSet(t *testing.T) {
 	env := NewEnvironment()
-	val := &Integer{Value: 10}
+	val := &Int{Value: 10}
 	name := "myVar"
 
 	// Test Set
@@ -57,11 +57,11 @@ func TestNewEnclosedEnvironment(t *testing.T) {
 
 func TestEnclosedEnvironmentGet(t *testing.T) {
 	outer := NewEnvironment()
-	outerVar := &Integer{Value: 100}
+	outerVar := &Int{Value: 100}
 	outer.Set("outerVar", outerVar)
 
 	inner := NewEnclosedEnvironment(outer)
-	innerVar := &Integer{Value: 200}
+	innerVar := &Int{Value: 200}
 	inner.Set("innerVar", innerVar)
 
 	// Test Get from inner for inner variable
@@ -89,7 +89,7 @@ func TestEnclosedEnvironmentGet(t *testing.T) {
 	}
 
 	// Test shadowing: inner variable with same name as outer
-	shadowVar := &Integer{Value: 300}
+	shadowVar := &Int{Value: 300}
 	inner.Set("outerVar", shadowVar) // Shadowing the outerVar
 
 	obj, ok = inner.Get("outerVar")
@@ -108,18 +108,18 @@ func TestEnclosedEnvironmentGet(t *testing.T) {
 
 func TestEnvironmentGetRaw(t *testing.T) {
 	outer := NewEnvironment()
-	outer.Set("outerVar", &Integer{Value: 1})
+	outer.Set("outerVar", &Int{Value: 1})
 
 	inner := NewEnclosedEnvironment(outer)
-	inner.Set("innerVar", &Integer{Value: 2})
+	inner.Set("innerVar", &Int{Value: 2})
 
 	// 1. GetRaw should find a variable in the current environment.
 	obj, ok := inner.GetRaw("innerVar")
 	if !ok {
 		t.Fatal("GetRaw() failed to retrieve variable from current environment")
 	}
-	if obj.(*Integer).Value != 2 {
-		t.Fatalf("GetRaw() retrieved wrong value. want=2, got=%d", obj.(*Integer).Value)
+	if obj.(*Int).Value != 2 {
+		t.Fatalf("GetRaw() retrieved wrong value. want=2, got=%d", obj.(*Int).Value)
 	}
 
 	// 2. GetRaw should NOT find a variable in the outer environment.
@@ -133,19 +133,19 @@ func TestEnvironmentGetRaw(t *testing.T) {
 	if !ok {
 		t.Fatal("Get() failed to retrieve variable from outer environment for comparison")
 	}
-	if obj.(*Integer).Value != 1 {
-		t.Fatalf("Get() retrieved wrong value from outer environment. want=1, got=%d", obj.(*Integer).Value)
+	if obj.(*Int).Value != 1 {
+		t.Fatalf("Get() retrieved wrong value from outer environment. want=1, got=%d", obj.(*Int).Value)
 	}
 }
 
 func TestEnvironmentNames(t *testing.T) {
 	outer := NewEnvironment()
-	outer.Set("var1", &Integer{Value: 1})
+	outer.Set("var1", &Int{Value: 1})
 	outer.Set("var2", &Boolean{Value: true})
 
 	inner := NewEnclosedEnvironment(outer)
 	inner.Set("var3", &String{Value: "test"})
-	inner.Set("var1", &Integer{Value: 99}) // Shadow outer var
+	inner.Set("var1", &Int{Value: 99}) // Shadow outer var
 
 	names := inner.Names()
 

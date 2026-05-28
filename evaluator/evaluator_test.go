@@ -16,21 +16,21 @@ func TestEvalIntegerExpression(t *testing.T) {
 		input    string
 		expected int64
 	}{
-		{"5", 5},
-		{"10", 10},
-		{"-5", -5},
-		{"-10", -10},
-		{"5 + 5 + 5 + 5 - 10", 10},
-		{"2 * 2 * 2 * 2 * 2", 32},
-		{"-50 + 100 + -50", 0},
-		{"5 * 2 + 10", 20},
-		{"5 + 2 * 10", 25},
-		{"20 + 2 * -10", 0},
-		{"50 / 2 * 2 + 10", 60},
-		{"2 * (5 + 10)", 30},
-		{"3 * 3 * 3 + 10", 37},
-		{"3 * (3 * 3) + 10", 37},
-		{"(5 + 10 * 2 + 15 / 3) * 2 + -10", 50},
+		{"5;", 5},
+		{"10;", 10},
+		{"-5;", -5},
+		{"-10;", -10},
+		{"5 + 5 + 5 + 5 - 10;", 10},
+		{"2 * 2 * 2 * 2 * 2;", 32},
+		{"-50 + 100 + -50;", 0},
+		{"5 * 2 + 10;", 20},
+		{"5 + 2 * 10;", 25},
+		{"20 + 2 * -10;", 0},
+		{"50 / 2 * 2 + 10;", 60},
+		{"2 * (5 + 10);", 30},
+		{"3 * 3 * 3 + 10;", 37},
+		{"3 * (3 * 3) + 10;", 37},
+		{"(5 + 10 * 2 + 15 / 3) * 2 + -10;", 50},
 	}
 
 	for _, tt := range tests {
@@ -44,25 +44,25 @@ func TestEvalBooleanExpression(t *testing.T) {
 		input    string
 		expected bool
 	}{
-		{"true", true},
-		{"false", false},
-		{"1 < 2", true},
-		{"1 > 2", false},
-		{"1 < 1", false},
-		{"1 > 1", false},
-		{"1 == 1", true},
-		{"1 != 1", false},
-		{"1 == 2", false},
-		{"1 != 2", true},
-		{"true == true", true},
-		{"false == false", true},
-		{"true == false", false},
-		{"true != false", true},
-		{"false != true", true},
-		{"(1 < 2) == true", true},
-		{"(1 < 2) == false", false},
-		{"(1 > 2) == true", false},
-		{"(1 > 2) == false", true},
+		{"true;", true},
+		{"false;", false},
+		{"1 < 2;", true},
+		{"1 > 2;", false},
+		{"1 < 1;", false},
+		{"1 > 1;", false},
+		{"1 = 1;", true},
+		{"1 != 1;", false},
+		{"1 = 2;", false},
+		{"1 != 2;", true},
+		{"true = true;", true},
+		{"false = false;", true},
+		{"true = false;", false},
+		{"true != false;", true},
+		{"false != true;", true},
+		{"(1 < 2) = true;", true},
+		{"(1 < 2) = false;", false},
+		{"(1 > 2) = true;", false},
+		{"(1 > 2) = false;", true},
 	}
 
 	for _, tt := range tests {
@@ -77,29 +77,29 @@ func TestEvalBooleanLogicalExpression(t *testing.T) {
 		expected bool
 	}{
 		// AND operator
-		{"TRUE AND TRUE", true},
-		{"TRUE AND FALSE", false},
-		{"FALSE AND TRUE", false},
-		{"FALSE AND FALSE", false},
-		{"TRUE & TRUE", true}, // Test '&' alias
-		{"(1 < 2) AND (3 > 1)", true},
-		{"(1 > 2) AND (3 > 1)", false},
+		{"TRUE AND TRUE;", true},
+		{"TRUE AND FALSE;", false},
+		{"FALSE AND TRUE;", false},
+		{"FALSE AND FALSE;", false},
+		{"TRUE & TRUE;", true}, // Test '&' alias
+		{"(1 < 2) AND (3 > 1);", true},
+		{"(1 > 2) AND (3 > 1);", false},
 
 		// OR operator
-		{"TRUE OR TRUE", true},
-		{"TRUE OR FALSE", true},
-		{"FALSE OR TRUE", true},
-		{"FALSE OR FALSE", false},
-		{"(1 > 2) OR (3 > 1)", true},
-		{"(1 > 2) OR (3 < 1)", false},
+		{"TRUE OR TRUE;", true},
+		{"TRUE OR FALSE;", true},
+		{"FALSE OR TRUE;", true},
+		{"FALSE OR FALSE;", false},
+		{"(1 > 2) OR (3 > 1);", true},
+		{"(1 > 2) OR (3 < 1);", false},
 
 		// XOR operator
-		{"TRUE XOR TRUE", false},
-		{"TRUE XOR FALSE", true},
-		{"FALSE XOR TRUE", true},
-		{"FALSE XOR FALSE", false},
-		{"(1 < 2) XOR (3 > 1)", false}, // true XOR true -> false
-		{"(1 > 2) XOR (3 > 1)", true},  // false XOR true -> true
+		{"TRUE XOR TRUE;", false},
+		{"TRUE XOR FALSE;", true},
+		{"FALSE XOR TRUE;", true},
+		{"FALSE XOR FALSE;", false},
+		{"(1 < 2) XOR (3 > 1);", false}, // true XOR true -> false
+		{"(1 > 2) XOR (3 > 1);", true},  // false XOR true -> true
 	}
 
 	for _, tt := range tests {
@@ -112,12 +112,13 @@ func TestBangOperator(t *testing.T) {
 		input    string
 		expected bool
 	}{
-		{"NOT TRUE", false},
-		{"NOT FALSE", true},
-		{"NOT 5", false},
-		{"NOT NOT TRUE", true},
-		{"NOT NOT FALSE", false},
-		{"NOT NOT 5", true},
+		{"NOT TRUE;", false},
+		{"NOT FALSE;", true},
+		{"NOT 5;", false},
+		{"NOT NOT TRUE;", true},
+		{"!TRUE;", false},
+		{"NOT NOT FALSE;", false},
+		{"NOT NOT 5;", true},
 	}
 
 	for _, tt := range tests {
@@ -131,13 +132,13 @@ func TestIfElseExpressions(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{"IF TRUE THEN 10 END_IF", 10},
-		{"IF FALSE THEN 10 END_IF", nil},
-		{"IF 1 THEN 10 END_IF", 10},
-		{"IF 1 < 2 THEN 10 END_IF", 10},
-		{"IF 1 > 2 THEN 10 END_IF", nil},
-		{"IF 1 > 2 THEN 10 ELSE 20 END_IF", 20},
-		{"IF 1 < 2 THEN 10 ELSE 20 END_IF", 10},
+		{"IF TRUE THEN 10; END_IF", 10},
+		{"IF FALSE THEN 10; END_IF", nil},
+		{"IF 1 THEN 10; END_IF", 10},
+		{"IF 1 < 2 THEN 10; END_IF", 10},
+		{"IF 1 > 2 THEN 10; END_IF", nil},
+		{"IF 1 > 2 THEN 10; ELSE 20; END_IF", 20},
+		{"IF 1 < 2 THEN 10; ELSE 20; END_IF", 10},
 	}
 
 	for _, tt := range tests {
@@ -160,7 +161,7 @@ func TestReturnStatements(t *testing.T) {
 		{"return 10; 9;", 10},
 		{"return 2 * 5; 9;", 10},
 		{"9; return 2 * 5; 9;", 10},
-		{"if (10 > 1) { return 10; }", 10},
+		{"IF (10 > 1) THEN RETURN 10; END_IF", 10},
 	}
 
 	for _, tt := range tests {
@@ -176,59 +177,59 @@ func TestErrorHandling(t *testing.T) {
 	}{
 		{
 			"5 + true;",
-			"ERROR (1:1): type mismatch: INTEGER + BOOLEAN",
+			"ERROR (1:3): type mismatch: INT + BOOLEAN",
 		},
 		{
 			"5 + true; 5;",
-			"ERROR (1:1): type mismatch: INTEGER + BOOLEAN",
+			"ERROR (1:3): type mismatch: INT + BOOLEAN",
 		},
 		{
-			"-true",
+			"-true;",
 			"ERROR (1:1): unknown operator: -BOOLEAN",
 		},
 		{
 			"true + false;",
-			"ERROR (1:1): unknown operator: BOOLEAN + BOOLEAN",
+			"ERROR (1:6): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
 			"true + false + true + false;",
-			"ERROR (1:1): unknown operator: BOOLEAN + BOOLEAN",
+			"ERROR (1:6): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
-			"5; true + false; 5",
-			"ERROR (1:4): unknown operator: BOOLEAN + BOOLEAN",
+			"5; true + false; 5;",
+			"ERROR (1:9): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
-			`"Hello" - "World"`,
-			"ERROR (1:1): unknown operator: STRING - STRING",
+			`"Hello" - "World";`,
+			"ERROR (1:9): unknown operator: STRING - STRING",
 		},
 		{
-			"if (10 > 1) { true + false; }",
-			"ERROR (1:15): unknown operator: BOOLEAN + BOOLEAN",
+			"IF (10 > 1) THEN true + false; END_IF",
+			"ERROR (1:23): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
 			`
-if (10 > 1) {
-  if (10 > 1) {
-    return true + false;
-  }
+IF (10 > 1) THEN
+  IF (10 > 1) THEN
+    RETURN true + false;
+  END_IF
 
-  return 1;
-}
+  RETURN 1;
+END_IF
 `,
-			"ERROR (4:12): unknown operator: BOOLEAN + BOOLEAN",
+			"ERROR (4:17): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
-			"foobar",
+			"foobar;",
 			"ERROR (1:1): identifier not found: foobar",
 		},
 		{
-			`{"name": "beedance"}[fn(x) { x }];`,
-			"ERROR (1:22): unusable as hash key: FUNCTION",
+			`{"name": "beedance"}[fn(x) { x ;}];`,
+			"ERROR (1:21): unusable as hash key: FUNCTION",
 		},
 		{
-			`999[1]`,
-			"index operator not supported: INTEGER",
+			`999[1];`,
+			"ERROR (1:4): index operator not supported: INT",
 		},
 	}
 
@@ -254,40 +255,37 @@ func TestIntegerOverflowErrors(t *testing.T) {
 		expectedMessage string
 	}{
 		// SINT (-128 to 127)
-		{"SINT#127 + SINT#1", "SINT overflow: 128"},
-		{"SINT#-128 - SINT#1", "SINT overflow: -129"},
-		{"SINT#64 * SINT#3", "SINT overflow: 192"},
-		{"SINT#-65 * SINT#2", "SINT overflow: -130"},
+		{"SINT#127 + SINT#1;", "SINT overflow: 128"},
+		{"SINT#-128 - SINT#1;", "SINT underflow: -129"},
+		{"SINT#64 * SINT#3;", "SINT overflow: 192"},
+		{"SINT#-65 * SINT#2;", "SINT underflow: -130"},
 
 		// INT (-32768 to 32767)
-		{"INT#32767 + INT#1", "INT overflow: 32768"},
-		{"INT#-32768 - INT#1", "INT overflow: -32769"},
-		{"INT#16384 * INT#3", "INT overflow: 49152"},
+		{"INT#32767 + INT#1;", "INT overflow: 32768"},
+		{"INT#-32768 - INT#1;", "INT underflow: -32769"},
+		{"INT#16384 * INT#3;", "INT overflow: 49152"},
 
 		// DINT (-2147483648 to 2147483647)
-		{"DINT#2147483647 + INT#1", "DINT overflow: 2147483648"},
-		{"DINT#-2147483648 - INT#1", "DINT overflow: -2147483649"},
+		{"DINT#2147483647 + INT#1;", "DINT overflow: 2147483648"},
+		{"DINT#-2147483648 - INT#1;", "DINT underflow: -2147483649"},
 
-		// LINT (Handled by Go's int64, but let's test a large operation)
-		// This won't overflow in our current implementation but is good to have.
-		// {"LINT#9223372036854775807 + LINT#1", "LINT overflow"}, // This would require math/big
+		// LINT (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
+		{"LINT#9223372036854775807 + LINT#1;", "LINT overflow"},
+		{"LINT#-9223372036854775808 - LINT#1;", "LINT underflow"},
 
 		// USINT (0 to 255)
-		{"USINT#255 + USINT#1", "USINT overflow: 256"},
-		{"USINT#0 - USINT#1", "USINT overflow: -1"},
-		{"SINT#-1 + USINT#0", "USINT overflow: -1"}, // Promotion to USINT, then underflow
+		{"USINT#255 + USINT#1;", "USINT overflow: 256"},
+		{"USINT#0 - USINT#1;", "USINT underflow: -1"},
 
 		// UINT (0 to 65535)
-		{"UINT#65535 + UINT#1", "UINT overflow: 65536"},
-		{"UINT#0 - UINT#1", "UINT overflow: -1"},
+		{"UINT#65535 + UINT#1;", "UINT overflow: 65536"},
+		{"UINT#0 - UINT#1;", "UINT underflow: -1"},
 
 		// UDINT (0 to 4294967295)
-		{"UDINT#4294967295 + UINT#1", "UDINT overflow: 4294967296"},
-		{"UDINT#0 - UINT#1", "UDINT overflow: -1"},
-
-		// ULINT (0 to 18446744073709551615)
-		{"ULINT#0 - DINT#1", "ULINT underflow: -1"},
-		// {"ULINT#18446744073709551615 + ULINT#1", "ULINT overflow"}, // This would require math/big
+		{"UDINT#4294967295 + UINT#1;", "UDINT overflow: 4294967296"},
+		{"UDINT#0 - UINT#1;", "UDINT underflow: -1"},
+		{"ULINT#18446744073709551615 + ULINT#1;", "ULINT overflow"},
+		{"ULINT#0 - ULINT#1;", "ULINT underflow: -1"},
 	}
 
 	for _, tt := range tests {
@@ -314,14 +312,14 @@ func TestEvalCaseStatement(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{"CASE 1 OF 1: 10; ELSE 99; END_CASE", int64(10)},
-		{"CASE 2 OF 1: 10; ELSE 99; END_CASE", int64(99)},
-		{"CASE 2 OF 1: 10; 2: 20; ELSE 99; END_CASE", int64(20)},
-		{"CASE 3 OF 1, 2: 10; 3, 4: 20; ELSE 99; END_CASE", int64(20)},
-		{"CASE 5 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE", int64(20)},
-		{"CASE 11 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE", int64(99)},
-		{"CASE 1 OF 1: 10; END_CASE", int64(10)},
-		{"CASE 99 OF 1: 10; END_CASE", nil}, // No match, no ELSE
+		{"CASE 1 OF 1: 10; ELSE 99; END_CASE;", int64(10)},
+		{"CASE 2 OF 1: 10; ELSE 99; END_CASE;", int64(99)},
+		{"CASE 2 OF 1: 10; 2: 20; ELSE 99; END_CASE;", int64(20)},
+		{"CASE 3 OF 1, 2: 10; 3, 4: 20; ELSE 99; END_CASE;", int64(20)},
+		{"CASE 5 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE;", int64(20)},
+		{"CASE 11 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE;", int64(99)},
+		{"CASE 1 OF 1: 10; END_CASE;", int64(10)},
+		{"CASE 99 OF 1: 10; END_CASE;", nil}, // No match, no ELSE
 		{`
 			VAR myVar : INT := 7; END_VAR
 			CASE myVar OF
@@ -377,26 +375,26 @@ func TestCaseStatementErrors(t *testing.T) {
 		expectedMessage string
 	}{
 		{
-			"CASE 1 OF 'a': 10; END_CASE",
-			"type mismatch for comparison: INTEGER == STRING",
+			"CASE 1 OF 'a': 10; END_CASE;",
+			"type mismatch for comparison: INTEGER = STRING",
 		},
 		{
-			"CASE 'a' OF 1: 10; END_CASE",
-			"type mismatch for comparison: STRING == INTEGER",
+			"CASE 'a' OF 1: 10; END_CASE;",
+			"type mismatch for comparison: STRING = INTEGER",
 		},
 		{
-			"CASE 1 OF 1.0..2.0: 10; END_CASE",
+			"CASE 1 OF 1.0..2.0: 10; END_CASE;",
 			"type mismatch for comparison: INTEGER >= REAL",
 		},
 		{
-			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE;
 			 CASE 1 OF COLOR#RED: 1; END_CASE`,
-			"type mismatch for comparison: INTEGER == ENUMERATED_VALUE",
+			"type mismatch for comparison: INTEGER = ENUMERATED_VALUE",
 		},
 		{
 			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
 			 CASE COLOR#RED OF 1: 1; END_CASE`,
-			"type mismatch for comparison: ENUMERATED_VALUE == INTEGER",
+			"type mismatch for comparison: ENUMERATED_VALUE = INTEGER",
 		},
 	}
 
@@ -470,7 +468,7 @@ func TestForLoopStatement(t *testing.T) {
 		`, int64(5)},
 		{`
 			FOR i := 1 TO 1 DO
-				RETURN 99;
+				RETURN 99; 
 			END_FOR
 		`, int64(99)},
 	}
@@ -1022,7 +1020,7 @@ func TestFunctionApplication(t *testing.T) {
 		input    string
 		expected int64
 	}{
-		{"fn(x) { x; }(5)", 5},
+		{"fn(x) { x; }(5);", 5},
 	}
 
 	for _, tt := range tests {
@@ -1031,7 +1029,7 @@ func TestFunctionApplication(t *testing.T) {
 }
 
 func TestStringLiteral(t *testing.T) {
-	input := `"Hello World!"`
+	input := `"Hello World!";`
 
 	evaluated := testEval(t, input)
 	str, ok := evaluated.(*object.String)
@@ -1045,7 +1043,7 @@ func TestStringLiteral(t *testing.T) {
 }
 
 func TestStringConcatenation(t *testing.T) {
-	input := `"Hello" + " " + "World!"`
+	input := `"Hello" + " " + "World!";`
 
 	evaluated := testEval(t, input)
 	str, ok := evaluated.(*object.String)
@@ -1063,24 +1061,24 @@ func TestBuiltinFunctions(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{`len("")`, 0},
-		{`len("four")`, 4},
-		{`len("hello world")`, 11},
-		{`len(1)`, "argument to `len` not supported, got INTEGER"},
-		{`len("one", "two")`, "wrong number of arguments. got=2, want=1"},
-		{`len([1, 2, 3])`, 3},
-		{`len([])`, 0},
-		{`puts("hello", "world!")`, nil},
-		{`first([1, 2, 3])`, 1},
-		{`first([])`, nil},
-		{`first(1)`, "argument to `first` must be ARRAY, got INTEGER"},
-		{`last([1, 2, 3])`, 3},
-		{`last([])`, nil},
-		{`last(1)`, "argument to `last` must be ARRAY, got INTEGER"},
-		{`rest([1, 2, 3])`, []int{2, 3}},
-		{`rest([])`, nil},
-		{`push([], 1)`, []int{1}},
-		{`push(1, 1)`, "argument to `push` must be ARRAY, got INTEGER"},
+		{`len("");`, 0},
+		{`len("four");`, 4},
+		{`len("hello world");`, 11},
+		{`len(1);`, "argument to `len` not supported, got INTEGER"},
+		{`len("one", "two");`, "wrong number of arguments. got=2, want=1"},
+		{`len([1, 2, 3]);`, 3},
+		{`len([]);`, 0},
+		{`puts("hello", "world!");`, nil},
+		{`first([1, 2, 3]);`, 1},
+		{`first([]);`, nil},
+		{`first(1);`, "argument to `first` must be ARRAY, got INTEGER"},
+		{`last([1, 2, 3]);`, 3},
+		{`last([]);`, nil},
+		{`last(1);`, "argument to `last` must be ARRAY, got INTEGER"},
+		{`rest([1, 2, 3]);`, []int{2, 3}},
+		{`rest([]);`, nil},
+		{`push([], 1);`, []int{1}},
+		{`push(1, 1);`, "argument to `push` must be ARRAY, got INTEGER"},
 	}
 
 	for _, tt := range tests {
@@ -1121,7 +1119,7 @@ func TestBuiltinFunctions(t *testing.T) {
 }
 
 func TestArrayLiterals(t *testing.T) {
-	input := "[1, 2 * 2, 3 + 3]"
+	input := "[1, 2 * 2, 3 + 3];"
 
 	evaluated := testEval(t, input)
 	result, ok := evaluated.(*object.Array)
@@ -1145,15 +1143,15 @@ func TestArrayIndexExpressions(t *testing.T) {
 		expected interface{}
 	}{
 		{
-			"[1, 2, 3][0]",
+			"[1, 2, 3][0];",
 			1,
 		},
 		{
-			"[1, 2, 3][1]",
+			"[1, 2, 3][1];",
 			2,
 		},
 		{
-			"[1, 2, 3][2]",
+			"[1, 2, 3][2];",
 			3,
 		},
 		{
@@ -1161,11 +1159,11 @@ func TestArrayIndexExpressions(t *testing.T) {
 			3,
 		},
 		{
-			"[1, 2, 3][3]",
+			"[1, 2, 3][3];",
 			nil,
 		},
 		{
-			"[1, 2, 3][-1]",
+			"[1, 2, 3][-1];",
 			nil,
 		},
 	}
@@ -1187,27 +1185,27 @@ func TestHashIndexExpressions(t *testing.T) {
 		expected interface{}
 	}{
 		{
-			`{"foo": 5}["foo"]`,
+			`{"foo": 5}["foo"];`,
 			5,
 		},
 		{
-			`{"foo": 5}["bar"]`,
+			`{"foo": 5}["bar"];`,
 			nil,
 		},
 		{
-			`{}["foo"]`,
+			`{}["foo"];`,
 			nil,
 		},
 		{
-			`{5: 5}[5]`,
+			`{5: 5}[5];`,
 			5,
 		},
 		{
-			`{true: 5}[true]`,
+			`{true: 5}[true];`,
 			5,
 		},
 		{
-			`{false: 5}[false]`,
+			`{false: 5}[false];`,
 			5,
 		},
 	}
@@ -1229,24 +1227,24 @@ func TestEvalTimeDateLiterals(t *testing.T) {
 		expected interface{}
 	}{
 		// TIME literals
-		{"T#5s", 5 * time.Second},
-		{"TIME#1m30s", (1 * time.Minute) + (30 * time.Second)},
-		{"T#1h_30m_15s", (1 * time.Hour) + (30 * time.Minute) + (15 * time.Second)},
-		{"T#1d", 24 * time.Hour},
-		{"T#100ms", 100 * time.Millisecond},
+		{"T#5s;", 5 * time.Second},
+		{"TIME#1m30s;", (1 * time.Minute) + (30 * time.Second)},
+		{"T#1h_30m_15s;", (1 * time.Hour) + (30 * time.Minute) + (15 * time.Second)},
+		{"T#1d;", 24 * time.Hour},
+		{"T#100ms;", 100 * time.Millisecond},
 
 		// DATE literals
-		{"D#1999-12-31", time.Date(1999, 12, 31, 0, 0, 0, 0, time.UTC)},
-		{"DATE#2026-04-30", time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)},
+		{"D#1999-12-31;", time.Date(1999, 12, 31, 0, 0, 0, 0, time.UTC)},
+		{"DATE#2026-04-30;", time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)},
 
 		// TIME_OF_DAY literals
-		{"TOD#13:30:05", time.Date(0, 1, 1, 13, 30, 5, 0, time.UTC)},
-		{"TIME_OF_DAY#23:59:59", time.Date(0, 1, 1, 23, 59, 59, 0, time.UTC)},
-		{"TOD#23:59:59.999", time.Date(0, 1, 1, 23, 59, 59, 999000000, time.UTC)},
+		{"TOD#13:30:05;", time.Date(0, 1, 1, 13, 30, 5, 0, time.UTC)},
+		{"TIME_OF_DAY#23:59:59;", time.Date(0, 1, 1, 23, 59, 59, 0, time.UTC)},
+		{"TOD#23:59:59.999;", time.Date(0, 1, 1, 23, 59, 59, 999000000, time.UTC)},
 
 		// DATE_AND_TIME literals
-		{"DT#1999-12-31-23:59:59", time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)},
-		{"DATE_AND_TIME#2026-04-30-10:20:30.123", time.Date(2026, 4, 30, 10, 20, 30, 123000000, time.UTC)},
+		{"DT#1999-12-31-23:59:59;", time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)},
+		{"DATE_AND_TIME#2026-04-30-10:20:30.123;", time.Date(2026, 4, 30, 10, 20, 30, 123000000, time.UTC)},
 	}
 
 	for _, tt := range tests {
@@ -1292,37 +1290,37 @@ func TestBuiltinAddSub(t *testing.T) {
 		expected interface{} // Can be int64, float64, time.Duration, time.Time, or string for error
 	}{
 		// ADD operations
-		{"ADD(T#1s, T#2s)", 3 * time.Second},
-		{"ADD(TIME#1m, TIME#30s)", (1 * time.Minute) + (30 * time.Second)},
-		{"ADD(TOD#10:00:00, T#1h)", time.Date(0, 1, 1, 11, 0, 0, 0, time.UTC)},               // TOD + TIME
-		{"ADD(TOD#23:00:00, T#2h)", time.Date(0, 1, 2, 1, 0, 0, 0, time.UTC)},                // TOD + TIME with wrap-around
-		{"ADD(DT#2026-04-30-10:00:00, T#1h)", time.Date(2026, 4, 30, 11, 0, 0, 0, time.UTC)}, // DT + TIME
-		{"ADD(10, 20)", int64(30)},
-		{"ADD(1.5, 2.5)", 4.0},
-		{"ADD(10, 2.5)", 12.5}, // INT + REAL promotion
-		{"ADD(1.5, 20)", 21.5}, // REAL + INT promotion
+		{"ADD(T#1s, T#2s);", 3 * time.Second},
+		{"ADD(TIME#1m, TIME#30s);", (1 * time.Minute) + (30 * time.Second)},
+		{"ADD(TOD#10:00:00, T#1h);", time.Date(0, 1, 1, 11, 0, 0, 0, time.UTC)},               // TOD + TIME
+		{"ADD(TOD#23:00:00, T#2h);", time.Date(0, 1, 2, 1, 0, 0, 0, time.UTC)},                // TOD + TIME with wrap-around
+		{"ADD(DT#2026-04-30-10:00:00, T#1h);", time.Date(2026, 4, 30, 11, 0, 0, 0, time.UTC)}, // DT + TIME
+		{"ADD(10, 20);", int64(30)},
+		{"ADD(1.5, 2.5);", 4.0},
+		{"ADD(10, 2.5);", 12.5}, // INT + REAL promotion
+		{"ADD(1.5, 20);", 21.5}, // REAL + INT promotion
 
 		// SUB operations
-		{"SUB(T#5s, T#2s)", 3 * time.Second},
-		{"SUB(TIME#2m, TIME#30s)", (1 * time.Minute) + (30 * time.Second)},
-		{"SUB(D#2026-04-30, D#2026-04-29)", 24 * time.Hour},                                 // DATE - DATE -> TIME
-		{"SUB(TOD#10:00:00, T#1h)", time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC)},               // TOD - TIME
-		{"SUB(TOD#01:00:00, T#2h)", time.Date(0, 1, 0, 23, 0, 0, 0, time.UTC)},              // TOD - TIME with wrap-around
-		{"SUB(TOD#10:00:00, TOD#09:00:00)", 1 * time.Hour},                                  // TOD - TOD -> TIME
-		{"SUB(DT#2026-04-30-10:00:00, T#1h)", time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)}, // DT - TIME
-		{"SUB(DT#2026-04-30-10:00:00, DT#2026-04-30-09:00:00)", 1 * time.Hour},              // DT - DT -> TIME
-		{"SUB(20, 10)", int64(10)},
-		{"SUB(4.0, 1.5)", 2.5},
-		{"SUB(10, 2.5)", 7.5},
-		{"SUB(4.0, 2)", 2.0},
+		{"SUB(T#5s, T#2s);", 3 * time.Second},
+		{"SUB(TIME#2m, TIME#30s);", (1 * time.Minute) + (30 * time.Second)},
+		{"SUB(D#2026-04-30, D#2026-04-29);", 24 * time.Hour},                                 // DATE - DATE -> TIME
+		{"SUB(TOD#10:00:00, T#1h);", time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC)},               // TOD - TIME
+		{"SUB(TOD#01:00:00, T#2h);", time.Date(0, 1, 0, 23, 0, 0, 0, time.UTC)},              // TOD - TIME with wrap-around
+		{"SUB(TOD#10:00:00, TOD#09:00:00);", 1 * time.Hour},                                  // TOD - TOD -> TIME
+		{"SUB(DT#2026-04-30-10:00:00, T#1h);", time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)}, // DT - TIME
+		{"SUB(DT#2026-04-30-10:00:00, DT#2026-04-30-09:00:00);", 1 * time.Hour},              // DT - DT -> TIME
+		{"SUB(20, 10);", int64(10)},
+		{"SUB(4.0, 1.5);", 2.5},
+		{"SUB(10, 2.5);", 7.5},
+		{"SUB(4.0, 2);", 2.0},
 
 		// Error cases
-		{"ADD(T#1s, D#2026-04-30)", "unsupported argument types for ADD: TIME + DATE"},
-		{"SUB(T#1s, D#2026-04-30)", "unsupported argument types for SUB: TIME - DATE"},
-		{"ADD(10, TRUE)", "unsupported argument types for ADD: INTEGER + BOOLEAN"},
-		{"SUB(10, TRUE)", "unsupported argument types for SUB: INTEGER + BOOLEAN"},
-		{"ADD(T#1s)", "wrong number of arguments for ADD. got=1, want=2"},
-		{"SUB(T#1s)", "wrong number of arguments for SUB. got=1, want=2"},
+		{"ADD(T#1s, D#2026-04-30);", "unsupported argument types for ADD: TIME + DATE"},
+		{"SUB(T#1s, D#2026-04-30);", "unsupported argument types for SUB: TIME - DATE"},
+		{"ADD(10, TRUE);", "unsupported argument types for ADD: INTEGER + BOOLEAN"},
+		{"SUB(10, TRUE);", "unsupported argument types for SUB: INTEGER + BOOLEAN"},
+		{"ADD(T#1s);", "wrong number of arguments for ADD. got=1, want=2"},
+		{"SUB(T#1s);", "wrong number of arguments for SUB. got=1, want=2"},
 	}
 
 	for _, tt := range tests {
@@ -1395,31 +1393,31 @@ func TestBuiltinMulDiv(t *testing.T) {
 		expected interface{} // Can be int64, float64, time.Duration, or string for error
 	}{
 		// MUL operations
-		{"MUL(10, 20)", int64(200)},
-		{"MUL(1.5, 2.0)", 3.0},
-		{"MUL(10, 2.5)", 25.0}, // INT * REAL promotion
-		{"MUL(1.5, 10)", 15.0}, // REAL * INT promotion
-		{"MUL(T#10s, 2)", 20 * time.Second},
-		{"MUL(2, T#10s)", 20 * time.Second},
-		{"MUL(T#1m, 1.5)", 90 * time.Second},
+		{"MUL(10, 20);", int64(200)},
+		{"MUL(1.5, 2.0);", 3.0},
+		{"MUL(10, 2.5);", 25.0}, // INT * REAL promotion
+		{"MUL(1.5, 10);", 15.0}, // REAL * INT promotion
+		{"MUL(T#10s, 2);", 20 * time.Second},
+		{"MUL(2, T#10s);", 20 * time.Second},
+		{"MUL(T#1m, 1.5);", 90 * time.Second},
 
 		// DIV operations
-		{"DIV(20, 10)", int64(2)},
-		{"DIV(5.0, 2.0)", 2.5},
-		{"DIV(10, 2.5)", 4.0},
-		{"DIV(5.0, 2)", 2.5},
-		{"DIV(T#20s, 2)", 10 * time.Second},
-		{"DIV(T#1m, 2.5)", 24 * time.Second},
+		{"DIV(20, 10);", int64(2)},
+		{"DIV(5.0, 2.0);", 2.5},
+		{"DIV(10, 2.5);", 4.0},
+		{"DIV(5.0, 2);", 2.5},
+		{"DIV(T#20s, 2);", 10 * time.Second},
+		{"DIV(T#1m, 2.5);", 24 * time.Second},
 
 		// Error cases
-		{"MUL(10, TRUE)", "unsupported argument types for MUL: INTEGER * BOOLEAN"},
-		{"DIV(10, TRUE)", "unsupported argument types for DIV: INTEGER / BOOLEAN"},
-		{"MUL(T#1s, T#2s)", "unsupported argument types for MUL: TIME * TIME"},
-		{"DIV(10, 0)", "division by zero"},
-		{"DIV(10.0, 0)", "division by zero"},
-		{"DIV(T#10s, 0)", "division by zero"},
-		{"MUL(T#1s)", "wrong number of arguments for MUL. got=1, want=2"},
-		{"DIV(T#1s)", "wrong number of arguments for DIV. got=1, want=2"},
+		{"MUL(10, TRUE);", "unsupported argument types for MUL: INTEGER * BOOLEAN"},
+		{"DIV(10, TRUE);", "unsupported argument types for DIV: INTEGER / BOOLEAN"},
+		{"MUL(T#1s, T#2s);", "unsupported argument types for MUL: TIME * TIME"},
+		{"DIV(10, 0);", "division by zero"},
+		{"DIV(10.0, 0);", "division by zero"},
+		{"DIV(T#10s, 0);", "division by zero"},
+		{"MUL(T#1s);", "wrong number of arguments for MUL. got=1, want=2"},
+		{"DIV(T#1s);", "wrong number of arguments for DIV. got=1, want=2"},
 	}
 
 	for _, tt := range tests {
@@ -1460,26 +1458,26 @@ func TestBuiltinModExpt(t *testing.T) {
 		expected interface{} // Can be int64, float64, or string for error
 	}{
 		// MOD operations
-		{"MOD(10, 3)", int64(1)},
-		{"MOD(10, 2)", int64(0)},
-		{"MOD(-10, 3)", int64(-1)},
-		{"MOD(10, -3)", int64(1)},
-		{"MOD(10, 0)", "division by zero in MOD"},
-		{"MOD(10.5, 2)", "arguments to `MOD` must be INTEGER, got REAL and INTEGER"},
-		{"MOD(10, 2.5)", "arguments to `MOD` must be INTEGER, got INTEGER and REAL"},
-		{"MOD(10)", "wrong number of arguments for MOD. got=1, want=2"},
+		{"MOD(10, 3);", int64(1)},
+		{"MOD(10, 2);", int64(0)},
+		{"MOD(-10, 3);", int64(-1)},
+		{"MOD(10, -3);", int64(1)},
+		{"MOD(10, 0);", "division by zero in MOD"},
+		{"MOD(10.5, 2);", "arguments to `MOD` must be INTEGER, got REAL and INTEGER"},
+		{"MOD(10, 2.5);", "arguments to `MOD` must be INTEGER, got INTEGER and REAL"},
+		{"MOD(10);", "wrong number of arguments for MOD. got=1, want=2"},
 
 		// EXPT operations
-		{"EXPT(2, 3)", 8.0},
-		{"EXPT(2.0, 3.0)", 8.0},
-		{"EXPT(4, 0.5)", 2.0},
-		{"EXPT(10, -1)", 0.1},
-		{"EXPT(-2, 3)", -8.0},
-		{"EXPT(9, 0.5)", 3.0},
-		{"EXPT(2, 3.5)", math.Pow(2, 3.5)},
-		{"EXPT(TRUE, 2)", "argument 1 to `EXPT` must be numeric, got BOOLEAN"},
-		{"EXPT(2, TRUE)", "argument 2 to `EXPT` must be numeric, got BOOLEAN"},
-		{"EXPT(2)", "wrong number of arguments for EXPT. got=1, want=2"},
+		{"EXPT(2, 3);", 8.0},
+		{"EXPT(2.0, 3.0);", 8.0},
+		{"EXPT(4, 0.5);", 2.0},
+		{"EXPT(10, -1);", 0.1},
+		{"EXPT(-2, 3);", -8.0},
+		{"EXPT(9, 0.5);", 3.0},
+		{"EXPT(2, 3.5);", math.Pow(2, 3.5)},
+		{"EXPT(TRUE, 2);", "argument 1 to `EXPT` must be numeric, got BOOLEAN"},
+		{"EXPT(2, TRUE);", "argument 2 to `EXPT` must be numeric, got BOOLEAN"},
+		{"EXPT(2);", "wrong number of arguments for EXPT. got=1, want=2"},
 	}
 
 	for _, tt := range tests {
@@ -1511,93 +1509,93 @@ func TestBuiltinComparisonFunctions(t *testing.T) {
 		expected interface{}
 	}{
 		// GT (Greater Than)
-		{"GT(20, 10)", true},
-		{"GT(10, 20)", false},
-		{"GT(10, 10)", false},
-		{"GT(20.5, 10)", true},
-		{"GT('b', 'a')", true},
+		{"GT(20, 10);", true},
+		{"GT(10, 20);", false},
+		{"GT(10, 10);", false},
+		{"GT(20.5, 10);", true},
+		{"GT('b', 'a');", true},
 
 		// GE (Greater Than or Equal)
-		{"GE(20, 10)", true},
-		{"GE(10, 20)", false},
-		{"GE(10, 10)", true},
-		{"GE(10.0, 10)", true},
-		{"GE('b', 'a')", true},
-		{"GE('a', 'a')", true},
+		{"GE(20, 10);", true},
+		{"GE(10, 20);", false},
+		{"GE(10, 10);", true},
+		{"GE(10.0, 10);", true},
+		{"GE('b', 'a');", true},
+		{"GE('a', 'a');", true},
 
 		// EQ (Equal)
-		{"EQ(10, 10)", true},
-		{"EQ(10, 20)", false},
-		{"EQ(10.0, 10)", true},
-		{"EQ('a', 'a')", true},
-		{"EQ('a', 'b')", false},
-		{"EQ(TRUE, TRUE)", true},
-		{"EQ(FALSE, FALSE)", true},
-		{"EQ(TRUE, FALSE)", false},
-		{"EQ(T#1s, T#1s)", true},
-		{"EQ(T#1s, T#2s)", false},
-		{"EQ(D#2026-01-01, D#2026-01-01)", true},
-		{"EQ(D#2026-01-01, D#2026-01-02)", false},
-		{"EQ(TOD#10:00:00, TOD#10:00:00)", true},
-		{"EQ(TOD#10:00:00, TOD#10:00:01)", false},
-		{"EQ(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00)", true},
-		{"EQ(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01)", false},
+		{"EQ(10, 10);", true},
+		{"EQ(10, 20);", false},
+		{"EQ(10.0, 10);", true},
+		{"EQ('a', 'a');", true},
+		{"EQ('a', 'b');", false},
+		{"EQ(TRUE, TRUE);", true},
+		{"EQ(FALSE, FALSE);", true},
+		{"EQ(TRUE, FALSE);", false},
+		{"EQ(T#1s, T#1s);", true},
+		{"EQ(T#1s, T#2s);", false},
+		{"EQ(D#2026-01-01, D#2026-01-01);", true},
+		{"EQ(D#2026-01-01, D#2026-01-02);", false},
+		{"EQ(TOD#10:00:00, TOD#10:00:00);", true},
+		{"EQ(TOD#10:00:00, TOD#10:00:01);", false},
+		{"EQ(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00);", true},
+		{"EQ(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01);", false},
 
 		// LE (Less Than or Equal)
-		{"LE(10, 20)", true},
-		{"LE(20, 10)", false},
-		{"LE(10, 10)", true},
-		{"LE(10, 10.0)", true},
-		{"LE(10.0, 10.0)", true},
-		{"LE('a', 'b')", true},
-		{"LE('a', 'a')", true},
-		{"LE(T#1s, T#1s)", true},
-		{"LE(T#1s, T#2s)", true},
-		{"LE(D#2026-01-01, D#2026-01-01)", true},
-		{"LE(D#2026-01-01, D#2026-01-02)", true},
-		{"LE(TOD#10:00:00, TOD#10:00:00)", true},
-		{"LE(TOD#10:00:00, TOD#10:00:01)", true},
-		{"LE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00)", true},
-		{"LE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01)", true},
+		{"LE(10, 20);", true},
+		{"LE(20, 10);", false},
+		{"LE(10, 10);", true},
+		{"LE(10, 10.0);", true},
+		{"LE(10.0, 10.0);", true},
+		{"LE('a', 'b');", true},
+		{"LE('a', 'a');", true},
+		{"LE(T#1s, T#1s);", true},
+		{"LE(T#1s, T#2s);", true},
+		{"LE(D#2026-01-01, D#2026-01-01);", true},
+		{"LE(D#2026-01-01, D#2026-01-02);", true},
+		{"LE(TOD#10:00:00, TOD#10:00:00);", true},
+		{"LE(TOD#10:00:00, TOD#10:00:01);", true},
+		{"LE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00);", true},
+		{"LE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01);", true},
 
 		// LT (Less Than)
-		{"LT(10, 20)", true},
-		{"LT(20, 10)", false},
-		{"LT(10, 10)", false},
-		{"LT(10, 20.5)", true},
-		{"LT(10.0, 20.5)", true},
-		{"LT('a', 'b')", true},
-		{"LT(T#1s, T#2s)", true},
-		{"LT(T#2s, T#1s)", false},
-		{"LT(D#2026-01-01, D#2026-01-02)", true},
-		{"LT(D#2026-01-02, D#2026-01-01)", false},
-		{"LT(TOD#10:00:00, TOD#10:00:01)", true},
-		{"LT(TOD#10:00:01, TOD#10:00:00)", false},
-		{"LT(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01)", true},
-		{"LT(DT#2026-01-01-10:00:01, DT#2026-01-01-10:00:00)", false},
+		{"LT(10, 20);", true},
+		{"LT(20, 10);", false},
+		{"LT(10, 10);", false},
+		{"LT(10, 20.5);", true},
+		{"LT(10.0, 20.5);", true},
+		{"LT('a', 'b');", true},
+		{"LT(T#1s, T#2s);", true},
+		{"LT(T#2s, T#1s);", false},
+		{"LT(D#2026-01-01, D#2026-01-02);", true},
+		{"LT(D#2026-01-02, D#2026-01-01);", false},
+		{"LT(TOD#10:00:00, TOD#10:00:01);", true},
+		{"LT(TOD#10:00:01, TOD#10:00:00);", false},
+		{"LT(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01);", true},
+		{"LT(DT#2026-01-01-10:00:01, DT#2026-01-01-10:00:00);", false},
 
 		// NE (Not Equal)
-		{"NE(10, 20)", true},
-		{"NE(10, 10)", false},
-		{"NE(10.0, 10)", false},
-		{"NE('a', 'b')", true},
-		{"NE('a', 'a')", false},
-		{"NE(TRUE, FALSE)", true},
-		{"NE(TRUE, TRUE)", false},
-		{"NE(T#1s, T#2s)", true},
-		{"NE(T#1s, T#1s)", false},
-		{"NE(D#2026-01-01, D#2026-01-01)", false},
-		{"NE(D#2026-01-01, D#2026-01-02)", true},
-		{"NE(TOD#10:00:00, TOD#10:00:00)", false},
-		{"NE(TOD#10:00:00, TOD#10:00:01)", true},
-		{"NE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00)", false},
-		{"NE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01)", true},
+		{"NE(10, 20);", true},
+		{"NE(10, 10);", false},
+		{"NE(10.0, 10);", false},
+		{"NE('a', 'b');", true},
+		{"NE('a', 'a');", false},
+		{"NE(TRUE, FALSE);", true},
+		{"NE(TRUE, TRUE);", false},
+		{"NE(T#1s, T#2s);", true},
+		{"NE(T#1s, T#1s);", false},
+		{"NE(D#2026-01-01, D#2026-01-01);", false},
+		{"NE(D#2026-01-01, D#2026-01-02);", true},
+		{"NE(TOD#10:00:00, TOD#10:00:00);", false},
+		{"NE(TOD#10:00:00, TOD#10:00:01);", true},
+		{"NE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:00);", false},
+		{"NE(DT#2026-01-01-10:00:00, DT#2026-01-01-10:00:01);", true},
 
 		// Error cases
-		{"GT(10, 'a')", "BUILTIN ERROR: type mismatch for comparison: INTEGER GT STRING"},
-		{"LT(TRUE, 1)", "BUILTIN ERROR: type mismatch for comparison: BOOLEAN LT INTEGER"},
-		{"GT(T#1s, 1)", "BUILTIN ERROR: unsupported operand types for GT: TIME"},
-		{"GT(10)", "BUILTIN ERROR: wrong number of arguments for GT. got=1, want=2"},
+		{"GT(10, 'a');", "BUILTIN ERROR: type mismatch for comparison: INTEGER GT STRING"},
+		{"LT(TRUE, 1);", "BUILTIN ERROR: type mismatch for comparison: BOOLEAN LT INTEGER"},
+		{"GT(T#1s, 1);", "BUILTIN ERROR: unsupported operand types for GT: TIME"},
+		{"GT(10);", "BUILTIN ERROR: wrong number of arguments for GT. got=1, want=2"},
 	}
 
 	for _, tt := range tests {
@@ -1621,28 +1619,28 @@ func TestBuiltinSQRTAndROUND(t *testing.T) {
 		expected interface{} // int64, float64, or string for error
 	}{
 		// SQRT
-		{"SQRT(9)", 3.0},
-		{"SQRT(2.25)", 1.5},
-		{"SQRT(0)", 0.0},
-		{"SQRT(-1)", "argument to `SQRT` must be non-negative, got -1"},
-		{"SQRT(-2.25)", "argument to `SQRT` must be non-negative, got -2.250000"},
-		{"SQRT(TRUE)", "argument to `SQRT` not supported, got BOOLEAN"},
-		{"SQRT()", "wrong number of arguments for SQRT. got=0, want=1"},
-		{"SQRT(1, 2)", "wrong number of arguments for SQRT. got=2, want=1"},
+		{"SQRT(9);", 3.0},
+		{"SQRT(2.25);", 1.5},
+		{"SQRT(0);", 0.0},
+		{"SQRT(-1);", "argument to `SQRT` must be non-negative, got -1"},
+		{"SQRT(-2.25);", "argument to `SQRT` must be non-negative, got -2.250000"},
+		{"SQRT(TRUE);", "argument to `SQRT` not supported, got BOOLEAN"},
+		{"SQRT();", "wrong number of arguments for SQRT. got=0, want=1"},
+		{"SQRT(1, 2);", "wrong number of arguments for SQRT. got=2, want=1"},
 
 		// ROUND
-		{"ROUND(2.4)", int64(2)},
-		{"ROUND(2.5)", int64(2)}, // round half to even
-		{"ROUND(2.6)", int64(3)},
-		{"ROUND(3.5)", int64(4)}, // round half to even
-		{"ROUND(-2.4)", int64(-2)},
-		{"ROUND(-2.5)", int64(-2)}, // round half to even
-		{"ROUND(-2.6)", int64(-3)},
-		{"ROUND(0.0)", int64(0)},
-		{"ROUND(5)", "argument to `ROUND` must be REAL, got INTEGER"},
-		{"ROUND(TRUE)", "argument to `ROUND` must be REAL, got BOOLEAN"},
-		{"ROUND()", "wrong number of arguments for ROUND. got=0, want=1"},
-		{"ROUND(1, 2)", "wrong number of arguments for ROUND. got=2, want=1"},
+		{"ROUND(2.4);", int64(2)},
+		{"ROUND(2.5);", int64(2)}, // round half to even
+		{"ROUND(2.6);", int64(3)},
+		{"ROUND(3.5);", int64(4)}, // round half to even
+		{"ROUND(-2.4);", int64(-2)},
+		{"ROUND(-2.5);", int64(-2)}, // round half to even
+		{"ROUND(-2.6);", int64(-3)},
+		{"ROUND(0.0);", int64(0)},
+		{"ROUND(5);", "argument to `ROUND` must be REAL, got INTEGER"},
+		{"ROUND(TRUE);", "argument to `ROUND` must be REAL, got BOOLEAN"},
+		{"ROUND();", "wrong number of arguments for ROUND. got=0, want=1"},
+		{"ROUND(1, 2);", "wrong number of arguments for ROUND. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -1664,23 +1662,23 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 		expected interface{} // int64, float64, or string for error
 	}{
 		// --- To Integer Types ---
-		{"REAL_TO_INT(5.4)", int64(5)},
-		{"REAL_TO_INT(5.5)", int64(6)}, // Round half to even (2.5->2, 3.5->4)
-		{"REAL_TO_INT(5.6)", int64(6)},
-		{"REAL_TO_INT(6.5)", int64(6)},
-		{"INT_TO_DINT(123)", int64(123)},
-		{"STRING_TO_INT('42')", int64(42)},
-		{"STRING_TO_INT('abc')", "BUILTIN ERROR: could not parse string to integer: abc"},
+		{"REAL_TO_INT(5.4);", int64(5)},
+		{"REAL_TO_INT(5.5);", int64(6)}, // Round half to even (2.5->2, 3.5->4)
+		{"REAL_TO_INT(5.6);", int64(6)},
+		{"REAL_TO_INT(6.5);", int64(6)},
+		{"INT_TO_DINT(123);", int64(123)},
+		{"STRING_TO_INT('42');", int64(42)},
+		{"STRING_TO_INT('abc');", "BUILTIN ERROR: could not parse string to integer: abc"},
 
 		// --- To Real Types ---
-		{"INT_TO_REAL(10)", 10.0},
-		{"STRING_TO_REAL('123.45')", 123.45},
-		{"STRING_TO_REAL('xyz')", "BUILTIN ERROR: could not parse string to real: xyz"},
+		{"INT_TO_REAL(10);", 10.0},
+		{"STRING_TO_REAL('123.45');", 123.45},
+		{"STRING_TO_REAL('xyz');", "BUILTIN ERROR: could not parse string to real: xyz"},
 
 		// --- To String Type ---
-		{"INT_TO_STRING(123)", "123"},
-		{"REAL_TO_STRING(1.23)", "1.230000"},
-		{"BOOL_TO_STRING(TRUE)", "TRUE"},
+		{"INT_TO_STRING(123);", "123"},
+		{"REAL_TO_STRING(1.23);", "1.230000"},
+		{"BOOL_TO_STRING(TRUE);", "TRUE"},
 
 		// --- To BCD ---
 		{"INT_TO_BCD(1234)", uint64(0x1234)},
@@ -1690,38 +1688,38 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 
 		// --- Overflow/Underflow Checks for Integer Types ---
 		// SINT (-128 to 127)
-		{"INT_TO_SINT(127)", int64(127)},
-		{"INT_TO_SINT(128)", "BUILTIN ERROR: value 128 is out of range for type SINT (-128 to 127)"},
-		{"INT_TO_SINT(-128)", int64(-128)},
-		{"INT_TO_SINT(-129)", "BUILTIN ERROR: value -129 is out of range for type SINT (-128 to 127)"},
+		{"INT_TO_SINT(127);", int64(127)},
+		{"INT_TO_SINT(128);", "BUILTIN ERROR: value 128 is out of range for type SINT (-128 to 127)"},
+		{"INT_TO_SINT(-128);", int64(-128)},
+		{"INT_TO_SINT(-129);", "BUILTIN ERROR: value -129 is out of range for type SINT (-128 to 127)"},
 
 		// USINT (0 to 255)
-		{"INT_TO_USINT(255)", int64(255)},
-		{"INT_TO_USINT(256)", "BUILTIN ERROR: value 256 is out of range for type USINT (0 to 255)"},
-		{"INT_TO_USINT(-1)", "BUILTIN ERROR: value -1 is out of range for type USINT (0 to 255)"},
+		{"INT_TO_USINT(255);", int64(255)},
+		{"INT_TO_USINT(256);", "BUILTIN ERROR: value 256 is out of range for type USINT (0 to 255)"},
+		{"INT_TO_USINT(-1);", "BUILTIN ERROR: value -1 is out of range for type USINT (0 to 255)"},
 
 		// INT (-32768 to 32767)
-		{"DINT_TO_INT(32767)", int64(32767)},
-		{"DINT_TO_INT(32768)", "BUILTIN ERROR: value 32768 is out of range for type INT (-32768 to 32767)"},
+		{"DINT_TO_INT(32767);", int64(32767)},
+		{"DINT_TO_INT(32768);", "BUILTIN ERROR: value 32768 is out of range for type INT (-32768 to 32767)"},
 
 		// UINT (0 to 65535)
-		{"DINT_TO_UINT(65535)", int64(65535)},
-		{"DINT_TO_UINT(65536)", "BUILTIN ERROR: value 65536 is out of range for type UINT (0 to 65535)"},
+		{"DINT_TO_UINT(65535);", int64(65535)},
+		{"DINT_TO_UINT(65536);", "BUILTIN ERROR: value 65536 is out of range for type UINT (0 to 65535)"},
 
 		// --- Overflow Checks for Bit-String Types ---
 		// BYTE (0 to 255)
-		{"INT_TO_BYTE(255)", uint64(255)},
-		{"INT_TO_BYTE(256)", "BUILTIN ERROR: value 256 is out of range for type BYTE (0 to 255)"},
-		{"INT_TO_BYTE(-1)", "BUILTIN ERROR: value -1 is out of range for type BYTE (0 to 255)"},
+		{"INT_TO_BYTE(255);", uint64(255)},
+		{"INT_TO_BYTE(256);", "BUILTIN ERROR: value 256 is out of range for type BYTE (0 to 255)"},
+		{"INT_TO_BYTE(-1);", "BUILTIN ERROR: value -1 is out of range for type BYTE (0 to 255)"},
 
 		// WORD (0 to 65535)
-		{"INT_TO_WORD(65535)", uint64(65535)},
-		{"INT_TO_WORD(65536)", "BUILTIN ERROR: value 65536 is out of range for type WORD (0 to 65535)"},
+		{"INT_TO_WORD(65535);", uint64(65535)},
+		{"INT_TO_WORD(65536);", "BUILTIN ERROR: value 65536 is out of range for type WORD (0 to 65535)"},
 
 		// --- General Error Cases ---
-		{"INT_TO_BOOL(1)", "BUILTIN ERROR: conversion to type BOOL is not supported"},
-		{"REAL_TO_TIME(1.0)", "BUILTIN ERROR: conversion to type TIME is not supported"},
-		{"INT_TO_REAL()", "BUILTIN ERROR: wrong number of arguments for INT_TO_REAL. got=0, want=1"},
+		{"INT_TO_BOOL(1);", "BUILTIN ERROR: conversion to type BOOL is not supported"},
+		{"REAL_TO_TIME(1.0);", "BUILTIN ERROR: conversion to type TIME is not supported"},
+		{"INT_TO_REAL();", "BUILTIN ERROR: wrong number of arguments for INT_TO_REAL. got=0, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -1769,18 +1767,18 @@ func TestBuiltinAbsFunction(t *testing.T) {
 		expected interface{}
 	}{
 		// Integer tests
-		{"ABS(10)", int64(10)},
-		{"ABS(-10)", int64(10)},
-		{"ABS(0)", int64(0)},
+		{"ABS(10);", int64(10)},
+		{"ABS(-10);", int64(10)},
+		{"ABS(0);", int64(0)},
 
 		// Real tests
-		{"ABS(10.5)", 10.5},
-		{"ABS(-10.5)", 10.5},
+		{"ABS(10.5);", 10.5},
+		{"ABS(-10.5);", 10.5},
 
 		// Error cases
-		{"ABS(TRUE)", "argument to `ABS` not supported, got BOOLEAN"},
-		{"ABS()", "wrong number of arguments for ABS. got=0, want=1"},
-		{"ABS(1, 2)", "wrong number of arguments for ABS. got=2, want=1"},
+		{"ABS(TRUE);", "argument to `ABS` not supported, got BOOLEAN"},
+		{"ABS();", "wrong number of arguments for ABS. got=0, want=1"},
+		{"ABS(1, 2);", "wrong number of arguments for ABS. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -1804,18 +1802,18 @@ func TestBuiltinTruncFunction(t *testing.T) {
 		expected interface{}
 	}{
 		// Positive and negative values
-		{"TRUNC(5.7)", int64(5)},
-		{"TRUNC(-5.7)", int64(-5)},
-		{"TRUNC(5.2)", int64(5)},
-		{"TRUNC(-5.2)", int64(-5)},
-		{"TRUNC(0.0)", int64(0)},
-		{"TRUNC(5.0)", int64(5)},
+		{"TRUNC(5.7);", int64(5)},
+		{"TRUNC(-5.7);", int64(-5)},
+		{"TRUNC(5.2);", int64(5)},
+		{"TRUNC(-5.2);", int64(-5)},
+		{"TRUNC(0.0);", int64(0)},
+		{"TRUNC(5.0);", int64(5)},
 
 		// Error cases
-		{"TRUNC(5)", "argument to `TRUNC` must be REAL, got INTEGER"},
-		{"TRUNC(TRUE)", "argument to `TRUNC` must be REAL, got BOOLEAN"},
-		{"TRUNC()", "wrong number of arguments for TRUNC. got=0, want=1"},
-		{"TRUNC(1.0, 2.0)", "wrong number of arguments for TRUNC. got=2, want=1"},
+		{"TRUNC(5);", "argument to `TRUNC` must be REAL, got INTEGER"},
+		{"TRUNC(TRUE);", "argument to `TRUNC` must be REAL, got BOOLEAN"},
+		{"TRUNC();", "wrong number of arguments for TRUNC. got=0, want=1"},
+		{"TRUNC(1.0, 2.0);", "wrong number of arguments for TRUNC. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -1839,19 +1837,19 @@ func TestBuiltinMoveFunction(t *testing.T) {
 		expected interface{}
 	}{
 		// Test with various literal types
-		{"MOVE(5)", int64(5)},
-		{"MOVE(10.5)", 10.5},
-		{"MOVE(TRUE)", true},
-		{`MOVE("hello")`, "hello"},
-		{"MOVE(T#5s)", 5 * time.Second},
-		{"MOVE(BYTE#16#FF)", uint64(0xFF)},
+		{"MOVE(5);", int64(5)},
+		{"MOVE(10.5);", 10.5},
+		{"MOVE(TRUE);", true},
+		{`MOVE("hello");`, "hello"},
+		{"MOVE(T#5s);", 5 * time.Second},
+		{"MOVE(BYTE#16#FF);", uint64(0xFF)},
 
 		// Test with an expression
-		{"MOVE(5 + 5)", int64(10)},
+		{"MOVE(5 + 5);", int64(10)},
 
 		// Error cases for wrong number of arguments
-		{"MOVE()", "BUILTIN ERROR: wrong number of arguments for MOVE. got=0, want=1"},
-		{"MOVE(1, 2)", "BUILTIN ERROR: wrong number of arguments for MOVE. got=2, want=1"},
+		{"MOVE();", "BUILTIN ERROR: wrong number of arguments for MOVE. got=0, want=1"},
+		{"MOVE(1, 2);", "BUILTIN ERROR: wrong number of arguments for MOVE. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -1884,152 +1882,38 @@ func TestBuiltinMoveFunction(t *testing.T) {
 	}
 }
 
-func TestBuiltinLimitFunction(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected interface{}
-	}{
-		// Integer tests
-		{"LIMIT(10, 5, 20)", int64(10)},      // Input below min
-		{"LIMIT(10, 15, 20)", int64(15)},     // Input within range
-		{"LIMIT(10, 25, 20)", int64(20)},     // Input above max
-		{"LIMIT(-20, -15, -10)", int64(-15)}, // Negative numbers
-		{"LIMIT(10, 10, 20)", int64(10)},     // Input equals min
-		{"LIMIT(10, 20, 20)", int64(20)},     // Input equals max
-
-		// Real tests
-		{"LIMIT(10.0, 5.0, 20.0)", 10.0},
-		{"LIMIT(10.0, 15.5, 20.0)", 15.5},
-		{"LIMIT(10.0, 25.0, 20.0)", 20.0},
-
-		// Mixed type tests (promotion to REAL)
-		{"LIMIT(10, 15.5, 20)", 15.5},
-		{"LIMIT(10.0, 5, 20.0)", 10.0},
-		{"LIMIT(10, 25, 20.0)", 20.0},
-
-		// Named arguments test (assuming evaluator supports this for built-ins)
-		// Note: The current applyFunction logic for built-ins is positional.
-		// This test will pass if the arguments are provided positionally as MN, IN, MX.
-		{"LIMIT(MN := 10, IN := 5, MX := 20)", int64(10)},
-
-		// Error cases
-		{"LIMIT(10, 5)", "BUILTIN ERROR: wrong number of arguments for LIMIT. got=2, want=3"},
-		{"LIMIT(10, 5, 20, 30)", "BUILTIN ERROR: wrong number of arguments for LIMIT. got=4, want=3"},
-		{"LIMIT(10, TRUE, 20)", "BUILTIN ERROR: all arguments to `LIMIT` must be INTEGER or REAL, got BOOLEAN"},
-		{`LIMIT(10, 5, "20")`, "BUILTIN ERROR: all arguments to `LIMIT` must be INTEGER or REAL, got STRING"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(t, tt.input)
-			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
-			case string:
-				// Can be a string result or an error message
-				if err, ok := evaluated.(*object.Error); ok {
-					if !strings.Contains(err.Message, expected) {
-						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
-					}
-				} else {
-					testStringObject(t, evaluated, expected)
-				}
-			default:
-				t.Fatalf("unhandled expected type: %T", tt.expected)
-			}
-		})
-	}
-}
-
-func TestBuiltinSelFunction(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected interface{}
-	}{
-		// Integer selection
-		{"SEL(FALSE, 10, 20)", int64(10)},
-		{"SEL(TRUE, 10, 20)", int64(20)},
-
-		// Real selection
-		{"SEL(FALSE, 10.5, 20.5)", 10.5},
-		{"SEL(TRUE, 10.5, 20.5)", 20.5},
-
-		// Boolean selection
-		{"SEL(FALSE, TRUE, FALSE)", true},
-		{"SEL(TRUE, TRUE, FALSE)", false},
-
-		// String selection
-		{`SEL(FALSE, "hello", "world")`, "hello"},
-		{`SEL(TRUE, "hello", "world")`, "world"},
-
-		// Selection with expressions
-		{"SEL(1 > 0, 5+5, 10+10)", int64(20)},
-		{"SEL(1 < 0, 5+5, 10+10)", int64(10)},
-
-		// Error cases
-		{"SEL(1, 10, 20)", "BUILTIN ERROR: argument 1 to `SEL` must be BOOLEAN, got INTEGER"},
-		{`SEL(TRUE, 10, "world")`, "BUILTIN ERROR: arguments 2 and 3 to `SEL` must be of the same type, got INTEGER and STRING"},
-		{"SEL(TRUE, 10)", "BUILTIN ERROR: wrong number of arguments for SEL. got=2, want=3"},
-		{"SEL(TRUE, 10, 20, 30)", "BUILTIN ERROR: wrong number of arguments for SEL. got=4, want=3"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(t, tt.input)
-			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
-			case bool:
-				testBooleanObject(t, evaluated, expected)
-			case string:
-				if _, ok := evaluated.(*object.Error); ok {
-					testErrorObject(t, evaluated, expected)
-				} else {
-					testStringObject(t, evaluated, expected)
-				}
-			default:
-				t.Fatalf("unhandled expected type: %T", tt.expected)
-			}
-		})
-	}
-}
-
 func TestBuiltinMinMaxFunctions(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected interface{}
 	}{
 		// MIN function tests
-		{"MIN(10, 20)", int64(10)},
-		{"MIN(20, 10)", int64(10)},
-		{"MIN(10, 20, 5, 30)", int64(5)},
-		{"MIN(-10, -20)", int64(-20)},
-		{"MIN(10.5, 10.6)", 10.5},
-		{"MIN(10, 20.5)", 10.0}, // Type promotion to REAL
-		{"MIN(1, 2.5, -3.0, 4)", -3.0},
-		{"MIN(10)", int64(10)},
-		{"MIN()", "BUILTIN ERROR: wrong number of arguments for MIN. got=0, want>=1"},
-		{"MIN(1, TRUE)", "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got BOOLEAN"},
+		{"MIN(10, 20);", int64(10)},
+		{"MIN(20, 10);", int64(10)},
+		{"MIN(10, 20, 5, 30);", int64(5)},
+		{"MIN(-10, -20);", int64(-20)},
+		{"MIN(10.5, 10.6);", 10.5},
+		{"MIN(10, 20.5);", 10.0}, // Type promotion to REAL
+		{"MIN(1, 2.5, -3.0, 4);", -3.0},
+		{"MIN(10);", int64(10)},
+		{"MIN();", "BUILTIN ERROR: wrong number of arguments for MIN. got=0, want>=1"},
+		{"MIN(1, TRUE);", "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got BOOLEAN"},
 
 		// MAX function tests
-		{"MAX(10, 20)", int64(20)},
-		{"MAX(20, 10)", int64(20)},
-		{"MAX(10, 20, 5, 30)", int64(30)},
-		{"MAX(-10, -20)", int64(-10)},
-		{"MAX(10.5, 10.6)", 10.6},
-		{"MAX(10, 20.5)", 20.5}, // Type promotion to REAL
-		{"MAX(1, 2.5, -3.0, 4)", 4.0},
-		{"MAX(10)", int64(10)},
-		{"MAX()", "BUILTIN ERROR: wrong number of arguments for MAX. got=0, want>=1"},
-		{"MAX(1, TRUE)", "BUILTIN ERROR: all arguments to `MAX` must be INTEGER or REAL, got BOOLEAN"},
+		{"MAX(10, 20);", int64(20)},
+		{"MAX(20, 10);", int64(20)},
+		{"MAX(10, 20, 5, 30);", int64(30)},
+		{"MAX(-10, -20);", int64(-10)},
+		{"MAX(10.5, 10.6);", 10.6},
+		{"MAX(10, 20.5);", 20.5}, // Type promotion to REAL
+		{"MAX(1, 2.5, -3.0, 4);", 4.0},
+		{"MAX(10);", int64(10)},
+		{"MAX();", "BUILTIN ERROR: wrong number of arguments for MAX. got=0, want>=1"},
+		{"MAX(1, TRUE);", "BUILTIN ERROR: all arguments to `MAX` must be INTEGER or REAL, got BOOLEAN"},
 	}
 
 	// Register MIN and MAX in builtins for testing if they aren't already
-	if _, ok := builtins["MIN"]; !ok {
+	if _, ok := builtins["MIN"]; !ok { // cspell:disable-line
 		builtins["MIN"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
 			return minMaxBuiltin("MIN", args...)
 		}}
@@ -2071,34 +1955,34 @@ func TestBuiltinBitwiseFunctions(t *testing.T) {
 		expected interface{}
 	}{
 		// AND function
-		{"AND(BYTE#16#F0, BYTE#16#A5)", uint64(0xA0)},
-		{"AND(WORD#16#1234, WORD#16#00FF, WORD#16#FFFF)", uint64(0x0034)},
-		{"AND(BYTE#16#FF, BYTE#16#FF)", uint64(0xFF)},
+		{"AND(BYTE#16#F0, BYTE#16#A5);", uint64(0xA0)},
+		{"AND(WORD#16#1234, WORD#16#00FF, WORD#16#FFFF);", uint64(0x0034)},
+		{"AND(BYTE#16#FF, BYTE#16#FF);", uint64(0xFF)},
 
 		// OR function
-		{"OR(BYTE#16#A0, BYTE#16#05)", uint64(0xA5)},
-		{"OR(WORD#16#1200, WORD#16#0034)", uint64(0x1234)},
-		{"OR(BYTE#16#F0, BYTE#16#0F, BYTE#16#AA)", uint64(0xFF)},
+		{"OR(BYTE#16#A0, BYTE#16#05);", uint64(0xA5)},
+		{"OR(WORD#16#1200, WORD#16#0034);", uint64(0x1234)},
+		{"OR(BYTE#16#F0, BYTE#16#0F, BYTE#16#AA);", uint64(0xFF)},
 
 		// XOR function
-		{"XOR(BYTE#16#A5, BYTE#16#F0)", uint64(0x55)},
-		{"XOR(WORD#16#FFFF, WORD#16#1234)", uint64(0xEDCB)},
-		{"XOR(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF)", uint64(0xFF)}, // A ^ A ^ A = A
+		{"XOR(BYTE#16#A5, BYTE#16#F0);", uint64(0x55)},
+		{"XOR(WORD#16#FFFF, WORD#16#1234);", uint64(0xEDCB)},
+		{"XOR(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF);", uint64(0xFF)}, // A ^ A ^ A = A
 
 		// Error cases
-		{"AND(BYTE#16#FF)", "BUILTIN ERROR: wrong number of arguments for AND. got=1, want>=2"},
-		{"OR(BYTE#16#FF, WORD#16#FF)", "BUILTIN ERROR: all arguments to `OR` must have the same width, got 8 and 16"},
-		{"XOR(BYTE#16#FF, 10)", "BUILTIN ERROR: all arguments to `XOR` must be bit-string types, got INTEGER"},
+		{"AND(BYTE#16#FF);", "BUILTIN ERROR: wrong number of arguments for AND. got=1, want>=2"},
+		{"OR(BYTE#16#FF, WORD#16#FF);", "BUILTIN ERROR: all arguments to `OR` must have the same width, got 8 and 16"},
+		{"XOR(BYTE#16#FF, 10);", "BUILTIN ERROR: all arguments to `XOR` must be bit-string types, got INTEGER"},
 
 		// NAND function
-		{"NAND(BYTE#16#F0, BYTE#16#A5)", uint64(0x5F)},             // NOT(A0) -> 5F
-		{"NAND(WORD#16#1234, WORD#16#00FF)", uint64(0xFFCB)},       // NOT(0034) -> FFCB
-		{"NAND(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF)", uint64(0x00)}, // NOT(FF) -> 00
+		{"NAND(BYTE#16#F0, BYTE#16#A5);", uint64(0x5F)},             // NOT(A0) -> 5F
+		{"NAND(WORD#16#1234, WORD#16#00FF);", uint64(0xFFCB)},       // NOT(0034) -> FFCB
+		{"NAND(BYTE#16#FF, BYTE#16#FF, BYTE#16#FF);", uint64(0x00)}, // NOT(FF) -> 00
 
 		// NOR function
-		{"NOR(BYTE#16#A0, BYTE#16#05)", uint64(0x5A)},       // NOT(A5) -> 5A
-		{"NOR(WORD#16#1200, WORD#16#0034)", uint64(0xEDCB)}, // NOT(1234) -> EDCB
-		{"NOR(BYTE#16#00, BYTE#16#00)", uint64(0xFF)},       // NOT(00) -> FF
+		{"NOR(BYTE#16#A0, BYTE#16#05);", uint64(0x5A)},       // NOT(A5) -> 5A
+		{"NOR(WORD#16#1200, WORD#16#0034);", uint64(0xEDCB)}, // NOT(1234) -> EDCB
+		{"NOR(BYTE#16#00, BYTE#16#00);", uint64(0xFF)},       // NOT(00) -> FF
 	}
 
 	for _, tt := range tests {
@@ -2139,23 +2023,23 @@ func TestBuiltinTrigFunctions(t *testing.T) {
 		expected interface{} // float64 or string for error
 	}{
 		// SIN
-		{"SIN(0)", 0.0},
-		{"SIN(PI / 2)", 1.0}, // Assuming PI is a variable in the environment
-		{"SIN(PI)", math.Sin(math.Pi)},
-		{"SIN(1.570796)", math.Sin(1.570796)},
-		{"SIN(TRUE)", "argument to `SIN` must be INTEGER or REAL, got BOOLEAN"},
-		{"SIN()", "wrong number of arguments for SIN. got=0, want=1"},
+		{"SIN(0);", 0.0},
+		{"SIN(PI / 2);", 1.0}, // Assuming PI is a variable in the environment
+		{"SIN(PI);", math.Sin(math.Pi)},
+		{"SIN(1.570796);", math.Sin(1.570796)},
+		{"SIN(TRUE);", "argument to `SIN` must be INTEGER or REAL, got BOOLEAN"},
+		{"SIN();", "wrong number of arguments for SIN. got=0, want=1"},
 
 		// COS
-		{"COS(0)", 1.0},
-		{"COS(PI / 2)", math.Cos(math.Pi / 2)},
-		{"COS(PI)", -1.0},
-		{"COS(TRUE)", "argument to `COS` must be INTEGER or REAL, got BOOLEAN"},
+		{"COS(0);", 1.0},
+		{"COS(PI / 2);", math.Cos(math.Pi / 2)},
+		{"COS(PI);", -1.0},
+		{"COS(TRUE);", "argument to `COS` must be INTEGER or REAL, got BOOLEAN"},
 
 		// TAN
-		{"TAN(0)", 0.0},
-		{"TAN(PI / 4)", 1.0},
-		{"TAN(TRUE)", "argument to `TAN` must be INTEGER or REAL, got BOOLEAN"},
+		{"TAN(0);", 0.0},
+		{"TAN(PI / 4);", 1.0},
+		{"TAN(TRUE);", "argument to `TAN` must be INTEGER or REAL, got BOOLEAN"},
 	}
 
 	for _, tt := range tests {
@@ -2175,40 +2059,40 @@ func TestBuiltinInverseTrigFunctions(t *testing.T) {
 		expected interface{} // float64 or string for error
 	}{
 		// ASIN
-		{"ASIN(0)", 0.0},
-		{"ASIN(1)", math.Pi / 2},
-		{"ASIN(-1)", -math.Pi / 2},
-		{"ASIN(0.5)", math.Asin(0.5)},
-		{"ASIN(2)", "argument to `ASIN` must be between -1 and 1, got 2.000000"},
-		{"ASIN(-2.0)", "argument to `ASIN` must be between -1 and 1, got -2.000000"},
-		{"ASIN(TRUE)", "argument to `ASIN` must be INTEGER or REAL, got BOOLEAN"},
-		{"ASIN()", "wrong number of arguments for ASIN. got=0, want=1"},
+		{"ASIN(0);", 0.0},
+		{"ASIN(1);", math.Pi / 2},
+		{"ASIN(-1);", -math.Pi / 2},
+		{"ASIN(0.5);", math.Asin(0.5)},
+		{"ASIN(2);", "argument to `ASIN` must be between -1 and 1, got 2.000000"},
+		{"ASIN(-2.0);", "argument to `ASIN` must be between -1 and 1, got -2.000000"},
+		{"ASIN(TRUE);", "argument to `ASIN` must be INTEGER or REAL, got BOOLEAN"},
+		{"ASIN();", "wrong number of arguments for ASIN. got=0, want=1"},
 
 		// ACOS
-		{"ACOS(1)", 0.0},
-		{"ACOS(-1)", math.Pi},
-		{"ACOS(0)", math.Pi / 2},
-		{"ACOS(0.5)", math.Acos(0.5)},
-		{"ACOS(2)", "argument to `ACOS` must be between -1 and 1, got 2.000000"},
-		{"ACOS(TRUE)", "argument to `ACOS` must be INTEGER or REAL, got BOOLEAN"},
+		{"ACOS(1);", 0.0},
+		{"ACOS(-1);", math.Pi},
+		{"ACOS(0);", math.Pi / 2},
+		{"ACOS(0.5);", math.Acos(0.5)},
+		{"ACOS(2);", "argument to `ACOS` must be between -1 and 1, got 2.000000"},
+		{"ACOS(TRUE);", "argument to `ACOS` must be INTEGER or REAL, got BOOLEAN"},
 
 		// ATAN
-		{"ATAN(0)", 0.0},
-		{"ATAN(1)", math.Pi / 4},
-		{"ATAN(-1)", -math.Pi / 4},
-		{"ATAN(100)", math.Atan(100)},
-		{"ATAN(TRUE)", "argument to `ATAN` must be INTEGER or REAL, got BOOLEAN"},
+		{"ATAN(0);", 0.0},
+		{"ATAN(1);", math.Pi / 4},
+		{"ATAN(-1);", -math.Pi / 4},
+		{"ATAN(100);", math.Atan(100)},
+		{"ATAN(TRUE);", "argument to `ATAN` must be INTEGER or REAL, got BOOLEAN"},
 
 		// ATAN2
-		{"ATAN2(1, 1)", math.Pi / 4},        // Quadrant 1
-		{"ATAN2(1, -1)", 3 * math.Pi / 4},   // Quadrant 2
-		{"ATAN2(-1, -1)", -3 * math.Pi / 4}, // Quadrant 3
-		{"ATAN2(-1, 1)", -math.Pi / 4},      // Quadrant 4
-		{"ATAN2(1.0, 0.0)", math.Pi / 2},
-		{"ATAN2(1, 0)", math.Pi / 2},
-		{"ATAN2(TRUE, 1)", "argument 1 to `ATAN2` must be INTEGER or REAL, got BOOLEAN"},
-		{"ATAN2(1, TRUE)", "argument 2 to `ATAN2` must be INTEGER or REAL, got BOOLEAN"},
-		{"ATAN(TRUE)", "argument to `ATAN` must be INTEGER or REAL, got BOOLEAN"},
+		{"ATAN2(1, 1);", math.Pi / 4},        // Quadrant 1
+		{"ATAN2(1, -1);", 3 * math.Pi / 4},   // Quadrant 2
+		{"ATAN2(-1, -1);", -3 * math.Pi / 4}, // Quadrant 3
+		{"ATAN2(-1, 1);", -math.Pi / 4},      // Quadrant 4
+		{"ATAN2(1.0, 0.0);", math.Pi / 2},
+		{"ATAN2(1, 0);", math.Pi / 2},
+		{"ATAN2(TRUE, 1);", "argument 1 to `ATAN2` must be INTEGER or REAL, got BOOLEAN"},
+		{"ATAN2(1, TRUE);", "argument 2 to `ATAN2` must be INTEGER or REAL, got BOOLEAN"},
+		{"ATAN(TRUE);", "argument to `ATAN` must be INTEGER or REAL, got BOOLEAN"},
 	}
 
 	for _, tt := range tests {
@@ -2228,23 +2112,23 @@ func TestBuiltinLogFunctions(t *testing.T) {
 		expected interface{} // float64 or string for error
 	}{
 		// LN (Natural Log)
-		{"LN(E)", 1.0}, // Assuming E is a variable in the environment
-		{"LN(1)", 0.0},
-		{"LN(10)", math.Log(10)},
-		{"LN(0)", "argument to `LN` must be positive, got 0.000000"},
-		{"LN(-1)", "argument to `LN` must be positive, got -1.000000"},
-		{"LN(TRUE)", "argument to `LN` must be INTEGER or REAL, got BOOLEAN"},
-		{"LN()", "wrong number of arguments for LN. got=0, want=1"},
+		{"LN(E);", 1.0}, // Assuming E is a variable in the environment
+		{"LN(1);", 0.0},
+		{"LN(10);", math.Log(10)},
+		{"LN(0);", "argument to `LN` must be positive, got 0.000000"},
+		{"LN(-1);", "argument to `LN` must be positive, got -1.000000"},
+		{"LN(TRUE);", "argument to `LN` must be INTEGER or REAL, got BOOLEAN"},
+		{"LN();", "wrong number of arguments for LN. got=0, want=1"},
 
 		// LOG (Base-10 Log)
-		{"LOG(10)", 1.0},
-		{"LOG(100)", 2.0},
-		{"LOG(1)", 0.0},
-		{"LOG(0.1)", -1.0},
-		{"LOG(0)", "argument to `LOG` must be positive, got 0.000000"},
-		{"LOG(-10)", "argument to `LOG` must be positive, got -10.000000"},
-		{"LOG(TRUE)", "argument to `LOG` must be INTEGER or REAL, got BOOLEAN"},
-		{"LOG()", "wrong number of arguments for LOG. got=0, want=1"},
+		{"LOG(10);", 1.0},
+		{"LOG(100);", 2.0},
+		{"LOG(1);", 0.0},
+		{"LOG(0.1);", -1.0},
+		{"LOG(0);", "argument to `LOG` must be positive, got 0.000000"},
+		{"LOG(-10);", "argument to `LOG` must be positive, got -10.000000"},
+		{"LOG(TRUE);", "argument to `LOG` must be INTEGER or REAL, got BOOLEAN"},
+		{"LOG();", "wrong number of arguments for LOG. got=0, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -2264,14 +2148,14 @@ func TestBuiltinExpFunction(t *testing.T) {
 		expected interface{} // float64 or string for error
 	}{
 		// EXP
-		{"EXP(1)", math.E},
-		{"EXP(0)", 1.0},
-		{"EXP(2)", math.Exp(2)},
-		{"EXP(-1)", math.Exp(-1)},
-		{"EXP(2.5)", math.Exp(2.5)},
-		{"EXP(TRUE)", "argument to `EXP` must be INTEGER or REAL, got BOOLEAN"},
-		{"EXP()", "wrong number of arguments for EXP. got=0, want=1"},
-		{"EXP(1, 2)", "wrong number of arguments for EXP. got=2, want=1"},
+		{"EXP(1);", math.E},
+		{"EXP(0);", 1.0},
+		{"EXP(2);", math.Exp(2)},
+		{"EXP(-1);", math.Exp(-1)},
+		{"EXP(2.5);", math.Exp(2.5)},
+		{"EXP(TRUE);", "argument to `EXP` must be INTEGER or REAL, got BOOLEAN"},
+		{"EXP();", "wrong number of arguments for EXP. got=0, want=1"},
+		{"EXP(1, 2);", "wrong number of arguments for EXP. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -2291,98 +2175,98 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		expected interface{} // string or error message
 	}{
 		// LEN
-		{`LEN("")`, int64(0)},
-		{`LEN("four")`, int64(4)},
-		{`LEN("hello world")`, int64(11)},
-		{`LEN(1)`, "argument to `len` not supported, got INTEGER"},
+		{`LEN("");`, int64(0)},
+		{`LEN("four");`, int64(4)},
+		{`LEN("hello world");`, int64(11)},
+		{`LEN(1);`, "argument to `len` not supported, got INTEGER"},
 
 		// LEFT
-		{`LEFT("abcdef", 2)`, "ab"},
-		{`LEFT("abc", 5)`, "abc"},
-		{`LEFT("abc", 3)`, "abc"},
-		{`LEFT("abc", 0)`, ""},
-		{`LEFT("abc", -1)`, ""},
-		{`LEFT(123, 1)`, "argument 1 to `LEFT` must be STRING, got INTEGER"},
-		{`LEFT("abc", "a")`, "argument 2 to `LEFT` must be INTEGER, got STRING"},
-		{`LEFT("abc")`, "wrong number of arguments for LEFT. got=1, want=2"},
+		{`LEFT("abcdef", 2);`, "ab"},
+		{`LEFT("abc", 5);`, "abc"},
+		{`LEFT("abc", 3);`, "abc"},
+		{`LEFT("abc", 0);`, ""},
+		{`LEFT("abc", -1);`, ""},
+		{`LEFT(123, 1);`, "argument 1 to `LEFT` must be STRING, got INTEGER"},
+		{`LEFT("abc", "a");`, "argument 2 to `LEFT` must be INTEGER, got STRING"},
+		{`LEFT("abc");`, "wrong number of arguments for LEFT. got=1, want=2"},
 
 		// RIGHT
-		{`RIGHT("abcdef", 2)`, "ef"},
-		{`RIGHT("abc", 5)`, "abc"},
-		{`RIGHT("abc", 3)`, "abc"},
-		{`RIGHT("abc", 0)`, ""},
-		{`RIGHT("abc", -1)`, ""},
-		{`RIGHT(123, 1)`, "argument 1 to `RIGHT` must be STRING, got INTEGER"},
-		{`RIGHT("abc", "a")`, "argument 2 to `RIGHT` must be INTEGER, got STRING"},
-		{`RIGHT("abc")`, "wrong number of arguments for RIGHT. got=1, want=2"},
+		{`RIGHT("abcdef", 2);`, "ef"},
+		{`RIGHT("abc", 5);`, "abc"},
+		{`RIGHT("abc", 3);`, "abc"},
+		{`RIGHT("abc", 0);`, ""},
+		{`RIGHT("abc", -1);`, ""},
+		{`RIGHT(123, 1);`, "argument 1 to `RIGHT` must be STRING, got INTEGER"},
+		{`RIGHT("abc", "a");`, "argument 2 to `RIGHT` must be INTEGER, got STRING"},
+		{`RIGHT("abc");`, "wrong number of arguments for RIGHT. got=1, want=2"},
 
 		// MID
-		{`MID("abcdef", 3, 2)`, "bc"},
-		{`MID("abcdef", 4, 3)`, "cde"},
-		{`MID("abcdef", 4, 5)`, "cdef"}, // Length goes past end of string
-		{`MID("abcdef", 2, 1)`, "a"},
-		{`MID("abcdef", 10, 1)`, ""}, // Position out of bounds
-		{`MID("abcdef", 2, 7)`, ""},  // Position out of bounds
-		{`MID("abcdef", 2, 0)`, ""},  // Position out of bounds (<=0)
-		{`MID("abcdef", 0, 2)`, ""},  // Length is 0
-		{`MID("abcdef", -1, 2)`, ""}, // Length is negative
-		{`MID(123, 1, 1)`, "argument 1 to `MID` must be STRING, got INTEGER"},
-		{`MID("abc", "a", 1)`, "argument 2 to `MID` must be INTEGER, got STRING"},
-		{`MID("abc", 1, "a")`, "argument 3 to `MID` must be INTEGER, got STRING"},
-		{`MID("abc", 1)`, "wrong number of arguments for MID. got=2, want=3"},
+		{`MID("abcdef", 2, 3);`, "cd"},    // MID(IN, L, P) -> MID("abcdef", Length=2, Pos=3)
+		{`MID("abcdef", 3, 4);`, "def"},   // MID("abcdef", L=3, P=4)
+		{`MID("abcdef", 5, 4);`, "def"},   // Length goes past end of string
+		{`MID("abcdef", 1, 2);`, "b"},     // MID("abcdef", L=1, P=2)
+		{`MID("abcdef", 1, 10);`, ""},     // Position out of bounds
+		{`MID("abcdef", 7, 2);`, "bcdef"}, // Length goes past end of string
+		{`MID("abcdef", 2, 0);`, ""},      // Position out of bounds (<=0)
+		{`MID("abcdef", 0, 2);`, ""},      // Length is 0
+		{`MID("abcdef", -1, 2);`, ""},     // Length is negative
+		{`MID(123, 1, 1);`, "argument 1 to `MID` must be STRING, got INTEGER"},
+		{`MID("abc", "a", 1);`, "argument 2 to `MID` must be INTEGER, got STRING"},
+		{`MID("abc", 1, "a");`, "argument 3 to `MID` must be INTEGER, got STRING"},
+		{`MID("abc", 1);`, "wrong number of arguments for MID. got=2, want=3"},
 
 		// FIND
-		{`FIND("abcdef", "cd")`, int64(3)},
-		{`FIND("abcdef", "a")`, int64(1)},
-		{`FIND("abcdef", "f")`, int64(6)},
-		{`FIND("abcdef", "xyz")`, int64(0)},
-		{`FIND("abcdef", "")`, int64(1)},
-		{`FIND("", "a")`, int64(0)},
-		{`FIND("abc", 1)`, "argument 2 to `FIND` must be STRING, got INTEGER"},
-		{`FIND("abc")`, "wrong number of arguments for FIND. got=2, want=2"},
+		{`FIND("abcdef", "cd");`, int64(3)},
+		{`FIND("abcdef", "a");`, int64(1)},
+		{`FIND("abcdef", "f");`, int64(6)},
+		{`FIND("abcdef", "xyz");`, int64(0)},
+		{`FIND("abcdef", "");`, int64(1)},
+		{`FIND("", "a");`, int64(0)},
+		{`FIND("abc", 1);`, "argument 2 to `FIND` must be STRING, got INTEGER"},
+		{`FIND("abc");`, "wrong number of arguments for FIND. got=2, want=2"},
 
 		// REPLACE
-		{`REPLACE("abcdef", "XX", 2, 3)`, "abXXef"},   // Standard replace
-		{`REPLACE("abcdef", "XX", 0, 3)`, "abXXcdef"}, // Insert (L=0)
-		{`REPLACE("abcdef", "", 2, 3)`, "abef"},       // Delete (IN2 is empty)
-		{`REPLACE("abc", "XX", 4, 2)`, "aXX"},         // L is larger than remaining string
-		{`REPLACE("abc", "XX", 2, 1)`, "XXc"},         // Replace at start
-		{`REPLACE("abc", "XX", 2, 4)`, "abcXX"},       // P is out of bounds (append)
-		{`REPLACE("abc", "XX", 2, 0)`, "XXc"},         // P < 1, treated as P=1
-		{`REPLACE("abc", "XX", -1, 2)`, "aXXbc"},      // L < 0, treated as L=0 (insert)
-		{`REPLACE(1, "a", 1, 1)`, "argument 1 to `REPLACE` must be STRING, got INTEGER"},
-		{`REPLACE("a", 1, 1, 1)`, "argument 2 to `REPLACE` must be STRING, got INTEGER"},
-		{`REPLACE("a", "b", "c", 1)`, "argument 3 to `REPLACE` must be INTEGER, got STRING"},
-		{`REPLACE("a", "b", 1, "d")`, "argument 4 to `REPLACE` must be INTEGER, got STRING"},
-		{`REPLACE("a", "b", 1)`, "wrong number of arguments for REPLACE. got=3, want=4"},
+		{`REPLACE("abcdef", "XX", 2, 3);`, "abXXef"},   // Standard replace
+		{`REPLACE("abcdef", "XX", 0, 3);`, "abXXcdef"}, // Insert (L=0)
+		{`REPLACE("abcdef", "", 2, 3);`, "abef"},       // Delete (IN2 is empty)
+		{`REPLACE("abc", "XX", 4, 2);`, "aXX"},         // L is larger than remaining string
+		{`REPLACE("abc", "XX", 2, 1);`, "XXc"},         // Replace at start
+		{`REPLACE("abc", "XX", 2, 4);`, "abcXX"},       // P is out of bounds (append)
+		{`REPLACE("abc", "XX", 2, 0);`, "XXc"},         // P < 1, treated as P=1
+		{`REPLACE("abc", "XX", -1, 2);`, "aXXbc"},      // L < 0, treated as L=0 (insert)
+		{`REPLACE(1, "a", 1, 1);`, "argument 1 to `REPLACE` must be STRING, got INTEGER"},
+		{`REPLACE("a", 1, 1, 1);`, "argument 2 to `REPLACE` must be STRING, got INTEGER"},
+		{`REPLACE("a", "b", "c", 1);`, "argument 3 to `REPLACE` must be INTEGER, got STRING"},
+		{`REPLACE("a", "b", 1, "d");`, "argument 4 to `REPLACE` must be INTEGER, got STRING"},
+		{`REPLACE("a", "b", 1);`, "wrong number of arguments for REPLACE. got=3, want=4"},
 
 		// CONCAT (for strings)
-		{`CONCAT("a", "b", "c")`, "abc"},
-		{`CONCAT("Hello, ", "World!")`, "Hello, World!"},
-		{`CONCAT("one")`, "one"},
-		{`CONCAT("", "a")`, "a"},
-		{`CONCAT("a", "")`, "a"},
-		{`CONCAT("", "")`, ""},
-		{`CONCAT("a", 1)`, "all arguments to `CONCAT` must be of the same type (STRING), got INTEGER"},
+		{`CONCAT("a", "b", "c");`, "abc"},
+		{`CONCAT("Hello, ", "World!");`, "Hello, World!"},
+		{`CONCAT("one");`, "one"},
+		{`CONCAT("", "a");`, "a"},
+		{`CONCAT("a", "");`, "a"},
+		{`CONCAT("", "");`, ""},
+		{`CONCAT("a", 1);`, "all arguments to `CONCAT` must be of the same type (STRING), got INTEGER"},
 
 		// DELETE (for strings)
-		{`DELETE("abcdef", 2, 3)`, "abef"},
-		{`DELETE("abcdef", 10, 2)`, "a"},
-		{`DELETE("abcdef", 2, 1)`, "cdef"},
-		{`DELETE("abcdef", 2, 6)`, "abcde"},
-		{`DELETE("abc", 1, 4)`, "abc"}, // Position out of bounds
-		{`DELETE("abc", 0, 1)`, "abc"}, // Length is 0
-		{`DELETE(123, 1, 1)`, "argument 1 to `DELETE` must be ARRAY or STRING, got INTEGER"},
-		{`DELETE("abc", "a", 1)`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
+		{`DELETE("abcdef", 2, 3);`, "abef"},
+		{`DELETE("abcdef", 10, 2);`, "a"},
+		{`DELETE("abcdef", 2, 1);`, "cdef"},
+		{`DELETE("abcdef", 2, 6);`, "abcde"},
+		{`DELETE("abc", 1, 4);`, "abc"}, // Position out of bounds
+		{`DELETE("abc", 0, 1);`, "abc"}, // Length is 0
+		{`DELETE(123, 1, 1);`, "argument 1 to `DELETE` must be ARRAY or STRING, got INTEGER"},
+		{`DELETE("abc", "a", 1);`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
 
 		// INSERT (for strings)
-		{`INSERT("abcdef", "XX", 3)`, "abXXcdef"},
-		{`INSERT("abc", "XX", 1)`, "XXabc"},
-		{`INSERT("abc", "XX", 4)`, "abcXX"},
-		{`INSERT("abc", "XX", 5)`, "abcXX"}, // Position > length, appends
-		{`INSERT("abc", "XX", 0)`, "XXabc"}, // Position < 1, prepends
-		{`INSERT(123, "a", 1)`, "argument 1 to `INSERT` must be ARRAY or STRING, got INTEGER"},
-		{`DELETE("abc", "a", 1)`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
+		{`INSERT("abcdef", "XX", 3);`, "abXXcdef"},
+		{`INSERT("abc", "XX", 1);`, "XXabc"},
+		{`INSERT("abc", "XX", 4);`, "abcXX"},
+		{`INSERT("abc", "XX", 5);`, "abcXX"}, // Position > length, appends
+		{`INSERT("abc", "XX", 0);`, "XXabc"}, // Position < 1, prepends
+		{`INSERT(123, "a", 1);`, "argument 1 to `INSERT` must be ARRAY or STRING, got INTEGER"},
+		{`DELETE("abc", "a", 1);`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
 	}
 
 	for _, tt := range tests {
@@ -2590,49 +2474,49 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		expected interface{}
 	}{
 		// INSERT
-		{`INSERT([1, 2, 3], 99, 2)`, []int{1, 99, 2, 3}},
-		{`INSERT([1, 2, 3], 99, 1)`, []int{99, 1, 2, 3}},
-		{`INSERT([1, 2, 3], 99, 4)`, []int{1, 2, 3, 99}},
-		{`INSERT([], 99, 1)`, []int{99}},
-		{`INSERT([1], 99, 5)`, []int{1, 99}}, // Position > length, appends
-		{`INSERT([1], 99, 0)`, []int{99, 1}}, // Position < 1, prepends
-		{`INSERT(1, 2, 3)`, "argument 1 to `INSERT` must be ARRAY, got INTEGER"},
-		{`INSERT([], 1, "a")`, "argument 3 to `INSERT` must be INTEGER, got STRING"},
-		{`INSERT([], 1)`, "wrong number of arguments for INSERT. got=2, want=3"},
+		{`INSERT([1, 2, 3], 99, 2);`, []int{1, 99, 2, 3}},
+		{`INSERT([1, 2, 3], 99, 1);`, []int{99, 1, 2, 3}},
+		{`INSERT([1, 2, 3], 99, 4);`, []int{1, 2, 3, 99}},
+		{`INSERT([], 99, 1);`, []int{99}},
+		{`INSERT([1], 99, 5);`, []int{1, 99}}, // Position > length, appends
+		{`INSERT([1], 99, 0);`, []int{99, 1}}, // Position < 1, prepends
+		{`INSERT(1, 2, 3);`, "argument 1 to `INSERT` must be ARRAY, got INTEGER"},
+		{`INSERT([], 1, "a");`, "argument 3 to `INSERT` must be INTEGER, got STRING"},
+		{`INSERT([], 1);`, "wrong number of arguments for INSERT. got=2, want=3"},
 
 		// DELETE
-		{`DELETE([1, 2, 3, 4], 2, 2)`, []int{1, 4}},
-		{`DELETE([1, 2, 3], 1, 1)`, []int{2, 3}},
-		{`DELETE([1, 2, 3], 3, 1)`, []int{}},
-		{`DELETE([1, 2, 3], 5, 1)`, []int{}}, // Length > array size
-		{`DELETE([1, 2, 3], 2, 3)`, []int{1, 2}},
-		{`DELETE([1, 2, 3], 1, 4)`, []int{1, 2, 3}},  // Position out of bounds
-		{`DELETE([1, 2, 3], 1, 0)`, []int{1, 2, 3}},  // Position out of bounds
-		{`DELETE([1, 2, 3], 0, 1)`, []int{1, 2, 3}},  // Length is 0
-		{`DELETE([1, 2, 3], -1, 1)`, []int{1, 2, 3}}, // Length is negative
-		{`DELETE(1, 2, 3)`, "argument 1 to `DELETE` must be ARRAY, got INTEGER"},
-		{`DELETE([], "a", 1)`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
-		{`DELETE([], 1, "a")`, "argument 3 to `DELETE` must be INTEGER, got STRING"},
-		{`DELETE([], 1)`, "wrong number of arguments for DELETE. got=2, want=3"},
+		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}},
+		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},
+		{`DELETE([1, 2, 3], 3, 1);`, []int{}},
+		{`DELETE([1, 2, 3], 5, 1);`, []int{}}, // Length > array size
+		{`DELETE([1, 2, 3], 2, 3);`, []int{1, 2}},
+		{`DELETE([1, 2, 3], 1, 4);`, []int{1, 2, 3}},  // Position out of bounds
+		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}},  // Position out of bounds
+		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}},  // Length is 0
+		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}}, // Length is negative
+		{`DELETE(1, 2, 3);`, "argument 1 to `DELETE` must be ARRAY, got INTEGER"},
+		{`DELETE([], "a", 1);`, "argument 2 to `DELETE` must be INTEGER, got STRING"},
+		{`DELETE([], 1, "a");`, "argument 3 to `DELETE` must be INTEGER, got STRING"},
+		{`DELETE([], 1);`, "wrong number of arguments for DELETE. got=2, want=3"},
 
 		// CONCAT
-		{`CONCAT([1, 2], [3, 4])`, []int{1, 2, 3, 4}},
-		{`CONCAT([1], [2], [3], [4])`, []int{1, 2, 3, 4}},
-		{`CONCAT([1, 2])`, []int{1, 2}},
-		{`CONCAT([], [1])`, []int{1}},
-		{`CONCAT([1], [])`, []int{1}},
-		{`CONCAT([], [])`, []int{}},
-		{`CONCAT()`, "wrong number of arguments for CONCAT. got=0, want>=1"},
-		{`CONCAT([1], 2)`, "all arguments to `CONCAT` must be ARRAY, got INTEGER"},
+		{`CONCAT([1, 2], [3, 4]);`, []int{1, 2, 3, 4}},
+		{`CONCAT([1], [2], [3], [4]);`, []int{1, 2, 3, 4}},
+		{`CONCAT([1, 2]);`, []int{1, 2}},
+		{`CONCAT([], [1]);`, []int{1}},
+		{`CONCAT([1], []);`, []int{1}},
+		{`CONCAT([], []);`, []int{}},
+		{`CONCAT();`, "wrong number of arguments for CONCAT. got=0, want>=1"},
+		{`CONCAT([1], 2);`, "all arguments to `CONCAT` must be ARRAY, got INTEGER"},
 
 		// FIND (for arrays)
-		{`FIND([1, 2, 3], 2)`, int64(2)},
-		{`FIND([1, 2, 3], 4)`, int64(0)},
-		{`FIND(["a", "b", "c"], "b")`, int64(2)},
-		{`FIND(["a", "b", "c"], "d")`, int64(0)},
-		{`FIND([], 1)`, int64(0)},
-		{`FIND([1, 2, 3], "a")`, int64(0)}, // Type mismatch, not found
-		{`FIND(1, 1)`, "BUILTIN ERROR: argument 1 to `FIND` must be STRING or ARRAY, got INTEGER"},
+		{`FIND([1, 2, 3], 2);`, int64(2)},
+		{`FIND([1, 2, 3], 4);`, int64(0)},
+		{`FIND(["a", "b", "c"], "b");`, int64(2)},
+		{`FIND(["a", "b", "c"], "d");`, int64(0)},
+		{`FIND([], 1);`, int64(0)},
+		{`FIND([1, 2, 3], "a");`, int64(0)}, // Type mismatch, not found
+		{`FIND(1, 1);`, "BUILTIN ERROR: argument 1 to `FIND` must be STRING or ARRAY, got INTEGER"},
 	}
 
 	for _, tt := range tests {
@@ -2662,78 +2546,110 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 	}
 }
 
-func TestBuiltinSelectionFunctions(t *testing.T) {
+func TestMuxFunction(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected interface{}
 	}{
-		// LIMIT
-		{"LIMIT(10, 5, 20)", int64(10)},   // below min
-		{"LIMIT(10, 15, 20)", int64(15)},  // within range
-		{"LIMIT(10, 25, 20)", int64(20)},  // above max
-		{"LIMIT(10.0, 5.0, 20.0)", 10.0},  // reals, below min
-		{"LIMIT(10.0, 15.0, 20.0)", 15.0}, // reals, within range
-		{"LIMIT(10.0, 25.0, 20.0)", 20.0}, // reals, above max
-		{"LIMIT(10, 15.5, 20)", 15.5},     // mixed types, promotion
-		{"LIMIT(10, 5, 20.5)", 10.0},      // mixed types, promotion
-		{"LIMIT(10, 25, 20.5)", 20.5},     // mixed types, promotion
-		{"LIMIT(10, TRUE, 20)", "BUILTIN ERROR: all arguments to `LIMIT` must be INTEGER or REAL, got BOOLEAN"},
-		{"LIMIT(10, 5)", "BUILTIN ERROR: wrong number of arguments for LIMIT. got=2, want=3"},
+		// Integer selection
+		{"MUX(0, 100, 101, 102);", int64(100)},
+		{"MUX(1, 100, 101, 102);", int64(101)},
+		{"MUX(2, 100, 101, 102);", int64(102)},
 
-		// SEL
-		{`SEL(FALSE, 10, 20)`, int64(10)},
-		{`SEL(TRUE, 10, 20)`, int64(20)},
-		{`SEL(FALSE, "a", "b")`, "a"},
-		{`SEL(TRUE, "a", "b")`, "b"},
-		{`SEL(1, 10, 20)`, "BUILTIN ERROR: argument 1 to `SEL` must be BOOLEAN, got INTEGER"},
-		{`SEL(TRUE, 10, "b")`, "BUILTIN ERROR: arguments 2 and 3 to `SEL` must be of the same type, got INTEGER and STRING"},
-		{`SEL(TRUE, 10)`, "BUILTIN ERROR: wrong number of arguments for SEL. got=2, want=3"},
+		// Real selection
+		{"MUX(1, 10.5, 20.5, 30.5);", 20.5},
 
-		// MUX
-		{`MUX(0, 100, 101, 102)`, int64(100)},
-		{`MUX(1, 100, 101, 102)`, int64(101)},
-		{`MUX(2, 100, 101, 102)`, int64(102)},
-		{`MUX(1, "a", "b", "c")`, "b"},
-		{`MUX(3, 100, 101, 102)`, "BUILTIN ERROR: index 3 out of bounds for MUX with 3 inputs"},
-		{`MUX(-1, 100, 101, 102)`, "BUILTIN ERROR: index -1 out of bounds for MUX"},
-		{`MUX(0.5, 100, 101)`, "BUILTIN ERROR: argument 1 to `MUX` must be INTEGER, got REAL"},
-		{`MUX(0, 100, "a")`, "BUILTIN ERROR: all value arguments to `MUX` must be of the same type, got STRING but expected INTEGER"},
-		{`MUX(0)`, "BUILTIN ERROR: wrong number of arguments for MUX. got=1, want>=2"},
-	}
+		// String selection
+		{`MUX(0, "a", "b", "c");`, "a"},
+		{`MUX(2, "a", "b", "c");`, "c"},
 
-	// Register functions for testing
-	builtins["LIMIT"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-		if len(args) != 3 {
-			return newBuiltinError("wrong number of arguments for LIMIT. got=%d, want=3", len(args))
-		}
-		return limitBuiltin(args[0], args[1], args[2])
-	}}
-	builtins["SEL"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-		if len(args) != 3 {
-			return newBuiltinError("wrong number of arguments for SEL. got=%d, want=3", len(args))
-		}
-		return selBuiltin(args[0], args[1], args[2])
-	}}
-	// The MUX built-in is now in the main map, but for test isolation, we can ensure it's here.
-	if _, ok := builtins["MUX"]; !ok {
-		builtins["MUX"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-			return muxBuiltin(args...)
-		}}
+		// Boolean selection
+		{"MUX(1, FALSE, TRUE);", true},
+
+		// Selection with expression as selector
+		{"MUX(1+1, 10, 20, 30);", int64(30)},
+
+		// Error cases
+		{"MUX(3, 100, 101, 102);", "index 3 out of bounds for MUX with 3 inputs"},
+		{"MUX(-1, 100, 101, 102);", "index -1 out of bounds for MUX"},
+		{"MUX(0.5, 100, 101);", "argument 1 to `MUX` must be INTEGER, got REAL"},
+		{`MUX(0, 100, "a");`, "all value arguments to `MUX` must be of the same type, got STRING but expected INTEGER"},
+		{"MUX(0);", "wrong number of arguments for MUX. got=1, want>=2"},
+		{"MUX();", "wrong number of arguments for MUX. got=0, want>=2"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
-
 			switch expected := tt.expected.(type) {
 			case int64:
 				testIntegerObject(t, evaluated, expected)
 			case float64:
 				testRealObject(t, evaluated, expected)
+			case bool:
+				testBooleanObject(t, evaluated, expected)
 			case string:
-				// Can be a string result or an error message
-				if _, ok := evaluated.(*object.Error); ok {
-					testErrorObject(t, evaluated, expected)
+				if err, ok := evaluated.(*object.Error); ok {
+					if !strings.Contains(err.Message, expected) {
+						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
+					}
+				} else {
+					testStringObject(t, evaluated, expected)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
+}
+
+func TestSelFunction(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Integer selection
+		{"SEL(FALSE, 10, 20);", int64(10)},
+		{"SEL(TRUE, 10, 20);", int64(20)},
+
+		// Real selection
+		{"SEL(FALSE, 10.5, 20.5);", 10.5},
+		{"SEL(TRUE, 10.5, 20.5);", 20.5},
+
+		// Boolean selection
+		{"SEL(FALSE, TRUE, FALSE);", true},
+		{"SEL(TRUE, TRUE, FALSE);", false},
+
+		// String selection
+		{`SEL(FALSE, "hello", "world");`, "hello"},
+		{`SEL(TRUE, "hello", "world");`, "world"},
+
+		// Selection with expressions
+		{"SEL(1 > 0, 5+5, 10+10);", int64(20)},
+		{"SEL(1 < 0, 5+5, 10+10);", int64(10)},
+
+		// Error cases
+		{"SEL(1, 10, 20);", "argument 1 to `SEL` must be BOOLEAN, got INTEGER"},
+		{`SEL(TRUE, 10, "world");`, "arguments 2 and 3 to `SEL` must be of the same type, got INTEGER and STRING"},
+		{"SEL(TRUE, 10);", "wrong number of arguments for SEL. got=2, want=3"},
+		{"SEL(TRUE, 10, 20, 30);", "wrong number of arguments for SEL. got=4, want=3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(t, tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case bool:
+				testBooleanObject(t, evaluated, expected)
+			case string:
+				if err, ok := evaluated.(*object.Error); ok {
+					if !strings.Contains(err.Message, expected) {
+						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
+					}
 				} else {
 					testStringObject(t, evaluated, expected)
 				}
@@ -2750,38 +2666,38 @@ func TestBitwiseOperators(t *testing.T) {
 		expected interface{}
 	}{
 		// NOT
-		{"NOT BYTE#16#A5", uint64(0x5A)},
-		{"NOT WORD#16#FF00", uint64(0x00FF)},
-		{"NOT DWORD#16#FFFF0000", uint64(0x0000FFFF)},
-		{"NOT LWORD#16#FFFFFFFF00000000", uint64(0x00000000FFFFFFFF)},
-		{"NOT 123", "ERROR (1:1): unknown operator: -INTEGER"}, // NOT is repurposed from bang, which becomes minus for int
+		{"NOT BYTE#16#A5;", uint64(0x5A)},
+		{"NOT WORD#16#FF00;", uint64(0x00FF)},
+		{"NOT DWORD#16#FFFF0000;", uint64(0x0000FFFF)},
+		{"NOT LWORD#16#FFFFFFFF00000000;", uint64(0x00000000FFFFFFFF)},
+		{"NOT 123;", "ERROR (1:1): unknown operator: -INTEGER"}, // NOT is repurposed from bang, which becomes minus for int
 
 		// AND
-		{"BYTE#16#A5 AND BYTE#16#F0", uint64(0xA0)},
-		{"WORD#16#1234 AND WORD#16#FFFF", uint64(0x1234)},
-		{"WORD#16#1234 & WORD#16#00FF", uint64(0x0034)}, // Test with '&' alias
+		{"BYTE#16#A5 AND BYTE#16#F0;", uint64(0xA0)},
+		{"WORD#16#1234 AND WORD#16#FFFF;", uint64(0x1234)},
+		{"WORD#16#1234 & WORD#16#00FF;", uint64(0x0034)}, // Test with '&' alias
 
 		// OR
-		{"BYTE#16#A5 OR BYTE#16#F0", uint64(0xF5)},
-		{"WORD#16#1234 OR WORD#16#00FF", uint64(0x12FF)},
+		{"BYTE#16#A5 OR BYTE#16#F0;", uint64(0xF5)},
+		{"WORD#16#1234 OR WORD#16#00FF;", uint64(0x12FF)},
 
 		// XOR
-		{"BYTE#16#A5 XOR BYTE#16#F0", uint64(0x55)},
-		{"WORD#16#1234 XOR WORD#16#FFFF", uint64(0xEDCB)},
+		{"BYTE#16#A5 XOR BYTE#16#F0;", uint64(0x55)},
+		{"WORD#16#1234 XOR WORD#16#FFFF;", uint64(0xEDCB)},
 
 		// NAND
-		{"BYTE#16#A5 NAND BYTE#16#F0", uint64(0x5F)}, // NOT (A5 & F0) -> NOT(A0) -> 5F
+		{"BYTE#16#A5 NAND BYTE#16#F0;", uint64(0x5F)}, // NOT (A5 & F0) -> NOT(A0) -> 5F
 
 		// NOR
-		{"BYTE#16#A5 NOR BYTE#16#F0", uint64(0x0A)}, // NOT (A5 | F0) -> NOT(F5) -> 0A
+		{"BYTE#16#A5 NOR BYTE#16#F0;", uint64(0x0A)}, // NOT (A5 | F0) -> NOT(F5) -> 0A
 
 		// Combinations
-		{"(BYTE#16#A5 OR BYTE#16#0F) AND BYTE#16#F0", uint64(0xA0)},
-		{"NOT (BYTE#16#A5 AND BYTE#16#F0)", uint64(0x5F)},
+		{"(BYTE#16#A5 OR BYTE#16#0F) AND BYTE#16#F0;", uint64(0xA0)},
+		{"NOT (BYTE#16#A5 AND BYTE#16#F0);", uint64(0x5F)},
 
 		// Error cases
-		{"BYTE#16#A5 AND WORD#16#F0", "ERROR (1:1): type mismatch: bitstring operands must have same width, got 8 and 16"},
-		{"BYTE#16#A5 OR 10", "ERROR (1:1): type mismatch: BITSTRING OR INTEGER"},
+		{"BYTE#16#A5 AND WORD#16#F0;", "ERROR (1:1): type mismatch: bitstring operands must have same width, got 8 and 16"},
+		{"BYTE#16#A5 OR 10;", "ERROR (1:1): type mismatch: BITSTRING OR INTEGER"},
 	}
 
 	for _, tt := range tests {
@@ -2821,14 +2737,14 @@ func TestBuiltinMove(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{"MOVE(5)", int64(5)},
-		{"MOVE(10.5)", 10.5},
-		{"MOVE(TRUE)", true},
-		{`MOVE("hello")`, "hello"},
-		{"MOVE(T#5s)", 5 * time.Second},
-		{"MOVE(BYTE#16#FF)", uint64(0xFF)},
-		{"MOVE()", "BUILTIN ERROR: wrong number of arguments for MOVE. got=0, want=1"},
-		{"MOVE(1, 2)", "BUILTIN ERROR: wrong number of arguments for MOVE. got=2, want=1"},
+		{"MOVE(5);", int64(5)},
+		{"MOVE(10.5);", 10.5},
+		{"MOVE(TRUE);", true},
+		{`MOVE("hello");`, "hello"},
+		{"MOVE(T#5s);", 5 * time.Second},
+		{"MOVE(BYTE#16#FF);", uint64(0xFF)},
+		{"MOVE();", "BUILTIN ERROR: wrong number of arguments for MOVE. got=0, want=1"},
+		{"MOVE(1, 2);", "BUILTIN ERROR: wrong number of arguments for MOVE. got=2, want=1"},
 	}
 
 	for _, tt := range tests {
@@ -3302,6 +3218,7 @@ func testEvalWithPi(t *testing.T, input string) object.Object {
 	program := p.ParseProgram()
 	env := object.NewEnvironment()
 	env.Set("PI", &object.Real{Value: math.Pi})
+	checkEvaluatorErrors(t, p, t.Name(), input)
 	return Eval(program, env)
 }
 
@@ -3312,21 +3229,43 @@ func testEvalWithBuiltinVars(t *testing.T, input string) object.Object {
 	env := object.NewEnvironment()
 	env.Set("PI", &object.Real{Value: math.Pi})
 	env.Set("E", &object.Real{Value: math.E})
+	checkEvaluatorErrors(t, p, t.Name(), input)
 	return Eval(program, env)
 }
 
 func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
-	result, ok := obj.(*object.Integer)
-	if !ok {
-		t.Errorf("object is not Integer. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%d, want=%d",
-			result.Value, expected)
-		return false
+	var val int64
+	var ok bool
+
+	switch o := obj.(type) {
+	case *object.SInt:
+		val, ok = int64(o.Value), true
+	case *object.Int:
+		val, ok = int64(o.Value), true
+	case *object.DInt:
+		val, ok = int64(o.Value), true
+	case *object.LInt:
+		val, ok = o.Value, true
+	case *object.USInt:
+		val, ok = int64(o.Value), true
+	case *object.UInt:
+		val, ok = int64(o.Value), true
+	case *object.UDInt:
+		val, ok = int64(o.Value), true
+	case *object.ULInt:
+		val, ok = int64(o.Value), true
+	default:
+		ok = false
 	}
 
+	if !ok {
+		t.Errorf("object is not a supported Integer type. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if val != expected {
+		t.Errorf("object has wrong value. got=%d, want=%d", val, expected)
+		return false
+	}
 	return true
 }
 

@@ -23,7 +23,6 @@ import (
 type ObjectType string
 
 const (
-	INTEGER_OBJ                 = "INTEGER"
 	SINT_OBJ                    = "SINT"
 	INT_OBJ                     = "INT"
 	DINT_OBJ                    = "DINT"
@@ -86,19 +85,10 @@ const (
 	ANY_DATE       = "ANY_DATE"
 )
 
-// Object is the interface that all objects in the Monkey language must implement.
 type Object interface {
 	Type() ObjectType
 	Inspect() string
 }
-
-// Integer objects store 64-bit integers.
-type Integer struct {
-	Value int64
-}
-
-func (i *Integer) Type() ObjectType { return INTEGER_OBJ }
-func (i *Integer) Inspect() string  { return fmt.Sprintf("%d", i.Value) }
 
 // SInt objects store 8-bit signed integers.
 type SInt struct {
@@ -180,7 +170,7 @@ func (n *Null) Inspect() string  { return "null" }
 
 // ReturnValue objects wrap other objects to signal a return from a function.
 type ReturnValue struct {
-	Value Object
+	Value Object // The value being returned.
 }
 
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_OBJ }
@@ -285,20 +275,13 @@ func (ao *Array) Inspect() string {
 	return out.String()
 }
 
-// HashKey is a struct used as a key in a hash map.
 type HashKey struct {
 	Type  ObjectType
 	Value uint64
 }
 
-// Hashable is an interface for objects that can be used as hash keys.
 type Hashable interface {
 	HashKey() HashKey
-}
-
-// HashKey implementations for Integer, Boolean, String.
-func (i *Integer) HashKey() HashKey {
-	return HashKey{Type: i.Type(), Value: uint64(i.Value)}
 }
 
 func (si *SInt) HashKey() HashKey { return HashKey{Type: si.Type(), Value: uint64(si.Value)} }
@@ -374,7 +357,7 @@ func (et *EnumeratedType) Inspect() string {
 
 // SubrangeType represents the definition of a subrange type.
 type SubrangeType struct {
-	Name       string
+	Name       string // The name of the subrange type.
 	BaseType   ObjectType
 	LowerBound int64
 	UpperBound int64
@@ -382,8 +365,7 @@ type SubrangeType struct {
 
 func (st *SubrangeType) Type() ObjectType { return SUBRANGE_TYPE_OBJ }
 func (st *SubrangeType) Inspect() string {
-	return fmt.Sprintf("SUBRANGE %s (%s..%s)", st.BaseType,
-		(&Integer{Value: st.LowerBound}).Inspect(), (&Integer{Value: st.UpperBound}).Inspect())
+	return fmt.Sprintf("SUBRANGE %s (%d..%d)", st.BaseType, st.LowerBound, st.UpperBound)
 }
 
 // EnumeratedValue represents a single value from an enumerated type.

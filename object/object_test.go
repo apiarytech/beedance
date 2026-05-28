@@ -18,7 +18,7 @@ func TestStringHashKey(t *testing.T) {
 	}{
 		{"same value", &String{Value: "Hello World"}, &String{Value: "Hello World"}, true},
 		{"different value", &String{Value: "Hello World"}, &String{Value: "My name is johnny"}, false},
-		{"different types", &String{Value: "1"}, &Integer{Value: 1}, false},
+		{"different types", &String{Value: "1"}, &LInt{Value: 1}, false},
 	}
 
 	for _, tt := range tests {
@@ -58,9 +58,9 @@ func TestIntegerHashKey(t *testing.T) {
 		a, b      Object
 		wantEqual bool
 	}{
-		{"same value", &Integer{Value: 1}, &Integer{Value: 1}, true},
-		{"different value", &Integer{Value: 1}, &Integer{Value: 2}, false},
-		{"different types", &Integer{Value: 1}, &String{Value: "1"}, false},
+		{"same value", &LInt{Value: 1}, &LInt{Value: 1}, true},
+		{"different value", &LInt{Value: 1}, &LInt{Value: 2}, false},
+		{"different types", &LInt{Value: 1}, &String{Value: "1"}, false},
 	}
 
 	for _, tt := range tests {
@@ -190,7 +190,7 @@ func TestSimpleObjectInspection(t *testing.T) {
 		{"Null", &Null{}, NULL_OBJ, "null"},
 		{"Real positive", &Real{Value: 3.14}, REAL_OBJ, "3.140000"},
 		{"Real negative", &Real{Value: -123.45}, REAL_OBJ, "-123.450000"},
-		{"ReturnValue", &ReturnValue{Value: &Integer{Value: 10}}, RETURN_VALUE_OBJ, "10"},
+		{"ReturnValue", &ReturnValue{Value: &LInt{Value: 10}}, RETURN_VALUE_OBJ, "10"},
 		{"Error", &Error{Message: "test error"}, ERROR_OBJ, "ERROR: test error"},
 		{"Builtin", &Builtin{Fn: func(args ...Object) Object { return nil }}, BUILTIN_OBJ, "builtin function"},
 		{"Quote", &Quote{Node: &ast.Identifier{Value: "myVar"}}, QUOTE_OBJ, "QUOTE(myVar)"},
@@ -215,7 +215,7 @@ func TestArrayObject(t *testing.T) {
 		obj         Object
 		wantInspect string
 	}{
-		{"populated array", &Array{Elements: []Object{&Integer{Value: 1}, &String{Value: "hello"}}}, "[1, hello]"},
+		{"populated array", &Array{Elements: []Object{&LInt{Value: 1}, &String{Value: "hello"}}}, "[1, hello]"},
 		{"empty array", &Array{Elements: []Object{}}, "[]"},
 	}
 
@@ -242,7 +242,7 @@ func TestHashObject(t *testing.T) {
 		{
 			name: "populated hash",
 			hash: &Hash{Pairs: map[HashKey]HashPair{
-				(&String{Value: "key1"}).HashKey(): {Key: &String{Value: "key1"}, Value: &Integer{Value: 1}},
+				(&String{Value: "key1"}).HashKey(): {Key: &String{Value: "key1"}, Value: &LInt{Value: 1}},
 				(&String{Value: "key2"}).HashKey(): {Key: &String{Value: "key2"}, Value: &Boolean{Value: false}},
 			}},
 			expectedSubstr: []string{"key1: 1", "key2: false"},
@@ -588,22 +588,22 @@ func TestBitStringHashKeys(t *testing.T) {
 		// Byte
 		{"same byte", &Byte{Value: 1}, &Byte{Value: 1}, true},
 		{"different byte", &Byte{Value: 1}, &Byte{Value: 2}, false},
-		{"byte vs integer", &Byte{Value: 1}, &Integer{Value: 1}, false},
+		{"byte vs integer", &Byte{Value: 1}, &LInt{Value: 1}, false},
 
 		// Word
 		{"same word", &Word{Value: 100}, &Word{Value: 100}, true},
 		{"different word", &Word{Value: 100}, &Word{Value: 200}, false},
-		{"word vs integer", &Word{Value: 100}, &Integer{Value: 100}, false},
+		{"word vs integer", &Word{Value: 100}, &LInt{Value: 100}, false},
 
 		// DWord
 		{"same dword", &DWord{Value: 1000}, &DWord{Value: 1000}, true},
 		{"different dword", &DWord{Value: 1000}, &DWord{Value: 2000}, false},
-		{"dword vs integer", &DWord{Value: 1000}, &Integer{Value: 1000}, false},
+		{"dword vs integer", &DWord{Value: 1000}, &LInt{Value: 1000}, false},
 
 		// LWord
 		{"same lword", &LWord{Value: 10000}, &LWord{Value: 10000}, true},
 		{"different lword", &LWord{Value: 10000}, &LWord{Value: 20000}, false},
-		{"lword vs integer", &LWord{Value: 10000}, &Integer{Value: 10000}, false},
+		{"lword vs integer", &LWord{Value: 10000}, &LInt{Value: 10000}, false},
 
 		// Cross bit-string types
 		{"byte vs word", &Byte{Value: 1}, &Word{Value: 1}, false},

@@ -108,7 +108,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 	// Expressions
 	case *ast.IntegerLiteral:
-		switch node.Type {
+		switch node.Token.Type {
 		case token.SINT:
 			return &object.SInt{Value: int8(node.Value)}
 		case token.INT:
@@ -118,11 +118,10 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		case token.LINT:
 			return &object.LInt{Value: node.Value}
 		default:
-			// Fallback for generic integer literals
-			return &object.Integer{Value: node.Value}
+			return &object.LInt{Value: node.Value}
 		}
 	case *ast.UnsignedIntegerLiteral:
-		switch node.Type {
+		switch node.Token.Type {
 		case token.USINT:
 			return &object.USInt{Value: uint8(node.Value)}
 		case token.UINT:
@@ -808,8 +807,8 @@ func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Envir
 			if isError(upper) {
 				return upper
 			}
-			lowerInt, okL := lower.(*object.Integer)
-			upperInt, okU := upper.(*object.Integer)
+			lowerInt, okL := lower.(*object.LInt)
+			upperInt, okU := upper.(*object.LInt)
 			if !okL || !okU {
 				return newError(decl, "subrange bounds must be integers")
 			}
@@ -924,7 +923,7 @@ func evalInfixExpression(
 
 func evalPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
 	switch node.Operator {
-	case "NOT":
+	case "NOT", "!":
 		return evalNotOperatorExpression(node, right)
 	case "-":
 		return evalMinusPrefixOperatorExpression(node, right)
@@ -950,12 +949,31 @@ func evalNotOperatorExpression(node *ast.PrefixExpression, right object.Object) 
 	}
 }
 func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	if right.Type() != object.INTEGER_OBJ {
+	if !isNumeric(right) {
 		return newError(node, "unknown operator: -%s", right.Type())
 	}
 
-	value := right.(*object.Integer).Value
-	return &object.Integer{Value: -value}
+	switch val := right.(type) {
+	case *object.SInt:
+		return &object.SInt{Value: -val.Value}
+	case *object.Int:
+		return &object.Int{Value: -val.Value}
+	case *object.DInt:
+		return &object.DInt{Value: -val.Value}
+	case *object.LInt:
+		return &object.LInt{Value: -val.Value}
+	case *object.Real:
+		return &object.Real{Value: -val.Value}
+	case *object.LReal:
+		return &object.LReal{Value: -val.Value}
+	// Negating an unsigned integer results in a signed integer of the same or larger size.
+	// We'll promote to the next signed size.
+	case *object.USInt:
+		return &object.SInt{Value: -int8(val.Value)}
+	case *object.UInt:
+		return &object.Int{Value: -int16(val.Value)}
+	}
+	return newError(node, "unknown operator: -%s", right.Type())
 }
 
 func evalBitStringPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
@@ -995,9 +1013,9 @@ func evalBooleanInfixExpression(
 		return nativeBoolToBooleanObject(leftVal || rightVal)
 	case "XOR":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "==":
+	case "=", "==":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=":
+	case "<>", "!=":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
 	default:
 		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
@@ -1121,9 +1139,9 @@ func evalBitStringInfixExpression(
 }
 
 func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Object) object.Object {
-	// Determine the result type based on IEC 61131-3 type promotion rules.
-	// The highest rank type determines the result type.
-	resultType := getResultIntegerType(left.Type(), right.Type())
+	leftType := left.Type()
+	rightType := right.Type()
+	resultType := getResultIntegerType(leftType, rightType)
 
 	// Convert both operands to the result type for the operation.
 	leftVal, leftIsUnsigned, ok := getIntegerObjectValue(left)
@@ -1146,17 +1164,84 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 		uLeft, uRight := uint64(leftVal), uint64(rightVal)
 		switch node.Operator {
 		case "+":
+			resultValue = leftVal + rightVal
+			switch resultType {
+			case object.USINT_OBJ:
+				if math.MaxUint8 < uLeft+uRight {
+					return newError(node, "USINT overflow: %d", resultValue)
+				}
+			case object.UINT_OBJ:
+				if math.MaxUint16 < uLeft+uRight {
+					return newError(node, "UINT overflow: %d", resultValue)
+				}
+			case object.UDINT_OBJ:
+				if math.MaxUint32 < uLeft+uRight {
+					return newError(node, "UDINT overflow: %d", resultValue)
+				}
+			case object.ULINT_OBJ:
+				if math.MaxUint64-uLeft < uRight {
+					return newError(node, "ULINT overflow: %d", resultValue)
+				}
+			case object.SINT_OBJ:
+				if math.MaxInt8 < uLeft+uRight {
+					return newError(node, "SINT overflow: %d", resultValue)
+				}
+			case object.INT_OBJ:
+				if math.MaxInt16 < uLeft+uRight {
+					return newError(node, "INT overflow: %d", resultValue)
+				}
+			case object.DINT_OBJ:
+				if math.MaxInt32 < uLeft+uRight {
+					return newError(node, "SINT overflow: %d", resultValue)
+				}
+			case object.LINT_OBJ:
+				if math.MaxInt64 < uLeft+uRight {
+					return newError(node, "LINT overflow: %d", resultValue)
+				}
+			}
 			uResultValue = uLeft + uRight
 		case "-":
+			resultValue = leftVal - rightVal
 			if uLeft < uRight {
-				// This would underflow. The overflow check later will catch this
-				// by converting the negative signed result to a large unsigned one.
+				// If the result type is ULINT, this is a hard underflow.
+				switch resultType {
+				case object.USINT_OBJ:
+					resultIsUnsigned = true
+					return newError(node, "USINT underflow: %d", resultValue)
+				case object.UINT_OBJ:
+					resultIsUnsigned = true
+					return newError(node, "UINT underflow: %d", resultValue)
+				case object.UDINT_OBJ:
+					resultIsUnsigned = true
+					return newError(node, "UDINT underflow: %d", resultValue)
+				case object.ULINT_OBJ:
+					resultIsUnsigned = true
+					return newError(node, "ULINT underflow: %d", resultValue)
+				case object.SINT_OBJ:
+					resultIsUnsigned = false
+					return newError(node, "SINT underflow: %d", resultValue)
+				case object.INT_OBJ:
+					resultIsUnsigned = false
+					return newError(node, "INT underflow: %d", resultValue)
+				case object.DINT_OBJ:
+					resultIsUnsigned = false
+					return newError(node, "DINT underflow: %d", resultValue)
+				case object.LINT_OBJ:
+					resultIsUnsigned = false
+					return newError(node, "LINT underflow: %d", resultValue)
+				}
+				// For smaller unsigned types, let it wrap to a negative signed number
+				// which will be caught as an underflow by checkAndCreateIntegerObject.
 				resultValue = leftVal - rightVal
-				resultIsUnsigned = false // Treat result as signed for overflow check
+				resultIsUnsigned = false
 			} else {
+				resultIsUnsigned = true
 				uResultValue = uLeft - uRight
 			}
 		case "*":
+			if resultType == object.ULINT_OBJ && uRight > 0 && uLeft > math.MaxUint64/uRight {
+				return newError(node, "ULINT overflow")
+			}
 			uResultValue = uLeft * uRight
 		case "/":
 			if uRight == 0 {
@@ -1169,10 +1254,28 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 		resultIsUnsigned = false
 		switch node.Operator {
 		case "+":
+			if resultType == object.LINT_OBJ && ((rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal)) {
+				return newError(node, "LINT overflow")
+			}
 			resultValue = leftVal + rightVal
 		case "-":
+			if resultType == object.LINT_OBJ && ((rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal)) {
+				return newError(node, "LINT underflow")
+			}
 			resultValue = leftVal - rightVal
 		case "*":
+			if resultType == object.LINT_OBJ {
+				if leftVal > 0 && rightVal > 0 && leftVal > math.MaxInt64/rightVal {
+					return newError(node, "LINT overflow")
+				} else if leftVal < 0 && rightVal < 0 && leftVal < math.MaxInt64/rightVal {
+					return newError(node, "LINT overflow")
+				} else if leftVal > 0 && rightVal < 0 && rightVal < math.MinInt64/leftVal {
+					return newError(node, "LINT overflow")
+				} else if leftVal < 0 && rightVal > 0 && leftVal < math.MinInt64/rightVal {
+					return newError(node, "LINT overflow")
+				}
+			}
+
 			resultValue = leftVal * rightVal
 		case "/":
 			if rightVal == 0 {
@@ -1183,7 +1286,7 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 	}
 
 	switch node.Operator {
-	case "==":
+	case "=":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
@@ -1197,63 +1300,10 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 		return nativeBoolToBooleanObject(leftVal >= rightVal)
 	}
 
-	// Check for overflow and return a new object of the correct, promoted type.
-	switch resultType {
-	case object.SINT_OBJ:
-		if resultValue < math.MinInt8 || resultValue > math.MaxInt8 {
-			return newError(node, "SINT overflow: %d", resultValue)
-		}
-		return &object.SInt{Value: int8(resultValue)}
-	case object.INT_OBJ:
-		if resultValue < math.MinInt16 || resultValue > math.MaxInt16 {
-			return newError(node, "INT overflow: %d", resultValue)
-		}
-		return &object.Int{Value: int16(resultValue)}
-	case object.DINT_OBJ:
-		if resultValue < math.MinInt32 || resultValue > math.MaxInt32 {
-			return newError(node, "DINT overflow: %d", resultValue)
-		}
-		return &object.DInt{Value: int32(resultValue)}
-	case object.LINT_OBJ:
-		// No overflow check needed as we are using int64
-		return &object.LInt{Value: resultValue}
-	case object.USINT_OBJ:
-		if resultIsUnsigned {
-			if uResultValue > math.MaxUint8 {
-				return newError(node, "USINT overflow: %d", uResultValue)
-			}
-		} else if resultValue < 0 || resultValue > math.MaxUint8 {
-			return newError(node, "USINT overflow: %d", resultValue)
-		}
-		return &object.USInt{Value: uint8(resultValue)}
-	case object.UINT_OBJ:
-		if resultIsUnsigned {
-			if uResultValue > math.MaxUint16 {
-				return newError(node, "UINT overflow: %d", uResultValue)
-			}
-		} else if resultValue < 0 || resultValue > math.MaxUint16 {
-			return newError(node, "UINT overflow: %d", resultValue)
-		}
-		return &object.UInt{Value: uint16(resultValue)}
-	case object.UDINT_OBJ:
-		if resultIsUnsigned {
-			if uResultValue > math.MaxUint32 {
-				return newError(node, "UDINT overflow: %d", uResultValue)
-			}
-		} else if resultValue < 0 || resultValue > math.MaxUint32 {
-			return newError(node, "UDINT overflow: %d", resultValue)
-		}
-		return &object.UDInt{Value: uint32(resultValue)}
-	case object.ULINT_OBJ:
-		if !resultIsUnsigned && resultValue < 0 {
-			return newError(node, "ULINT underflow: %d", resultValue)
-		}
-		uResultValue = uint64(resultValue)
-		// No overflow check needed for addition/multiplication as we are using uint64
-		return &object.ULInt{Value: uResultValue}
-	default:
-		// Fallback to generic Integer for safety, though this path should ideally not be taken.
-		return &object.Integer{Value: resultValue}
+	if resultIsUnsigned {
+		return checkAndCreateIntegerObject(node, resultType, int64(uResultValue), uResultValue, resultIsUnsigned)
+	} else {
+		return checkAndCreateIntegerObject(node, resultType, resultValue, uResultValue, resultIsUnsigned)
 	}
 }
 
@@ -1279,8 +1329,6 @@ func getResultIntegerType(t1, t2 object.ObjectType) object.ObjectType {
 		object.UDINT_OBJ: {3, false},
 		object.LINT_OBJ:  {4, true},
 		object.ULINT_OBJ: {4, false},
-		// Generic INTEGER is treated like DINT for promotion.
-		object.INTEGER_OBJ: {3, true},
 	}
 
 	info1, ok1 := typeInfo[t1]
@@ -1318,8 +1366,6 @@ func getResultIntegerType(t1, t2 object.ObjectType) object.ObjectType {
 // getIntegerObjectValue safely extracts an int64 from any integer-like object.
 func getIntegerObjectValue(obj object.Object) (val int64, isUnsigned bool, success bool) {
 	switch o := obj.(type) {
-	case *object.Integer:
-		return o.Value, false, true
 	case *object.SInt:
 		return int64(o.Value), false, true
 	case *object.Int:
@@ -1341,6 +1387,82 @@ func getIntegerObjectValue(obj object.Object) (val int64, isUnsigned bool, succe
 	default:
 		return 0, false, false
 	}
+}
+
+func checkAndCreateIntegerObject(node ast.Node, t object.ObjectType, val int64, uval uint64, isUnsigned bool) object.Object {
+	switch t {
+	case object.SINT_OBJ:
+		if val < math.MinInt8 {
+			return newError(node, "SINT underflow: %d", val)
+		} else if val > math.MaxInt8 {
+			return newError(node, "SINT overflow: %d", val)
+		}
+		return &object.SInt{Value: int8(val)}
+	case object.INT_OBJ:
+		if val < math.MinInt16 {
+			return newError(node, "INT underflow: %d", val)
+		} else if val > math.MaxInt16 {
+			return newError(node, "INT overflow: %d", val)
+		}
+		return &object.Int{Value: int16(val)}
+	case object.DINT_OBJ:
+		if val < math.MinInt32 {
+			return newError(node, "DINT underflow: %d", val)
+		} else if val > math.MaxInt32 {
+			return newError(node, "DINT overflow: %d", val)
+		}
+		return &object.DInt{Value: int32(val)}
+	case object.LINT_OBJ:
+		// Overflow/underflow for LINT is handled before the operation.
+		return &object.LInt{Value: val}
+	case object.USINT_OBJ:
+		if isUnsigned {
+			if uval > math.MaxUint8 {
+				return newError(node, "USINT overflow: %d", uval)
+			}
+			return &object.USInt{Value: uint8(uval)}
+		} else { // Result from a signed operation
+			if val < 0 {
+				return newError(node, "USINT underflow: %d", val)
+			} else if val > math.MaxUint8 {
+				return newError(node, "USINT overflow: %d", val)
+			}
+			return &object.USInt{Value: uint8(val)}
+		}
+	case object.UINT_OBJ:
+		if isUnsigned {
+			if uval > math.MaxUint16 {
+				return newError(node, "UINT overflow: %d", uval)
+			}
+			return &object.UInt{Value: uint16(uval)}
+		} else {
+			if val < 0 {
+				return newError(node, "UINT underflow: %d", val)
+			} else if val > math.MaxUint16 {
+				return newError(node, "UINT overflow: %d", val)
+			}
+			return &object.UInt{Value: uint16(val)}
+		}
+	case object.UDINT_OBJ:
+		if isUnsigned {
+			if uval > math.MaxUint32 {
+				return newError(node, "UDINT overflow: %d", uval)
+			}
+			return &object.UDInt{Value: uint32(uval)}
+		} else {
+			if val < 0 {
+				return newError(node, "UDINT underflow: %d", val)
+			} else if val > math.MaxUint32 {
+				return newError(node, "UDINT overflow: %d", val)
+			}
+			return &object.UDInt{Value: uint32(val)}
+		}
+	case object.ULINT_OBJ:
+		// No overflow check needed for addition/multiplication as we are using uint64
+		return &object.ULInt{Value: uval}
+	}
+	// Fallback to generic Integer for safety, though this path should ideally not be taken.
+	return &object.LInt{Value: val}
 }
 
 func evalCaseStatement(cs *ast.CaseStatement, env *object.Environment) object.Object {
@@ -1403,7 +1525,7 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 
 	// Handle subrange types as case labels
 	if subrange, ok := caseValue.(*object.SubrangeType); ok {
-		selectorInt, ok := selector.(*object.Integer)
+		selectorInt, ok := selector.(*object.LInt)
 		if !ok {
 			// If selector is not an integer, it can't match a subrange.
 			// This isn't an error, just not a match.
@@ -1429,7 +1551,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 	if isError(initVal) {
 		return initVal
 	}
-	initInt, ok := initVal.(*object.Integer)
+	initInt, ok := initVal.(*object.LInt)
 	if !ok {
 		return newError(fls.ControlVar, "FOR loop start value must be an integer, got %s", initVal.Type())
 	}
@@ -1441,7 +1563,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 	if isError(endValObj) {
 		return endValObj
 	}
-	endVal, ok := endValObj.(*object.Integer)
+	endVal, ok := endValObj.(*object.LInt)
 	if !ok {
 		return newError(fls.EndValue, "FOR loop end value must be an integer, got %s", endValObj.Type())
 	}
@@ -1453,7 +1575,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 		if isError(stepValObj) {
 			return stepValObj
 		}
-		stepInt, ok := stepValObj.(*object.Integer)
+		stepInt, ok := stepValObj.(*object.LInt)
 		if !ok {
 			return newError(fls.StepValue, "FOR loop step value must be an integer, got %s", stepValObj.Type())
 		}
@@ -1464,7 +1586,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 	for {
 		// Get the current value of the control variable.
 		currentValObj, _ := loopEnv.Get(controlVarName)
-		currentVal := currentValObj.(*object.Integer).Value
+		currentVal := currentValObj.(*object.LInt).Value
 
 		// Check termination condition.
 		if stepVal > 0 {
@@ -1490,7 +1612,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 		}
 
 		// Increment the control variable.
-		loopEnv.Set(controlVarName, &object.Integer{Value: currentVal + stepVal})
+		loopEnv.Set(controlVarName, &object.LInt{Value: currentVal + stepVal})
 	}
 
 	return NULL
@@ -1581,7 +1703,7 @@ func evalTaskDeclaration(taskDecl *ast.TaskDeclaration, env *object.Environment)
 		if isError(priorityObj) {
 			return priorityObj
 		}
-		if p, ok := priorityObj.(*object.Integer); ok {
+		if p, ok := priorityObj.(*object.LInt); ok {
 			priority = p.Value
 		} else {
 			return newError(taskDecl, "task PRIORITY must be of type INTEGER, got %s", priorityObj.Type())
@@ -2093,7 +2215,7 @@ func unwrapReturnValue(obj object.Object) object.Object {
 
 func evalIndexExpression(node ast.Node, left, index object.Object) object.Object {
 	switch {
-	case left.Type() == object.ARRAY_OBJ && index.Type() == object.INTEGER_OBJ:
+	case left.Type() == object.ARRAY_OBJ && index.Type() == object.LINT_OBJ:
 		return evalArrayIndexExpression(left, index)
 	case left.Type() == object.HASH_OBJ:
 		return evalHashIndexExpression(node, left, index)
@@ -2104,7 +2226,7 @@ func evalIndexExpression(node ast.Node, left, index object.Object) object.Object
 
 func evalArrayIndexExpression(array, index object.Object) object.Object {
 	arrayObject := array.(*object.Array)
-	idx := index.(*object.Integer).Value
+	idx := index.(*object.LInt).Value
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
@@ -2441,8 +2563,7 @@ func evalGenericComparison(op string, leftVal, rightVal int64) object.Object {
 // isNumeric checks if an object is one of the numeric types.
 func isNumeric(obj object.Object) bool {
 	t := obj.Type()
-	return t == object.INTEGER_OBJ ||
-		t == object.SINT_OBJ || t == object.INT_OBJ || t == object.DINT_OBJ || t == object.LINT_OBJ ||
+	return t == object.SINT_OBJ || t == object.INT_OBJ || t == object.DINT_OBJ || t == object.LINT_OBJ ||
 		t == object.USINT_OBJ || t == object.UINT_OBJ || t == object.UDINT_OBJ || t == object.ULINT_OBJ ||
 		t == object.REAL_OBJ || t == object.LREAL_OBJ
 }
@@ -2450,8 +2571,6 @@ func isNumeric(obj object.Object) bool {
 // getFloat64Value extracts a float64 from any numeric object type for calculations.
 func getFloat64Value(obj object.Object) (float64, bool) {
 	switch o := obj.(type) {
-	case *object.Integer:
-		return float64(o.Value), true
 	case *object.SInt:
 		return float64(o.Value), true
 	case *object.Int:

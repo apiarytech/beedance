@@ -10,6 +10,7 @@
 package evaluator
 
 import (
+	"beedance/ast"
 	"beedance/object"
 	"fmt"
 	"math"
@@ -20,7 +21,7 @@ import (
 )
 
 var builtins = map[string]*object.Builtin{
-	"puts": &object.Builtin{
+	"puts": {
 		Fn: func(args ...object.Object) object.Object {
 			for _, arg := range args {
 				fmt.Println(arg.Inspect())
@@ -29,7 +30,7 @@ var builtins = map[string]*object.Builtin{
 			return NULL
 		},
 	},
-	"first": &object.Builtin{
+	"first": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments. got=%d, want=1", len(args))
@@ -46,7 +47,7 @@ var builtins = map[string]*object.Builtin{
 			return NULL
 		},
 	},
-	"last": &object.Builtin{
+	"last": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments. got=%d, want=1", len(args))
@@ -64,7 +65,7 @@ var builtins = map[string]*object.Builtin{
 			return NULL
 		},
 	},
-	"rest": &object.Builtin{
+	"rest": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments. got=%d, want=1", len(args))
@@ -76,7 +77,7 @@ var builtins = map[string]*object.Builtin{
 			arr := args[0].(*object.Array)
 			length := len(arr.Elements)
 			if length > 0 {
-				newElements := make([]object.Object, length-1, length-1)
+				newElements := make([]object.Object, length-1)
 				copy(newElements, arr.Elements[1:length])
 				return &object.Array{Elements: newElements}
 			}
@@ -84,7 +85,7 @@ var builtins = map[string]*object.Builtin{
 			return NULL
 		},
 	},
-	"push": &object.Builtin{
+	"push": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments. got=%d, want=2", len(args))
@@ -96,20 +97,20 @@ var builtins = map[string]*object.Builtin{
 			arr := args[0].(*object.Array)
 			length := len(arr.Elements)
 
-			newElements := make([]object.Object, length+1, length+1)
+			newElements := make([]object.Object, length+1)
 			copy(newElements, arr.Elements)
 			newElements[length] = args[1]
 
 			return &object.Array{Elements: newElements}
 		},
 	},
-	"INSERT": &object.Builtin{
+	"INSERT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 3 {
 				return newBuiltinError("wrong number of arguments for INSERT. got=%d, want=3", len(args))
 			}
 
-			pos, ok := args[2].(*object.Integer)
+			pos, ok := args[2].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 3 to `INSERT` must be INTEGER, got %s", args[2].Type())
 			}
@@ -157,18 +158,18 @@ var builtins = map[string]*object.Builtin{
 			}
 		},
 	},
-	"DELETE": &object.Builtin{
+	"DELETE": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 3 {
 				return newBuiltinError("wrong number of arguments for DELETE. got=%d, want=3", len(args))
 			}
 
-			length, ok := args[1].(*object.Integer)
+			length, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `DELETE` must be INTEGER, got %s", args[1].Type())
 			}
 
-			pos, ok := args[2].(*object.Integer)
+			pos, ok := args[2].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 3 to `DELETE` must be INTEGER, got %s", args[2].Type())
 			}
@@ -213,7 +214,7 @@ var builtins = map[string]*object.Builtin{
 			}
 		},
 	},
-	"CONCAT": &object.Builtin{
+	"CONCAT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) < 1 {
 				// In case of no arguments, we can't determine the type.
@@ -254,7 +255,7 @@ var builtins = map[string]*object.Builtin{
 			}
 		},
 	},
-	"LEFT": &object.Builtin{
+	"LEFT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for LEFT. got=%d, want=2", len(args))
@@ -263,7 +264,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `LEFT` must be STRING, got %s", args[0].Type())
 			}
-			length, ok := args[1].(*object.Integer)
+			length, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `LEFT` must be INTEGER, got %s", args[1].Type())
 			}
@@ -278,7 +279,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.String{Value: str.Value[:l]}
 		},
 	},
-	"RIGHT": &object.Builtin{
+	"RIGHT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for RIGHT. got=%d, want=2", len(args))
@@ -287,7 +288,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `RIGHT` must be STRING, got %s", args[0].Type())
 			}
-			length, ok := args[1].(*object.Integer)
+			length, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `RIGHT` must be INTEGER, got %s", args[1].Type())
 			}
@@ -303,7 +304,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.String{Value: str.Value[sLen-l:]}
 		},
 	},
-	"MID": &object.Builtin{
+	"MID": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 3 {
 				return newBuiltinError("wrong number of arguments for MID. got=%d, want=3", len(args))
@@ -312,11 +313,11 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `MID` must be STRING, got %s", args[0].Type())
 			}
-			length, ok := args[1].(*object.Integer)
+			length, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `MID` must be INTEGER, got %s", args[1].Type())
 			}
-			pos, ok := args[2].(*object.Integer)
+			pos, ok := args[2].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
 			}
@@ -336,7 +337,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.String{Value: str.Value[start:end]}
 		},
 	},
-	"FIND": &object.Builtin{
+	"FIND": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for FIND. got=%d, want=2", len(args))
@@ -349,7 +350,7 @@ var builtins = map[string]*object.Builtin{
 					return newBuiltinError("argument 2 to `FIND` for strings must be STRING, got %s", args[1].Type())
 				}
 				index := strings.Index(in1.Value, in2.Value)
-				return &object.Integer{Value: int64(index + 1)}
+				return &object.LInt{Value: int64(index + 1)}
 
 			case *object.Array:
 				toFind := args[1]
@@ -358,17 +359,17 @@ var builtins = map[string]*object.Builtin{
 					// This means direct comparison for basic types.
 					// A more complex implementation could use `evalInfixExpression` for `==`.
 					if isEqual(elem, toFind) {
-						return &object.Integer{Value: int64(i + 1)} // 1-based index
+						return &object.LInt{Value: int64(i + 1)} // 1-based index
 					}
 				}
-				return &object.Integer{Value: 0} // Not found
+				return &object.LInt{Value: 0} // Not found
 
 			default:
 				return newBuiltinError("argument 1 to `FIND` must be STRING or ARRAY, got %s", args[0].Type())
 			}
 		},
 	},
-	"REPLACE": &object.Builtin{
+	"REPLACE": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 4 {
 				return newBuiltinError("wrong number of arguments for REPLACE. got=%d, want=4", len(args))
@@ -381,11 +382,11 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 2 to `REPLACE` must be STRING, got %s", args[1].Type())
 			}
-			length, ok := args[2].(*object.Integer)
+			length, ok := args[2].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 3 to `REPLACE` must be INTEGER, got %s", args[2].Type())
 			}
-			pos, ok := args[3].(*object.Integer)
+			pos, ok := args[3].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
 			}
@@ -417,7 +418,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.String{Value: str1[:start] + str2 + str1[endDelete:]}
 		},
 	},
-	"SHL": &object.Builtin{
+	"SHL": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for SHL. got=%d, want=2", len(args))
@@ -426,7 +427,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `SHL` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.Integer)
+			n, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `SHL` must be INTEGER, got %s", args[1].Type())
 			}
@@ -444,7 +445,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
-	"SHR": &object.Builtin{
+	"SHR": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for SHR. got=%d, want=2", len(args))
@@ -453,7 +454,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `SHR` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.Integer)
+			n, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `SHR` must be INTEGER, got %s", args[1].Type())
 			}
@@ -470,7 +471,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
-	"ROL": &object.Builtin{
+	"ROL": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for ROL. got=%d, want=2", len(args))
@@ -479,7 +480,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `ROL` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.Integer)
+			n, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `ROL` must be INTEGER, got %s", args[1].Type())
 			}
@@ -502,7 +503,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
-	"ROR": &object.Builtin{
+	"ROR": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for ROR. got=%d, want=2", len(args))
@@ -511,7 +512,7 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `ROR` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.Integer)
+			n, ok := args[1].(*object.LInt)
 			if !ok {
 				return newBuiltinError("argument 2 to `ROR` must be INTEGER, got %s", args[1].Type())
 			}
@@ -533,7 +534,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.BitString{Value: result, Width: in.Width}
 		},
 	},
-	"SIN": &object.Builtin{
+	"SIN": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for SIN. got=%d, want=1", len(args))
@@ -545,7 +546,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Sin(val)}
 		},
 	},
-	"COS": &object.Builtin{
+	"COS": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for COS. got=%d, want=1", len(args))
@@ -557,7 +558,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Cos(val)}
 		},
 	},
-	"TAN": &object.Builtin{
+	"TAN": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for TAN. got=%d, want=1", len(args))
@@ -569,7 +570,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Tan(val)}
 		},
 	},
-	"ASIN": &object.Builtin{
+	"ASIN": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ASIN. got=%d, want=1", len(args))
@@ -584,7 +585,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Asin(val)}
 		},
 	},
-	"ACOS": &object.Builtin{
+	"ACOS": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ACOS. got=%d, want=1", len(args))
@@ -599,7 +600,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Acos(val)}
 		},
 	},
-	"ATAN": &object.Builtin{
+	"ATAN": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ATAN. got=%d, want=1", len(args))
@@ -611,7 +612,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Atan(val)}
 		},
 	},
-	"ATAN2": &object.Builtin{
+	"ATAN2": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for ATAN2. got=%d, want=2", len(args))
@@ -628,7 +629,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Atan2(y, x)}
 		},
 	},
-	"LN": &object.Builtin{
+	"LN": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for LN. got=%d, want=1", len(args))
@@ -643,7 +644,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Log(val)}
 		},
 	},
-	"LOG": &object.Builtin{
+	"LOG": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for LOG. got=%d, want=1", len(args))
@@ -658,7 +659,7 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Log10(val)}
 		},
 	},
-	"EXP": &object.Builtin{
+	"EXP": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for EXP. got=%d, want=1", len(args))
@@ -670,28 +671,23 @@ var builtins = map[string]*object.Builtin{
 			return &object.Real{Value: math.Exp(val)}
 		},
 	},
-	"SQRT": &object.Builtin{
+	"SQRT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for SQRT. got=%d, want=1", len(args))
 			}
-			switch arg := args[0].(type) {
-			case *object.Integer:
-				if arg.Value < 0 {
-					return newBuiltinError("argument to `SQRT` must be non-negative, got %d", arg.Value)
-				}
-				return &object.Real{Value: math.Sqrt(float64(arg.Value))}
-			case *object.Real:
-				if arg.Value < 0 {
-					return newBuiltinError("argument to `SQRT` must be non-negative, got %f", arg.Value)
-				}
-				return &object.Real{Value: math.Sqrt(arg.Value)}
-			default:
+			val, ok := getFloat64Value(args[0])
+			if !ok {
 				return newBuiltinError("argument to `SQRT` not supported, got %s", args[0].Type())
 			}
+
+			if val < 0 {
+				return newBuiltinError("argument to `SQRT` must be non-negative, got %f", val)
+			}
+			return &object.Real{Value: math.Sqrt(val)}
 		},
 	},
-	"ROUND": &object.Builtin{
+	"ROUND": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ROUND. got=%d, want=1", len(args))
@@ -701,25 +697,43 @@ var builtins = map[string]*object.Builtin{
 			}
 			realVal := args[0].(*object.Real).Value
 			// Per IEC 60559 (IEEE 754), the default rounding mode is "round half to even".
-			return &object.Integer{Value: int64(math.Round(realVal))}
+			return &object.LInt{Value: int64(math.Round(realVal))}
 		},
 	},
-	"ABS": &object.Builtin{
+	"ABS": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ABS. got=%d, want=1", len(args))
 			}
 			switch arg := args[0].(type) {
-			case *object.Integer:
-				return &object.Integer{Value: int64(math.Abs(float64(arg.Value)))}
+			case *object.SInt:
+				if arg.Value < 0 {
+					return &object.SInt{Value: -arg.Value}
+				}
+				return arg
+			case *object.Int:
+				if arg.Value < 0 {
+					return &object.Int{Value: -arg.Value}
+				}
+				return arg
+			case *object.DInt:
+				if arg.Value < 0 {
+					return &object.DInt{Value: -arg.Value}
+				}
+				return arg
+			case *object.LInt:
+				if arg.Value < 0 {
+					return &object.LInt{Value: -arg.Value}
+				}
+				return arg
 			case *object.Real:
-				return &object.Real{Value: math.Abs(arg.Value)}
+				return &object.Real{Value: math.Abs(arg.Value)} //
 			default:
 				return newBuiltinError("argument to `ABS` not supported, got %s", args[0].Type())
 			}
 		},
 	},
-	"TRUNC": &object.Builtin{
+	"TRUNC": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for TRUNC. got=%d, want=1", len(args))
@@ -728,15 +742,15 @@ var builtins = map[string]*object.Builtin{
 				return newBuiltinError("argument to `TRUNC` must be REAL, got %s", args[0].Type())
 			}
 			realVal := args[0].(*object.Real).Value
-			return &object.Integer{Value: int64(math.Trunc(realVal))}
+			return &object.LInt{Value: int64(math.Trunc(realVal))}
 		},
 	},
-	"ADD":  &object.Builtin{Fn: addBuiltin},
-	"SUB":  &object.Builtin{Fn: subBuiltin},
-	"MUL":  &object.Builtin{Fn: mulBuiltin},
-	"DIV":  &object.Builtin{Fn: divBuiltin},
-	"MOD":  &object.Builtin{Fn: modBuiltin},
-	"EXPT": &object.Builtin{Fn: exptBuiltin},
+	"ADD":  {Fn: addBuiltin},
+	"SUB":  {Fn: subBuiltin},
+	"MUL":  {Fn: mulBuiltin},
+	"DIV":  {Fn: divBuiltin},
+	"MOD":  {Fn: modBuiltin},
+	"EXPT": {Fn: exptBuiltin},
 	"GT":   {Fn: comparisonBuiltin("GT")},
 	"GE":   {Fn: comparisonBuiltin("GE")},
 	"EQ":   {Fn: comparisonBuiltin("EQ")},
@@ -749,9 +763,9 @@ var builtins = map[string]*object.Builtin{
 		}
 		switch arg := args[0].(type) {
 		case *object.Array:
-			return &object.Integer{Value: int64(len(arg.Elements))}
+			return &object.LInt{Value: int64(len(arg.Elements))}
 		case *object.String:
-			return &object.Integer{Value: int64(len(arg.Value))}
+			return &object.LInt{Value: int64(len(arg.Value))}
 		default:
 			return newBuiltinError("argument to `LEN` not supported, got %s", args[0].Type())
 		}
@@ -788,7 +802,7 @@ func limitBuiltin(min, in, max object.Object) object.Object {
 	hasReal := false
 	for _, arg := range args {
 		switch arg.Type() {
-		case object.INTEGER_OBJ:
+		case object.LINT_OBJ:
 		case object.REAL_OBJ:
 			hasReal = true
 		default:
@@ -810,16 +824,16 @@ func limitBuiltin(min, in, max object.Object) object.Object {
 	}
 
 	// All are integers
-	minVal := min.(*object.Integer).Value
-	inVal := in.(*object.Integer).Value
-	maxVal := max.(*object.Integer).Value
+	minVal := min.(*object.LInt).Value
+	inVal := in.(*object.LInt).Value
+	maxVal := max.(*object.LInt).Value
 	if inVal < minVal {
-		return &object.Integer{Value: minVal}
+		return &object.LInt{Value: minVal}
 	}
 	if inVal > maxVal {
-		return &object.Integer{Value: maxVal}
+		return &object.LInt{Value: maxVal}
 	}
-	return &object.Integer{Value: inVal}
+	return &object.LInt{Value: inVal}
 }
 
 func limitWrapperBuiltin(args ...object.Object) object.Object {
@@ -873,9 +887,9 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 	hasReal := false
 	for _, arg := range args {
 		switch arg.Type() {
-		case object.INTEGER_OBJ:
-			// continue
-		case object.REAL_OBJ:
+		case object.SINT_OBJ, object.INT_OBJ, object.DINT_OBJ, object.LINT_OBJ, object.USINT_OBJ, object.UINT_OBJ, object.UDINT_OBJ, object.ULINT_OBJ:
+			// This is an integer type, continue.
+		case object.REAL_OBJ, object.LREAL_OBJ:
 			hasReal = true
 		default:
 			return newBuiltinError("all arguments to `%s` must be INTEGER or REAL, got %s", op, arg.Type())
@@ -896,9 +910,9 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 	}
 
 	// All arguments are integers
-	result := args[0].(*object.Integer).Value
+	result, _, _ := getIntegerObjectValue(args[0])
 	for i := 1; i < len(args); i++ {
-		val := args[i].(*object.Integer).Value
+		val, _, _ := getIntegerObjectValue(args[i])
 		if op == "MIN" {
 			if val < result {
 				result = val
@@ -909,7 +923,7 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 			}
 		}
 	}
-	return &object.Integer{Value: result}
+	return checkAndCreateIntegerObject(nil, object.LINT_OBJ, result, uint64(result), false)
 }
 
 // bitwiseBuiltin is a generic helper for extensible bitwise functions (AND, OR, XOR).
@@ -992,34 +1006,12 @@ func addBuiltin(args ...object.Object) object.Object {
 		}
 	}
 
+	// If both are numeric, delegate to the main infix evaluation logic
+	if isNumeric(arg1) && isNumeric(arg2) {
+		return evalNumericInfixExpression(&ast.InfixExpression{Operator: "+"}, arg1, arg2)
+	}
+
 	return evalAddOperation(arg1, arg2) // Call core logic
-}
-
-// isEqual compares two objects for equality. This is a simplified version for built-ins.
-func isEqual(a, b object.Object) bool {
-	if a.Type() != b.Type() {
-		return false
-	}
-
-	switch a := a.(type) {
-	case *object.Integer:
-		return a.Value == b.(*object.Integer).Value
-	case *object.Real:
-		return a.Value == b.(*object.Real).Value
-	case *object.String:
-		return a.Value == b.(*object.String).Value
-	case *object.Boolean:
-		return a == b // Can compare pointers for TRUE/FALSE singletons
-	case *object.Null:
-		return true // NULL is always equal to NULL
-	case *object.Time:
-		return a.Value == b.(*object.Time).Value
-	case *object.Date:
-		return a.Value.Equal(b.(*object.Date).Value)
-	// Other types can be added here. For now, unhandled types are not considered equal.
-	default:
-		return false
-	}
 }
 
 // evalAddOperation contains the core logic for the ADD builtin function.
@@ -1040,22 +1032,6 @@ func evalAddOperation(arg1, arg2 object.Object) object.Object {
 		if a2, ok := arg2.(*object.Time); ok {
 			return &object.DateAndTime{Value: a1.Value.Add(a2.Value)}
 		}
-	case *object.Integer:
-		if a2, ok := arg2.(*object.Integer); ok {
-			return &object.Integer{Value: a1.Value + a2.Value}
-		}
-		if a2, ok := arg2.(*object.Real); ok {
-			// Promote INTEGER to REAL
-			return &object.Real{Value: float64(a1.Value) + a2.Value}
-		}
-	case *object.Real:
-		if a2, ok := arg2.(*object.Real); ok {
-			return &object.Real{Value: a1.Value + a2.Value}
-		}
-		if a2, ok := arg2.(*object.Integer); ok {
-			// Promote INTEGER to REAL
-			return &object.Real{Value: a1.Value + float64(a2.Value)}
-		}
 	}
 	return newBuiltinError("unsupported argument types for ADD: %s + %s", arg1.Type(), arg2.Type())
 }
@@ -1067,6 +1043,11 @@ func subBuiltin(args ...object.Object) object.Object {
 	}
 	arg1 := args[0]
 	arg2 := args[1]
+
+	// If both are numeric, delegate to the main infix evaluation logic
+	if isNumeric(arg1) && isNumeric(arg2) {
+		return evalNumericInfixExpression(&ast.InfixExpression{Operator: "-"}, arg1, arg2)
+	}
 
 	switch a1 := arg1.(type) {
 	case *object.Time:
@@ -1091,9 +1072,9 @@ func subBuiltin(args ...object.Object) object.Object {
 		if a2, ok := arg2.(*object.DateAndTime); ok {
 			return &object.Time{Value: a1.Value.Sub(a2.Value)}
 		}
-	case *object.Integer:
-		if a2, ok := arg2.(*object.Integer); ok {
-			return &object.Integer{Value: a1.Value - a2.Value}
+	case *object.LInt:
+		if a2, ok := arg2.(*object.LInt); ok {
+			return &object.LInt{Value: a1.Value - a2.Value}
 		}
 		if a2, ok := arg2.(*object.Real); ok {
 			// Promote INTEGER to REAL
@@ -1103,7 +1084,7 @@ func subBuiltin(args ...object.Object) object.Object {
 		if a2, ok := arg2.(*object.Real); ok {
 			return &object.Real{Value: a1.Value - a2.Value}
 		}
-		if a2, ok := arg2.(*object.Integer); ok {
+		if a2, ok := arg2.(*object.LInt); ok {
 			// Promote INTEGER to REAL
 			return &object.Real{Value: a1.Value - float64(a2.Value)}
 		}
@@ -1142,22 +1123,8 @@ func mulBuiltin(args ...object.Object) object.Object {
 		}
 	}
 
-	// Handle numeric types
-	switch a1 := arg1.(type) {
-	case *object.Integer:
-		if a2, ok := arg2.(*object.Integer); ok {
-			return &object.Integer{Value: a1.Value * a2.Value}
-		}
-		if a2, ok := arg2.(*object.Real); ok {
-			return &object.Real{Value: float64(a1.Value) * a2.Value}
-		}
-	case *object.Real:
-		if a2, ok := arg2.(*object.Real); ok {
-			return &object.Real{Value: a1.Value * a2.Value}
-		}
-		if a2, ok := arg2.(*object.Integer); ok {
-			return &object.Real{Value: a1.Value * float64(a2.Value)}
-		}
+	if isNumeric(arg1) && isNumeric(arg2) {
+		return evalNumericInfixExpression(&ast.InfixExpression{Operator: "*"}, arg1, arg2)
 	}
 
 	return newBuiltinError("unsupported argument types for MUL: %s * %s", arg1.Type(), arg2.Type())
@@ -1181,28 +1148,9 @@ func divBuiltin(args ...object.Object) object.Object {
 		}
 	}
 
-	// Handle numeric types
-	switch a1 := arg1.(type) {
-	case *object.Integer:
-		if a2, ok := arg2.(*object.Integer); ok {
-			if a2.Value == 0 {
-				return newBuiltinError("division by zero")
-			}
-			return &object.Integer{Value: a1.Value / a2.Value}
-		}
-		if a2, ok := arg2.(*object.Real); ok {
-			if a2.Value == 0.0 {
-				return newBuiltinError("division by zero")
-			}
-			return &object.Real{Value: float64(a1.Value) / a2.Value}
-		}
-	case *object.Real:
-		if num, ok := getFloat64Value(arg2); ok {
-			if num == 0.0 {
-				return newBuiltinError("division by zero")
-			}
-			return &object.Real{Value: a1.Value / num}
-		}
+	// Handle all numeric types
+	if isNumeric(arg1) && isNumeric(arg2) {
+		return evalNumericInfixExpression(&ast.InfixExpression{Operator: "/"}, arg1, arg2)
 	}
 
 	return newBuiltinError("unsupported argument types for DIV: %s / %s", arg1.Type(), arg2.Type())
@@ -1213,18 +1161,24 @@ func modBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return newBuiltinError("wrong number of arguments for MOD. got=%d, want=2", len(args))
 	}
-	arg1, ok1 := args[0].(*object.Integer)
-	arg2, ok2 := args[1].(*object.Integer)
+	// getIntegerObjectValue returns (value, isUnsigned, success)
+	arg1Val, arg1IsUnsigned, ok1 := getIntegerObjectValue(args[0])
+	arg2Val, _, ok2 := getIntegerObjectValue(args[1])
 
 	if !ok1 || !ok2 {
 		return newBuiltinError("arguments to `MOD` must be INTEGER, got %s and %s", args[0].Type(), args[1].Type())
 	}
 
-	if arg2.Value == 0 {
+	if arg2Val == 0 {
 		return newBuiltinError("division by zero in MOD")
 	}
 
-	return &object.Integer{Value: arg1.Value % arg2.Value}
+	// The result type of MOD is the same as the type of the operands.
+	// We'll use getResultIntegerType and create the correct object.
+	resultType := getResultIntegerType(args[0].Type(), args[1].Type())
+	result := arg1Val % arg2Val
+	// The result of MOD should be unsigned only if the first operand (dividend) is unsigned.
+	return checkAndCreateIntegerObject(nil, resultType, result, uint64(result), arg1IsUnsigned)
 }
 
 // exptBuiltin implements the EXPT standard function.
@@ -1261,15 +1215,15 @@ func comparisonBuiltin(op string) object.BuiltinFunction {
 
 // evalComparison centralizes the logic for all comparison operations.
 func evalComparison(op string, left, right object.Object) object.Object {
-	// Type promotion for REAL and INTEGER
-	if l, ok := left.(*object.Integer); ok {
-		if _, ok := right.(*object.Real); ok {
-			left = &object.Real{Value: float64(l.Value)}
+	// Type promotion for mixed REAL and INTEGER comparisons.
+	// If one operand is REAL/LREAL and the other is any integer type, promote the integer to REAL.
+	if isRealType(string(left.Type())) {
+		if val, _, ok := getIntegerObjectValue(right); ok {
+			right = &object.Real{Value: float64(val)}
 		}
-	}
-	if _, ok := left.(*object.Real); ok {
-		if r, ok := right.(*object.Integer); ok {
-			right = &object.Real{Value: float64(r.Value)}
+	} else if isRealType(string(right.Type())) {
+		if val, _, ok := getIntegerObjectValue(left); ok {
+			left = &object.Real{Value: float64(val)}
 		}
 	}
 
@@ -1279,8 +1233,8 @@ func evalComparison(op string, left, right object.Object) object.Object {
 
 	var result bool
 	switch l := left.(type) {
-	case *object.Integer:
-		r := right.(*object.Integer).Value
+	case *object.LInt:
+		r := right.(*object.LInt).Value
 		switch op {
 		case "GT":
 			result = l.Value > r
@@ -1338,7 +1292,7 @@ func evalComparison(op string, left, right object.Object) object.Object {
 		if r {
 			ri = 1
 		}
-		return evalComparison(op, &object.Integer{Value: int64(li)}, &object.Integer{Value: int64(ri)})
+		return evalComparison(op, &object.LInt{Value: int64(li)}, &object.LInt{Value: int64(ri)})
 
 	default:
 		// For other types, fall back to simple equality/inequality checks.
@@ -1361,7 +1315,7 @@ func muxBuiltin(args ...object.Object) object.Object {
 		return newBuiltinError("wrong number of arguments for MUX. got=%d, want>=2", len(args))
 	}
 
-	k, ok := args[0].(*object.Integer)
+	kVal, _, ok := getIntegerObjectValue(args[0])
 	if !ok {
 		return newBuiltinError("argument 1 to `MUX` must be INTEGER, got %s", args[0].Type())
 	}
@@ -1369,8 +1323,8 @@ func muxBuiltin(args ...object.Object) object.Object {
 	valueArgs := args[1:]
 	numInputs := len(valueArgs)
 
-	if k.Value < 0 || k.Value >= int64(numInputs) {
-		return newBuiltinError("index %d out of bounds for MUX with %d inputs", k.Value, numInputs)
+	if kVal < 0 || kVal >= int64(numInputs) {
+		return newBuiltinError("index %d out of bounds for MUX with %d inputs", kVal, numInputs)
 	}
 
 	// Check that all value arguments are of the same type
@@ -1383,7 +1337,7 @@ func muxBuiltin(args ...object.Object) object.Object {
 		}
 	}
 
-	return valueArgs[k.Value]
+	return valueArgs[kVal]
 }
 
 // genericConversionBuiltin creates a built-in function on the fly for `*_TO_*` conversions.
@@ -1438,33 +1392,38 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 	// Handle conversions to Integer types
 	if isIntegerType(toType) {
 		switch val := input.(type) {
-		case *object.Integer:
+		case *object.LInt, *object.SInt, *object.Int, *object.DInt, *object.USInt, *object.UInt, *object.UDInt, *object.ULInt:
+			iVal, isUnsigned, _ := getIntegerObjectValue(val)
 			targetRange, ok := integerTypeRanges[toType]
 			if !ok {
 				return newBuiltinError("internal error: unknown integer type %s", toType)
 			}
 			// Check signed vs unsigned ranges
 			if strings.HasPrefix(toType, "U") { // Unsigned
-				if val.Value < 0 || uint64(val.Value) > targetRange.maxUnsigned {
-					return newBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, targetRange.maxUnsigned)
+				if iVal < 0 || uint64(iVal) > targetRange.maxUnsigned {
+					return newBuiltinError("value %d is out of range for type %s (0 to %d)", iVal, toType, targetRange.maxUnsigned)
 				}
 			} else { // Signed
-				if val.Value < targetRange.minSigned || val.Value > targetRange.maxSigned {
-					return newBuiltinError("value %d is out of range for type %s (%d to %d)", val.Value, toType, targetRange.minSigned, targetRange.maxSigned)
+				if iVal < targetRange.minSigned || iVal > targetRange.maxSigned {
+					return newBuiltinError("value %d is out of range for type %s (%d to %d)", iVal, toType, targetRange.minSigned, targetRange.maxSigned)
 				}
 			}
 			// The value fits, so we can return it.
-			// Our internal object.Integer is int64, which can represent all target types.
-			return &object.Integer{Value: val.Value}
+			return checkAndCreateIntegerObject(nil, object.ObjectType(toType), iVal, uint64(iVal), isUnsigned)
 		case *object.Real:
 			// Per IEC 61131-3 (Table 22, footnote b), REAL to INT conversion uses rounding.
-			return &object.Integer{Value: int64(math.Round(val.Value))}
+			rounded := int64(math.Round(val.Value))
+			return checkAndCreateIntegerObject(nil, object.ObjectType(toType), rounded, uint64(rounded), false)
+		case *object.LReal:
+			// Per IEC 61131-3 (Table 22, footnote b), REAL to INT conversion uses rounding.
+			rounded := int64(math.Round(val.Value))
+			return checkAndCreateIntegerObject(nil, object.ObjectType(toType), rounded, uint64(rounded), false)
 		case *object.String:
 			i, err := strconv.ParseInt(val.Value, 10, 64)
 			if err != nil {
 				return newBuiltinError("could not parse string to integer: %s", val.Value)
 			}
-			return &object.Integer{Value: i}
+			return &object.LInt{Value: i}
 		default:
 			return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 		}
@@ -1472,9 +1431,11 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 
 	// Handle conversions to Real types
 	if isRealType(toType) {
+		val, ok := getFloat64Value(input)
+		if ok {
+			return &object.Real{Value: val}
+		}
 		switch val := input.(type) {
-		case *object.Integer:
-			return &object.Real{Value: float64(val.Value)}
 		case *object.Real:
 			return &object.Real{Value: val.Value}
 		case *object.String:
@@ -1501,11 +1462,12 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 		}
 		width, _ := getBitStringWidth(toType)
 		switch val := input.(type) {
-		case *object.Integer:
-			if val.Value < 0 || uint64(val.Value) > maxVal {
-				return newBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, maxVal)
+		case *object.LInt, *object.SInt, *object.Int, *object.DInt, *object.USInt, *object.UInt, *object.UDInt, *object.ULInt:
+			iVal, _, _ := getIntegerObjectValue(val)
+			if iVal < 0 || uint64(iVal) > maxVal {
+				return newBuiltinError("value %d is out of range for type %s (0 to %d)", iVal, toType, maxVal)
 			}
-			return &object.BitString{Value: uint64(val.Value), Width: width}
+			return &object.BitString{Value: uint64(iVal), Width: width}
 		default:
 			return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 		}
@@ -1514,12 +1476,12 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 	// Handle BCD conversions
 	if toType == "BCD" {
 		switch val := input.(type) {
-		case *object.Integer:
-			bcd, err := intToBcd(val.Value)
+		case *object.LInt, *object.SInt, *object.Int, *object.DInt:
+			iVal, _, _ := getIntegerObjectValue(val)
+			bcd, err := intToBcd(iVal)
 			if err != nil {
 				return newBuiltinError("%s", err.Error())
 			}
-			// BCD is represented as a WORD (16-bit)
 			return &object.BitString{Value: uint64(bcd), Width: 16}
 		default:
 			return newBuiltinError("conversion from %s to BCD is not supported", input.Type())
@@ -1612,7 +1574,7 @@ func bcdToInt(input object.Object) object.Object {
 		multiplier *= 10
 	}
 
-	return &object.Integer{Value: result}
+	return &object.LInt{Value: result}
 }
 
 // evalTON implements the logic for the TON (Timer On-Delay) standard function block.
@@ -1723,35 +1685,35 @@ func evalCTU(instanceEnv, callEnv *object.Environment) object.Object {
 	cu, _ := instanceEnv.Get("CU")
 	r, _ := instanceEnv.Get("R")
 	pv, _ := instanceEnv.Get("PV")
-	lastCU, _ := instanceEnv.Get("__lastCU")
+	lastCU, _ := instanceEnv.GetRaw("__lastCU")
 	cvObj, _ := instanceEnv.Get("CV")
 
 	cuBool, _ := cu.(*object.Boolean)
 	rBool, _ := r.(*object.Boolean)
-	pvInt, _ := pv.(*object.Integer)
-	if cuBool == nil || rBool == nil || pvInt == nil {
-		return newBuiltinError("CTU requires CU (BOOL), R (BOOL), and PV (INT) inputs")
+	pvInt, _, ok := getIntegerObjectValue(pv)
+	if cuBool == nil || rBool == nil || !ok {
+		return newBuiltinError("CTU requires CU (BOOL), R (BOOL), and PV (any INT type) inputs")
 	}
 
 	lastCUBool := lastCU == TRUE
 	var cv int64
-	if cvInt, ok := cvObj.(*object.Integer); ok {
+	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
 	}
 
 	if rBool == TRUE {
 		cv = 0
-	} else if cuBool == TRUE && !lastCUBool { // Rising edge on CU
-		if cv < pvInt.Value { // Standard says count up to max value, but PV is a practical limit
+	} else if cuBool.Value && !lastCUBool { // Rising edge on CU
+		if cv < pvInt { // Standard says count up to max value, but PV is a practical limit
 			cv++
 		}
 	}
 
-	q := nativeBoolToBooleanObject(cv >= pvInt.Value)
+	q := nativeBoolToBooleanObject(cv >= pvInt)
 
-	instanceEnv.Set("__lastCU", cuBool)
+	instanceEnv.Set("__lastCU", cu)
 	instanceEnv.Set("Q", q)
-	instanceEnv.Set("CV", &object.Integer{Value: cv})
+	instanceEnv.Set("CV", &object.LInt{Value: cv})
 
 	return q
 }
@@ -1761,25 +1723,25 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 	cd, _ := instanceEnv.Get("CD")
 	ld, _ := instanceEnv.Get("LD")
 	pv, _ := instanceEnv.Get("PV")
-	lastCD, _ := instanceEnv.Get("__lastCD")
+	lastCD, _ := instanceEnv.GetRaw("__lastCD")
 	cvObj, _ := instanceEnv.Get("CV")
 
 	cdBool, _ := cd.(*object.Boolean)
 	ldBool, _ := ld.(*object.Boolean)
-	pvInt, _ := pv.(*object.Integer)
-	if cdBool == nil || ldBool == nil || pvInt == nil {
-		return newBuiltinError("CTD requires CD (BOOL), LD (BOOL), and PV (INT) inputs")
+	pvInt, _, ok := getIntegerObjectValue(pv)
+	if cdBool == nil || ldBool == nil || !ok {
+		return newBuiltinError("CTD requires CD (BOOL), LD (BOOL), and PV (any INT type) inputs")
 	}
 
 	lastCDBool := lastCD == TRUE
 	var cv int64
-	if cvInt, ok := cvObj.(*object.Integer); ok {
+	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
 	}
 
 	if ldBool == TRUE {
-		cv = pvInt.Value
-	} else if cdBool == TRUE && !lastCDBool { // Rising edge on CD
+		cv = pvInt
+	} else if cdBool.Value && !lastCDBool { // Rising edge on CD
 		if cv > 0 { // Standard says count down to min value
 			cv--
 		}
@@ -1787,9 +1749,9 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 
 	q := nativeBoolToBooleanObject(cv <= 0)
 
-	instanceEnv.Set("__lastCD", cdBool)
+	instanceEnv.Set("__lastCD", cd)
 	instanceEnv.Set("Q", q)
-	instanceEnv.Set("CV", &object.Integer{Value: cv})
+	instanceEnv.Set("CV", &object.LInt{Value: cv})
 
 	return q
 }
@@ -1866,8 +1828,8 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 	pv, _ := instanceEnv.Get("PV")
 
 	// 2. Get internal state
-	lastCU, _ := instanceEnv.Get("__lastCU")
-	lastCD, _ := instanceEnv.Get("__lastCD")
+	lastCU, _ := instanceEnv.GetRaw("__lastCU")
+	lastCD, _ := instanceEnv.GetRaw("__lastCD")
 	cvObj, _ := instanceEnv.Get("CV")
 
 	// 3. Type assertions and defaults
@@ -1875,15 +1837,15 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 	cdBool, _ := cd.(*object.Boolean)
 	rBool, _ := r.(*object.Boolean)
 	ldBool, _ := ld.(*object.Boolean)
-	pvInt, _ := pv.(*object.Integer)
-	if cuBool == nil || cdBool == nil || rBool == nil || ldBool == nil || pvInt == nil {
+	pvInt, _, ok := getIntegerObjectValue(pv)
+	if cuBool == nil || cdBool == nil || rBool == nil || ldBool == nil || !ok {
 		return newBuiltinError("CTUD requires CU, CD, R, LD (BOOL) and PV (INT) inputs")
 	}
 
 	lastCUBool := lastCU == TRUE
 	lastCDBool := lastCD == TRUE
 	var cv int64
-	if cvInt, ok := cvObj.(*object.Integer); ok {
+	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
 	}
 
@@ -1892,10 +1854,10 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 	if rBool == TRUE {
 		cv = 0
 	} else if ldBool == TRUE {
-		cv = pvInt.Value
+		cv = pvInt
 	} else {
-		cuRising := cuBool == TRUE && !lastCUBool
-		cdRising := cdBool == TRUE && !lastCDBool
+		cuRising := cuBool.Value && !lastCUBool
+		cdRising := cdBool.Value && !lastCDBool
 
 		// Per the standard, if both count up and count down are triggered, nothing happens.
 		if cuRising && !cdRising {
@@ -1912,10 +1874,10 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 	}
 
 	// 5. Update outputs and internal state
-	instanceEnv.Set("__lastCU", cuBool)
-	instanceEnv.Set("__lastCD", cdBool)
-	instanceEnv.Set("CV", &object.Integer{Value: cv})
-	instanceEnv.Set("QU", nativeBoolToBooleanObject(cv >= pvInt.Value))
+	instanceEnv.Set("__lastCU", cu)
+	instanceEnv.Set("__lastCD", cd)
+	instanceEnv.Set("CV", &object.LInt{Value: cv})
+	instanceEnv.Set("QU", nativeBoolToBooleanObject(cv >= pvInt))
 	instanceEnv.Set("QD", nativeBoolToBooleanObject(cv <= 0))
 
 	// CTUD does not have a primary return value. Outputs are accessed via member variables.
@@ -2020,6 +1982,17 @@ func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
 	instanceEnv.Set("Q1", q1Result)
 
 	return q1Result
+}
+
+// isEqual is a helper function that uses the main evaluator's comparison logic
+// to determine if two objects are equal.
+func isEqual(left, right object.Object) bool {
+	// We can reuse the comparison logic from the "EQ" builtin.
+	// The result of evalComparison will be either TRUE, FALSE, or an Error.
+	result := evalComparison("EQ", left, right)
+	// We are only interested in whether the result is the singleton TRUE object.
+	// Any other result (FALSE, NULL, Error) means they are not considered equal.
+	return result == TRUE
 }
 
 // evalRS implements the logic for the RS (Reset-Set) bistable function block.

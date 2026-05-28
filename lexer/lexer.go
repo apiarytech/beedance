@@ -48,6 +48,15 @@ func (l *Lexer) NextToken() token.Token {
 		} else {
 			tok = newToken(token.EQ, l.ch, startLine, startCol, startPos)
 		}
+	case '!':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			literal := string(ch) + string(l.ch)
+			tok = token.Token{Type: token.NEQ, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
+		} else {
+			tok = newToken(token.NOT, l.ch, startLine, startCol, startPos)
+		}
 	case '+':
 		tok = newToken(token.PLUS, l.ch, startLine, startCol, startPos)
 	case '-':

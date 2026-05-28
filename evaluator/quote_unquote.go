@@ -52,7 +52,7 @@ func isUnquoteCall(node ast.Node) bool {
 
 func convertObjectToASTNode(obj object.Object) ast.Node {
 	switch obj := obj.(type) {
-	case *object.Integer:
+	case *object.LInt:
 		t := token.Token{
 			Type:    token.INT,
 			Literal: fmt.Sprintf("%d", obj.Value),

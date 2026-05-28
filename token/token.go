@@ -28,8 +28,6 @@ const (
 
 	// Identifiers + literals
 	IDENT           = "IDENT" // add, foobar, x, y, ...
-	INT             = "INT"
-	REAL            = "REAL"
 	STRING_LITERAL  = "STRING_LITERAL"
 	WSTRING_LITERAL = "WSTRING_LITERAL"
 	TIME            = "TIME"
@@ -168,15 +166,16 @@ const (
 	NIL                = "NIL"
 
 	// Data Type Keywords
-	BOOL = "BOOL"
-	SINT = "SINT"
-
+	BOOL    = "BOOL"
+	SINT    = "SINT"
+	INT     = "INT"
 	DINT    = "DINT"
 	LINT    = "LINT"
 	USINT   = "USINT"
 	UINT    = "UINT"
 	UDINT   = "UDINT"
 	ULINT   = "ULINT"
+	REAL    = "REAL"
 	LREAL   = "LREAL"
 	WSTRING = "WSTRING"
 	BYTE    = "BYTE"

@@ -29,7 +29,7 @@ const (
 	LOGICAL_XOR // XOR
 	LOGICAL_AND // AND
 	EQUALS      // =, <>
-	LESSGREATER // <, >, <=, >=
+	LESSGREATER // >, <, <=, >=
 	SUM         // +, -
 	PRODUCT     // *, /, MOD
 	EXPONENT    // **
@@ -139,6 +139,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.SLASH, p.parseInfixExpression)
 	p.registerInfix(token.ASTERISK, p.parseInfixExpression)
 	p.registerInfix(token.EXPONENT, p.parseInfixExpression)
+	p.registerInfix(token.EQ, p.parseInfixExpression)
 	p.registerInfix(token.EQ, p.parseInfixExpression)
 	p.registerInfix(token.NEQ, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)

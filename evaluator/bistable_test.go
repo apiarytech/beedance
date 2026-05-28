@@ -168,3 +168,51 @@ func TestSR_FunctionBlock_EN_ENO(t *testing.T) {
 	testBooleanObject(t, mustGet(env, "OutputQ1"), false) // Latch is now reset
 	testBooleanObject(t, mustGet(env, "EnableOut"), true) // ENO is TRUE again
 }
+
+func TestRS_FunctionBlock_EN_ENO(t *testing.T) {
+	input := `
+		PROGRAM TestRS_EN
+			VAR
+				MyLatch : RS;
+				EnableExecution : BOOL := TRUE;
+				SetInput : BOOL;
+				ResetInput : BOOL;
+				OutputQ1 : BOOL;
+				EnableOut : BOOL;
+			END_VAR
+
+			MyLatch(EN := EnableExecution, ENO => EnableOut, S := SetInput, R1 := ResetInput, Q1 => OutputQ1);
+		END_PROGRAM
+	`
+	env := object.NewEnvironment()
+	testEvalWithEnv(t, input, env)
+
+	runScan := func() {
+		testEvalWithEnv(t, `MyLatch(EN := EnableExecution, ENO => EnableOut, S := SetInput, R1 := ResetInput, Q1 => OutputQ1);`, env)
+	}
+
+	// --- Cycle 1: Enabled, Set the latch ---
+	env.Set("EnableExecution", TRUE)
+	env.Set("SetInput", TRUE)
+	env.Set("ResetInput", FALSE)
+	runScan()
+	testBooleanObject(t, mustGet(env, "OutputQ1"), true)
+	testBooleanObject(t, mustGet(env, "EnableOut"), true)
+
+	// --- Cycle 2: Disable execution ---
+	// The inputs change, but the block should not execute, and outputs should hold their values.
+	env.Set("EnableExecution", FALSE)
+	env.Set("SetInput", FALSE)
+	env.Set("ResetInput", TRUE) // This would normally reset the latch
+	runScan()
+	testBooleanObject(t, mustGet(env, "OutputQ1"), true)   // Output is held from previous state
+	testBooleanObject(t, mustGet(env, "EnableOut"), false) // ENO should be FALSE
+
+	// --- Cycle 3: Re-enable execution ---
+	// The block should now execute with the inputs from Cycle 2 (R1=TRUE).
+	// Since Set has priority in RS, if SetInput were TRUE, it would set. But it's FALSE.
+	env.Set("EnableExecution", TRUE)
+	runScan()
+	testBooleanObject(t, mustGet(env, "OutputQ1"), false) // Latch is now reset
+	testBooleanObject(t, mustGet(env, "EnableOut"), true) // ENO is TRUE again
+}
