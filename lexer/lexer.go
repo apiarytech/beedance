@@ -31,6 +31,12 @@ func New(input string) *Lexer {
 	return l
 }
 
+// Prepend pushes a string back to the front of the input stream.
+// This is useful when the parser needs to split a token.
+func (l *Lexer) Prepend(s string) {
+	l.input = s + l.input[l.position:]
+}
+
 func (l *Lexer) NextToken() token.Token {
 	var tok token.Token
 
@@ -170,6 +176,8 @@ func (l *Lexer) NextToken() token.Token {
 			// We'll tokenize it as DOT and let the parser decide its validity.
 			tok = newToken(token.DOT, l.ch, startLine, startCol, startPos)
 		}
+	case '#':
+		tok = newToken(token.HASH, l.ch, startLine, startCol, startPos)
 	case '%':
 		if isLetter(l.peekChar()) {
 			// This is the start of a directly represented variable (e.g., %IX1.0)
@@ -186,33 +194,63 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Column = startCol
 			tok.Pos = startPos
 
-			// Check for typed literals (e.g., "INT#10", "D#2026-01-01").
-			// This is the only context where single-letter identifiers like D, T, DT, TOD
-			// should be treated as keywords.
-			if l.ch == '#' {
-				// It's a typed literal like D#..., INT#..., etc.
-				tok = l.readTypedLiteral(ident, startLine, startCol) // This sets the correct token type (e.g., DATE, INT)
-			} else {
-				// Not followed by '#'. Check if it's a date/time abbreviation that should be an IDENT.
-				if isTimeDateAbbreviation(ident) {
-					tok.Type = token.IDENT
-				} else {
-					// It's a regular keyword (VAR, IF) or an identifier.
-					tok.Type = token.LookupIdent(ident)
+			if strings.HasPrefix(ident, "VAR_") {
+				// Handle compound VAR keywords
+				switch ident {
+				case "VAR_GLOBAL":
+					tok.Type = token.VAR_GLOBAL
+				case "VAR_EXTERNAL":
+					tok.Type = token.VAR_EXTERNAL
+				case "VAR_ACCESS":
+					tok.Type = token.VAR_ACCESS
+				case "VAR_TEMP":
+					tok.Type = token.VAR_TEMP
+				case "VAR_CONFIG":
+					tok.Type = token.VAR_CONFIG
+				case "VAR_INPUT":
+					tok.Type = token.VAR_INPUT
+				case "VAR_OUTPUT":
+					tok.Type = token.VAR_OUTPUT
+				case "VAR_IN_OUT":
+					tok.Type = token.VAR_IN_OUT
+				}
+				return tok
+			}
+
+			// Check if the identifier is a potential time/date keyword.
+			typeToken, isTimeDate := isTimeDateKeyword(ident)
+			if isTimeDate {
+				// It's a potential keyword. We MUST confirm it's followed by a '#'
+				// to treat it as a special token. We need to peek past whitespace.
+				tempPos := l.position
+				tempReadPos := l.readPos
+				tempCh := l.ch
+				l.skipWhitespace()
+				isTypedLiteral := l.ch == '#'
+				// Restore lexer state to before the peek.
+				l.position = tempPos
+				l.readPos = tempReadPos
+				l.ch = tempCh
+
+				if isTypedLiteral {
+					tok.Type = typeToken // It's a literal prefix, e.g., DATE#
+					// Now, parse the rest of the literal value as a single identifier.
+					//tok.Literal = l.readTimeLiteralValue()
+					return tok
 				}
 			}
+
+			// If it wasn't a time/date literal, perform a general keyword lookup.
+			tok.Type = token.LookupIdent(ident)
 			return tok
 		} else if isDigit(l.ch) {
-			literal, tokType := l.readNumber()
-			tok.Literal = literal
-			tok.Type = tokType
+			tok.Literal, tok.Type = l.readNumber()
 			tok.Row = startLine
 			tok.Column = startCol
 			tok.Pos = startPos
 			return tok
 		} else {
 			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol, startPos)
-
 		}
 	}
 	l.readChar()
@@ -283,7 +321,8 @@ func (l *Lexer) peekChar() byte {
 
 func (l *Lexer) readIdentifier() string { // Changed to return the identifier string
 	position := l.position
-	for isLetter(l.ch) || isDigit(l.ch) {
+	// Per IEC 61131-3 §2.1.2, an identifier is a string of letters, digits, and underscores.
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' {
 		l.readChar()
 	}
 	return l.input[position:l.position]
@@ -293,7 +332,7 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 	position := l.position // 0-based index for slicing
 	tokType := token.TokenType(token.INT)
 
-	// Read the integer part
+	// Read the integer part, allowing for underscores
 	for isDigit(l.ch) || l.ch == '_' {
 		l.readChar()
 	}
@@ -328,15 +367,8 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 			return l.input[position:l.position], tokType
 		}
 
-		// Check for an exponent part, which is not allowed for based literals
-		if l.ch == 'e' || l.ch == 'E' {
-			l.readChar()
-			for isDigit(l.ch) || l.ch == '+' || l.ch == '-' || l.ch == '_' {
-				l.readChar()
-			}
-			return l.input[position:l.position], token.ILLEGAL
-		}
-		return l.input[position:l.position], token.INT
+		// After parsing a based literal, we should not look for exponents. Return immediately.
+		return l.input[position:l.position], tokType
 	}
 
 	// If not a based literal, check for fractional part (making it a REAL)
@@ -349,20 +381,10 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 		}
 	}
 
-	// Check for a fractional part (making it a REAL)
-	// Make sure it's not the start of a '..' range token
-	if l.ch == '.' && l.peekChar() != '.' {
-		tokType = token.REAL
-		l.readChar() // consume '.'
-		for isDigit(l.ch) || l.ch == '_' {
-			l.readChar()
-		}
-	}
-
 	// Check for an exponent part (also making it a REAL)
 	if l.ch == 'e' || l.ch == 'E' {
-		tokType = token.REAL
-		l.readChar() // consume 'e' or 'E'
+		tokType = token.REAL // cspell:disable-line
+		l.readChar()         // consume 'e' or 'E'
 		if l.ch == '+' || l.ch == '-' {
 			l.readChar()
 		}
@@ -371,7 +393,36 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 		}
 	}
 
+	// After a number, if we see characters that are part of a date/time literal,
+	// switch to treating it as an identifier to consume the whole thing.
+	if l.ch == '-' || l.ch == ':' {
+		tokType = token.IDENT
+		for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '.' || l.ch == '-' || l.ch == ':' {
+			l.readChar()
+		}
+	}
+
+	// After a number, if we see a letter, it might be a time unit (e.g., 5s, 10ms).
+	// We consume the rest of what looks like a duration string.
+	if isLetter(l.ch) {
+		tokType = token.IDENT // It's no longer just a number, but part of a duration identifier
+		for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '.' {
+			l.readChar()
+		}
+	}
+
 	return l.input[position:l.position], tokType
+}
+
+// readTimeLiteralValue consumes the value part of a time/date literal.
+// This is a special case because these literals can contain '-' and ':'
+// which would normally be treated as separate tokens.
+func (l *Lexer) readTimeLiteralValue() string {
+	position := l.position
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '.' || l.ch == '-' || l.ch == ':' {
+		l.readChar()
+	}
+	return l.input[position:l.position]
 }
 
 func (l *Lexer) readDirectVariable() string {
@@ -382,31 +433,6 @@ func (l *Lexer) readDirectVariable() string {
 		l.readChar()
 	}
 	return l.input[position:l.position]
-}
-
-func (l *Lexer) readTypedLiteral(typePart string, startLine int, startCol int) token.Token {
-	startPos := l.position - len(typePart) // Mark the start of the entire literal
-	l.readChar()                           // consume '#'
-
-	// Delegate to a specific reader based on the type part.
-	// This makes the lexer more robust and compliant with IEC 61131-3 literal formats.
-	typeKeyword := token.LookupIdent(strings.ToUpper(typePart))
-	switch typeKeyword {
-	case token.BYTE, token.WORD, token.DWORD, token.LWORD:
-		l.readBasedIntegerPart()
-	case token.SINT, token.INT, token.DINT, token.LINT, token.USINT, token.UINT, token.UDINT, token.ULINT:
-		l.readIntegerPart()
-	case token.REAL, token.LREAL:
-		l.readRealPart()
-	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME:
-		l.readTimeDatePart(typeKeyword) // Pass typeKeyword for specific validation
-	default:
-		// If the type is not a known keyword for typed literals, it's an error.
-		return token.Token{Type: token.ILLEGAL, Literal: typePart, Row: startLine, Column: startCol, Pos: startPos}
-	}
-
-	literal := l.input[startPos:l.position]
-	return token.Token{Type: typeKeyword, Literal: literal, Row: startLine, Column: startCol}
 }
 
 // readBasedIntegerPart reads the value part of a bit-string literal (e.g., 16#FF_AB).
@@ -482,18 +508,6 @@ func (l *Lexer) readRealPart() {
 	}
 }
 
-// readTimeDatePart reads the value part of time and date related literals.
-func (l *Lexer) readTimeDatePart(tokType token.TokenType) {
-	// This function should be more specific based on tokType for strict compliance.
-	// For now, it's a general reader for time/date components.
-	// Full IEC 61131-3 validation of the *format* (e.g., T#5s, DATE#1990-01-01)
-	// is complex and might be better handled in the parser or a dedicated validator.
-	// Here, we ensure we capture all characters that *could* be part of a valid time/date literal.
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '-' || l.ch == '_' || l.ch == '.' || l.ch == ':' || l.ch == '#' {
-		l.readChar()
-	}
-}
-
 func isLetter(ch byte) bool {
 	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
 }
@@ -553,13 +567,19 @@ func isTypedLiteralPrefix(ident string) bool {
 	}
 }
 
-// isTimeDateAbbreviation checks if an identifier is one of the special
-// single- or two-letter abbreviations for date/time types.
-func isTimeDateAbbreviation(ident string) bool {
+// isTimeDateKeyword checks if an identifier is a time/date keyword or abbreviation.
+// It returns the corresponding token type and a boolean indicating if it's a match.
+func isTimeDateKeyword(ident string) (token.TokenType, bool) {
 	upper := strings.ToUpper(ident)
 	switch upper {
-	case "D", "T", "DT", "TOD":
-		return true
+	case "TIME", "T":
+		return token.TIME, true
+	case "DATE", "D":
+		return token.DATE, true
+	case "TIME_OF_DAY", "TOD":
+		return token.TIME_OF_DAY, true
+	case "DATE_AND_TIME", "DT":
+		return token.DATE_AND_TIME, true
 	}
-	return false
+	return token.ILLEGAL, false
 }

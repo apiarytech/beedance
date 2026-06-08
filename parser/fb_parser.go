@@ -50,17 +50,11 @@ end_var_parsing:
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
 	} else {
-		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK, token.VAR)
+		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
 	}
 
 	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
-		// Error Recovery: If we see a keyword that could start a new statement,
-		// report the missing END_FUNCTION_BLOCK and return without advancing.
-		if isStatementStartKeyword(p.curToken.Type) {
-			p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
-		} else {
-			p.peekError(token.END_FUNCTION_BLOCK)
-		}
+		p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
 	}
 
 	return stmt

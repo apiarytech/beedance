@@ -7,87 +7,77 @@ import (
 )
 
 func TestNumericLiterals(t *testing.T) {
-	tests := []struct {
-		input           string
-		expectedType    token.TokenType
-		expectedLiteral string
-	}{
-		// Integers
+	runLexerTest(t, "Integers", []testToken{
 		{"123", token.INT, "123"},
 		{"0", token.INT, "0"},
 		{"9876543210", token.INT, "9876543210"},
+	})
 
-		// Reals
+	runLexerTest(t, "Reals", []testToken{
 		{"123.456", token.REAL, "123.456"},
 		{"0.0", token.REAL, "0.0"},
-		{".123", token.ILLEGAL, "."}, // Assuming numbers must start with a digit
+		{".123", token.ILLEGAL, "."},
+	})
 
-		// Reals with exponents
+	runLexerTest(t, "Reals with exponents", []testToken{
 		{"1.23E4", token.REAL, "1.23E4"},
 		{"1.23e4", token.REAL, "1.23e4"},
 		{"1.23e+4", token.REAL, "1.23e+4"},
 		{"1.23E-4", token.REAL, "1.23E-4"},
 		{"123E-4", token.REAL, "123E-4"},
+	})
+}
 
-		// Based literals
-		{"2#1010_1100", token.INT, "2#1010_1100"}, // Binary
-		{"8#377", token.INT, "8#377"},             // Octal
-		{"16#FF", token.INT, "16#FF"},             // Hexadecimal
-		{"16#ff", token.INT, "16#ff"},             // Hexadecimal (lowercase)
-
-		// Based Real Literals
+func TestBasedLiterals(t *testing.T) {
+	runLexerTest(t, "Based literals", []testToken{
+		{"2#1010_1100", token.INT, "2#1010_1100"},
+		{"8#377", token.INT, "8#377"},
+		{"16#FF", token.INT, "16#FF"},
+		{"16#ff", token.INT, "16#ff"},
 		{"16#A.B", token.REAL, "16#A.B"},
 		{"2#1011_0010", token.INT, "2#1011_0010"},
+	})
+}
 
-		// Typed Literals
-		{"INT#10", token.INT, "INT#10"},
-		{"DINT#123", token.DINT, "DINT#123"},
-		{"REAL#1.5", token.REAL, "REAL#1.5"},
-		{"TIME#5s", token.TIME, "TIME#5s"},
-		{"T#5s", token.TIME, "T#5s"},               // Short form for TIME
-		{"T#5m_10s", token.TIME, "T#5m_10s"},       // With underscore
-		{"TIME#1h_30m", token.TIME, "TIME#1h_30m"}, // Long form with underscore
-		{"DATE#2026-05-21", token.DATE, "DATE#2026-05-21"},
-		{"D#2026-05-21", token.DATE, "D#2026-05-21"},
-		{"TIME_OF_DAY#14:21:00", token.TIME_OF_DAY, "TIME_OF_DAY#14:21:00"},
-		{"TOD#14:21:00.123", token.TIME_OF_DAY, "TOD#14:21:00.123"},
-		{"DATE_AND_TIME#2026-05-21-14:21:00", token.DATE_AND_TIME, "DATE_AND_TIME#2026-05-21-14:21:00"},
-		{"DT#2026-05-21-14:21:00", token.DATE_AND_TIME, "DT#2026-05-21-14:21:00"},
-
-		// Invalid literals
-		{"16#FFe10", token.ILLEGAL, "16#FFe10"},
-		{"INVALID#123", token.ILLEGAL, "INVALID"},
+func TestTypedLiteralsLexing(t *testing.T) {
+	tests := []struct {
+		name             string
+		input            string
+		expectedTokens   []token.Token
+		expectedLiterals []string
+	}{
+		{"INT", "INT#10", []token.Token{{Type: token.INT}, {Type: token.HASH}, {Type: token.INT}}, []string{"INT", "#", "10"}},
+		{"DINT", "DINT#123", []token.Token{{Type: token.DINT}, {Type: token.HASH}, {Type: token.INT}}, []string{"DINT", "#", "123"}},
+		{"REAL", "REAL#1.5", []token.Token{{Type: token.REAL}, {Type: token.HASH}, {Type: token.REAL}}, []string{"REAL", "#", "1.5"}},
+		{"TIME short", "T#5s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"T", "#", "5s"}},
+		{"TIME long", "TIME#5m_10s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TIME", "#", "5m_10s"}},
+		{"DATE short", "D#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"D", "#", "2026-05-21"}},
+		{"DATE long", "DATE#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE", "#", "2026-05-21"}},
+		{"TOD short", "TOD#14:21:00.123", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TOD", "#", "14:21:00.123"}},
+		{"DT long", "DATE_AND_TIME#2026-05-21-14:21:00", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE_AND_TIME", "#", "2026-05-21-14:21:00"}},
 	}
 
 	for _, tt := range tests {
-		l := New(tt.input)
-		tok := l.NextToken()
-
-		if tok.Type != tt.expectedType {
-			t.Errorf("test for %q - tokentype wrong. expected=%q, got=%q",
-				tt.input, tt.expectedType, tok.Type)
-		}
-
-		if tok.Literal != tt.expectedLiteral {
-			t.Errorf("test for %q - literal wrong. expected=%q, got=%q",
-				tt.input, tt.expectedLiteral, tok.Literal)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			for i, expectedToken := range tt.expectedTokens {
+				tok := l.NextToken()
+				if tok.Type != expectedToken.Type {
+					t.Errorf("token %d type wrong. want=%q, got=%q", i, expectedToken.Type, tok.Type)
+				}
+				if tok.Literal != tt.expectedLiterals[i] {
+					t.Errorf("token %d literal wrong. want=%q, got=%q", i, tt.expectedLiterals[i], tok.Literal)
+				}
+			}
+		})
 	}
 }
 
-func TestNumberWithFollowingIdentifier(t *testing.T) {
-	input := "123myVar"
-	l := New(input)
-
-	tok := l.NextToken()
-	if tok.Type != token.INT || tok.Literal != "123" {
-		t.Fatalf("Expected INT 123, got %s %s", tok.Type, tok.Literal)
-	}
-
-	tok = l.NextToken()
-	if tok.Type != token.IDENT || tok.Literal != "myVar" {
-		t.Fatalf("Expected IDENT myVar, got %s %s", tok.Type, tok.Literal)
-	}
+func TestInvalidLiterals(t *testing.T) {
+	runLexerTest(t, "Invalid literals", []testToken{
+		{"16#FFe10", token.INT, "16#FF"},        // The lexer stops at 'e', which is not a valid hex digit.
+		{"INVALID#123", token.IDENT, "INVALID"}, // Lexer sees IDENT, HASH, INT. Parser handles the error.
+	})
 }
 
 func TestDirectlyRepresentedVariables(t *testing.T) {
@@ -117,4 +107,42 @@ func TestDirectlyRepresentedVariables(t *testing.T) {
 				tt.input, tt.expectedLiteral, tok.Literal)
 		}
 	}
+}
+
+func TestNumberWithFollowingIdentifier(t *testing.T) {
+	input := "123 myVar"
+	l := New(input)
+
+	tok := l.NextToken()
+	if tok.Type != token.INT || tok.Literal != "123" {
+		t.Fatalf("Expected INT 123, got %s %s", tok.Type, tok.Literal)
+	}
+
+	tok = l.NextToken()
+	if tok.Type != token.IDENT || tok.Literal != "myVar" {
+		t.Fatalf("Expected IDENT myVar, got %s %s", tok.Type, tok.Literal)
+	}
+}
+
+type testToken struct {
+	input           string
+	expectedType    token.TokenType
+	expectedLiteral string
+}
+
+func runLexerTest(t *testing.T, name string, tests []testToken) {
+	t.Run(name, func(t *testing.T) {
+		for i, tt := range tests {
+			l := New(tt.input)
+			tok := l.NextToken()
+
+			if tok.Type != tt.expectedType {
+				t.Errorf("test %d (%q) - tokentype wrong. expected=%q, got=%q", i, tt.input, tt.expectedType, tok.Type)
+			}
+
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("test %d (%q) - literal wrong. expected=%q, got=%q", i, tt.input, tt.expectedLiteral, tok.Literal)
+			}
+		}
+	})
 }

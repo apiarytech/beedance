@@ -11,10 +11,8 @@ package parser
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"beedance/ast"
 	"beedance/lexer"
@@ -92,28 +90,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.prefixParseFns = make(map[token.TokenType]prefixParseFn)
 
 	// Literals (B.1.2)
-	p.registerPrefix(token.INT, p.parseIntegerLiteral)
-	p.registerPrefix(token.REAL, p.parseRealLiteral)
-	p.registerPrefix(token.LREAL, p.parseRealLiteral)
+	// Generic literals are handled by the lexer and parsed as identifiers or numbers.
+	// Typed literals (e.g., INT#10) are handled by the HASH infix parser.
 	p.registerPrefix(token.STRING_LITERAL, p.parseStringLiteral)
-	p.registerPrefix(token.WSTRING_LITERAL, p.parseStringLiteral) // Treat WSTRING as STRING for now
-	p.registerPrefix(token.TIME, p.parseTimeDateLiteral)
-	p.registerPrefix(token.DATE, p.parseTimeDateLiteral) // This will handle D# and DATE#
-	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeDateLiteral)
-	// Specific integer types
-	p.registerPrefix(token.SINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.DINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.LINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.USINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.UINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.UDINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.ULINT, p.parseTypedIntegerLiteral)
-	p.registerPrefix(token.BYTE, p.parseBitStringLiteral)
-	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.DATE_AND_TIME, p.parseTimeDateLiteral)
+	p.registerPrefix(token.WSTRING_LITERAL, p.parseStringLiteral)
 	p.registerPrefix(token.TRUE, p.parseBoolean)
 	p.registerPrefix(token.FALSE, p.parseBoolean)
 
@@ -121,6 +101,15 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.IDENT, p.parseIdentifier)
 	p.registerPrefix(token.DIRECT_VAR, p.parseDirectVariable)
 
+	// Numeric literals (which can also be part of a typed literal)
+	p.registerPrefix(token.INT, p.parseIntegerLiteral)
+	p.registerPrefix(token.REAL, p.parseRealLiteral)
+	p.registerPrefix(token.LREAL, p.parseRealLiteral)
+	// Time and Date Literals
+	p.registerPrefix(token.TIME, p.parseTimeLiteral)
+	p.registerPrefix(token.DATE, p.parseDateLiteral)
+	p.registerPrefix(token.TIME_OF_DAY, p.parseTimeOfDayLiteral)
+	p.registerPrefix(token.DATE_AND_TIME, p.parseDateAndTimeLiteral)
 	// Prefix Operators
 	p.registerPrefix(token.NOT, p.parsePrefixExpression)
 	p.registerPrefix(token.MINUS, p.parsePrefixExpression)
@@ -164,6 +153,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
+	p.registerInfix(token.HASH, p.parseTypedLiteral)
 
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
@@ -218,9 +208,9 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 			return true // "Recovered"
 		}
 		// For other errors, we might want to skip until the next semicolon or block end.
-		for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.EOF) {
-			p.nextToken()
-		}
+		// for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.EOF) {
+		// 	p.nextToken()
+		// }
 		return false
 	}
 }
@@ -275,17 +265,17 @@ func (p *Parser) ParseProgram() *ast.Program {
 			program.Statements = append(program.Statements, stmt)
 		}
 
-		// Decide whether to advance the token.
+		// Error recovery: if an error occurred during parsing, skip tokens until
+		// we find a semicolon or a keyword that can start a new statement,
+		// then try to continue parsing from there.
 		numErrorsAfter := len(p.errors)
 		if numErrorsAfter == numErrorsBefore {
 			// No new errors, so we are confident we can advance.
 			p.nextToken()
-		} else {
-			// An error occurred. As a recovery strategy, if the current token is a semicolon,
-			// we can often safely consume it to move on to the next statement.
-			if p.curTokenIs(token.SEMICOLON) {
-				p.nextToken()
-			} else if isStatementEndToken(p.curToken.Type) {
+		} else if numErrorsAfter > numErrorsBefore {
+			// If an error occurred, skip tokens until we find a safe place to restart.
+			// We check the *current* token, not the peek token, to decide if we should stop.
+			for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) && !isStatementStartKeyword(p.curToken.Type) {
 				p.nextToken()
 			}
 		}
@@ -459,17 +449,21 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 
 	p.nextToken() // Consume VAR
 
-	// Check for the optional CONSTANT keyword after VAR
-	isConstant := false
-	if p.curTokenIs(token.CONSTANT) {
-		isConstant = true
+	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
+
+	// After parsing the declarations, we must be at the END_VAR token.
+	if !p.curTokenIs(token.END_VAR) {
+		// The error is already reported by parseVarDeclarations, so we don't need to report it again.
+		// Just ensure we don't advance past the token that should start the next statement.
+		return stmt
 	}
-	stmt.Declarations = p.parseVarDeclarations(token.END_VAR, isConstant)
+
 	return stmt
 }
 
 func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	defer untrace(trace("parseStructMember"))
+	// cspell:disable-next-line
 	// Struct members are like variable declarations but without the VAR keyword
 	// and, according to the IEC 61131-3 standard, without initial values.
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
@@ -508,13 +502,7 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 
 	p.nextToken() // Consume VAR_GLOBAL
 
-	// Check for the optional CONSTANT keyword after VAR_GLOBAL
-	isConstant := false
-	if p.curTokenIs(token.CONSTANT) {
-		isConstant = true
-		p.nextToken() // consume CONSTANT
-	}
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR, isConstant)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
 	return stmt
 }
 
@@ -524,14 +512,7 @@ func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 
 	p.nextToken() // Consume VAR_EXTERNAL
 
-	// Check for the optional CONSTANT keyword after VAR_EXTERNAL
-	isConstant := false
-	if p.curTokenIs(token.CONSTANT) {
-		isConstant = true
-		p.nextToken() // consume CONSTANT
-	}
-
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR, isConstant)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
 	return stmt
 }
 
@@ -596,7 +577,7 @@ func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 
 	p.nextToken() // consume VAR_TEMP
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR, false)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
 	return stmt
 }
 
@@ -606,7 +587,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 
 	p.nextToken() // consume VAR_CONFIG
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR, false)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
 	return stmt
 }
 
@@ -624,10 +605,6 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 		}
 		// p.parseTypeDeclaration consumes the semicolon, so we just advance.
 		p.nextToken()
-	}
-
-	if !p.curTokenIs(token.END_TYPE) {
-		p.errors = append(p.errors, fmt.Sprintf("expected END_TYPE, got %s instead at row %d, column %d", p.curToken.Type, p.curToken.Row, p.curToken.Column))
 	}
 
 	return block
@@ -721,17 +698,21 @@ func (p *Parser) parseEnumDefinition() ast.Expression {
 		}
 	}
 
-	p.expectPeek(token.RPAREN) // Expect and consume ')'
+	// After the loop, the current token should be the closing parenthesis.
+	if !p.curTokenIs(token.RPAREN) {
+		p.currentError("expected ')' to close enumeration, got %s instead", p.curToken.Type)
+		return nil
+	}
 	return enumDef
 }
 
-func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant bool) []*ast.VarDeclStatement {
+func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
 	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
 
-	isConstant := blockIsConstant
 	var isRetain bool
 	var isNonRetain bool
+	isConstant := false
 
 	if p.curTokenIs(token.CONSTANT) {
 		isConstant = true
@@ -742,6 +723,11 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 	} else if p.curTokenIs(token.NON_RETAIN) {
 		isNonRetain = true
 		p.nextToken() // consume NON_RETAIN
+	}
+	// Check for the optional CONSTANT keyword after VAR
+	if p.curTokenIs(token.CONSTANT) {
+		isConstant = true
+		p.nextToken() // consume CONSTANT
 	}
 
 	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
@@ -789,7 +775,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 				Location:    atDecl,
 				DataType:    dataType,
 				Value:       initialValue,
-				IsConstant:  isConstant,
+				IsConstant:  isConstant, // Apply the block-level qualifier
 				IsRetain:    isRetain,
 				IsNonRetain: isNonRetain,
 			}
@@ -797,12 +783,11 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockIsConstant 
 		}
 
 		// After parsing the declaration, we should be at the semicolon.
-		if !p.expectPeek(token.SEMICOLON) { // Consume the semicolon
-			//Do not consume but produce error, then continue.
-		} else {
-			p.nextToken() // Move to the start of the next declaration or end token
-		}
+		p.expectPeek(token.SEMICOLON) // Consume the semicolon
+		p.nextToken()                 // Move to the start of the next declaration or end token
 	}
+
+	//p.nextToken() // Consume the endToken (e.g., END_VAR) to advance the parser
 	return varDecls
 }
 
@@ -1082,25 +1067,29 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) parseIdentifier() ast.Expression {
 	defer untrace(trace("parseIdentifier"))
-	// Check for qualified enumerated value: TypeName#Value
-	if p.peekTokenIs(token.HASH) {
-		typeName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken() // consume IDENT, curToken is now HASH
-		p.nextToken() // consume HASH, curToken is now the value IDENT
+	// The lexer might provide a token that includes a delimiter if it's not surrounded by whitespace.
+	// We need to split the identifier at the delimiter and only consume the identifier part,
+	// leaving the delimiter as the next token.
+	literal := p.curToken.Literal
+	delimiters := ":#,-"
 
-		if !p.curTokenIs(token.IDENT) {
-			p.currentError("expected identifier after '#' for enumerated value, got %s", p.curToken.Type)
-			return nil
+	if index := strings.IndexAny(literal, delimiters); index != -1 {
+		identPart := literal[:index]
+		rest := literal[index:]
+
+		// Create a new token for the identifier part.
+		identToken := token.Token{
+			Type:    token.IDENT,
+			Literal: identPart,
+			Row:     p.curToken.Row,
+			Column:  p.curToken.Column,
+			Pos:     p.curToken.Pos,
 		}
 
-		valueName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		return &ast.EnumeratedValueLiteral{
-			Token:    typeName.Token,
-			TypeName: typeName,
-			Value:    valueName,
-		}
+		p.l.Prepend(rest)
+		return &ast.Identifier{Token: identToken, Value: identPart}
 	}
-	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	return &ast.Identifier{Token: p.curToken, Value: literal}
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
@@ -1244,19 +1233,9 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 	lit := &ast.RealLiteral{Token: p.curToken}
 
 	literal := p.curToken.Literal
-	// Handle typed literals like REAL#1.23 or LREAL#1.23E-4
-	if strings.Contains(literal, "#") {
-		// The lexer should have already captured the full literal including exponent.
-		// We just need to extract the value part.
-		parts := strings.SplitN(literal, "#", 2)
-		literal = parts[1]
-	}
 
-	// Default to REAL (32-bit) unless LREAL is specified.
-	bitSize := 32
-	if p.curToken.Type == token.LREAL {
-		bitSize = 64
-	}
+	bitSize := 64 // Always parse to float64 to maintain precision
+
 	lit.Precision = bitSize
 	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
 
@@ -1333,72 +1312,12 @@ func (p *Parser) parseBitStringLiteral() ast.Expression {
 }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
-	defer untrace(trace("parseStringLiteral"))
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
-}
-
-func (p *Parser) parseTimeDateLiteral() ast.Expression {
-	defer untrace(trace("parseTimeDateLiteral"))
-	literal := p.curToken.Literal
-	parts := strings.SplitN(literal, "#", 2)
-	if len(parts) != 2 {
-		p.errors = append(p.errors, fmt.Sprintf("invalid time/date literal format: %q", literal))
-		return nil
+	defer untrace(trace("parseStringLiteral")) // cspell:disable-line
+	if p.curToken.Type == token.WSTRING_LITERAL {
+		return &ast.WStringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	} else {
+		return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 	}
-	valuePart := parts[1]
-
-	switch p.curToken.Type {
-	case token.TIME:
-		// Regex to validate IEC 61131-3 duration format.
-		// It allows for optional days, hours, minutes, seconds, and milliseconds.
-		// It also handles underscores between units.
-		// Example valid: 2d_5h_30m_10s_500ms, 10.5s, 500ms
-		validTimeRegex := regexp.MustCompile(`^(((\d+d_?)?(\d+h_?)?(\d+m_?)?(\d+(\.\d+)?s_?)?(\d+ms)?)|(\d+(\.\d+)?s))$`)
-		if !validTimeRegex.MatchString(strings.ToLower(valuePart)) {
-			p.errors = append(p.errors, fmt.Sprintf("invalid TIME literal format: %q", valuePart))
-			return nil
-		}
-		return &ast.TimeLiteral{Token: p.curToken, Value: literal}
-
-	case token.DATE:
-		// Use Go's time parsing with a strict layout.
-		_, err := time.Parse("2006-01-02", valuePart)
-		if err != nil {
-			p.errors = append(p.errors, fmt.Sprintf("invalid DATE literal format: %q, expected YYYY-MM-DD", valuePart))
-			return nil
-		}
-		return &ast.DateLiteral{Token: p.curToken, Value: literal}
-
-	case token.TIME_OF_DAY:
-		// Use Go's time parsing with a strict layout.
-		_, err := time.Parse("15:04:05", valuePart)
-		if err != nil {
-			// Allow for fractional seconds
-			_, err2 := time.Parse("15:04:05.999999999", valuePart)
-			if err2 != nil {
-				p.errors = append(p.errors, fmt.Sprintf("invalid TIME_OF_DAY literal format: %q, expected HH:MM:SS", valuePart))
-				return nil
-			}
-		}
-		return &ast.TimeOfDayLiteral{Token: p.curToken, Value: literal}
-
-	case token.DATE_AND_TIME:
-		// Use Go's time parsing with a strict layout.
-		_, err := time.Parse("2006-01-02-15:04:05", valuePart)
-		if err != nil {
-			// Allow for fractional seconds
-			_, err2 := time.Parse("2006-01-02-15:04:05.999999999", valuePart)
-			if err2 != nil {
-				p.errors = append(p.errors, fmt.Sprintf("invalid DATE_AND_TIME literal format: %q, expected YYYY-MM-DD-HH:MM:SS", valuePart))
-				return nil
-			}
-		}
-		return &ast.DateAndTimeLiteral{Token: p.curToken, Value: literal}
-	}
-
-	// This should not be reached if the prefix functions are registered correctly.
-	p.errors = append(p.errors, fmt.Sprintf("no parsing function for time/date literal type %s", p.curToken.Type))
-	return nil
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
@@ -1518,7 +1437,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 	// The last token should be END_IF
 	if !p.curTokenIs(token.END_IF) {
-		p.specificError("missing 'END_IF' for IF statement starting at row %d", ifStmt.Token.Row)
+		p.currentError("missing 'END_IF' for IF statement starting at row %d", ifStmt.Token.Row)
 		// Do not return nil. Return the partially parsed statement to allow recovery.
 	}
 
@@ -1563,9 +1482,11 @@ func (p *Parser) parseForStatement() ast.Statement {
 	}
 
 	// DO
-	p.expectPeek(token.DO)
+	if !p.expectPeek(token.DO) {
+		return stmt // allow recovery
+	}
 	p.nextToken() // Consume DO
-	stmt.Body = p.parseBlockStatementUntil(token.END_FOR, token.VAR)
+	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
 
 	return stmt
 }
@@ -1576,16 +1497,15 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 
 	p.nextToken() // Consume WHILE
 	stmt.Condition = p.parseExpression(LOWEST)
-	p.nextToken() // Consume IDENT
 
 	// Improved Error Recovery: Report missing DO but continue parsing the block.
-	if !p.curTokenIs(token.DO) {
-		p.specificError("missing 'DO' in WHILE loop at row %d, column %d", p.peekToken.Row, p.peekToken.Column)
+	if !p.expectPeek(token.DO) {
 		// Do not return, allow parsing of the body to continue.
+		// expectPeek has already logged the error.
 	}
 
 	p.nextToken() // Consume DO
-	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE, token.VAR)
+	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
 
 	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
 	if !p.curTokenIs(token.END_WHILE) {
@@ -1668,11 +1588,16 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	// Parse optional ELSE block
 	if p.curTokenIs(token.ELSE) {
 		p.nextToken() // consume ELSE
-		stmt.Alternative = p.parseBlockStatementUntil(token.END_CASE, token.VAR)
+		stmt.Alternative = p.parseBlockStatementUntil(token.END_CASE)
 	}
 
 	if !p.curTokenIs(token.END_CASE) {
 		p.peekError(token.END_CASE)
+	}
+
+	// A CASE statement, like other block statements, must be terminated by a semicolon.
+	if !p.expectPeek(token.SEMICOLON) {
+		// expectPeek will have logged an error.
 	}
 
 	return stmt
@@ -1737,31 +1662,25 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 
 	p.nextToken() // Consume the block type token (e.g., VAR_INPUT)
 
-	// Check for the optional CONSTANT keyword after VAR
-	isConstant := false
-	if p.peekTokenIs(token.CONSTANT) {
-		isConstant = true
-		p.nextToken() // Consume VAR, curToken is now CONSTANT
-	}
-
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
-	decls := p.parseVarDeclarations(token.END_VAR, isConstant)
+	decls := p.parseVarDeclarations(token.END_VAR)
 
 	// After parsing declarations, we should be on the END_VAR token.
 	// We consume it here so the caller doesn't have to.
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken() // Consume END_VAR
 	}
+
 	return decls
 }
 
-func (p *Parser) parseBlockStatementUntil(end token.TokenType, recoveryToken token.TokenType) *ast.BlockStatement {
+func (p *Parser) parseBlockStatementUntil(end token.TokenType) *ast.BlockStatement {
 	defer untrace(trace(fmt.Sprintf("parseBlockStatementUntil (until %s)", end)))
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 	//p.nextToken()
 	if isStatementStartKeyword(p.curToken.Type) {
-		p.peekError(end)
+		p.currentError("expected statement, but found keyword %s. Missing %s?", p.curToken.Type, end)
 	}
 
 	for !p.curTokenIs(end) && !p.curTokenIs(token.EOF) {
@@ -1963,6 +1882,34 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	return list
 }
 
+// parseGenericExpressionList is a more general version of parseExpressionList.
+// It parses a comma-separated list of simple expressions until a given end token.
+// This is suitable for array literals and repetition factors.
+func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expression {
+	defer untrace(trace(fmt.Sprintf("parseGenericExpressionList (until %s)", end)))
+	list := []ast.Expression{}
+
+	if p.peekTokenIs(end) {
+		p.nextToken() // Consume the end token (e.g., ']')
+		return list
+	}
+
+	p.nextToken() // Move to the first element
+	list = append(list, p.parseExpression(LOWEST))
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // Consume the expression
+		p.nextToken() // Consume the comma
+		list = append(list, p.parseExpression(LOWEST))
+	}
+
+	if !p.expectPeek(end) {
+		return nil
+	}
+
+	return list
+}
+
 func (p *Parser) parseCallArgument() ast.Expression {
 	defer untrace(trace("parseCallArgument"))
 	// Check for named arguments (IDENT := or IDENT =>)
@@ -1992,7 +1939,7 @@ func (p *Parser) parseArrayLiteral() ast.Expression {
 	defer untrace(trace("parseArrayLiteral"))
 	array := &ast.ArrayLiteral{Token: p.curToken}
 
-	array.Elements = p.parseExpressionList(token.RBRACKET)
+	array.Elements = p.parseArrayElementsList(token.RBRACKET)
 
 	return array
 }
@@ -2009,6 +1956,34 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	}
 
 	return exp
+}
+
+func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
+	defer untrace(trace("parseTypedLiteral"))
+
+	// The 'left' expression should be the type identifier (e.g., INT, REAL, DATE).
+	typeIdent, ok := left.(*ast.Identifier)
+	if !ok {
+		p.currentError("expected a type name before '#', got %T", left)
+		return nil
+	}
+
+	// The current token is '#'. We need to parse the literal value that follows.
+	p.nextToken() // Consume '#'
+
+	// The value part is parsed as a standard expression. This handles numbers, time durations, etc.
+	// The lexer will provide the value part (e.g., "5s_10ms", "2026-05-21") as an IDENT token.
+	if !p.curTokenIs(token.IDENT) {
+		p.currentError("expected a literal value after '#'")
+		return nil
+	}
+	valueExp := p.parseIdentifier()
+
+	return &ast.TypedLiteral{
+		Token:    typeIdent.Token, // The token of the type name (e.g., INT)
+		TypeName: typeIdent.Value,
+		Value:    valueExp,
+	}
 }
 
 func (p *Parser) parseHashLiteral() ast.Expression {
@@ -2041,6 +2016,48 @@ func (p *Parser) parseHashLiteral() ast.Expression {
 	return hash
 }
 
+// parseArrayElementsList parses a comma-separated list of expressions or repetition factors
+// for an array literal, until the specified end token is encountered.
+func (p *Parser) parseArrayElementsList(end token.TokenType) []ast.Expression {
+	defer untrace(trace(fmt.Sprintf("parseArrayElementsList (until %s)", end)))
+	elements := []ast.Expression{}
+
+	if p.peekTokenIs(end) {
+		p.nextToken() // Consume the ']'
+		return elements
+	}
+
+	p.nextToken() // Consume the '['
+
+	// Parse the first element or repetition factor
+	elements = append(elements, p.parseArrayElementOrRepetition())
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // Consume the current element/repetition
+		p.nextToken() // Consume the comma
+		elements = append(elements, p.parseArrayElementOrRepetition())
+	}
+
+	if !p.expectPeek(end) {
+		return nil
+	}
+
+	return elements
+}
+
+// parseArrayElementOrRepetition parses a single element within an array literal,
+// which can either be a regular expression or a repetition factor (e.g., 3(0)).
+func (p *Parser) parseArrayElementOrRepetition() ast.Expression {
+	defer untrace(trace("parseArrayElementOrRepetition"))
+
+	// Check for repetition factor: e.g., 3(0) or 2(1,2,3)
+	if p.curTokenIs(token.INT) && p.peekTokenIs(token.LPAREN) {
+		return p.parseArrayRepetition()
+	}
+	// Otherwise, it's a regular expression
+	return p.parseExpression(LOWEST)
+}
+
 func (p *Parser) parseMacroLiteral() ast.Expression {
 	defer untrace(trace("parseMacroLiteral"))
 	lit := &ast.MacroLiteral{Token: p.curToken}
@@ -2058,6 +2075,80 @@ func (p *Parser) parseMacroLiteral() ast.Expression {
 	lit.Body = p.parseBlockStatement()
 
 	return lit
+}
+
+func (p *Parser) parseTimeLiteral() ast.Expression {
+	defer untrace(trace("parseTimeLiteral"))
+	// The lexer gives us the keyword (e.g., "T"). We expect '#' next.
+	if !p.expectPeek(token.HASH) {
+		return nil
+	}
+
+	isNegative := false
+	if p.peekTokenIs(token.MINUS) {
+		isNegative = true
+		p.nextToken() // Consume the '-'
+	}
+
+	p.nextToken() // Consume the '#' or '-' to get to the duration value
+	durationValue := p.curToken.Literal
+	if isNegative {
+		durationValue = "-" + durationValue
+	}
+
+	return &ast.TimeLiteral{
+		Token: p.curToken,
+		Value: durationValue,
+	}
+}
+
+func (p *Parser) parseDateLiteral() ast.Expression {
+	defer untrace(trace("parseDateLiteral"))
+	if !p.expectPeek(token.HASH) {
+		return nil
+	}
+	p.nextToken()
+	return &ast.DateLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseTimeOfDayLiteral() ast.Expression {
+	defer untrace(trace("parseTimeOfDayLiteral"))
+	if !p.expectPeek(token.HASH) {
+		return nil
+	}
+	p.nextToken()
+	return &ast.TimeOfDayLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseDateAndTimeLiteral() ast.Expression {
+	defer untrace(trace("parseDateAndTimeLiteral"))
+	if !p.expectPeek(token.HASH) {
+		return nil
+	}
+	p.nextToken()
+	return &ast.DateAndTimeLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+// parseArrayRepetition parses a repetition factor like `3(0)` or `2(1,2,3)`.
+func (p *Parser) parseArrayRepetition() ast.Expression {
+	defer untrace(trace("parseArrayRepetition"))
+
+	factorToken := p.curToken
+	factorExp := p.parseIntegerLiteral() // Parse the repetition factor (e.g., '3')
+
+	if !p.expectPeek(token.LPAREN) { // Consume '('
+		return nil
+	}
+	// The current token is now '('. We need to parse the elements inside.
+	// We can reuse parseExpressionList for the elements inside the parentheses.
+	// We use parseGenericExpressionList here as repetition elements are simple expressions.
+	repeatedElements := p.parseGenericExpressionList(token.RPAREN)
+
+	return &ast.ArrayRepetition{
+		Token:    factorToken,
+		Factor:   factorExp,
+		Elements: repeatedElements,
+	}
 }
 
 func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {

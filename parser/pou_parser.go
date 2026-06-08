@@ -62,7 +62,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 
 	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION, token.VAR)
+	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
 
 	return stmt
 }
@@ -103,11 +103,11 @@ end_var_parsing:
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_PROGRAM)
 	} else {
-		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM, token.VAR)
+		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM)
 	}
 
 	if !p.curTokenIs(token.END_PROGRAM) {
-		p.peekError(token.END_PROGRAM)
+		p.currentError("expected next token to be %s, got %s instead", token.END_PROGRAM, p.curToken.Type)
 	}
 
 	return stmt

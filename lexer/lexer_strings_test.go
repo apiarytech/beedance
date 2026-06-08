@@ -13,6 +13,7 @@ func TestStringLiterals(t *testing.T) {
 		expectedLiteral string
 	}{
 		// Single-quoted strings
+		{"d", token.IDENT, "d"},
 		{"'hello world'", token.STRING_LITERAL, "hello world"},
 		{"''", token.STRING_LITERAL, ""},
 		{"'a'", token.STRING_LITERAL, "a"},

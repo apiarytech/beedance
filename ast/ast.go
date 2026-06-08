@@ -453,6 +453,26 @@ func (bsl *BitStringLiteral) String() string {
 	}
 }
 
+// TypedLiteral represents a literal with an explicit type, e.g., INT#10.
+type TypedLiteral struct {
+	Token    token.Token // The type token, e.g., the 'INT' token
+	TypeName string
+	Value    Expression
+}
+
+func (tl *TypedLiteral) expressionNode()      {}
+func (tl *TypedLiteral) TokenLiteral() string { return tl.Token.Literal }
+func (tl *TypedLiteral) String() string {
+	var out bytes.Buffer
+	out.WriteString(tl.TypeName)
+	out.WriteString("#")
+	out.WriteString(tl.Value.String())
+	return out.String()
+}
+func (tl *TypedLiteral) Pos() (int, int) {
+	return tl.Token.Row, tl.Token.Column
+}
+
 type PrefixExpression struct {
 	Token    token.Token // The prefix token, e.g. !
 	Operator string
@@ -776,7 +796,7 @@ func (tl *TimeLiteral) expressionNode()      {}
 func (tl *TimeLiteral) Pos() (int, int)      { return tl.Token.Row, tl.Token.Column }
 func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
 func (tl *TimeLiteral) String() string {
-	return tl.Token.Literal
+	return "T#" + tl.Value
 }
 
 type DateLiteral struct {
@@ -835,6 +855,29 @@ func (al *ArrayLiteral) String() string {
 	out.WriteString(strings.Join(elements, ", "))
 	out.WriteString("]")
 
+	return out.String()
+}
+
+// ArrayRepetition represents a repetition factor in an array literal, e.g., 3(0) or 2(1,2,3).
+type ArrayRepetition struct {
+	Token    token.Token  // The token for the repetition factor (e.g., the '3' in 3(0))
+	Factor   Expression   // The repetition factor (e.g., IntegerLiteral for 3)
+	Elements []Expression // The elements to repeat (e.g., [0] for 3(0))
+}
+
+func (ar *ArrayRepetition) expressionNode()      {}
+func (ar *ArrayRepetition) Pos() (int, int)      { return ar.Token.Row, ar.Token.Column }
+func (ar *ArrayRepetition) TokenLiteral() string { return ar.Token.Literal }
+func (ar *ArrayRepetition) String() string {
+	var out bytes.Buffer
+	out.WriteString(ar.Factor.String())
+	out.WriteString("(")
+	elements := []string{}
+	for _, el := range ar.Elements {
+		elements = append(elements, el.String())
+	}
+	out.WriteString(strings.Join(elements, ", "))
+	out.WriteString(")")
 	return out.String()
 }
 

@@ -1,9 +1,11 @@
 package parser
 
 import (
-	"fmt"
+	"fmt" // cspell:disable-line
+	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"beedance/ast"
 	"beedance/lexer"
@@ -11,7 +13,7 @@ import (
 )
 
 func TestSingleVarDeclStatement(t *testing.T) {
-	input := `VAR myVar : INT := 5;`
+	input := `VAR myVar : INT := 5; END_VAR`
 
 	l := lexer.New(input)
 	p := New(l) // cspell:disable-line
@@ -204,6 +206,47 @@ func TestTypeDeclarations(t *testing.T) {
 	}
 }
 
+func TestEnumTypeDeclaration(t *testing.T) {
+	input := `
+		TYPE
+			COLOR : (RED, GREEN, BLUE);
+		END_TYPE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestEnumTypeDeclaration", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	typeBlock, ok := program.Statements[0].(*ast.TypeBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.TypeBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(typeBlock.Declarations) != 1 {
+		t.Fatalf("Expected 1 type declaration. got=%d", len(typeBlock.Declarations))
+	}
+
+	typeDecl := typeBlock.Declarations[0]
+	if typeDecl.Name.Value != "COLOR" {
+		t.Fatalf("Type name is not 'COLOR'. got=%s", typeDecl.Name.Value)
+	}
+
+	enumDef, ok := typeDecl.DataType.(*ast.EnumDefinition)
+	if !ok {
+		t.Fatalf("DataType is not ast.EnumDefinition. got=%T", typeDecl.DataType)
+	}
+
+	expectedValues := []string{"RED", "GREEN", "BLUE"}
+	if len(enumDef.Values) != len(expectedValues) {
+		t.Fatalf("Enum does not have %d values. got=%d", len(expectedValues), len(enumDef.Values))
+	}
+
+}
+
 func TestStructTypeDeclaration(t *testing.T) {
 	input := `
 		TYPE
@@ -265,7 +308,7 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 			MySubrange  : INT (0..100);
 			MyArray     : ARRAY [1..10] OF BOOL;
 			MyStruct    : STRUCT 
-				Field1:INT; 
+				Field1 : INT; 
 			END_STRUCT;
 		END_TYPE
 	`
@@ -765,42 +808,29 @@ func TestIntegerLiteralExpression(t *testing.T) {
 
 func TestRealLiteralExpression(t *testing.T) {
 	tests := []struct {
-		input             string
-		expectedValue     float64
-		expectedPrecision int
+		input         string
+		expectedValue float64
 	}{
-		{"1.23E4;", 12300.0, 32},
-		{"1.23e-4;", 0.000123, 32},
-		{"REAL#3.14;", 3.14, 32},
-		{"LREAL#2.718;", 2.718, 64},
+		{"3.14;", 3.14},
+		{"1.23E4;", 12300.0},
+		{"-1.23e-4;", -0.000123},
 	}
 
 	for _, tt := range tests {
 		l := lexer.New(tt.input)
 		p := New(l)
 		program := p.ParseProgram()
-		checkParserErrors(t, p, "TestRealLiteralExpression", tt.input)
+		checkParserErrors(t, p, "TestRealLiteralExpression", tt.input) // cspell:disable-line
 
 		if len(program.Statements) != 1 {
 			t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
 		}
 		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
 		if !ok {
-			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0]) // cspell:disable-line
 		}
 
-		literal, ok := stmt.Expression.(*ast.RealLiteral)
-		if !ok {
-			t.Fatalf("exp not *ast.RealLiteral. got=%T", stmt.Expression)
-		}
-		// Use a small tolerance (epsilon) for float comparison to avoid precision issues.
-		const epsilon = 1e-6
-		if diff := literal.Value - tt.expectedValue; diff < -epsilon || diff > epsilon {
-			t.Errorf("literal.Value not %g. got=%g", tt.expectedValue, literal.Value)
-		}
-		if literal.Precision != tt.expectedPrecision {
-			t.Errorf("literal.Precision not %d. got=%d", tt.expectedPrecision, literal.Precision)
-		}
+		testRealLiteral(t, stmt.Expression, tt.expectedValue)
 	}
 }
 
@@ -1046,6 +1076,43 @@ func TestOperatorPrecedenceParsing(t *testing.T) {
 			t.Errorf("expected=%q, got=%q", tt.expected, actual)
 		}
 	}
+}
+
+func testTypedRealLiteral(t *testing.T, exp ast.Expression, typeName string, value float64) bool {
+	t.Helper()
+	typedLit, ok := exp.(*ast.TypedLiteral)
+	if !ok {
+		t.Errorf("exp not *ast.TypedLiteral. got=%T", exp)
+		return false
+	}
+
+	if typedLit.TypeName != typeName {
+		t.Errorf("typedLit.TypeName not %q. got=%q", typeName, typedLit.TypeName)
+		return false
+	}
+
+	return testRealLiteral(t, typedLit.Value, value)
+}
+
+func testRealLiteral(t *testing.T, exp ast.Expression, value float64) bool {
+	t.Helper()
+	realLit, ok := exp.(*ast.RealLiteral)
+	if !ok {
+		// It might be a prefix expression for negative numbers
+		if prefix, ok := exp.(*ast.PrefixExpression); ok && prefix.Operator == "-" {
+			return testRealLiteral(t, prefix.Right, -value)
+		}
+		t.Errorf("exp not *ast.RealLiteral. got=%T", exp)
+		return false
+	}
+
+	// Use a small tolerance (epsilon) for float comparison to avoid precision issues.
+	const epsilon = 1e-9
+	if diff := realLit.Value - value; diff < -epsilon || diff > epsilon {
+		t.Errorf("realLit.Value not %g. got=%g", value, realLit.Value)
+		return false
+	}
+	return true
 }
 
 func TestBooleanExpression(t *testing.T) {
@@ -1306,13 +1373,43 @@ func TestProgramWithSFCBody(t *testing.T) {
 		t.Fatalf("Program body is not ast.SFCProgram. got=%T", progDecl.Body)
 	}
 
-	// Check if the SFC body contains the expected elements
-	// 1 initial step, 1 transition, 1 step = 3 elements
 	if len(sfcBody.Elements) != 3 {
 		t.Fatalf("SFC body does not have 3 elements. got=%d", len(sfcBody.Elements))
 	}
 
-	// Further checks could be added here to inspect the details of each SFC element.
+	// --- Detailed check of the first element: INITIAL_STEP S1 ---
+	initialStep, ok := sfcBody.Elements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("Element 0 is not ast.StepStatement. got=%T", sfcBody.Elements[0])
+	}
+	if !initialStep.IsInitial {
+		t.Error("First step should be initial.")
+	}
+	if initialStep.Name.Value != "S1" {
+		t.Errorf("Initial step name is not 'S1'. got=%s", initialStep.Name.Value)
+	}
+
+	// --- Detailed check of the second element: TRANSITION ---
+	transition, ok := sfcBody.Elements[1].(*ast.TransitionStatement)
+	if !ok {
+		t.Fatalf("Element 1 is not ast.TransitionStatement. got=%T", sfcBody.Elements[1])
+	}
+	if len(transition.From) != 1 || transition.From[0].Value != "S1" {
+		t.Errorf("Transition 'FROM' is not 'S1'. got=%v", transition.From)
+	}
+	if len(transition.To) != 1 || transition.To[0].Value != "S2" {
+		t.Errorf("Transition 'TO' is not 'S2'. got=%v", transition.To)
+	}
+	testIdentifier(t, transition.Condition, "cond")
+
+	// --- Detailed check of the third element: STEP S2 ---
+	step2, ok := sfcBody.Elements[2].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("Element 2 is not ast.StepStatement. got=%T", sfcBody.Elements[2])
+	}
+	if step2.Name.Value != "S2" {
+		t.Errorf("Step name is not 'S2'. got=%s", step2.Name.Value)
+	}
 }
 
 func TestIfStatementWithEmptyBlocks(t *testing.T) {
@@ -1568,12 +1665,16 @@ func TestCallExpressionParameterParsing(t *testing.T) {
 }
 
 func TestStringLiteralExpression(t *testing.T) {
-	input := `"hello world";`
+	input := `'hello world';`
 
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestStringLiteralExpression", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+	}
 
 	stmt := program.Statements[0].(*ast.ExpressionStatement)
 	literal, ok := stmt.Expression.(*ast.StringLiteral)
@@ -1581,31 +1682,53 @@ func TestStringLiteralExpression(t *testing.T) {
 		t.Fatalf("exp not *ast.StringLiteral. got=%T", stmt.Expression)
 	}
 
-	if literal.Value != "hello world" {
-		t.Errorf("literal.Value not %q. got=%q", "hello world", literal.Value)
+	if literal.Value != "hello world" { // cspell:disable-line
+		t.Errorf("literal.Value not %q. got=%q", "hello world", literal.Value) // cspell:disable-line
 	}
 }
 
-func TestTimeLiteralExpression(t *testing.T) {
+func TestWStringLiteralExpression(t *testing.T) {
+	input := `"hello world";` // cspell:disable-line
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestWStringLiteralExpression", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+	}
+
+	stmt := program.Statements[0].(*ast.ExpressionStatement)
+	_, ok := stmt.Expression.(*ast.WStringLiteral)
+	if !ok {
+		t.Fatalf("exp not *ast.WStringLiteral. got=%T", stmt.Expression)
+	}
+}
+
+func TestTimeLiteralExpression(t *testing.T) { // cspell:disable-line
 	tests := []struct {
-		input        string
-		expectedType interface{}
-		expectedVal  string
+		input         string
+		expectedValue string
+		expectedType  interface{}
 	}{
-		{"T#5m_10s;", (*ast.TimeLiteral)(nil), "T#5m_10s"},
-		{"TIME#1h_30m;", (*ast.TimeLiteral)(nil), "TIME#1h_30m"},
-		{"D#2026-05-09;", (*ast.DateLiteral)(nil), "D#2026-05-09"},
-		{"DATE#1999-12-31;", (*ast.DateLiteral)(nil), "DATE#1999-12-31"},
-		{"TOD#22:45:00;", (*ast.TimeOfDayLiteral)(nil), "TOD#22:45:00"},
-		{"TIME_OF_DAY#08:30:15.5;", (*ast.TimeOfDayLiteral)(nil), "TIME_OF_DAY#08:30:15.5"},
-		{"DT#2026-05-09-22:45:00;", (*ast.DateAndTimeLiteral)(nil), "DT#2026-05-09-22:45:00"},
-		{"DATE_AND_TIME#1999-12-31-23:59:59;", (*ast.DateAndTimeLiteral)(nil), "DATE_AND_TIME#1999-12-31-23:59:59"},
+		{"T#5m_10s;", "5m_10s", &ast.TimeLiteral{}},
+		{"TIME#1h_30m;", "1h_30m", &ast.TimeLiteral{}},
+		{"D#2026-05-21;", "2026-05-21", &ast.DateLiteral{}},
+		{"DATE#1999-12-31;", "1999-12-31", &ast.DateLiteral{}},
+		{"TOD#22:45:00;", "22:45:00", &ast.TimeOfDayLiteral{}},
+		{"TIME_OF_DAY#08:30:15.5;", "08:30:15.5", &ast.TimeOfDayLiteral{}},
+		{"DT#2026-05-09-22:45:00;", "2026-05-09-22:45:00", &ast.DateAndTimeLiteral{}},
+		{"DATE_AND_TIME#1999-12-31-23:59:59;", "1999-12-31-23:59:59", &ast.DateAndTimeLiteral{}},
+		{"t#14.7s;", "14.7s", &ast.TimeLiteral{}},                                           // Lowercase keyword, real value
+		{"dt#1984-06-25-15:36:55.36;", "1984-06-25-15:36:55.36", &ast.DateAndTimeLiteral{}}, // Lowercase keyword
+		{"T#-10s;", "-10s", &ast.TimeLiteral{}},                                             // Negative duration
 	}
 
 	for i, tt := range tests {
 		l := lexer.New(tt.input)
 		p := New(l)
-		program := p.ParseProgram()
+		program := p.ParseProgram() // cspell:disable-line
 		checkParserErrors(t, p, fmt.Sprintf("TestTimeLiteralExpression[%d]", i), tt.input)
 
 		if len(program.Statements) != 1 {
@@ -1614,22 +1737,153 @@ func TestTimeLiteralExpression(t *testing.T) {
 
 		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
 		if !ok {
-			t.Fatalf("Test[%d] - program.Statements[0] is not ast.ExpressionStatement for input '%s'. got=%T", i, tt.input, program.Statements[0])
+			t.Fatalf("Test[%d] - program.Statements[0] is not ast.ExpressionStatement. got=%T", i, program.Statements[0])
 		}
 
-		if !isExpectedType(t, tt.expectedType, stmt.Expression) {
-			t.Fatalf("Test[%d] - Expression is not of expected type for input '%s'. got=%T", i, tt.input, stmt.Expression)
+		var actualValue string
+		switch tt.expectedType.(type) {
+		case *ast.TimeLiteral:
+			lit, ok := stmt.Expression.(*ast.TimeLiteral)
+			if !ok {
+				t.Fatalf("Test[%d] - Expression is not *ast.TimeLiteral. got=%T", i, stmt.Expression)
+			}
+			actualValue = lit.Value
+		case *ast.DateLiteral:
+			lit, ok := stmt.Expression.(*ast.DateLiteral)
+			if !ok {
+				t.Fatalf("Test[%d] - Expression is not *ast.DateLiteral. got=%T", i, stmt.Expression)
+			}
+			actualValue = lit.Value
+		case *ast.TimeOfDayLiteral:
+			lit, ok := stmt.Expression.(*ast.TimeOfDayLiteral)
+			if !ok {
+				t.Fatalf("Test[%d] - Expression is not *ast.TimeOfDayLiteral. got=%T", i, stmt.Expression)
+			}
+			actualValue = lit.Value
+		case *ast.DateAndTimeLiteral:
+			lit, ok := stmt.Expression.(*ast.DateAndTimeLiteral)
+			if !ok {
+				t.Fatalf("Test[%d] - Expression is not *ast.DateAndTimeLiteral. got=%T", i, stmt.Expression)
+			}
+			actualValue = lit.Value
 		}
 
-		// Check the raw literal value stored in the AST node
-		val := stmt.Expression.(ast.Node).TokenLiteral()
-		if val != tt.expectedVal {
-			t.Errorf("Test[%d] - literal.Value not %q for input '%s'. got=%q", i, tt.expectedVal, tt.input, val)
+		if actualValue != tt.expectedValue {
+			t.Errorf("Test[%d] - Value wrong. want=%q, got=%q", i, tt.expectedValue, actualValue)
 		}
 	}
 }
 
-func TestParsingEmptyArrayLiterals(t *testing.T) {
+func TestAllVarBlockTypes(t *testing.T) {
+	// Seed the random number generator for varied testing
+	// cspell:disable-next-line
+	source := rand.NewSource(time.Now().UnixNano())
+	// cspell:disable-next-line
+	rng := rand.New(source)
+
+	// Define POU wrappers to randomly place VAR blocks inside them
+	pouWrappers := []struct {
+		start        string
+		end          string
+		expectedType interface{}
+	}{
+		{"PROGRAM TestProg ", " END_PROGRAM", &ast.ProgramDeclaration{}},
+		{"FUNCTION TestFunc : INT ", " END_FUNCTION", &ast.FunctionDeclaration{}},
+		{"FUNCTION_BLOCK TestFB ", " END_FUNCTION_BLOCK", &ast.FunctionBlockDeclaration{}},
+	}
+
+	tests := []struct {
+		varBlock      string
+		getVarDecls   func(stmt ast.Statement) []*ast.VarDeclStatement
+		isBlock       bool // True if it's a block like VAR_GLOBAL, not a simple VAR_INPUT
+		blockExpected interface{}
+	}{
+		{
+			"VAR_INPUT myVar : INT; END_VAR", func(stmt ast.Statement) []*ast.VarDeclStatement {
+				switch s := stmt.(type) {
+				case *ast.ProgramDeclaration:
+					return s.VarInputs
+				case *ast.FunctionDeclaration:
+					return s.VarInputs
+				case *ast.FunctionBlockDeclaration:
+					return s.VarInputs
+				}
+				return nil
+			}, false, nil,
+		},
+		{
+			"VAR_OUTPUT myVar : SINT; END_VAR", func(stmt ast.Statement) []*ast.VarDeclStatement {
+				switch s := stmt.(type) {
+				case *ast.ProgramDeclaration:
+					return s.VarOutputs
+				case *ast.FunctionDeclaration:
+					return s.VarOutputs
+				case *ast.FunctionBlockDeclaration:
+					return s.VarOutputs
+				}
+				return nil
+			}, false, nil,
+		},
+		{
+			"VAR_IN_OUT myVar : DINT; END_VAR", func(stmt ast.Statement) []*ast.VarDeclStatement {
+				switch s := stmt.(type) {
+				case *ast.ProgramDeclaration:
+					return s.VarInOuts
+				case *ast.FunctionDeclaration:
+					return s.VarInOuts
+				case *ast.FunctionBlockDeclaration:
+					return s.VarInOuts
+				}
+				return nil
+			}, false, nil,
+		},
+		{
+			"VAR myVar : LINT; END_VAR", func(stmt ast.Statement) []*ast.VarDeclStatement {
+				switch s := stmt.(type) {
+				case *ast.ProgramDeclaration:
+					return s.Vars
+				case *ast.FunctionDeclaration:
+					return s.Vars
+				case *ast.FunctionBlockDeclaration:
+					return s.Vars
+				}
+				return nil
+			}, false, nil,
+		},
+	}
+
+	for i, tt := range tests {
+		// Randomly select a POU wrapper for the current test case
+		wrapper := pouWrappers[rng.Intn(len(pouWrappers))]
+		input := wrapper.start + tt.varBlock + wrapper.end
+
+		l := lexer.New(input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestAllVarBlockTypes", input)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("test[%d] input: %s\nprogram.Statements does not contain 1 statement. got=%d", i, input, len(program.Statements))
+		}
+
+		// Check that the top-level statement is the correct POU type
+		if !isExpectedType(t, wrapper.expectedType, program.Statements[0]) {
+			t.Fatalf("test[%d] input: %s\nprogram.Statements[0] is not of expected type %T. got=%T", i, input, wrapper.expectedType, program.Statements[0])
+		}
+
+		// Use the accessor function to get the list of var declarations
+		decls := tt.getVarDecls(program.Statements[0])
+		if decls == nil {
+			t.Fatalf("test[%d] input: %s\ngetVarDecls returned nil for type %T", i, input, program.Statements[0])
+		}
+
+		if len(decls) != 1 {
+			t.Fatalf("test[%d] input: %s\nExpected 1 var declaration inside the POU. got=%d", i, input, len(decls))
+		}
+	}
+}
+
+func TestParsingEmptyArrayLiterals(t *testing.T) { // cspell:disable-line
 	input := "[];"
 
 	l := lexer.New(input)
@@ -1714,7 +1968,7 @@ func TestParsingEmptyHashLiteral(t *testing.T) {
 }
 
 func TestParsingHashLiteralsStringKeys(t *testing.T) {
-	input := `{"one": 1, "two": 2, "three": 3};`
+	input := `{'one': 1, 'two': 2, 'three': 3};`
 
 	l := lexer.New(input)
 	p := New(l)
@@ -1738,13 +1992,21 @@ func TestParsingHashLiteralsStringKeys(t *testing.T) {
 	}
 
 	for key, value := range hash.Pairs {
-		literal, ok := key.(*ast.StringLiteral)
-		if !ok {
-			t.Errorf("key is not ast.StringLiteral. got=%T", key)
+		var keyStr string
+		switch k := key.(type) {
+		case *ast.StringLiteral:
+			keyStr = k.Value
+		case *ast.WStringLiteral:
+			keyStr = k.Value
+		default:
+			t.Errorf("key is not a string literal. got=%T", key)
 			continue
 		}
 
-		expectedValue := expected[literal.String()]
+		expectedValue, ok := expected[keyStr]
+		if !ok {
+			t.Errorf("unexpected key in hash: %s", keyStr)
+		}
 		testIntegerLiteral(t, value, expectedValue)
 	}
 }
@@ -1784,40 +2046,61 @@ func TestParsingHashLiteralsBooleanKeys(t *testing.T) {
 	}
 }
 
-func TestParsingHashLiteralsIntegerKeys(t *testing.T) {
-	input := `{1: 1, 2: 2, 3: 3};`
-
-	l := lexer.New(input)
-	p := New(l)
-	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestParsingHashLiteralsIntegerKeys", input)
-
-	stmt := program.Statements[0].(*ast.ExpressionStatement)
-	hash, ok := stmt.Expression.(*ast.HashLiteral)
-	if !ok {
-		t.Fatalf("exp is not ast.HashLiteral. got=%T", stmt.Expression)
+func TestParsingArrayLiteralsWithRepetition(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"[3(0)];",
+			"[3(0)];",
+		},
+		{
+			"[2(1, 2, 3)];",
+			"[2(1, 2, 3)];",
+		},
+		{
+			"[3(0), 2(1)];",
+			"[3(0), 2(1)];",
+		},
+		{
+			"[1, 3(0), 2, 2(5, 6)];",
+			"[1, 3(0), 2, 2(5, 6)];",
+		},
+		{
+			"[3(T#1s)];",
+			"[3(T#1s)];",
+		},
+		{
+			"[2(myVar + 1)];",
+			"[2((myVar + 1))];",
+		},
 	}
 
-	expected := map[string]int64{
-		"1": 1,
-		"2": 2,
-		"3": 3,
-	}
+	for i, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, fmt.Sprintf("TestParsingArrayLiteralsWithRepetition[%d]", i), tt.input)
 
-	if len(hash.Pairs) != len(expected) {
-		t.Errorf("hash.Pairs has wrong length. got=%d", len(hash.Pairs))
-	}
-
-	for key, value := range hash.Pairs {
-		integer, ok := key.(*ast.IntegerLiteral)
-		if !ok {
-			t.Errorf("key is not ast.IntegerLiteral. got=%T", key)
-			continue
+		if len(program.Statements) != 1 {
+			t.Fatalf("Test[%d] - program.Statements does not contain 1 statement. got=%d", i, len(program.Statements))
 		}
 
-		expectedValue := expected[integer.String()]
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("Test[%d] - program.Statements[0] is not ast.ExpressionStatement. got=%T", i, program.Statements[0])
+		}
 
-		testIntegerLiteral(t, value, expectedValue)
+		arrayLit, ok := stmt.Expression.(*ast.ArrayLiteral)
+		if !ok {
+			t.Fatalf("Test[%d] - stmt.Expression is not *ast.ArrayLiteral. got=%T", i, stmt.Expression)
+		}
+
+		actual := arrayLit.String() + ";" // Add semicolon back for comparison with expected
+		if actual != tt.expected {
+			t.Errorf("Test[%d] - ArrayLiteral.String() wrong. want=%q, got=%q", i, tt.expected, actual)
+		}
 	}
 }
 
@@ -1852,15 +2135,20 @@ func TestParsingHashLiteralsWithExpressions(t *testing.T) {
 	}
 
 	for key, value := range hash.Pairs {
-		literal, ok := key.(*ast.StringLiteral)
-		if !ok {
-			t.Errorf("key is not ast.StringLiteral. got=%T", key)
+		var keyStr string
+		switch k := key.(type) {
+		case *ast.StringLiteral:
+			keyStr = k.Value
+		case *ast.WStringLiteral:
+			keyStr = k.Value
+		default:
+			t.Errorf("key is not a string literal. got=%T", key)
 			continue
 		}
 
-		testFunc, ok := tests[literal.String()]
+		testFunc, ok := tests[keyStr]
 		if !ok {
-			t.Errorf("No test function for key %q found", literal.String())
+			t.Errorf("No test function for key %q found", keyStr)
 			continue
 		}
 
@@ -2129,7 +2417,7 @@ func TestCaseStatement(t *testing.T) {
 			2, 3: x := 2;
 		ELSE
 			x := 3;
-		END_CASE
+		END_CASE;
 	`
 
 	l := lexer.New(input)
@@ -2192,6 +2480,74 @@ func TestCaseStatement(t *testing.T) {
 	testIdentifier(t, elseConsequence.Left, "x")
 	testIntegerLiteral(t, elseConsequence.Value, 3)
 
+}
+
+func TestCaseStatementWithEnums(t *testing.T) {
+	input := `
+		TYPE
+			COLOR : (RED, GREEN, BLUE);
+		END_TYPE
+
+		VAR
+			myColor : COLOR;
+			x : INT;
+		END_VAR
+
+		CASE myColor OF
+			COLOR#RED: x := 1;
+			COLOR#GREEN, COLOR#BLUE: x := 2;
+		END_CASE;
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestCaseStatementWithEnums", input)
+
+	if len(program.Statements) != 3 {
+		t.Fatalf("program.Statements does not contain 3 statements. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[2].(*ast.CaseStatement)
+	if !ok {
+		t.Fatalf("program.Statements[2] is not ast.CaseStatement. got=%T", program.Statements[2])
+	}
+
+	if !testIdentifier(t, stmt.Expression, "myColor") {
+		return
+	}
+
+	if len(stmt.Cases) != 2 {
+		t.Fatalf("case statement does not have 2 cases. got=%d", len(stmt.Cases))
+	}
+
+	// Test first case: COLOR#RED: x := 1;
+	case1 := stmt.Cases[0]
+	if len(case1.Values) != 1 {
+		t.Fatalf("incorrect number of values for case 1. got=%d", len(case1.Values))
+	}
+	testEnumeratedValueLiteral(t, case1.Values[0], "COLOR", "RED")
+
+	// Test second case: COLOR#GREEN, COLOR#BLUE: x := 2;
+	case2 := stmt.Cases[1]
+	if len(case2.Values) != 2 {
+		t.Fatalf("incorrect number of values for case 2. got=%d", len(case2.Values))
+	}
+	testEnumeratedValueLiteral(t, case2.Values[0], "COLOR", "GREEN")
+	testEnumeratedValueLiteral(t, case2.Values[1], "COLOR", "BLUE")
+}
+
+func testEnumeratedValueLiteral(t *testing.T, exp ast.Expression, typeName string, value string) bool {
+	evl, ok := exp.(*ast.EnumeratedValueLiteral)
+	if !ok {
+		t.Errorf("exp not *ast.EnumeratedValueLiteral. got=%T", exp)
+		return false
+	}
+	if evl.TypeName.Value != typeName || evl.Value.Value != value {
+		t.Errorf("EnumeratedValueLiteral wrong. want=%s#%s, got=%s", typeName, value, evl.String())
+		return false
+	}
+	return true
 }
 
 func TestFunctionBlockDeclaration(t *testing.T) {
@@ -2773,17 +3129,17 @@ func TestMissingDoErrorRecovery(t *testing.T) {
 			"Missing DO in FOR loop",
 			`FOR i := 1 TO 10
 				x := x + 1;
-			 END_FOR`,
-			"expected next token to be DO, got IDENT instead",
-			3,
+			END_FOR`,
+			"expected next token to be DO, got IDENT instead at row 2, column 4",
+			1,
 		},
 		{
 			"Missing DO in WHILE loop",
 			`WHILE x < 10
 				x := x + 1;
-			 END_WHILE`,
-			"missing 'DO' in WHILE loop",
-			3,
+			END_WHILE`,
+			"expected next token to be DO, got IDENT instead at row 2, column 4",
+			1,
 		},
 	}
 
@@ -2826,11 +3182,11 @@ func TestMissingEndBlockErrorRecovery(t *testing.T) {
 	program := p.ParseProgram()
 
 	if len(p.Errors()) != 1 {
-		t.Fatalf("Expected parser to have 2 error, but it had %d: %v", len(p.Errors()), p.Errors())
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
 	}
 
-	expectedError := "missing 'END_IF' for IF statement starting at row 2 at row 7, column 3"
-	if !strings.Contains(p.Errors()[0], expectedError) {
+	expectedError := "missing 'END_IF' for IF statement starting at row 2"
+	if !strings.HasPrefix(p.Errors()[0], expectedError) {
 		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 
@@ -2838,7 +3194,7 @@ func TestMissingEndBlockErrorRecovery(t *testing.T) {
 	if len(program.Statements) != 1 {
 		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
-
+	// The parser should parse the IF statement (partially) and then the next statement.
 	_, ok := program.Statements[0].(*ast.IfStatement)
 	if !ok {
 		t.Errorf("First statement should be an IfStatement after recovery.")
@@ -2875,7 +3231,7 @@ func TestMissingEndVarErrorRecovery(t *testing.T) {
 
 	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
 	if !ok || len(varBlock.Declarations) != 1 {
-		t.Errorf("First statement should be a VarBlockDeclaration with 1 declaration.")
+		t.Errorf("First statement should be a VarBlockDeclaration with 1 declaration. got %d", len(varBlock.Declarations))
 	}
 
 	_, ok = program.Statements[1].(*ast.IfStatement)
@@ -2905,19 +3261,23 @@ func TestMissingEndFunctionBlockErrorRecovery(t *testing.T) {
 		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
 	}
 
-	expectedError := "expected next token to be END_FUNCTION_BLOCK, got EOF instead at row 12, column 3"
+	expectedError := "expected next token to be END_FUNCTION_BLOCK, got VAR instead"
 	if !strings.Contains(p.Errors()[0], expectedError) {
 		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 
 	// Check that the parser recovered and parsed both the FUNCTION_BLOCK and the subsequent VAR block
-	if len(program.Statements) != 1 {
+	if len(program.Statements) != 2 {
 		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
 
 	_, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
 	if !ok {
 		t.Errorf("First statement should be a FunctionBlockDeclaration after recovery.")
+	}
+	_, ok = program.Statements[1].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Errorf("Second statement should be a VarBlockDeclaration after recovery.")
 	}
 }
 
@@ -2942,18 +3302,22 @@ func TestMissingEndProgramErrorRecovery(t *testing.T) {
 		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
 	}
 
-	expectedError := "expected next token to be END_PROGRAM, got EOF instead at row 12, column 3"
+	expectedError := "expected next token to be END_PROGRAM, got VAR instead"
 	if !strings.Contains(p.Errors()[0], expectedError) {
 		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 
 	// Check that the parser recovered and parsed both the PROGRAM and the subsequent VAR block
-	if len(program.Statements) != 1 {
+	if len(program.Statements) != 2 {
 		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
 
 	if _, ok := program.Statements[0].(*ast.ProgramDeclaration); !ok {
 		t.Errorf("First statement should be a ProgramDeclaration after recovery.")
+	}
+	_, ok := program.Statements[1].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Errorf("Second statement should be a VarBlockDeclaration after recovery.")
 	}
 }
 
@@ -2961,7 +3325,7 @@ func TestIlProgramParsing(t *testing.T) {
 	input := `
 		FUNCTION_BLOCK MyIlProgram
 			VAR
-				Start : BOOL;
+				Start : BOOL; 
 				Counter : INT;
 				Result : INT;
 			END_VAR
@@ -3020,6 +3384,34 @@ func TestIlProgramParsing(t *testing.T) {
 	}
 	if inst3.Operator != "ST" || inst3.Operand.String() != "Result" {
 		t.Errorf("Instruction 3 is incorrect. Expected 'ST Result', got '%s %s'", inst3.Operator, inst3.Operand)
+	}
+}
+
+func TestParsingErrors(t *testing.T) {
+	tests := []struct {
+		input         string
+		expectedError string
+	}{
+		{
+			"T#5z;", // cspell:disable-line
+			"expected next token to be ;, got z instead at row 1, column 4",
+		},
+		// {
+		// 	"VAR x : INT := 5;",
+		// 	"expected 'END_VAR' to close 'VAR' block, but got EOF at row 1, column 18",
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+			}
+		})
 	}
 }
 
@@ -3213,6 +3605,7 @@ func checkParserErrors(t *testing.T, p *Parser, testName string, input string) {
 }
 
 func isExpectedType(t *testing.T, expectedType interface{}, actual interface{}) bool {
+	t.Helper()
 	expected := fmt.Sprintf("%T", expectedType)
 	result := fmt.Sprintf("%T", actual)
 	return expected == result

@@ -253,22 +253,17 @@ func TestCTUD(t *testing.T) {
 	}
 
 	// Helper for rising edge pulse
-	pulse := func(v *object.Boolean) {
-		*v = *TRUE
+	pulse := func(varName string) {
+		env.Set(varName, TRUE)
 		runScan()
-		*v = *FALSE
+		env.Set(varName, FALSE)
 		runScan()
 	}
 
-	cuVar := FALSE
-	cdVar := FALSE
-	resetVar := FALSE
-	loadVar := FALSE
-
-	env.Set("CountUp", cuVar)
-	env.Set("CountDown", cdVar)
-	env.Set("Reset", resetVar)
-	env.Set("Load", loadVar)
+	env.Set("CountUp", FALSE)
+	env.Set("CountDown", FALSE)
+	env.Set("Reset", FALSE)
+	env.Set("Load", FALSE)
 
 	// --- Cycle 1: Initial state ---
 	runScan()
@@ -277,41 +272,41 @@ func TestCTUD(t *testing.T) {
 	testBooleanObject(t, mustGet(env, "IsEmpty"), true)
 
 	// --- Cycle 2: Count up to 2 ---
-	pulse(cuVar) // CV=1
-	pulse(cuVar) // CV=2
+	pulse("CountUp") // CV=1
+	pulse("CountUp") // CV=2
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 2)
 	testBooleanObject(t, mustGet(env, "IsEmpty"), false)
 
 	// --- Cycle 3: Count down to 1 ---
-	pulse(cdVar) // CV=1
+	pulse("CountDown") // CV=1
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
 
 	// --- Cycle 4: Count up to PV (5) ---
-	pulse(cuVar) // CV=2
-	pulse(cuVar) // CV=3
-	pulse(cuVar) // CV=4
-	pulse(cuVar) // CV=5
+	pulse("CountUp") // CV=2
+	pulse("CountUp") // CV=3
+	pulse("CountUp") // CV=4
+	pulse("CountUp") // CV=5
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 5)
 	testBooleanObject(t, mustGet(env, "IsFull"), true)
 	testBooleanObject(t, mustGet(env, "IsEmpty"), false)
 
 	// --- Cycle 5: Try to count past PV ---
-	pulse(cuVar) // CV should stay 5
+	pulse("CountUp") // CV should stay 5
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 5)
 
 	// --- Cycle 6: Load PV ---
-	*loadVar = *TRUE
+	env.Set("Load", TRUE)
 	runScan()
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 5) // Already at PV, but confirms load
-	*loadVar = *FALSE
+	env.Set("Load", FALSE)
 	runScan()
 
 	// --- Cycle 7: Count down to 0 ---
-	pulse(cdVar) // 4
-	pulse(cdVar) // 3
-	pulse(cdVar) // 2
-	pulse(cdVar) // 1
-	pulse(cdVar) // 0
+	pulse("CountDown") // 4
+	pulse("CountDown") // 3
+	pulse("CountDown") // 2
+	pulse("CountDown") // 1
+	pulse("CountDown") // 0
 	testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
 	testBooleanObject(t, mustGet(env, "IsEmpty"), true)
 	testBooleanObject(t, mustGet(env, "IsFull"), false)

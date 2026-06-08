@@ -65,6 +65,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		}
 		return evalBlockStatement(node, env)
 
+	case *ast.VarBlockDeclaration:
+		return evalVarBlockStatement(node, env)
+
 	// SFC elements are handled within the context of a program/function block body, not as standalone statements.
 
 	case *ast.TypeBlockDeclaration:
@@ -105,6 +108,23 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			return val
 		}
 		return &object.ReturnValue{Value: val}
+
+	case *ast.TypedLiteral:
+		// 1. Evaluate the value part of the literal (e.g., the '10' in 'INT#10').
+		val := Eval(node.Value, env)
+		if isError(val) {
+			return val
+		}
+
+		// 2. Get the target type name from the AST node.
+		targetTypeName := node.TypeName
+
+		// 3. Get the source type name from the evaluated object.
+		// For literals, the parser gives a generic type, so we use the value's object type.
+		sourceTypeName := string(val.Type())
+
+		// 4. Use the existing conversion logic to validate and convert the literal.
+		return applyConversion(val, sourceTypeName, targetTypeName)
 
 	// Expressions
 	case *ast.IntegerLiteral:
@@ -178,33 +198,39 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return &object.Time{Value: duration}
 
 	case *ast.DateLiteral:
-		parts := strings.SplitN(node.Value, "#", 2)
-		if len(parts) != 2 {
-			return newError(node, "invalid DATE literal format: %q", node.Value)
-		}
-		t, err := time.Parse("2006-01-02", parts[1])
+		// The parser provides the value part of the literal, e.g., "1984-06-25"
+		// The standard format is YYYY-MM-DD.
+		t, err := time.Parse("2006-01-02", node.Value)
 		if err != nil {
 			return newError(node, "could not parse DATE literal: %s", err)
 		}
 		return &object.Date{Value: t}
 
 	case *ast.TimeOfDayLiteral:
-		parts := strings.SplitN(node.Value, "#", 2)
-		if len(parts) != 2 {
-			return newError(node, "invalid TIME_OF_DAY literal format: %q", node.Value)
-		}
-		t, err := time.Parse("15:04:05.999999999", parts[1])
+		// The parser provides the value part, e.g., "15:36:55.36"
+		// The standard format is HH:MM:SS with optional fractional seconds.
+		// Go's time.Parse with the layout "15:04:05.999999999" correctly handles
+		// both cases (with and without fractional part).
+		t, err := time.Parse("15:04:05.999999999", node.Value)
 		if err != nil {
 			return newError(node, "could not parse TIME_OF_DAY literal: %s", err)
 		}
 		return &object.TimeOfDay{Value: t}
 
 	case *ast.DateAndTimeLiteral:
-		parts := strings.SplitN(node.Value, "#", 2)
-		if len(parts) != 2 {
-			return newError(node, "invalid DATE_AND_TIME literal format: %q", node.Value)
+		// The parser provides the value part, e.g., "1984-06-25-15:36:55.36"
+		// The standard format is YYYY-MM-DD-HH:MM:SS with optional fractional seconds.
+		// We need to try parsing both formats (with and without fractional seconds)
+		// as time.Parse requires an exact match.
+		layoutWithFraction := "2006-01-02-15:04:05.999999999"
+		layoutWithoutFraction := "2006-01-02-15:04:05"
+
+		t, err := time.Parse(layoutWithFraction, node.Value)
+		if err != nil {
+			// If parsing with fractional seconds fails, try without.
+			t, err = time.Parse(layoutWithoutFraction, node.Value)
 		}
-		t, err := time.Parse("2006-01-02-15:04:05.999999999", parts[1])
+
 		if err != nil {
 			return newError(node, "could not parse DATE_AND_TIME literal: %s", err)
 		}
@@ -554,16 +580,22 @@ func getHighestPriorityActiveQualifier(action *object.Action) (qualifier string,
 }
 
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
-	var result object.Object
+	var result object.Object = NULL // Default to NULL
 
 	for _, statement := range program.Statements {
-		result = Eval(statement, env)
+		stmtResult := Eval(statement, env)
 
-		switch result := result.(type) {
-		case *object.ReturnValue:
-			return result.Value
-		case *object.Error:
-			return result
+		if stmtResult != nil {
+			switch res := stmtResult.(type) {
+			case *object.ReturnValue:
+				return res.Value
+			case *object.Error:
+				return res
+			case *object.Null:
+				// Do nothing, don't let NULL from VAR blocks overwrite a previous valid result.
+			default:
+				result = stmtResult // Update the result with the value of the last non-null statement
+			}
 		}
 	}
 
@@ -761,20 +793,35 @@ func evalBlockStatement(
 	block *ast.BlockStatement,
 	env *object.Environment,
 ) object.Object {
-	var result object.Object
+	var result object.Object = NULL // Default to NULL
 
 	for _, statement := range block.Statements {
-		result = Eval(statement, env)
+		stmtResult := Eval(statement, env)
 
-		if result != nil {
-			rt := result.Type()
-			if rt == object.RETURN_VALUE_OBJ || rt == object.ERROR_OBJ {
-				return result
+		if stmtResult != nil {
+			switch res := stmtResult.(type) {
+			case *object.ReturnValue:
+				return res // Propagate return values immediately
+			case *object.Error:
+				return res // Propagate errors immediately
+			case *object.Null:
+				// Do nothing, don't let NULL overwrite a previous valid result.
+			default:
+				result = stmtResult // Update the result with the value of the last non-null statement
 			}
 		}
 	}
 
 	return result
+}
+
+func evalVarBlockStatement(block *ast.VarBlockDeclaration, env *object.Environment) object.Object {
+	for _, decl := range block.Declarations {
+		if err := Eval(decl, env); isError(err) {
+			return err
+		}
+	}
+	return NULL
 }
 
 func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Environment) object.Object {
@@ -846,11 +893,19 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 // parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms")
 // into a time.Duration. This is a simplified implementation.
 func parseDuration(s string) (time.Duration, error) {
+	isNegative := false
+	if strings.HasPrefix(s, "-") {
+		isNegative = true
+		s = s[1:] // Strip the negative sign for parsing
+	}
+
 	s = strings.ToLower(s)
 	totalDuration := time.Duration(0)
 
 	// A more robust implementation would use a regex, but for now, we can split by '_'
 	parts := strings.Split(s, "_")
+	// TODO: Add validation to ensure parts are in the correct order (d, h, m, s, ms)
+	// and that only the last part has a fractional value.
 
 	for _, part := range parts {
 		if strings.Contains(part, "d") {
@@ -885,6 +940,10 @@ func parseDuration(s string) (time.Duration, error) {
 			}
 			totalDuration += dur
 		}
+	}
+
+	if isNegative {
+		totalDuration = -totalDuration
 	}
 	return totalDuration, nil
 }
@@ -1013,7 +1072,7 @@ func evalBooleanInfixExpression(
 		return nativeBoolToBooleanObject(leftVal || rightVal)
 	case "XOR":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "=", "==":
+	case "=":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "<>", "!=":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
@@ -1067,7 +1126,7 @@ func evalFloatInfixExpression(node *ast.InfixExpression, leftVal, rightVal float
 		return nativeBoolToBooleanObject(leftVal < rightVal)
 	case ">", "GT":
 		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "==", "EQ":
+	case "=", "EQ":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=", "NE":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
@@ -1125,7 +1184,7 @@ func evalBitStringInfixExpression(
 			mask = 0xFFFFFFFFFFFFFFFF
 		}
 		return &object.BitString{Value: ^(leftVal | rightVal) & mask, Width: width}
-	case "==":
+	case "=":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
@@ -1138,17 +1197,18 @@ func evalBitStringInfixExpression(
 	}
 }
 
+// evalIntegerInfixExpression handles arithmetic for all integer types, including promotion and overflow checking.
 func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Object) object.Object {
 	leftType := left.Type()
 	rightType := right.Type()
 	resultType := getResultIntegerType(leftType, rightType)
 
 	// Convert both operands to the result type for the operation.
-	leftVal, leftIsUnsigned, ok := getIntegerObjectValue(left)
+	leftVal, isLeftUnsigned, ok := getIntegerObjectValue(left)
 	if !ok {
 		return newError(node, "could not get value from left operand of type %s", left.Type())
 	}
-	rightVal, rightIsUnsigned, ok := getIntegerObjectValue(right)
+	rightVal, isRightUnsigned, ok := getIntegerObjectValue(right)
 	if !ok {
 		return newError(node, "could not get value from right operand of type %s", right.Type())
 	}
@@ -1156,91 +1216,25 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 	// Perform the operation
 	var resultValue int64
 	var uResultValue uint64
-	var resultIsUnsigned bool
+	resultIsUnsigned := isLeftUnsigned && isRightUnsigned
 
 	// If both are unsigned, use unsigned arithmetic.
-	if leftIsUnsigned && rightIsUnsigned {
-		resultIsUnsigned = true
+	if resultIsUnsigned {
 		uLeft, uRight := uint64(leftVal), uint64(rightVal)
 		switch node.Operator {
 		case "+":
-			resultValue = leftVal + rightVal
-			switch resultType {
-			case object.USINT_OBJ:
-				if math.MaxUint8 < uLeft+uRight {
-					return newError(node, "USINT overflow: %d", resultValue)
-				}
-			case object.UINT_OBJ:
-				if math.MaxUint16 < uLeft+uRight {
-					return newError(node, "UINT overflow: %d", resultValue)
-				}
-			case object.UDINT_OBJ:
-				if math.MaxUint32 < uLeft+uRight {
-					return newError(node, "UDINT overflow: %d", resultValue)
-				}
-			case object.ULINT_OBJ:
-				if math.MaxUint64-uLeft < uRight {
-					return newError(node, "ULINT overflow: %d", resultValue)
-				}
-			case object.SINT_OBJ:
-				if math.MaxInt8 < uLeft+uRight {
-					return newError(node, "SINT overflow: %d", resultValue)
-				}
-			case object.INT_OBJ:
-				if math.MaxInt16 < uLeft+uRight {
-					return newError(node, "INT overflow: %d", resultValue)
-				}
-			case object.DINT_OBJ:
-				if math.MaxInt32 < uLeft+uRight {
-					return newError(node, "SINT overflow: %d", resultValue)
-				}
-			case object.LINT_OBJ:
-				if math.MaxInt64 < uLeft+uRight {
-					return newError(node, "LINT overflow: %d", resultValue)
-				}
+			if math.MaxUint64-uLeft < uRight {
+				return newError(node, "unsigned integer overflow")
 			}
 			uResultValue = uLeft + uRight
 		case "-":
-			resultValue = leftVal - rightVal
 			if uLeft < uRight {
-				// If the result type is ULINT, this is a hard underflow.
-				switch resultType {
-				case object.USINT_OBJ:
-					resultIsUnsigned = true
-					return newError(node, "USINT underflow: %d", resultValue)
-				case object.UINT_OBJ:
-					resultIsUnsigned = true
-					return newError(node, "UINT underflow: %d", resultValue)
-				case object.UDINT_OBJ:
-					resultIsUnsigned = true
-					return newError(node, "UDINT underflow: %d", resultValue)
-				case object.ULINT_OBJ:
-					resultIsUnsigned = true
-					return newError(node, "ULINT underflow: %d", resultValue)
-				case object.SINT_OBJ:
-					resultIsUnsigned = false
-					return newError(node, "SINT underflow: %d", resultValue)
-				case object.INT_OBJ:
-					resultIsUnsigned = false
-					return newError(node, "INT underflow: %d", resultValue)
-				case object.DINT_OBJ:
-					resultIsUnsigned = false
-					return newError(node, "DINT underflow: %d", resultValue)
-				case object.LINT_OBJ:
-					resultIsUnsigned = false
-					return newError(node, "LINT underflow: %d", resultValue)
-				}
-				// For smaller unsigned types, let it wrap to a negative signed number
-				// which will be caught as an underflow by checkAndCreateIntegerObject.
-				resultValue = leftVal - rightVal
-				resultIsUnsigned = false
-			} else {
-				resultIsUnsigned = true
-				uResultValue = uLeft - uRight
+				return newError(node, "unsigned integer underflow")
 			}
+			uResultValue = uLeft - uRight
 		case "*":
-			if resultType == object.ULINT_OBJ && uRight > 0 && uLeft > math.MaxUint64/uRight {
-				return newError(node, "ULINT overflow")
+			if uRight > 0 && uLeft > math.MaxUint64/uRight {
+				return newError(node, "unsigned integer overflow")
 			}
 			uResultValue = uLeft * uRight
 		case "/":
@@ -1248,62 +1242,86 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 				return newError(node, "division by zero")
 			}
 			uResultValue = uLeft / uRight
+		case "MOD":
+			if uRight == 0 {
+				return newError(node, "division by zero in MOD")
+			}
+			uResultValue = uLeft % uRight
+		case "<":
+			return nativeBoolToBooleanObject(uLeft < uRight)
+		case ">":
+			return nativeBoolToBooleanObject(uLeft > uRight)
+		case "<=":
+			return nativeBoolToBooleanObject(uLeft <= uRight)
+		case ">=":
+			return nativeBoolToBooleanObject(uLeft >= uRight)
+		case "=":
+			return nativeBoolToBooleanObject(uLeft == uRight)
+		case "<>":
+			return nativeBoolToBooleanObject(uLeft != uRight)
+		default:
+			return newError(node, "unknown operator for unsigned integers: %s", node.Operator)
 		}
 	} else {
 		// If one or both are signed, use signed arithmetic.
-		resultIsUnsigned = false
 		switch node.Operator {
 		case "+":
-			if resultType == object.LINT_OBJ && ((rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal)) {
-				return newError(node, "LINT overflow")
+			if (rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal) {
+				return newError(node, "signed integer overflow")
 			}
 			resultValue = leftVal + rightVal
 		case "-":
-			if resultType == object.LINT_OBJ && ((rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal)) {
-				return newError(node, "LINT underflow")
+			if (rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal) {
+				return newError(node, "signed integer underflow")
 			}
 			resultValue = leftVal - rightVal
 		case "*":
-			if resultType == object.LINT_OBJ {
-				if leftVal > 0 && rightVal > 0 && leftVal > math.MaxInt64/rightVal {
-					return newError(node, "LINT overflow")
-				} else if leftVal < 0 && rightVal < 0 && leftVal < math.MaxInt64/rightVal {
-					return newError(node, "LINT overflow")
-				} else if leftVal > 0 && rightVal < 0 && rightVal < math.MinInt64/leftVal {
-					return newError(node, "LINT overflow")
-				} else if leftVal < 0 && rightVal > 0 && leftVal < math.MinInt64/rightVal {
-					return newError(node, "LINT overflow")
-				}
+			// Special case for MinInt64 to avoid overflow on negation
+			if leftVal == math.MinInt64 || rightVal == math.MinInt64 {
+				return newError(node, "signed integer overflow on multiplication with MinInt64")
 			}
-
+			if rightVal != 0 && leftVal > math.MaxInt64/abs(rightVal) {
+				return newError(node, "signed integer overflow")
+			}
+			if rightVal != 0 && leftVal < math.MinInt64/abs(rightVal) {
+				return newError(node, "signed integer underflow")
+			}
 			resultValue = leftVal * rightVal
 		case "/":
 			if rightVal == 0 {
 				return newError(node, "division by zero")
 			}
+			// Special case for MinInt64 / -1
+			if leftVal == math.MinInt64 && rightVal == -1 {
+				return newError(node, "signed integer overflow (MinInt64 / -1)")
+			}
 			resultValue = leftVal / rightVal
+		case "MOD":
+			if rightVal == 0 {
+				return newError(node, "division by zero in MOD")
+			}
+			resultValue = leftVal % rightVal
+		case "<":
+			return nativeBoolToBooleanObject(leftVal < rightVal)
+		case ">":
+			return nativeBoolToBooleanObject(leftVal > rightVal)
+		case "<=":
+			return nativeBoolToBooleanObject(leftVal <= rightVal)
+		case ">=":
+			return nativeBoolToBooleanObject(leftVal >= rightVal)
+		case "=":
+			return nativeBoolToBooleanObject(leftVal == rightVal)
+		case "<>":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		default:
+			return newError(node, "unknown operator for signed integers: %s", node.Operator)
 		}
 	}
 
-	switch node.Operator {
-	case "=":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	}
-
 	if resultIsUnsigned {
-		return checkAndCreateIntegerObject(node, resultType, int64(uResultValue), uResultValue, resultIsUnsigned)
+		return checkAndCreateIntegerObject(node, resultType, 0, uResultValue, true)
 	} else {
-		return checkAndCreateIntegerObject(node, resultType, resultValue, uResultValue, resultIsUnsigned)
+		return checkAndCreateIntegerObject(node, resultType, resultValue, 0, false)
 	}
 }
 
@@ -1363,6 +1381,13 @@ func getResultIntegerType(t1, t2 object.ObjectType) object.ObjectType {
 	return t2
 }
 
+func abs(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // getIntegerObjectValue safely extracts an int64 from any integer-like object.
 func getIntegerObjectValue(obj object.Object) (val int64, isUnsigned bool, success bool) {
 	switch o := obj.(type) {
@@ -1389,6 +1414,7 @@ func getIntegerObjectValue(obj object.Object) (val int64, isUnsigned bool, succe
 	}
 }
 
+// checkAndCreateIntegerObject validates the computed value against the target type's bounds and creates the object.
 func checkAndCreateIntegerObject(node ast.Node, t object.ObjectType, val int64, uval uint64, isUnsigned bool) object.Object {
 	switch t {
 	case object.SINT_OBJ:
@@ -1417,48 +1443,49 @@ func checkAndCreateIntegerObject(node ast.Node, t object.ObjectType, val int64, 
 		return &object.LInt{Value: val}
 	case object.USINT_OBJ:
 		if isUnsigned {
-			if uval > math.MaxUint8 {
+			if uval > math.MaxUint8 { // Check against uint64 value
 				return newError(node, "USINT overflow: %d", uval)
 			}
 			return &object.USInt{Value: uint8(uval)}
-		} else { // Result from a signed operation
-			if val < 0 {
-				return newError(node, "USINT underflow: %d", val)
-			} else if val > math.MaxUint8 {
-				return newError(node, "USINT overflow: %d", val)
-			}
-			return &object.USInt{Value: uint8(val)}
 		}
+		// Result from a signed operation being cast to unsigned
+		if val < 0 {
+			return newError(node, "USINT underflow: %d", val)
+		} else if val > math.MaxUint8 {
+			return newError(node, "USINT overflow: %d", val)
+		}
+		return &object.USInt{Value: uint8(val)}
 	case object.UINT_OBJ:
 		if isUnsigned {
-			if uval > math.MaxUint16 {
+			if uval > math.MaxUint16 { // Check against uint64 value
 				return newError(node, "UINT overflow: %d", uval)
 			}
 			return &object.UInt{Value: uint16(uval)}
-		} else {
-			if val < 0 {
-				return newError(node, "UINT underflow: %d", val)
-			} else if val > math.MaxUint16 {
-				return newError(node, "UINT overflow: %d", val)
-			}
-			return &object.UInt{Value: uint16(val)}
 		}
+		if val < 0 {
+			return newError(node, "UINT underflow: %d", val)
+		} else if val > math.MaxUint16 {
+			return newError(node, "UINT overflow: %d", val)
+		}
+		return &object.UInt{Value: uint16(val)}
 	case object.UDINT_OBJ:
 		if isUnsigned {
-			if uval > math.MaxUint32 {
+			if uval > math.MaxUint32 { // Check against uint64 value
 				return newError(node, "UDINT overflow: %d", uval)
 			}
 			return &object.UDInt{Value: uint32(uval)}
-		} else {
-			if val < 0 {
-				return newError(node, "UDINT underflow: %d", val)
-			} else if val > math.MaxUint32 {
-				return newError(node, "UDINT overflow: %d", val)
-			}
-			return &object.UDInt{Value: uint32(val)}
 		}
+		if val < 0 {
+			return newError(node, "UDINT underflow: %d", val)
+		} else if val > math.MaxUint32 {
+			return newError(node, "UDINT overflow: %d", val)
+		}
+		return &object.UDInt{Value: uint32(val)}
 	case object.ULINT_OBJ:
-		// No overflow check needed for addition/multiplication as we are using uint64
+		if !isUnsigned && val < 0 {
+			return newError(node, "ULINT underflow: %d", val)
+		}
+		// Overflow is handled before the operation for uint64
 		return &object.ULInt{Value: uval}
 	}
 	// Fallback to generic Integer for safety, though this path should ideally not be taken.
@@ -1473,7 +1500,7 @@ func evalCaseStatement(cs *ast.CaseStatement, env *object.Environment) object.Ob
 
 	for _, branch := range cs.Cases {
 		for _, valueNode := range branch.Values {
-			matches, err := isCaseMatch(selector, valueNode, env)
+			matches, err := isCaseMatch(selector, valueNode, env) // Pass the correct environment
 			if err != nil {
 				return err // Propagate errors from case value evaluation
 			}
@@ -1503,13 +1530,13 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 		}
 
 		// Check selector >= lowerBound
-		ge := evalComparisonInfix(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
+		ge := evalInfixExpression(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
 		if err, isErr := ge.(*object.Error); isErr {
 			return false, err
 		}
 
 		// Check selector <= upperBound
-		le := evalComparisonInfix(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
+		le := evalInfixExpression(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
 		if err, isErr := le.(*object.Error); isErr {
 			return false, err
 		}
@@ -1535,7 +1562,14 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 		return match, nil
 	}
 
-	eq := evalComparisonInfix(&ast.InfixExpression{Operator: "=="}, selector, caseValue)
+	// For numeric types, use the dedicated numeric comparison logic.
+	if isNumeric(selector) && isNumeric(caseValue) {
+		eq := evalNumericInfixExpression(&ast.InfixExpression{Operator: "="}, selector, caseValue)
+		return eq == TRUE, nil
+	}
+
+	// For non-numeric types, use the generic comparison logic.
+	eq := evalComparisonInfix(&ast.InfixExpression{Operator: "="}, selector, caseValue)
 	if err, isErr := eq.(*object.Error); isErr {
 		return false, err
 	}
@@ -2326,7 +2360,7 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 // isComparisonOperator checks if a given operator string is a comparison operator.
 func isComparisonOperator(op string) bool {
 	switch op {
-	case "==", "!=", "<", ">", "<=", ">=":
+	case "=", "!=", "<", ">", "<=", ">=":
 		return true
 	default:
 		return false
@@ -2337,7 +2371,7 @@ func isComparisonOperator(op string) bool {
 func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) object.Object {
 	// Handle NULL comparisons
 	if left == NULL || right == NULL {
-		if node.Operator == "==" {
+		if node.Operator == "=" {
 			return nativeBoolToBooleanObject(left == right)
 		}
 		if node.Operator == "!=" {
@@ -2351,13 +2385,21 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 		leftVal := left.(*object.Boolean).Value
 		rightVal := right.(*object.Boolean).Value
 		switch node.Operator {
-		case "==":
+		case "=":
 			return nativeBoolToBooleanObject(leftVal == rightVal)
 		case "!=":
 			return nativeBoolToBooleanObject(leftVal != rightVal)
 		default:
 			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
 		}
+	}
+
+	// Handle String comparisons
+	if left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ {
+		leftVal := left.(*object.String).Value
+		rightVal := right.(*object.String).Value
+		// For strings, all comparison operators are valid.
+		return evalGenericComparison(node.Operator, leftVal, rightVal)
 	}
 
 	// Handle Time comparisons
@@ -2373,6 +2415,23 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 		rightVal := right.(*object.Date).Value
 		// Compare using Unix nanoseconds for a consistent integer-based comparison
 		return evalGenericComparison(node.Operator, leftVal.UnixNano(), rightVal.UnixNano())
+	}
+
+	// Handle EnumeratedValue comparisons
+	if left.Type() == object.ENUMERATED_VALUE_OBJ && right.Type() == object.ENUMERATED_VALUE_OBJ {
+		leftVal := left.(*object.EnumeratedValue)
+		rightVal := right.(*object.EnumeratedValue)
+		// For enums, only equality and inequality are meaningful.
+		// They must be of the same type and have the same value.
+		isEqual := leftVal.TypeName == rightVal.TypeName && leftVal.Value == rightVal.Value
+		switch node.Operator {
+		case "=":
+			return nativeBoolToBooleanObject(isEqual)
+		case "!=":
+			return nativeBoolToBooleanObject(!isEqual)
+		default:
+			return newError(node, "unknown operator for enumerated types: %s", node.Operator)
+		}
 	}
 
 	// Handle TimeOfDay comparisons
@@ -2401,7 +2460,7 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 		// They must be of the same type and have the same value.
 		isEqual := leftVal.TypeName == rightVal.TypeName && leftVal.Value == rightVal.Value
 		switch node.Operator {
-		case "==":
+		case "=":
 			return nativeBoolToBooleanObject(isEqual)
 		case "!=":
 			return nativeBoolToBooleanObject(!isEqual)
@@ -2539,10 +2598,10 @@ func RunScheduler(s *object.Scheduler, env *object.Environment, scanCycle time.D
 }
 
 // evalGenericComparison centralizes comparison logic for types that can be represented as int64.
-func evalGenericComparison(op string, leftVal, rightVal int64) object.Object {
+func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) object.Object {
 	switch op {
-	case "==":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "=":
+		return nativeBoolToBooleanObject(leftVal == rightVal) // This now works for strings too
 	case "!=":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
 	case "<":

@@ -37,9 +37,9 @@ func (p *Parser) parseSFCProgram(end token.TokenType) *ast.SFCProgram {
 		if stmt != nil {
 			program.Elements = append(program.Elements, stmt)
 		}
-		// The main parse loop advances the token, so we don't need to here
-		// unless a statement parser doesn't consume its final token.
-		// Since parseStatement handles this, we just need to advance to the next token.
+		// After parsing a complete SFC element (like a STEP or TRANSITION block),
+		// we must advance the token to begin parsing the next element.
+		// The individual parsing functions consume up to their END_* token.
 		p.nextToken()
 	}
 	return program
@@ -72,7 +72,7 @@ func (p *Parser) parseActionStatement() ast.Statement {
 	   		p.peekError(token.END_ACTION)
 	   	} */
 
-	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION, token.VAR)
+	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION)
 
 	if !p.curTokenIs(token.END_ACTION) {
 		p.peekError(token.END_ACTION)
@@ -110,7 +110,7 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 		return nil
 	}
 
-	if !p.expectPeek(token.END_TRANSITION) {
+	if !p.expectPeek(token.END_TRANSITION) { // This should consume the END_TRANSITION token
 		return nil
 	}
 
@@ -141,19 +141,18 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	p.nextToken() // consume COLON
 
 	stmt.Actions = []*ast.ActionBlockStatement{}
+	// Loop while the next token is not the end of the step block.
 	for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
-		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.LPAREN) {
-			assoc := p.parseActionBlockStatement()
-			if assoc != nil {
-				stmt.Actions = append(stmt.Actions, assoc)
-			}
+		assoc := p.parseActionBlockStatement()
+		if assoc == nil {
+			// If parsing an action fails, break to avoid an infinite loop.
+			break
 		}
-		if !p.expectPeek(token.SEMICOLON) {
-			break // Or handle error
-		}
-		p.nextToken()
+		stmt.Actions = append(stmt.Actions, assoc)
+		p.nextToken() // Advance to the next token for the next iteration or END_STEP
 	}
 
+	// The loop terminates with curToken on END_STEP.
 	if !p.curTokenIs(token.END_STEP) {
 		p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
 	}
@@ -193,6 +192,11 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 	if !p.curTokenIs(token.RPAREN) {
 		p.peekError(token.RPAREN)
 		return nil
+	}
+
+	// After the closing parenthesis, there must be a semicolon.
+	if !p.expectPeek(token.SEMICOLON) {
+		// Error already reported by expectPeek.
 	}
 
 	return stmt

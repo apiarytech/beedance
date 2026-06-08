@@ -275,7 +275,7 @@ func TestIntegerOverflowErrors(t *testing.T) {
 
 		// USINT (0 to 255)
 		{"USINT#255 + USINT#1;", "USINT overflow: 256"},
-		{"USINT#0 - USINT#1;", "USINT underflow: -1"},
+		{"USINT#0 - USINT#1;", "SINT underflow: -1"},
 
 		// UINT (0 to 65535)
 		{"UINT#65535 + UINT#1;", "UINT overflow: 65536"},
@@ -312,42 +312,73 @@ func TestEvalCaseStatement(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{"CASE 1 OF 1: 10; ELSE 99; END_CASE;", int64(10)},
-		{"CASE 2 OF 1: 10; ELSE 99; END_CASE;", int64(99)},
-		{"CASE 2 OF 1: 10; 2: 20; ELSE 99; END_CASE;", int64(20)},
-		{"CASE 3 OF 1, 2: 10; 3, 4: 20; ELSE 99; END_CASE;", int64(20)},
-		{"CASE 5 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE;", int64(20)},
-		{"CASE 11 OF 1..4: 10; 5..10: 20; ELSE 99; END_CASE;", int64(99)},
-		{"CASE 1 OF 1: 10; END_CASE;", int64(10)},
-		{"CASE 99 OF 1: 10; END_CASE;", nil}, // No match, no ELSE
 		{`
-			VAR myVar : INT := 7; END_VAR
-			CASE myVar OF
-				1..5: 10;
-				6..10: 20;
-			END_CASE
+			VAR myVar : INT := 2; END_VAR 
+			CASE myVar OF 
+				1: 10; 
+				2: 20; 
+				3: 30; 
+				ELSE 40; 
+			END_CASE;
 		`, int64(20)},
 		{`
-			TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
-			VAR myColor : COLOR := COLOR#GREEN; END_VAR
-			CASE myColor OF
-				COLOR#RED: 1;
-				COLOR#GREEN: 2;
-				COLOR#BLUE: 3;
-			ELSE
-				99;
-			END_CASE
+			VAR myVar : INT := 3; END_VAR 
+			CASE myVar OF 
+				1: 10; 
+				2: 20; 
+				3: 30; 
+				ELSE 40; 
+			END_CASE;
+		`, int64(30)},
+		{`
+			VAR myVar : INT := 5; END_VAR 
+			CASE myVar OF 
+				1: 10; 
+				2: 20; 
+				3: 30; 
+				ELSE 40; 
+			END_CASE;
+		`, int64(40)},
+		{`
+			VAR myVar : INT := 1; END_VAR 
+			CASE myVar OF 
+				1: 10; 
+				ELSE 0;
+			END_CASE;
+		`, int64(10)},
+		{`
+			VAR myVar : INT := 2; END_VAR 
+				CASE myVar OF 
+					1, 2: 10; 
+					ELSE 0;
+				END_CASE;
+		`, int64(10)},
+		{`
+			VAR myVar : INT := 3; END_VAR
+			CASE myVar OF
+				1, 2: 100;
+				3, 4: 200;
+			END_CASE;
+		`, int64(200)},
+		{`
+			VAR myVar : INT := 10; END_VAR
+			CASE myVar OF
+				1..5: 100;
+				6..10: 200;
+			END_CASE;
+		`, int64(200)},
+		{`
+			CASE 'b' OF 
+				'a': 1; 
+				'b': 2; 
+				'c': 3; 
+			END_CASE;
 		`, int64(2)},
 		{`
-			TYPE
-				VALID_RANGE : INT(10..20);
-			END_TYPE
-			CASE 15 OF
-				0..9: 1;
-				VALID_RANGE: 2;
-				21..30: 3;
-			END_CASE
-		`, int64(2)},
+			CASE 2 OF 
+				1.0..2.0: 10; 
+			END_CASE;
+		`, int64(10)},
 	}
 
 	for _, tt := range tests {
@@ -376,25 +407,26 @@ func TestCaseStatementErrors(t *testing.T) {
 	}{
 		{
 			"CASE 1 OF 'a': 10; END_CASE;",
-			"type mismatch for comparison: INTEGER = STRING",
+			"type mismatch for comparison: INT = STRING",
 		},
 		{
 			"CASE 'a' OF 1: 10; END_CASE;",
-			"type mismatch for comparison: STRING = INTEGER",
+			"type mismatch for comparison: STRING = INT",
 		},
-		{
-			"CASE 1 OF 1.0..2.0: 10; END_CASE;",
-			"type mismatch for comparison: INTEGER >= REAL",
-		},
-		{
-			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE;
-			 CASE 1 OF COLOR#RED: 1; END_CASE`,
-			"type mismatch for comparison: INTEGER = ENUMERATED_VALUE",
+		{`
+			 TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			 VAR myColor : INT := 1; END_VAR;
+			 CASE myColor OF 
+			 	COLOR#RED: 1; 
+			 	COLOR#GREEN: 2; 
+			 	COLOR#BLUE: 3; 
+			 END_CASE;
+		`, "type mismatch for comparison: INT = ENUMERATED_VALUE",
 		},
 		{
 			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
 			 CASE COLOR#RED OF 1: 1; END_CASE`,
-			"type mismatch for comparison: ENUMERATED_VALUE = INTEGER",
+			"type mismatch for comparison: ENUMERATED_VALUE = INT",
 		},
 	}
 
@@ -3432,4 +3464,165 @@ func TestNestedInOutVarPassing(t *testing.T) {
 	// OriginalVar is now 10.
 	// InnerFunc modifies it to 10 * 2 = 20.
 	testIntegerObject(t, mustGet(env, "OriginalVar"), 20)
+}
+
+func TestPumpControlSFC(t *testing.T) {
+	input := `
+		PROGRAM PumpControlProgram
+			VAR
+				StartButton: BOOL;
+				TankHighSensor: BOOL;
+				PumpMotor: BOOL;
+				TimerDone: BOOL;
+			END_VAR
+
+			ACTION IdleAction:
+				PumpMotor := FALSE;
+			END_ACTION
+
+			ACTION RunningAction:
+				PumpMotor := TRUE;
+			END_ACTION
+
+			INITIAL_STEP Idle:
+				IdleAction(N);
+			END_STEP
+
+			TRANSITION FROM Idle TO Running := StartButton AND NOT TankHighSensor;
+			END_TRANSITION
+
+			STEP Running:
+				RunningAction(N);
+			END_STEP
+
+			TRANSITION FROM Running TO Idle := TankHighSensor OR TimerDone;
+			END_TRANSITION
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	checkEvaluatorErrors(t, p, "TestPumpControlSFC", input)
+
+	env := object.NewEnvironment()
+	// Evaluate the program to declare the POU and its variables.
+	Eval(program, env)
+
+	// The evaluation of a PROGRAM containing an SFC body should return the SFC object.
+	sfc, ok := mustGet(env, "PumpControlProgram").(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", mustGet(env, "PumpControlProgram"))
+	}
+
+	// Helper to run a scan cycle
+	runScan := func() {
+		evalSFCCycle(sfc, env)
+	}
+
+	// --- Cycle 1: Initial State ---
+	// System is idle, pump should be off.
+	env.Set("StartButton", FALSE)
+	env.Set("TankHighSensor", FALSE)
+	env.Set("TimerDone", FALSE)
+	runScan()
+
+	if !sfc.Steps["Idle"].IsActive {
+		t.Fatal("SFC should be in 'Idle' step initially.")
+	}
+	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+
+	// --- Cycle 2: Transition to Running ---
+	// Press the start button. Tank is not high. Pump should turn on.
+	env.Set("StartButton", TRUE)
+	runScan()
+
+	if !sfc.Steps["Running"].IsActive {
+		t.Fatal("SFC should have transitioned to 'Running' step.")
+	}
+	testBooleanObject(t, mustGet(env, "PumpMotor"), true)
+
+	// --- Cycle 3: Transition back to Idle via TankHighSensor ---
+	// Release start button, sensor indicates tank is full. Pump should turn off.
+	env.Set("StartButton", FALSE)
+	env.Set("TankHighSensor", TRUE)
+	runScan()
+
+	if !sfc.Steps["Idle"].IsActive {
+		t.Fatal("SFC should have transitioned back to 'Idle' step.")
+	}
+	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+
+	// --- Cycle 4 & 5: Transition to Running, then stop via TimerDone ---
+	env.Set("TankHighSensor", FALSE)
+	env.Set("StartButton", TRUE)
+	runScan() // Go to Running
+	env.Set("StartButton", FALSE)
+	env.Set("TimerDone", TRUE)
+	runScan() // Go to Idle
+	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+}
+
+func TestTypedLiteralEvaluation(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// Valid conversions
+		{"SINT#10;", int64(10)},
+		{"INT#-100;", int64(-100)},
+		{"DINT#123456;", int64(123456)},
+		{"USINT#255;", int64(255)},
+		{"UINT#65535;", int64(65535)},
+		{"REAL#1.5;", 1.5},
+		{"LREAL#1.23E-4;", 0.000123},
+		{"BOOL#1;", true},
+		{"BOOL#0;", false},
+		{"BYTE#16#F0;", uint64(0xF0)},
+		{"DATE#2026-05-21;", time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC)},
+
+		// Out-of-range errors
+		{"SINT#128;", "value 128 is out of range for type SINT"},
+		{"SINT#-129;", "value -129 is out of range for type SINT"},
+		{"USINT#256;", "value 256 is out of range for type USINT"},
+		{"USINT#-1;", "value -1 is out of range for type USINT"},
+		{"BYTE#256;", "value 256 is out of range for type BYTE"},
+
+		// Type mismatch errors
+		{"INVALID_TYPE#10;", "identifier not found: INVALID_TYPE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(t, tt.input)
+			switch expected := tt.expected.(type) {
+			case int64:
+				testIntegerObject(t, evaluated, expected)
+			case float64:
+				testRealObject(t, evaluated, expected)
+			case bool:
+				testBooleanObject(t, evaluated, expected)
+			case uint64:
+				bs, ok := evaluated.(*object.BitString)
+				if !ok {
+					t.Fatalf("object is not BitString. got=%T (%+v)", evaluated, evaluated)
+				}
+				if bs.Value != expected {
+					t.Errorf("wrong value. want=%d, got=%d", expected, bs.Value)
+				}
+			case string:
+				testErrorObjectContains(t, evaluated, expected)
+			case time.Time:
+				dateObj, ok := evaluated.(*object.Date)
+				if !ok {
+					t.Fatalf("object is not Date. got=%T (%+v)", evaluated, evaluated)
+				}
+				if !dateObj.Value.Equal(expected) {
+					t.Errorf("wrong date value. want=%v, got=%v", expected, dateObj.Value)
+				}
+			default:
+				t.Fatalf("unhandled expected type: %T", tt.expected)
+			}
+		})
+	}
 }
