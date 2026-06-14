@@ -49,12 +49,19 @@ func TestTypedLiteralsLexing(t *testing.T) {
 		{"INT", "INT#10", []token.Token{{Type: token.INT}, {Type: token.HASH}, {Type: token.INT}}, []string{"INT", "#", "10"}},
 		{"DINT", "DINT#123", []token.Token{{Type: token.DINT}, {Type: token.HASH}, {Type: token.INT}}, []string{"DINT", "#", "123"}},
 		{"REAL", "REAL#1.5", []token.Token{{Type: token.REAL}, {Type: token.HASH}, {Type: token.REAL}}, []string{"REAL", "#", "1.5"}},
-		{"TIME short", "T#5s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"T", "#", "5s"}},
-		{"TIME long", "TIME#5m_10s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TIME", "#", "5m_10s"}},
-		{"DATE short", "D#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"D", "#", "2026-05-21"}},
-		{"DATE long", "DATE#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE", "#", "2026-05-21"}},
-		{"TOD short", "TOD#14:21:00.123", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TOD", "#", "14:21:00.123"}},
-		{"DT long", "DATE_AND_TIME#2026-05-21-14:21:00", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE_AND_TIME", "#", "2026-05-21-14:21:00"}},
+		// TIME literals
+		{"TIME short form", "T#5s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"T", "#", "5s"}},
+		{"TIME long form", "TIME#5m_10s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TIME", "#", "5m_10s"}},
+		{"TIME with milliseconds", "T#100ms", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"T", "#", "100ms"}},
+		// DATE literals
+		{"DATE short form", "D#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"D", "#", "2026-05-21"}},
+		{"DATE long form", "DATE#1999-12-31", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE", "#", "1999-12-31"}},
+		// TIME_OF_DAY literals
+		{"TOD short form", "TOD#14:21:00.123", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TOD", "#", "14:21:00.123"}},
+		{"TOD long form", "TIME_OF_DAY#23:59:59", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"TIME_OF_DAY", "#", "23:59:59"}},
+		// DATE_AND_TIME literals
+		{"DT short form", "DT#2026-05-21-14:21:00", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DT", "#", "2026-05-21-14:21:00"}},
+		{"DT long form", "DATE_AND_TIME#1984-06-25-15:36:55.36", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.IDENT}}, []string{"DATE_AND_TIME", "#", "1984-06-25-15:36:55.36"}},
 	}
 
 	for _, tt := range tests {

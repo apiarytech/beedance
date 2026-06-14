@@ -796,7 +796,7 @@ func (tl *TimeLiteral) expressionNode()      {}
 func (tl *TimeLiteral) Pos() (int, int)      { return tl.Token.Row, tl.Token.Column }
 func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
 func (tl *TimeLiteral) String() string {
-	return "T#" + tl.Value
+	return tl.Value
 }
 
 type DateLiteral struct {
@@ -808,7 +808,7 @@ func (dl *DateLiteral) expressionNode()      {}
 func (dl *DateLiteral) Pos() (int, int)      { return dl.Token.Row, dl.Token.Column }
 func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
 func (dl *DateLiteral) String() string {
-	return dl.Token.Literal
+	return dl.Value
 }
 
 type TimeOfDayLiteral struct {
@@ -820,7 +820,7 @@ func (todl *TimeOfDayLiteral) expressionNode()      {}
 func (todl *TimeOfDayLiteral) Pos() (int, int)      { return todl.Token.Row, todl.Token.Column }
 func (todl *TimeOfDayLiteral) TokenLiteral() string { return todl.Token.Literal }
 func (todl *TimeOfDayLiteral) String() string {
-	return todl.Token.Literal
+	return todl.Value
 }
 
 type DateAndTimeLiteral struct {
@@ -832,7 +832,7 @@ func (dtl *DateAndTimeLiteral) expressionNode()      {}
 func (dtl *DateAndTimeLiteral) Pos() (int, int)      { return dtl.Token.Row, dtl.Token.Column }
 func (dtl *DateAndTimeLiteral) TokenLiteral() string { return dtl.Token.Literal }
 func (dtl *DateAndTimeLiteral) String() string {
-	return dtl.Token.Literal
+	return dtl.Value
 }
 
 type ArrayLiteral struct {

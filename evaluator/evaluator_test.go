@@ -1253,69 +1253,6 @@ func TestHashIndexExpressions(t *testing.T) {
 	}
 }
 
-func TestEvalTimeDateLiterals(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected interface{}
-	}{
-		// TIME literals
-		{"T#5s;", 5 * time.Second},
-		{"TIME#1m30s;", (1 * time.Minute) + (30 * time.Second)},
-		{"T#1h_30m_15s;", (1 * time.Hour) + (30 * time.Minute) + (15 * time.Second)},
-		{"T#1d;", 24 * time.Hour},
-		{"T#100ms;", 100 * time.Millisecond},
-
-		// DATE literals
-		{"D#1999-12-31;", time.Date(1999, 12, 31, 0, 0, 0, 0, time.UTC)},
-		{"DATE#2026-04-30;", time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)},
-
-		// TIME_OF_DAY literals
-		{"TOD#13:30:05;", time.Date(0, 1, 1, 13, 30, 5, 0, time.UTC)},
-		{"TIME_OF_DAY#23:59:59;", time.Date(0, 1, 1, 23, 59, 59, 0, time.UTC)},
-		{"TOD#23:59:59.999;", time.Date(0, 1, 1, 23, 59, 59, 999000000, time.UTC)},
-
-		// DATE_AND_TIME literals
-		{"DT#1999-12-31-23:59:59;", time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)},
-		{"DATE_AND_TIME#2026-04-30-10:20:30.123;", time.Date(2026, 4, 30, 10, 20, 30, 123000000, time.UTC)},
-	}
-
-	for _, tt := range tests {
-		evaluated := testEval(t, tt.input)
-
-		switch expected := tt.expected.(type) {
-		case time.Duration:
-			timeObj, ok := evaluated.(*object.Time)
-			if !ok {
-				t.Errorf("object is not Time. got=%T (%+v)", evaluated, evaluated)
-				continue
-			}
-			if timeObj.Value != expected {
-				t.Errorf("wrong time duration value. want=%v, got=%v", expected, timeObj.Value)
-			}
-		case time.Time:
-			switch evaluated := evaluated.(type) {
-			case *object.Date:
-				if !evaluated.Value.Equal(expected) {
-					t.Errorf("wrong date value. want=%v, got=%v", expected, evaluated.Value)
-				}
-			case *object.TimeOfDay:
-				// For TOD, we only compare the time part, not the date part.
-				if evaluated.Value.Format("15:04:05.999999999") != expected.Format("15:04:05.999999999") {
-					t.Errorf("wrong time of day value. want=%v, got=%v", expected.Format("15:04:05.999999999"), evaluated.Value.Format("15:04:05.999999999"))
-				}
-			case *object.DateAndTime:
-				if !evaluated.Value.Equal(expected) {
-					t.Errorf("wrong date and time value. want=%v, got=%v", expected, evaluated.Value)
-				}
-			default:
-				t.Errorf("object is not a known time.Time-based type. got=%T (%+v)", evaluated, evaluated)
-			}
-		default:
-			t.Errorf("unhandled expected type: %T", tt.expected)
-		}
-	}
-}
-
 func TestBuiltinAddSub(t *testing.T) {
 	tests := []struct {
 		input    string

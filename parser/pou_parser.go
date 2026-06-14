@@ -106,7 +106,7 @@ end_var_parsing:
 		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM)
 	}
 
-	if !p.curTokenIs(token.END_PROGRAM) {
+	if !p.curTokenIs(token.END_PROGRAM) || (p.peekTokenIs(token.EOF) && p.curTokenIs(token.EOF)) {
 		p.currentError("expected next token to be %s, got %s instead", token.END_PROGRAM, p.curToken.Type)
 	}
 

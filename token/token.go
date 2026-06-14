@@ -296,22 +296,22 @@ var keywords = map[string]TokenType{
 	"ULINT":              ULINT, // Abbreviation for TIME
 	"REAL":               REAL,
 	"LREAL":              LREAL,
-	//"T":                  TIME,
-	//"DT":                 DATE_AND_TIME,
-	"TIME": TIME,
-	//"D":                  DATE,
-	"DATE":          DATE,
-	"DATE_AND_TIME": DATE_AND_TIME,
-	"TIME_OF_DAY":   TIME_OF_DAY,
-	//"TOD":                TIME_OF_DAY, // Alias for TIME_OF_DAY
-	"WSTRING": WSTRING,
-	"BYTE":    BYTE,
-	"WORD":    WORD,
-	"DWORD":   DWORD,
-	"LWORD":   LWORD,
-	"ARRAY":   ARRAY,
-	"STRING":  STRING,
-	"RANGE":   RANGE,
+	"T":                  TIME,
+	"DT":                 DATE_AND_TIME,
+	"TIME":               TIME,
+	"D":                  DATE,
+	"DATE":               DATE,
+	"DATE_AND_TIME":      DATE_AND_TIME,
+	"TIME_OF_DAY":        TIME_OF_DAY,
+	"TOD":                TIME_OF_DAY, // Alias for TIME_OF_DAY
+	"WSTRING":            WSTRING,
+	"BYTE":               BYTE,
+	"WORD":               WORD,
+	"DWORD":              DWORD,
+	"LWORD":              LWORD,
+	"ARRAY":              ARRAY,
+	"STRING":             STRING,
+	"RANGE":              RANGE,
 }
 
 // LookupIdent checks the `keywords` table to see whether the given identifier

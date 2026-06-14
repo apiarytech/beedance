@@ -110,21 +110,38 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return &object.ReturnValue{Value: val}
 
 	case *ast.TypedLiteral:
-		// 1. Evaluate the value part of the literal (e.g., the '10' in 'INT#10').
-		val := Eval(node.Value, env)
-		if isError(val) {
-			return val
+		// The parser gives us a TypedLiteral for constructs like `INT#10` or `DATE#'2023-01-01'`.
+		// The `Value` field of the AST node is an expression that needs to be evaluated.
+		// For `INT#10`, `node.Value` is an `IntegerLiteral`.
+		// For `DATE#'...'`, `node.Value` is an `Identifier` with the date string.
+		valueObj := Eval(node.Value, env)
+		if isError(valueObj) {
+			return valueObj
 		}
 
-		// 2. Get the target type name from the AST node.
 		targetTypeName := node.TypeName
+		// The source type is derived from the evaluated object.
 
-		// 3. Get the source type name from the evaluated object.
-		// For literals, the parser gives a generic type, so we use the value's object type.
-		sourceTypeName := string(val.Type())
+		// 1. Handle enumerated typed literals (e.g., COLOR#RED)
+		if enumTypeObj, ok := env.Get(targetTypeName); ok {
+			if enumType, isEnumType := enumTypeObj.(*object.EnumeratedType); isEnumType {
+				if enumVal, isEnumVal := valueObj.(*object.EnumeratedValue); isEnumVal {
+					if _, exists := enumType.Values[enumVal.Value]; exists {
+						return &object.EnumeratedValue{TypeName: targetTypeName, Value: enumVal.Value}
+					}
+					return newError(node, "enumerated value '%s' not found in type '%s'", enumVal.Value, targetTypeName)
+				}
+				return newError(node, "expected enumerated value, got %s", valueObj.Type())
+			}
+		}
 
-		// 4. Use the existing conversion logic to validate and convert the literal.
-		return applyConversion(val, sourceTypeName, targetTypeName)
+		// 2. Handle time/date typed literals (e.g., DATE#'2023-01-01')
+		if timeDateObj := applyTimeDateConversion(valueObj.Inspect(), targetTypeName); timeDateObj.Type() != object.ERROR_OBJ {
+			return timeDateObj
+		}
+
+		// 3. Handle other typed literals (e.g., INT#10, REAL#1.23)
+		return applyConversion(valueObj, string(valueObj.Type()), targetTypeName)
 
 	// Expressions
 	case *ast.IntegerLiteral:
@@ -161,80 +178,11 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// Note: We use float64 internally for both for simplicity in Go.
 		return &object.Real{Value: node.Value}
 
-	case *ast.EnumeratedValueLiteral:
-		// Look up the type definition in the environment.
-		enumTypeObj, ok := env.Get(node.TypeName.Value)
-		if !ok {
-			return newError(node, "enumerated type '%s' not defined", node.TypeName.Value)
-		}
-		enumType, ok := enumTypeObj.(*object.EnumeratedType)
-		if !ok {
-			return newError(node, "'%s' is not an enumerated type", node.TypeName.Value)
-		}
-
-		// Look up the specific value within the type.
-		enumValue, ok := enumType.Values[node.Value.Value]
-		if !ok {
-			return newError(node, "value '%s' is not a member of enumerated type '%s'", node.Value.Value, node.TypeName.Value)
-		}
-
-		return enumValue
-
 	case *ast.StringLiteral:
 		return &object.String{Value: node.Value}
 
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
-
-	case *ast.TimeLiteral:
-		parts := strings.SplitN(node.Value, "#", 2)
-		if len(parts) != 2 {
-			return newError(node, "invalid TIME literal format: %q", node.Value)
-		}
-		duration, err := parseDuration(parts[1])
-		if err != nil {
-			return newError(node, "could not parse TIME literal: %s", err)
-		}
-		return &object.Time{Value: duration}
-
-	case *ast.DateLiteral:
-		// The parser provides the value part of the literal, e.g., "1984-06-25"
-		// The standard format is YYYY-MM-DD.
-		t, err := time.Parse("2006-01-02", node.Value)
-		if err != nil {
-			return newError(node, "could not parse DATE literal: %s", err)
-		}
-		return &object.Date{Value: t}
-
-	case *ast.TimeOfDayLiteral:
-		// The parser provides the value part, e.g., "15:36:55.36"
-		// The standard format is HH:MM:SS with optional fractional seconds.
-		// Go's time.Parse with the layout "15:04:05.999999999" correctly handles
-		// both cases (with and without fractional part).
-		t, err := time.Parse("15:04:05.999999999", node.Value)
-		if err != nil {
-			return newError(node, "could not parse TIME_OF_DAY literal: %s", err)
-		}
-		return &object.TimeOfDay{Value: t}
-
-	case *ast.DateAndTimeLiteral:
-		// The parser provides the value part, e.g., "1984-06-25-15:36:55.36"
-		// The standard format is YYYY-MM-DD-HH:MM:SS with optional fractional seconds.
-		// We need to try parsing both formats (with and without fractional seconds)
-		// as time.Parse requires an exact match.
-		layoutWithFraction := "2006-01-02-15:04:05.999999999"
-		layoutWithoutFraction := "2006-01-02-15:04:05"
-
-		t, err := time.Parse(layoutWithFraction, node.Value)
-		if err != nil {
-			// If parsing with fractional seconds fails, try without.
-			t, err = time.Parse(layoutWithoutFraction, node.Value)
-		}
-
-		if err != nil {
-			return newError(node, "could not parse DATE_AND_TIME literal: %s", err)
-		}
-		return &object.DateAndTime{Value: t}
 
 	case *ast.PrefixExpression:
 		right := Eval(node.Right, env)
@@ -876,6 +824,47 @@ func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Envir
 		}
 	}
 	return NULL // Type declarations don't produce a value themselves.
+}
+
+func applyTimeDateConversion(value, typeName string) object.Object {
+	upperType := strings.ToUpper(typeName)
+	switch upperType {
+	case "TIME", "T":
+		duration, err := parseDuration(value)
+		if err != nil {
+			return newBuiltinError("could not parse TIME literal: %s", err)
+		}
+		return &object.Time{Value: duration}
+	case "DATE", "D":
+		t, err := time.Parse("2006-01-02", value)
+		if err != nil {
+			return newBuiltinError("could not parse DATE literal: %s", err)
+		}
+		return &object.Date{Value: t}
+	case "TIME_OF_DAY", "TOD":
+		t, err := time.Parse("15:04:05.999999999", value)
+		if err != nil {
+			// Try without fractional part
+			t, err = time.Parse("15:04:05", value)
+		}
+		if err != nil {
+			return newBuiltinError("could not parse TIME_OF_DAY literal: %s", err)
+		}
+		return &object.TimeOfDay{Value: t}
+	case "DATE_AND_TIME", "DT":
+		layoutWithFraction := "2006-01-02-15:04:05.999999999"
+		layoutWithoutFraction := "2006-01-02-15:04:05"
+
+		t, err := time.Parse(layoutWithFraction, value)
+		if err != nil {
+			t, err = time.Parse(layoutWithoutFraction, value)
+		}
+		if err != nil {
+			return newBuiltinError("could not parse DATE_AND_TIME literal: %s", err)
+		}
+		return &object.DateAndTime{Value: t}
+	}
+	return newBuiltinError("unknown time/date type: %s", typeName)
 }
 
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
@@ -1918,16 +1907,17 @@ func dereferencePointer(node ast.Node, obj object.Object) object.Object {
 }
 
 func isTruthy(obj object.Object) bool {
-	switch obj {
-	case NULL:
+	if obj == nil || obj == NULL || obj == FALSE {
 		return false
-	case TRUE:
-		return true
-	case FALSE:
-		return false
-	default:
+	}
+	if obj == TRUE {
 		return true
 	}
+	// IEC 61131-3 requires the condition of an IF statement to be a boolean expression.
+	// Any non-boolean result is implicitly not "truthy". A stricter implementation
+	// could return an error here if the type is not BOOLEAN. For now, we treat
+	// non-booleans as false to prevent unexpected execution of the consequence.
+	return false
 }
 
 func newError(node ast.Node, format string, a ...interface{}) *object.Error {
