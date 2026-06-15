@@ -3372,11 +3372,7 @@ func TestParsingErrors(t *testing.T) {
 		{
 			"T#5z;", // cspell:disable-line
 			[]string{
-				"expected next token to be ;, got # instead at row 1, column 2",
-				"no prefix parse function for # found",
-				"expected next token to be ;, got INT instead at row 1, column 3",
-				"expected next token to be ;, got IDENT instead at row 1, column 4",
-			},
+				"invalid time duration format: '5z' at row 1, column 5"},
 		},
 	}
 

@@ -63,6 +63,7 @@ var precedences = map[token.TokenType]int{
 	token.LPAREN:    CALL,
 	token.LBRACKET:  INDEX,
 	token.DOT:       MEMBER,
+	token.HASH:      MEMBER, // Typed literals have similar precedence to member access.
 }
 
 type (
@@ -524,7 +525,7 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 		// The error is already reported by parseVarDeclarations, so we don't need to report it again.
 		// Just ensure we don't advance past the token that should start the next statement.
 		return stmt
-	}
+	} // cspell:disable-line
 
 	return stmt
 }
@@ -2083,7 +2084,7 @@ func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
 		// After assembling the string, perform validation for TIME literals.
 		if typeNameUpper == "TIME" || typeNameUpper == "T" {
 			if ident, ok := valueExp.(*ast.Identifier); ok {
-				if !isValidIecDuration(ident.Value) {
+				if ident.Value != "" && !isValidIecDuration(ident.Value) {
 					p.specificError("invalid time duration format: '%s'", ident.Value)
 					return nil
 				}
