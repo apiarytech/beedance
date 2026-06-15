@@ -17,6 +17,7 @@ import (
 	"beedance/ast"
 	"beedance/lexer"
 	"beedance/token"
+	"regexp"
 )
 
 const (
@@ -79,6 +80,15 @@ type Parser struct {
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
 }
+
+// parseError is a custom error type used for panicking during parsing errors.
+// This allows us to unwind the stack to a recovery point (e.g., ParseProgram)
+// without cluttering every parsing function with error checks.
+type parseError struct {
+	msg string
+}
+
+func (e *parseError) Error() string { return e.msg }
 
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{
@@ -223,12 +233,61 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 	}
 }
 
+// parseDateTimeIdentifier consumes tokens to build a single identifier for date/time literals.
+// It handles constructs like `5s`, `5m_10s`, `2026-05-21`, and `14:30:00.5`.
+func (p *Parser) parseDateTimeIdentifier() ast.Expression {
+	defer untrace(trace("parseDateTimeIdentifier"))
+	startToken := p.curToken
+	var builder strings.Builder
+
+	// Consume tokens that can be part of a date/time literal value.
+	// This loop continues as long as the tokens are numbers, identifiers (for units like 's', 'ms'),
+	// or separators like '-', ':', and '.'.
+	for {
+		if p.curTokenIs(token.INT) || p.curTokenIs(token.REAL) || p.curTokenIs(token.IDENT) ||
+			p.curTokenIs(token.MINUS) || p.curTokenIs(token.COLON) || p.curTokenIs(token.DOT) {
+			builder.WriteString(p.curToken.Literal)
+
+			// Peek ahead to see if the next token is also part of the literal.
+			if !(p.peekTokenIs(token.INT) || p.peekTokenIs(token.REAL) || p.peekTokenIs(token.IDENT) ||
+				p.peekTokenIs(token.MINUS) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.DOT)) {
+				break
+			}
+			p.nextToken()
+		} else {
+			break // Not a valid date/time token, so we stop.
+		}
+	}
+
+	combinedLiteral := builder.String()
+	combinedToken := token.Token{
+		Type:    token.IDENT,
+		Literal: combinedLiteral,
+		Row:     startToken.Row,
+		Column:  startToken.Column,
+		Pos:     startToken.Pos,
+	}
+	return &ast.Identifier{Token: combinedToken, Value: combinedLiteral}
+}
+
 func (p *Parser) Errors() []string {
 	return p.errors
 }
 
 func (p *Parser) peekError(t token.TokenType) {
 	p.specificError("expected next token to be %s, got %s instead", t, p.peekToken.Type)
+}
+
+// synchronizeParser advances the parser's tokens until it finds a likely start of a new statement.
+// This is used after a parsing panic to get the parser back to a stable state.
+func (p *Parser) synchronizeParser() {
+	for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) && !isStatementStartKeyword(p.curToken.Type) {
+		p.nextToken()
+	}
+	// If we stopped on a semicolon, consume it to move to the next statement.
+	if p.curTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
 }
 
 // specificError creates a formatted error message with line and column numbers.
@@ -266,27 +325,28 @@ func (p *Parser) ParseProgram() *ast.Program {
 		}
 		lastPosition = p.curToken.Pos
 
-		numErrorsBefore := len(p.errors)
-		stmt := p.parseStatement()
+		// Use defer-recover to catch parsing panics for a single statement.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Check if it's our custom parseError or another runtime panic.
+					if _, ok := r.(*parseError); !ok {
+						// Re-panic if it's not our expected parseError
+						panic(r)
+					}
+					// An error has already been logged by the panic source (e.g., p.peekError or p.currentError).
+					// We just need to synchronize the parser to a safe point.
+					p.synchronizeParser()
+				}
+			}()
 
-		if stmt != nil {
-			program.Statements = append(program.Statements, stmt)
-		}
-
-		// Error recovery: if an error occurred during parsing, skip tokens until
-		// we find a semicolon or a keyword that can start a new statement,
-		// then try to continue parsing from there.
-		numErrorsAfter := len(p.errors)
-		if numErrorsAfter == numErrorsBefore {
-			// No new errors, so we are confident we can advance.
-			p.nextToken()
-		} else if numErrorsAfter > numErrorsBefore {
-			// If an error occurred, skip tokens until we find a safe place to restart.
-			// We check the *current* token, not the peek token, to decide if we should stop.
-			for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) && !isStatementStartKeyword(p.curToken.Type) {
-				p.nextToken()
+			stmt := p.parseStatement()
+			if stmt != nil {
+				program.Statements = append(program.Statements, stmt)
 			}
-		}
+			// After a successful parse, advance to the next token.
+			p.nextToken()
+		}()
 	}
 
 	return program
@@ -789,10 +849,17 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			}
 			varDecls = append(varDecls, decl)
 		}
-
-		// After parsing the declaration, we should be at the semicolon.
-		p.expectPeek(token.SEMICOLON) // Consume the semicolon
-		p.nextToken()                 // Move to the start of the next declaration or end token
+		p.expectPeek(token.SEMICOLON)
+		p.nextToken()
+		// // After parsing the declaration, we should be at the semicolon.
+		// if !p.peekTokenIs(token.IDENT) || isStatementStartKeyword(p.curToken.Type) {
+		// 	// Report the missing end token, but do not advance the parser.
+		// 	// This allows the main loop to process the current token as the start of a new statement.
+		// 	p.currentError("expected next token to be %s, got %s instead", endToken, p.curToken.Type)
+		// 	return varDecls // Return what we have, leaving the parser on the new statement's keyword.
+		// } else {
+		// 	p.nextToken() // Move to the start of the next declaration or end token
+		// }
 	}
 
 	//p.nextToken() // Consume the endToken (e.g., END_VAR) to advance the parser
@@ -1406,15 +1473,19 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	defer untrace(trace("parseIfStatement"))
 	ifStmt := &ast.IfStatement{Token: p.curToken}
 
-	p.nextToken() //Consume the IF
+	p.nextToken()
 	ifStmt.Condition = p.parseExpression(LOWEST)
 
 	// After parsing the condition, the next token should be THEN.
 	if !p.expectPeek(token.THEN) {
+		// Error recovery: if THEN is missing, an error has been logged by expectPeek.
+		// We return the partially parsed statement and let the main ParseProgram loop's
+		// recovery mechanism handle synchronization to the next statement.
+		//return ifStmt
 	}
+	p.nextToken() // Consume THEN
 
-	p.nextToken()
-	ifStmt.Consequence = p.parseBlockStatementForIf()
+	ifStmt.Consequence = p.parseBlockStatementUntil(token.ELSIF, token.ELSE, token.END_IF)
 
 	// Keep track of the current statement for chaining ELSIF
 	current := ifStmt
@@ -1429,7 +1500,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			p.specificError("missing 'THEN' in ELSIF statement, got %s instead", p.peekToken.Type)
 		}
 		p.nextToken() // consume THEN
-		newIf.Consequence = p.parseBlockStatementForIf()
+		newIf.Consequence = p.parseBlockStatementUntil(token.ELSIF, token.ELSE, token.END_IF)
 
 		current.Alternative = newIf
 		current = newIf
@@ -1438,7 +1509,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	// Handle the final ELSE clause
 	if p.curTokenIs(token.ELSE) {
 		p.nextToken() // Consume ELSE
-		current.Alternative = p.parseBlockStatementForIf()
+		current.Alternative = p.parseBlockStatementUntil(token.END_IF)
 	}
 
 	// The last token should be END_IF
@@ -1489,10 +1560,8 @@ func (p *Parser) parseForStatement() ast.Statement {
 
 	// DO
 	if !p.expectPeek(token.DO) {
-		// expectPeek has already logged the error.
-		//return stmt
+		//return stmt // allow recovery
 	}
-
 	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
 
@@ -1699,14 +1768,6 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		return false
 	}
 
-	if isStatementStartKeyword(p.curToken.Type) {
-		// If we are already at the end token, it's an empty block.
-		if isEndToken(p.curToken.Type) {
-			return block
-		}
-		p.currentError("expected statement, but found keyword %s. Missing one of %v?", p.curToken.Type, end)
-	}
-
 	for !isEndToken(p.curToken.Type) && !p.curTokenIs(token.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
@@ -1789,6 +1850,18 @@ func isStatementStartKeyword(tok token.TokenType) bool {
 	default:
 		return false
 	}
+}
+
+// isValidIecDuration checks if a string conforms to the IEC 61131-3 time duration format.
+// This is a simplified check using regex. A full validation would be more complex.
+func isValidIecDuration(s string) bool {
+	// This regex checks for an optional negative sign, followed by one or more segments
+	// of (number)(unit), separated by underscores.
+	// Units can be d, h, m, s, ms.
+	// Example matches: 5s, 1h_30m, -10s_500ms
+	// Example non-matches: 5z, 1h30m (missing underscore)
+	re := regexp.MustCompile(`^-?(\d+(\.\d+)?(d|h|m|s|ms))(_\d+(\.\d+)?(d|h|m|s|ms))*$`)
+	return re.MatchString(strings.ToLower(s))
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
@@ -1997,18 +2070,32 @@ func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
 	// The current token is '#'. We need to parse the literal value that follows.
 	p.nextToken() // Consume '#'
 
-	// The value part is parsed as a standard expression. This handles numbers, time durations, etc.
-	// The lexer will provide the value part (e.g., "5s_10ms", "2026-05-21") as an IDENT token.
-	// It can also be a numeric literal.
-	if !p.curTokenIs(token.IDENT) && !p.curTokenIs(token.INT) && !p.curTokenIs(token.REAL) && !p.curTokenIs(token.TRUE) && !p.curTokenIs(token.FALSE) {
-		p.currentError("expected a literal value after '#'")
-		return nil
+	var valueExp ast.Expression
+	typeNameUpper := strings.ToUpper(typeIdent.Value)
+
+	// For date and time literals, we manually consume tokens to form a single identifier string.
+	// This simplifies the AST, leaving the string parsing to the evaluator.
+	if isDateTimeKeyword(typeNameUpper) {
+		// For time/date types, we consume tokens to build a single string identifier.
+		// This is simpler than parsing a complex expression for values like '2023-10-26-10:00:00'.
+		valueExp = p.parseDateTimeIdentifier()
+
+		// After assembling the string, perform validation for TIME literals.
+		if typeNameUpper == "TIME" || typeNameUpper == "T" {
+			if ident, ok := valueExp.(*ast.Identifier); ok {
+				if !isValidIecDuration(ident.Value) {
+					p.specificError("invalid time duration format: '%s'", ident.Value)
+					return nil
+				}
+			}
+		}
+	} else {
+		// For all other typed literals (INT#10, DATE#..., COLOR#RED), parse the value as a normal expression.
+		valueExp = p.parseExpression(PREFIX)
 	}
 
-	// We need to parse the value as an expression to handle numbers, identifiers, etc.
-	valueExp := p.parseExpression(PREFIX)
 	if valueExp == nil {
-		return nil
+		return nil // An error occurred during value parsing.
 	}
 
 	return &ast.TypedLiteral{
@@ -2016,6 +2103,64 @@ func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
 		TypeName: typeIdent.Value,
 		Value:    valueExp,
 	}
+}
+
+// isDateTimeKeyword checks if an identifier is a time/date keyword or abbreviation.
+func isDateTimeKeyword(ident string) bool {
+	// This logic is central to parsing and belongs in the parser, not the lexer.
+	upper := strings.ToUpper(ident)
+	switch upper {
+	case "TIME", "T",
+		"DATE", "D",
+		"TIME_OF_DAY", "TOD",
+		"DATE_AND_TIME", "DT":
+		return true
+	default:
+		return false
+	}
+}
+
+// parseDateTimeLiteral consumes tokens to build a single identifier for date/time literals.
+// It handles constructs like `5s`, `5m_10s`, `2026-05-21`, and `14:30:00.5`.
+func (p *Parser) parseDateTimeLiteral(typeName string) ast.Expression {
+	defer untrace(trace(fmt.Sprintf("parseDateTimeLiteral (type: %s)", typeName)))
+	startToken := p.curToken
+	var builder strings.Builder
+
+	// Consume tokens that can be part of a date/time literal value.
+	// This loop continues as long as the tokens are numbers, identifiers (for units like 's', 'ms'),
+	// or separators like '-', ':', and '.'.
+	for {
+		// The token must be a number, an identifier, or a separator.
+		if p.curTokenIs(token.INT) || p.curTokenIs(token.REAL) || p.curTokenIs(token.IDENT) ||
+			p.curTokenIs(token.MINUS) || p.curTokenIs(token.COLON) {
+			builder.WriteString(p.curToken.Literal)
+
+			// Peek ahead to see if the next token is also part of the literal.
+			// We stop if the next token is a semicolon, parenthesis, or another operator
+			// that would not be part of a date/time string.
+			if !(p.peekTokenIs(token.INT) || p.peekTokenIs(token.REAL) || p.peekTokenIs(token.IDENT) ||
+				p.peekTokenIs(token.MINUS) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.DOT)) {
+				break
+			}
+			p.nextToken()
+		} else {
+			// The first token was not a valid start for a date/time value.
+			p.currentError("invalid value for date/time literal, got %s", p.curToken.Type)
+			return nil
+		}
+	}
+
+	// Create a new identifier token that represents the entire literal value.
+	combinedLiteral := builder.String()
+	combinedToken := token.Token{
+		Type:    token.IDENT,
+		Literal: combinedLiteral,
+		Row:     startToken.Row,
+		Column:  startToken.Column,
+		Pos:     startToken.Pos,
+	}
+	return &ast.Identifier{Token: combinedToken, Value: combinedLiteral}
 }
 
 func (p *Parser) parseHashLiteral() ast.Expression {

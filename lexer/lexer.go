@@ -369,15 +369,8 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 		}
 	}
 
-	// After a number, if we see a letter, it might be a time unit (e.g., 5s, 10ms).
-	// We consume the rest of what looks like a duration string.
-	if isLetter(l.ch) || l.ch == ':' || (l.ch == '-' && isDigit(l.peekChar())) {
-		tokType = token.IDENT // It's no longer just a number, but part of a time/date/duration identifier
-		for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '.' || l.ch == '-' || l.ch == ':' {
-			l.readChar()
-		}
-	}
-
+	// After parsing a number, any following letter is part of the next token.
+	// This correctly handles cases like `5s` (number, identifier) and `5z`.
 	return l.input[position:l.position], tokType
 }
 
