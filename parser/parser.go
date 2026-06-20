@@ -134,6 +134,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(token.LBRACE, p.parseHashLiteral)
 	p.registerPrefix(token.STRUCT, p.parseStructDefinition)
+	// Bit-string literals
+	p.registerPrefix(token.BYTE, p.parseBitStringLiteral)
+	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
 
 	p.infixParseFns = make(map[token.TokenType]infixParseFn)
 	p.registerInfix(token.PLUS, p.parseInfixExpression)
@@ -1348,8 +1353,7 @@ func (p *Parser) parseBitStringLiteral() ast.Expression {
 
 	literal := p.curToken.Literal // e.g., "BYTE#16#FF" or "WORD#FF"
 
-	// Extract the value part after the first '#'
-	parts := strings.SplitN(literal, "#", 2)
+	parts := strings.SplitN(literal, "#", 2) // cspell:disable-line
 	if len(parts) < 2 {
 		p.errors = append(p.errors, fmt.Sprintf("invalid bitstring literal format: %q", literal))
 		return nil
@@ -2092,7 +2096,12 @@ func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
 		}
 	} else {
 		// For all other typed literals (INT#10, DATE#..., COLOR#RED), parse the value as a normal expression.
-		valueExp = p.parseExpression(PREFIX)
+		// Special check for based literals like 16#FF which are tokenized as INT
+		if p.curTokenIs(token.INT) && strings.Contains(p.curToken.Literal, "#") {
+			valueExp = p.parseIntegerLiteral()
+		} else {
+			valueExp = p.parseExpression(PREFIX)
+		}
 	}
 
 	if valueExp == nil {

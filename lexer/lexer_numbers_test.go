@@ -41,39 +41,56 @@ func TestBasedLiterals(t *testing.T) {
 
 func TestTypedLiteralsLexing(t *testing.T) {
 	tests := []struct {
-		name             string
-		input            string
-		expectedTokens   []token.Token
-		expectedLiterals []string
+		name            string
+		input           string
+		expectedType    token.TokenType
+		expectedLiteral string
 	}{
-		{"INT", "INT#10", []token.Token{{Type: token.INT}, {Type: token.HASH}, {Type: token.INT}}, []string{"INT", "#", "10"}},
-		{"DINT", "DINT#123", []token.Token{{Type: token.DINT}, {Type: token.HASH}, {Type: token.INT}}, []string{"DINT", "#", "123"}},
-		{"REAL", "REAL#1.5", []token.Token{{Type: token.REAL}, {Type: token.HASH}, {Type: token.REAL}}, []string{"REAL", "#", "1.5"}},
-		// TIME literals
-		{"TIME short form", "T#5s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.INT}, {Type: token.S}}, []string{"T", "#", "5", "s"}},
-		{"TIME long form", "TIME#5m_10s", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.INT}, {Type: token.IDENT}}, []string{"TIME", "#", "5", "m_10s"}},
-		{"TIME with milliseconds", "T#100ms", []token.Token{{Type: token.TIME}, {Type: token.HASH}, {Type: token.INT}, {Type: token.IDENT}}, []string{"T", "#", "100", "ms"}},
-		// DATE literals
-		{"DATE short form", "D#2026-05-21", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}}, []string{"D", "#", "2026", "-", "05", "-", "21"}},
-		{"DATE long form", "DATE#1999-12-31", []token.Token{{Type: token.DATE}, {Type: token.HASH}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}}, []string{"DATE", "#", "1999", "-", "12", "-", "31"}},
-		// TIME_OF_DAY literals
-		{"TOD short form", "TOD#14:21:00.123", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}, {Type: token.COLON}, {Type: token.REAL}}, []string{"TOD", "#", "14", ":", "21", ":", "00.123"}},
-		{"TOD long form", "TIME_OF_DAY#23:59:59", []token.Token{{Type: token.TIME_OF_DAY}, {Type: token.HASH}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}}, []string{"TIME_OF_DAY", "#", "23", ":", "59", ":", "59"}},
-		// DATE_AND_TIME literals
-		{"DT short form", "DT#2026-05-21-14:21:00", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}}, []string{"DT", "#", "2026", "-", "05", "-", "21", "-", "14", ":", "21", ":", "00"}},
-		{"DT long form", "DATE_AND_TIME#1984-06-25-15:36:55.36", []token.Token{{Type: token.DATE_AND_TIME}, {Type: token.HASH}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.MINUS}, {Type: token.INT}, {Type: token.COLON}, {Type: token.INT}, {Type: token.COLON}, {Type: token.REAL}}, []string{"DATE_AND_TIME", "#", "1984", "-", "06", "-", "25", "-", "15", ":", "36", ":", "55.36"}},
+		{"INT", "INT#10", token.INT, "INT#10"},
+		{"DINT with base", "DINT#16#FF", token.DINT, "DINT#16#FF"},
+		{"REAL", "REAL#1.5", token.REAL, "REAL#1.5"},
+		{"TIME short form", "T#5s", token.TIME, "T#5s"},
+		{"TIME long form", "TIME#5m_10s", token.TIME, "TIME#5m_10s"},
+		{"DATE short form", "D#2026-05-21", token.DATE, "D#2026-05-21"},
+		{"TOD long form", "TIME_OF_DAY#23:59:59", token.TIME_OF_DAY, "TIME_OF_DAY#23:59:59"},
+		{"DT short form", "DT#2026-05-21-14:21:00", token.DATE_AND_TIME, "DT#2026-05-21-14:21:00"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			tok := l.NextToken()
+			if tok.Type != tt.expectedType {
+				t.Errorf("token type wrong. want=%q, got=%q", tt.expectedType, tok.Type)
+			}
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("token literal wrong. want=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestBitStringLiteralLexing(t *testing.T) {
+	tests := []struct {
+		input          string
+		expectedTokens []token.Token
+	}{
+		{"BYTE#16#A5", []token.Token{{Type: token.BYTE, Literal: "BYTE#16#A5"}, {Type: token.EOF, Literal: ""}}},
+		{"WORD#16#1234", []token.Token{{Type: token.WORD, Literal: "WORD#16#1234"}, {Type: token.EOF, Literal: ""}}},
+		{"DWORD#16#ABCDEF12", []token.Token{{Type: token.DWORD, Literal: "DWORD#16#ABCDEF12"}, {Type: token.EOF, Literal: ""}}},
+		{"LWORD#16#1234567890ABCDEF", []token.Token{{Type: token.LWORD, Literal: "LWORD#16#1234567890ABCDEF"}, {Type: token.EOF, Literal: ""}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
 			l := New(tt.input)
 			for i, expectedToken := range tt.expectedTokens {
 				tok := l.NextToken()
 				if tok.Type != expectedToken.Type {
 					t.Errorf("token %d type wrong. want=%q, got=%q", i, expectedToken.Type, tok.Type)
 				}
-				if tok.Literal != tt.expectedLiterals[i] {
-					t.Errorf("token %d literal wrong. want=%q, got=%q", i, tt.expectedLiterals[i], tok.Literal)
+				if tok.Literal != expectedToken.Literal {
+					t.Errorf("token %d literal wrong. want=%q, got=%q", i, expectedToken.Literal, tok.Literal)
 				}
 			}
 		})

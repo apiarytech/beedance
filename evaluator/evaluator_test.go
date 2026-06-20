@@ -110,20 +110,91 @@ func TestEvalBooleanLogicalExpression(t *testing.T) {
 func TestBangOperator(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected bool
+		expected interface{}
 	}{
 		{"NOT TRUE;", false},
 		{"NOT FALSE;", true},
-		{"NOT 5;", false},
 		{"NOT NOT TRUE;", true},
-		{"!TRUE;", false},
 		{"NOT NOT FALSE;", false},
-		{"NOT NOT 5;", true},
+		{"!TRUE;", false},
+		// Error cases for non-boolean/non-bitstring types
+		{"NOT 5;", "ERROR (1:1): unknown operator: NOTINT"},
+		{"NOT 3.14;", "ERROR (1:1): unknown operator: NOTLREAL"},
+		//{`NOT "hello";`, "ERROR (1:1): unknown operator: NOTSTRING"},
+		// Nested NOT on invalid type should also error
+		{"NOT NOT 5;", "ERROR (1:5): unknown operator: NOTINT"},
+		// ANY_BIT bitwise tests
+		// {"NOT BYTE#16#A5;", uint64(0x5A)}, // NOT 10100101 -> 01011010
+		// {"NOT WORD#16#FF00;", uint64(0x00FF)},
+		// {"NOT DWORD#16#FFFF0000;", uint64(0x0000FFFF)},
+		// {"NOT LWORD#16#FFFFFFFF00000000;", uint64(0x00000000FFFFFFFF)},
+		// Double NOT on bitstrings
+		// {"NOT NOT BYTE#16#A5;", uint64(0xA5)},
+		// {"NOT NOT WORD#16#FF00;", uint64(0xFF00)},
+		// {"NOT NOT DWORD#16#FFFF0000;", uint64(0xFFFF0000)},
+		// {"NOT NOT LWORD#16#FFFFFFFF00000000;", uint64(0xFFFFFFFF00000000)},
 	}
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testBooleanObject(t, evaluated, tt.expected)
+		switch expected := tt.expected.(type) {
+		case bool:
+			testBooleanObject(t, evaluated, expected)
+		case string:
+			errObj, ok := evaluated.(*object.Error)
+			if !ok {
+				t.Errorf("object is not Error. got=%T(%+v)", evaluated, evaluated)
+				continue
+			}
+			if errObj.Message != expected {
+				t.Errorf("wrong error message. expected=%q, got=%q", expected, errObj.Message)
+			}
+		case uint64:
+			bs, ok := evaluated.(*object.BitString)
+			if !ok {
+				t.Errorf("object is not BitString. got=%T (%+v)", evaluated, evaluated)
+				continue
+			}
+			if bs.Value != expected {
+				t.Errorf("wrong bitstring value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
+			}
+		}
+	}
+}
+
+func TestTypedBitStringLiterals(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		// BYTE (8-bit)
+		{"BYTE#16#A5;", uint64(0xA5)},
+		{"BYTE#8#245;", uint64(0xA5)}, // 245 octal = 165 decimal = A5 hex
+		{"BYTE#2#1010_0101;", uint64(0xA5)},
+		{"BYTE#10#165;", uint64(0xA5)},
+		{"BYTE#256;", "value 256 is out of range for type BYTE"},
+
+		// WORD (16-bit)
+		{"WORD#16#1234;", uint64(0x1234)},
+		{"WORD#65535;", uint64(65535)},
+		{"WORD#65536;", "value 65536 is out of range for type WORD"},
+
+		// DWORD (32-bit)
+		{"DWORD#16#ABCDEF12;", uint64(0xABCDEF12)},
+
+		// LWORD (64-bit)
+		{"LWORD#16#1234567890ABCDEF;", uint64(0x1234567890ABCDEF)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(t, tt.input)
+			if expectedUint, ok := tt.expected.(uint64); ok {
+				testBitStringObject(t, evaluated, expectedUint)
+			} else if expectedErr, ok := tt.expected.(string); ok {
+				testErrorObjectContains(t, evaluated, expectedErr)
+			}
+		})
 	}
 }
 
@@ -226,6 +297,10 @@ END_IF
 		{
 			`{"name": "beedance"}[fn(x) { x ;}];`,
 			"ERROR (1:21): unusable as hash key: FUNCTION",
+		},
+		{
+			`NOT "string"`,
+			"ERROR (1:1): unknown operator: NOTSTRING",
 		},
 		{
 			`999[1];`,
@@ -3260,6 +3335,20 @@ func testTimeObject(t *testing.T, obj object.Object, expected time.Duration) boo
 	}
 	if result.Value != expected {
 		t.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+		return false
+	}
+	return true
+}
+
+func testBitStringObject(t *testing.T, obj object.Object, expected uint64) bool {
+	t.Helper()
+	bs, ok := obj.(*object.BitString)
+	if !ok {
+		t.Errorf("object is not BitString. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if bs.Value != expected {
+		t.Errorf("wrong bitstring value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
 		return false
 	}
 	return true

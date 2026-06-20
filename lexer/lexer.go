@@ -199,6 +199,30 @@ func (l *Lexer) NextToken() token.Token {
 			// The lexer just needs to tokenize `DATE`, `#`, and the value separately.
 			tok.Type = token.LookupIdent(ident)
 
+			// If this is a typed literal prefix (e.g., INT, BYTE, TIME) followed by a '#',
+			// we consume the entire literal as a single token. This simplifies the parser.
+			if isTypedLiteralPrefix(ident) && l.ch == '#' {
+				l.readChar() // consume the identifier to move to '#'
+
+				// The logic for reading the rest of the literal depends on the type.
+				switch tok.Type {
+				case token.SINT, token.INT, token.DINT, token.LINT,
+					token.USINT, token.UINT, token.UDINT, token.ULINT:
+					// Integer literals can also have a base (e.g., DINT#16#FF)
+					l.readBasedIntegerPart()
+				case token.REAL, token.LREAL:
+					// Real literals have a specific format (e.g., REAL#1.23)
+					l.readRealPart()
+				case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME:
+					// Time and date literals have complex string values (e.g., T#5m_10s)
+					l.readTimeLiteralValue()
+				case token.BYTE, token.WORD, token.DWORD, token.LWORD: // Bit-string literals share the same format as based integers
+					l.readBasedIntegerPart()
+				}
+
+				tok.Literal = l.input[startPos:l.position] // The literal is the full string "TYPE#Value"
+				return tok                                 // Return the complete token
+			}
 			// Special handling for short-form date/time keywords (D, T, TOD, DT).
 			// They should only be treated as keywords if followed by a '#'.
 			// Otherwise, they are just regular identifiers.
@@ -402,10 +426,13 @@ func (l *Lexer) readBasedIntegerPart() {
 		for isDigit(l.ch) {
 			l.readChar()
 		}
-		if l.ch == '#' {
-			l.readChar() // consume '#'
-		}
 	}
+
+	// It must be followed by a hash
+	if l.ch == '#' {
+		l.readChar() // consume '#'
+	}
+
 	// Value part (hex digits for bit-strings)
 	for isHexDigit(l.ch) || l.ch == '_' {
 		l.readChar()

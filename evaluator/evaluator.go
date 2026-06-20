@@ -982,20 +982,24 @@ func evalPrefixExpression(node *ast.PrefixExpression, right object.Object) objec
 }
 
 func evalNotOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	switch right.Type() {
-	case object.BOOLEAN_OBJ:
-		if right == TRUE {
+	switch right := right.(type) {
+	case *object.Boolean:
+		if right.Value {
 			return FALSE
 		}
 		return TRUE
-	case object.BITSTRING_OBJ:
-		return evalBitStringPrefixExpression(node, right)
+	case *object.BitString:
+		if isAnyBit(right) {
+			return evalBitStringPrefixExpression(node, right)
+		} else {
+			return FALSE
+		}
+
 	default:
-		// As per TestBangOperator, NOT on a non-boolean (like an integer) should evaluate to false.
-		// This is a simplification; a strict implementation might error.
-		return nativeBoolToBooleanObject(!isTruthy(right))
+		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
 	}
 }
+
 func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
 	if !isNumeric(right) {
 		return newError(node, "unknown operator: -%s", right.Type())
@@ -1175,7 +1179,7 @@ func evalBitStringInfixExpression(
 		return &object.BitString{Value: ^(leftVal | rightVal) & mask, Width: width}
 	case "=":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=":
+	case "!=", "<>":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
 	case "<=":
 		return nativeBoolToBooleanObject(leftVal <= rightVal)
@@ -1246,7 +1250,7 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 			return nativeBoolToBooleanObject(uLeft >= uRight)
 		case "=":
 			return nativeBoolToBooleanObject(uLeft == uRight)
-		case "<>":
+		case "<>", "!=":
 			return nativeBoolToBooleanObject(uLeft != uRight)
 		default:
 			return newError(node, "unknown operator for unsigned integers: %s", node.Operator)
@@ -1300,7 +1304,7 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 			return nativeBoolToBooleanObject(leftVal >= rightVal)
 		case "=":
 			return nativeBoolToBooleanObject(leftVal == rightVal)
-		case "<>":
+		case "<>", "!=":
 			return nativeBoolToBooleanObject(leftVal != rightVal)
 		default:
 			return newError(node, "unknown operator for signed integers: %s", node.Operator)
@@ -2355,6 +2359,12 @@ func isComparisonOperator(op string) bool {
 	default:
 		return false
 	}
+}
+
+// isAnyBit checks if an object's type is part of the ANY_BIT family.
+func isAnyBit(obj object.Object) bool {
+	t := obj.Type()
+	return t == object.BOOLEAN_OBJ || t == object.BITSTRING_OBJ
 }
 
 // evalComparisonInfix handles comparison operations for types not covered by specific infix evaluators.

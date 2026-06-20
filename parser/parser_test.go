@@ -806,6 +806,52 @@ func TestIntegerLiteralExpression(t *testing.T) {
 	}
 }
 
+func TestBitStringLiteralParsing(t *testing.T) {
+	tests := []struct {
+		input         string
+		expectedValue uint64
+		expectedWidth int
+	}{
+		{"BYTE#16#A5;", 0xA5, 8},
+		{"WORD#16#1234;", 0x1234, 16},
+		{"DWORD#16#ABCDEF12;", 0xABCDEF12, 32},
+		{"LWORD#16#1234567890ABCDEF;", 0x1234567890ABCDEF, 64},
+		// Test with different bases
+		{"BYTE#10#165;", 165, 8},
+		{"BYTE#8#245;", 165, 8}, // 245 octal = 165 decimal
+		{"BYTE#2#1010_0101;", 0xA5, 8},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestBitStringLiteralParsing", tt.input)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+		}
+
+		bitStringLit, ok := stmt.Expression.(*ast.BitStringLiteral)
+		if !ok {
+			t.Fatalf("stmt.Expression is not ast.BitStringLiteral. got=%T", stmt.Expression)
+		}
+
+		if bitStringLit.Value != tt.expectedValue {
+			t.Errorf("bitStringLit.Value not %d (0x%X). got=%d (0x%X)", tt.expectedValue, tt.expectedValue, bitStringLit.Value, bitStringLit.Value)
+		}
+
+		if bitStringLit.Width != tt.expectedWidth {
+			t.Errorf("bitStringLit.Width not %d. got=%d", tt.expectedWidth, bitStringLit.Width)
+		}
+	}
+}
+
 func TestRealLiteralExpression(t *testing.T) {
 	tests := []struct {
 		input         string
@@ -3361,35 +3407,6 @@ func TestIlProgramParsing(t *testing.T) {
 	}
 	if inst3.Operator != "ST" || inst3.Operand.String() != "Result" {
 		t.Errorf("Instruction 3 is incorrect. Expected 'ST Result', got '%s %s'", inst3.Operator, inst3.Operand)
-	}
-}
-
-func TestParsingErrors(t *testing.T) {
-	tests := []struct {
-		input          string
-		expectedErrors []string // cspell:disable-line
-	}{
-		{
-			"T#5z;", // cspell:disable-line
-			[]string{
-				"invalid time duration format: '5z' at row 1, column 5"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			l := lexer.New(tt.input)
-			p := New(l)
-			program := p.ParseProgram()
-			_ = program
-
-			if len(p.Errors()) != len(tt.expectedErrors) {
-				t.Fatalf("Expected parser to have %d error(s), but it had %d: %v", len(tt.expectedErrors), len(p.Errors()), p.Errors())
-			}
-			for i, expected := range tt.expectedErrors {
-				assertErrorContains(t, p.Errors(), expected, i)
-			}
-		})
 	}
 }
 

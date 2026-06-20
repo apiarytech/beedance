@@ -1,7 +1,5 @@
 # Licenses for Third-Party Components
-The following sections contain licensing information for libraries that may be included with this product. We
-are thankful to all individuals that have created these. Standard licenses referenced herein are detailed in
-the Standard Licenses section.
+The following sections contain licensing information for libraries that may be included with this product. We are thankful to all individuals that have created these. Standard licenses referenced herein are detailed in the Standard Licenses section.
 
 # Writing An Interpreter In Go
 
