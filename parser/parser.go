@@ -115,6 +115,13 @@ func New(l *lexer.Lexer) *Parser {
 	// Numeric literals (which can also be part of a typed literal)
 	p.registerPrefix(token.INT, p.parseIntegerLiteral)
 	p.registerPrefix(token.REAL, p.parseRealLiteral)
+	p.registerPrefix(token.SINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.DINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.LINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.USINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.UINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.UDINT, p.parseIntegerLiteral)
+	p.registerPrefix(token.ULINT, p.parseIntegerLiteral)
 	p.registerPrefix(token.LREAL, p.parseRealLiteral)
 	// Time and Date keywords can start a typed literal expression (e.g., T#5s).
 	// We treat them like identifiers at this stage.
@@ -171,7 +178,6 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
-	p.registerInfix(token.HASH, p.parseTypedLiteral)
 
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
@@ -1177,12 +1183,12 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	defer untrace(trace("parseIntegerLiteral"))
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 
-	literal := p.curToken.Literal // e.g., "INT#10", "16#FF", "10"
+	literal := p.curToken.Literal
 	base := 10
 	bitSize := 64 // Default to LINT/ULINT size
 
-	// Handle typed literals (e.g., SINT#10, INT#20, DINT#30)
-	// The lexer provides the full literal string, e.g., "SINT#10"
+	// Handle typed literals where the lexer provides the full string, e.g., "SINT#10"
+	// or based literals like "16#FF".
 	if strings.Contains(literal, "#") {
 		parts := strings.SplitN(literal, "#", 2)
 		if len(parts) == 2 {
@@ -1191,7 +1197,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 
 			// Determine bitSize based on the typePart
 			switch token.LookupIdent(strings.ToUpper(typePart)) {
-			case token.SINT, token.USINT:
+			case token.SINT, token.USINT, token.BYTE:
 				bitSize = 8
 			case token.INT, token.UINT:
 				bitSize = 16
@@ -1199,6 +1205,10 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 				bitSize = 32
 			case token.LINT, token.ULINT:
 				bitSize = 64
+			default:
+				// This is a non-typed based literal like 16#FF.
+				// The typePart is the base.
+				valuePart = literal
 			}
 
 			// Check for based literal within the value part (e.g., DINT#16#FF)
@@ -1214,16 +1224,6 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 			}
 			literal = valuePart
 		}
-	} else if strings.Contains(literal, "#") {
-		// Handle non-typed based literals like 16#FF, 8#77, 2#1011
-		parts := strings.SplitN(literal, "#", 2)
-		if len(parts) == 2 {
-			parsedBase, err := strconv.Atoi(parts[0])
-			if err == nil {
-				base = parsedBase
-			}
-			literal = parts[1]
-		}
 	}
 	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
 	value, err := strconv.ParseInt(literal, base, bitSize)
@@ -1236,77 +1236,6 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit.Value = value
 
 	return lit
-}
-
-func (p *Parser) parseTypedIntegerLiteral() ast.Expression {
-	defer untrace(trace("parseTypedIntegerLiteral"))
-
-	tok := p.curToken
-	literal := tok.Literal
-	base := 10
-	var bitSize int
-	var isUnsigned bool
-
-	// Determine properties from token type
-	switch tok.Type {
-	case token.SINT:
-		bitSize = 8
-	case token.INT:
-		bitSize = 16
-	case token.DINT:
-		bitSize = 32
-	case token.LINT:
-		bitSize = 64
-	case token.USINT:
-		bitSize, isUnsigned = 8, true
-	case token.UINT:
-		bitSize, isUnsigned = 16, true
-	case token.UDINT:
-		bitSize, isUnsigned = 32, true
-	case token.ULINT:
-		bitSize, isUnsigned = 64, true
-	default:
-		// Fallback to generic integer if called with a non-specific type
-		return p.parseIntegerLiteral()
-	}
-
-	// The lexer provides the full literal, e.g., "SINT#10" or "UINT#16#FF"
-	parts := strings.SplitN(literal, "#", 2)
-	if len(parts) != 2 {
-		p.currentError("invalid typed integer literal format: %q", literal)
-		return nil
-	}
-	valuePart := parts[1]
-
-	// Check for an explicit base in the value part
-	if strings.Contains(valuePart, "#") {
-		baseParts := strings.SplitN(valuePart, "#", 2)
-		parsedBase, err := strconv.Atoi(baseParts[0])
-		if err != nil {
-			p.currentError("invalid base in typed integer literal: %q", baseParts[0])
-			return nil
-		}
-		base = parsedBase
-		valuePart = baseParts[1]
-	}
-
-	valuePart = strings.ReplaceAll(valuePart, "_", "")
-
-	if isUnsigned {
-		value, err := strconv.ParseUint(valuePart, base, bitSize)
-		if err != nil {
-			p.currentError("could not parse %q as unsigned integer (base %d, size %d): %v", valuePart, base, bitSize, err)
-			return nil
-		}
-		return &ast.UnsignedIntegerLiteral{Token: tok, Value: value, Type: tok.Type}
-	} else {
-		value, err := strconv.ParseInt(valuePart, base, bitSize)
-		if err != nil {
-			p.currentError("could not parse %q as signed integer (base %d, size %d): %v", valuePart, base, bitSize, err)
-			return nil
-		}
-		return &ast.IntegerLiteral{Token: tok, Value: value, Type: tok.Type}
-	}
 }
 
 func (p *Parser) parseRealLiteral() ast.Expression {
@@ -1382,8 +1311,13 @@ func (p *Parser) parseBitStringLiteral() ast.Expression {
 
 	val, err := strconv.ParseUint(valueStr, base, width)
 	if err != nil {
-		msg := fmt.Sprintf("could not parse %q as %s (base %d, width %d): %s", valueStr, p.curToken.Type, base, width, err.Error())
-		p.errors = append(p.errors, msg)
+		// Check if the error is due to the value being out of range for the specified width.
+		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+			p.errors = append(p.errors, fmt.Sprintf("value %q is out of range for type %s (width %d)", valueStr, p.curToken.Type, width))
+		} else {
+			// Handle other parsing errors.
+			p.errors = append(p.errors, fmt.Sprintf("could not parse %q as %s (base %d): %s", valueStr, p.curToken.Type, base, err.Error()))
+		}
 		return nil
 	}
 
@@ -2060,59 +1994,6 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	}
 
 	return exp
-}
-
-func (p *Parser) parseTypedLiteral(left ast.Expression) ast.Expression {
-	defer untrace(trace("parseTypedLiteral"))
-
-	// The 'left' expression should be the type identifier (e.g., INT, REAL, DATE).
-	typeIdent, ok := left.(*ast.Identifier)
-	if !ok {
-		p.currentError("expected a type name before '#', got %T", left)
-		return nil
-	}
-
-	// The current token is '#'. We need to parse the literal value that follows.
-	p.nextToken() // Consume '#'
-
-	var valueExp ast.Expression
-	typeNameUpper := strings.ToUpper(typeIdent.Value)
-
-	// For date and time literals, we manually consume tokens to form a single identifier string.
-	// This simplifies the AST, leaving the string parsing to the evaluator.
-	if isDateTimeKeyword(typeNameUpper) {
-		// For time/date types, we consume tokens to build a single string identifier.
-		// This is simpler than parsing a complex expression for values like '2023-10-26-10:00:00'.
-		valueExp = p.parseDateTimeIdentifier()
-
-		// After assembling the string, perform validation for TIME literals.
-		if typeNameUpper == "TIME" || typeNameUpper == "T" {
-			if ident, ok := valueExp.(*ast.Identifier); ok {
-				if ident.Value != "" && !isValidIecDuration(ident.Value) {
-					p.specificError("invalid time duration format: '%s'", ident.Value)
-					return nil
-				}
-			}
-		}
-	} else {
-		// For all other typed literals (INT#10, DATE#..., COLOR#RED), parse the value as a normal expression.
-		// Special check for based literals like 16#FF which are tokenized as INT
-		if p.curTokenIs(token.INT) && strings.Contains(p.curToken.Literal, "#") {
-			valueExp = p.parseIntegerLiteral()
-		} else {
-			valueExp = p.parseExpression(PREFIX)
-		}
-	}
-
-	if valueExp == nil {
-		return nil // An error occurred during value parsing.
-	}
-
-	return &ast.TypedLiteral{
-		Token:    typeIdent.Token, // The token of the type name (e.g., INT)
-		TypeName: typeIdent.Value,
-		Value:    valueExp,
-	}
 }
 
 // isDateTimeKeyword checks if an identifier is a time/date keyword or abbreviation.

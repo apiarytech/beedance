@@ -184,6 +184,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
 
+	case *ast.BitStringLiteral:
+		return &object.BitString{Value: node.Value, Width: node.Width}
+
 	case *ast.PrefixExpression:
 		right := Eval(node.Right, env)
 		if isError(right) {
@@ -988,13 +991,8 @@ func evalNotOperatorExpression(node *ast.PrefixExpression, right object.Object) 
 			return FALSE
 		}
 		return TRUE
-	case *object.BitString:
-		if isAnyBit(right) {
-			return evalBitStringPrefixExpression(node, right)
-		} else {
-			return FALSE
-		}
-
+	case *object.BitString: // Delegate all bitstring NOT operations
+		return evalBitStringPrefixExpression(node, right)
 	default:
 		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
 	}

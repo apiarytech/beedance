@@ -172,12 +172,10 @@ func TestTypedBitStringLiterals(t *testing.T) {
 		{"BYTE#8#245;", uint64(0xA5)}, // 245 octal = 165 decimal = A5 hex
 		{"BYTE#2#1010_0101;", uint64(0xA5)},
 		{"BYTE#10#165;", uint64(0xA5)},
-		{"BYTE#256;", "value 256 is out of range for type BYTE"},
 
 		// WORD (16-bit)
 		{"WORD#16#1234;", uint64(0x1234)},
-		{"WORD#65535;", uint64(65535)},
-		{"WORD#65536;", "value 65536 is out of range for type WORD"},
+		{"WORD#10#32767;", uint64(32767)},
 
 		// DWORD (32-bit)
 		{"DWORD#16#ABCDEF12;", uint64(0xABCDEF12)},
@@ -194,6 +192,47 @@ func TestTypedBitStringLiterals(t *testing.T) {
 			} else if expectedErr, ok := tt.expected.(string); ok {
 				testErrorObjectContains(t, evaluated, expectedErr)
 			}
+		})
+	}
+}
+
+func TestTypedBitStringLiteralsWithErrors(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// BYTE (8-bit) overflows (max 255)
+		{"BYTE#10#256;", `value "256" is out of range for type BYTE`},
+		{"BYTE#16#100;", `value "100" is out of range for type BYTE`}, // 0x100 = 256
+		{"BYTE#8#400;", `value "400" is out of range for type BYTE`},  // 400 octal = 256 decimal
+		{"BYTE#2#100000000;", `value "100000000" is out of range for type BYTE`},
+
+		// WORD (16-bit) overflows (max 65535)
+		{"WORD#10#65536;", `value "65536" is out of range for type WORD`},
+		{"WORD#16#10000;", `value "10000" is out of range for type WORD`},
+		{"WORD#8#200000;", `value "200000" is out of range for type WORD`},
+		{"WORD#2#10000000000000000;", `value "10000000000000000" is out of range for type WORD`},
+
+		// DWORD (32-bit) overflows (max 4294967295)
+		{"DWORD#10#4294967296;", `value "4294967296" is out of range for type DWORD`},
+		{"DWORD#16#100000000;", `value "100000000" is out of range for type DWORD`},
+
+		// LWORD (64-bit) overflows (max 18446744073709551615)
+		{"LWORD#10#18446744073709551616;", `value "18446744073709551616" is out of range for type LWORD`},
+		{"LWORD#16#10000000000000000;", `value "10000000000000000" is out of range for type LWORD`},
+
+		// Invalid format
+		{"BYTE#FFF;", `value "FFF" is out of range for type BYTE (width 8)`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			// For expected error cases, we allow parser errors.
+			_, pErrors := testEvalWithParserErrors(t, tt.input)
+			if len(pErrors) == 0 {
+				t.Fatalf("expected parser errors, but got none")
+			}
+			testParserErrorContains(t, pErrors, tt.expected)
 		})
 	}
 }
@@ -2714,7 +2753,7 @@ func TestBitwiseOperators(t *testing.T) {
 		{"NOT WORD#16#FF00;", uint64(0x00FF)},
 		{"NOT DWORD#16#FFFF0000;", uint64(0x0000FFFF)},
 		{"NOT LWORD#16#FFFFFFFF00000000;", uint64(0x00000000FFFFFFFF)},
-		{"NOT 123;", "ERROR (1:1): unknown operator: -INTEGER"}, // NOT is repurposed from bang, which becomes minus for int
+		{"NOT 123;", "ERROR (1:1): unknown operator: NOTLINT"},
 
 		// AND
 		{"BYTE#16#A5 AND BYTE#16#F0;", uint64(0xA0)},
@@ -3277,6 +3316,14 @@ func testEvalWithBuiltinVars(t *testing.T, input string) object.Object {
 	return Eval(program, env)
 }
 
+func testEvalWithParserErrors(t *testing.T, input string) (object.Object, []string) {
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	env := object.NewEnvironment()
+	return Eval(program, env), p.Errors()
+}
+
 func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
 	var val int64
 	var ok bool
@@ -3424,6 +3471,21 @@ func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input
 		t.Errorf("Evaluator error: %q", msg)
 	}
 	t.FailNow()
+}
+
+func testParserErrorContains(t *testing.T, errors []string, expectedMessage string) bool {
+	t.Helper()
+	found := false
+	for _, msg := range errors {
+		if strings.Contains(msg, expectedMessage) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected parser error containing %q, but none found in %v", expectedMessage, errors)
+	}
+	return found
 }
 
 func testErrorObject(t *testing.T, obj object.Object, expectedMessage string) bool {

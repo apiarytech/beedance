@@ -1181,7 +1181,7 @@ func modBuiltin(args ...object.Object) object.Object {
 	return checkAndCreateIntegerObject(nil, resultType, result, uint64(result), arg1IsUnsigned)
 }
 
-// exptBuiltin implements the EXPT standard function.
+// exptBuiltin implements the EXPT standard function. It calculates the power of a base to an exponent.
 func exptBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return newBuiltinError("wrong number of arguments for EXPT. got=%d, want=2", len(args))

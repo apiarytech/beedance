@@ -48,6 +48,10 @@ func TestTypedLiteralsLexing(t *testing.T) {
 	}{
 		{"INT", "INT#10", token.INT, "INT#10"},
 		{"DINT with base", "DINT#16#FF", token.DINT, "DINT#16#FF"},
+		{"DINT binary", "DINT#2#1011_0101", token.DINT, "DINT#2#1011_0101"},
+		{"UINT octal", "UINT#8#377", token.UINT, "UINT#8#377"},
+		{"SINT decimal", "SINT#10#123", token.SINT, "SINT#10#123"},
+		{"LINT hex", "LINT#16#AABBCCDD_EEFF0011", token.LINT, "LINT#16#AABBCCDD_EEFF0011"},
 		{"REAL", "REAL#1.5", token.REAL, "REAL#1.5"},
 		{"TIME short form", "T#5s", token.TIME, "T#5s"},
 		{"TIME long form", "TIME#5m_10s", token.TIME, "TIME#5m_10s"},
