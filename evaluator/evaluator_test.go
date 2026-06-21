@@ -244,11 +244,12 @@ func TestIfElseExpressions(t *testing.T) {
 	}{
 		{"IF TRUE THEN 10; END_IF", 10},
 		{"IF FALSE THEN 10; END_IF", nil},
-		{"IF 1 THEN 10; END_IF", 10},
+		{"IF 1 = 1 THEN 10; END_IF", 10}, // Non-boolean conditions are false
 		{"IF 1 < 2 THEN 10; END_IF", 10},
 		{"IF 1 > 2 THEN 10; END_IF", nil},
 		{"IF 1 > 2 THEN 10; ELSE 20; END_IF", 20},
 		{"IF 1 < 2 THEN 10; ELSE 20; END_IF", 10},
+		{"IF 1 THEN 10; END_IF", nil},
 	}
 
 	for _, tt := range tests {
@@ -310,8 +311,12 @@ func TestErrorHandling(t *testing.T) {
 			"ERROR (1:9): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
-			`"Hello" - "World";`,
+			`'Hello' - 'World';`,
 			"ERROR (1:9): unknown operator: STRING - STRING",
+		},
+		{
+			`"Hello" - "World";`,
+			"ERROR (1:9): unknown operator: WSTRING - WSTRING",
 		},
 		{
 			"IF (10 > 1) THEN true + false; END_IF",
@@ -319,15 +324,16 @@ func TestErrorHandling(t *testing.T) {
 		},
 		{
 			`
-IF (10 > 1) THEN
-  IF (10 > 1) THEN
-    RETURN true + false;
-  END_IF
-
-  RETURN 1;
-END_IF
-`,
-			"ERROR (4:17): unknown operator: BOOLEAN + BOOLEAN",
+			IF (10 < 1) THEN
+				// DO NOTHING
+			ELSE
+				IF (10 > 1) THEN
+					RETURN true + false;
+				END_IF
+				RETURN 1;
+			END_IF
+			`,
+			"ERROR (6:18): unknown operator: BOOLEAN + BOOLEAN",
 		},
 		{
 			"foobar;",
@@ -338,8 +344,12 @@ END_IF
 			"ERROR (1:21): unusable as hash key: FUNCTION",
 		},
 		{
-			`NOT "string"`,
+			`NOT 'string';`,
 			"ERROR (1:1): unknown operator: NOTSTRING",
+		},
+		{
+			`NOT "string";`,
+			"ERROR (1:1): unknown operator: NOTWSTRING",
 		},
 		{
 			`999[1];`,
@@ -370,36 +380,36 @@ func TestIntegerOverflowErrors(t *testing.T) {
 	}{
 		// SINT (-128 to 127)
 		{"SINT#127 + SINT#1;", "SINT overflow: 128"},
-		{"SINT#-128 - SINT#1;", "SINT underflow: -129"},
+		{"-SINT#127 - SINT#2;", "ERROR (1:11): SINT underflow: -129"},
 		{"SINT#64 * SINT#3;", "SINT overflow: 192"},
-		{"SINT#-65 * SINT#2;", "SINT underflow: -130"},
+		{"-SINT#65 * SINT#2;", "SINT underflow: -130"},
 
-		// INT (-32768 to 32767)
+		// // INT (-32768 to 32767)
 		{"INT#32767 + INT#1;", "INT overflow: 32768"},
-		{"INT#-32768 - INT#1;", "INT underflow: -32769"},
+		{"-INT#32767 - INT#2;", "ERROR (1:12): INT underflow: -32769"},
 		{"INT#16384 * INT#3;", "INT overflow: 49152"},
 
-		// DINT (-2147483648 to 2147483647)
+		// // DINT (-2147483648 to 2147483647)
 		{"DINT#2147483647 + INT#1;", "DINT overflow: 2147483648"},
-		{"DINT#-2147483648 - INT#1;", "DINT underflow: -2147483649"},
+		{"-DINT#2147483647 - INT#2;", "ERROR (1:18): DINT underflow: -2147483649"},
 
-		// LINT (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
-		{"LINT#9223372036854775807 + LINT#1;", "LINT overflow"},
-		{"LINT#-9223372036854775808 - LINT#1;", "LINT underflow"},
+		// // LINT (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
+		{"LINT#9223372036854775807 + LINT#1;", "ERROR (1:26): signed integer overflow"},
+		{"-LINT#9223372036854775807 - LINT#2;", "ERROR (1:27): signed integer underflow"},
 
-		// USINT (0 to 255)
+		// // USINT (0 to 255)
 		{"USINT#255 + USINT#1;", "USINT overflow: 256"},
-		{"USINT#0 - USINT#1;", "SINT underflow: -1"},
+		{"USINT#0 - USINT#1;", "ERROR (1:9): unsigned integer underflow"},
 
-		// UINT (0 to 65535)
+		// // UINT (0 to 65535)
 		{"UINT#65535 + UINT#1;", "UINT overflow: 65536"},
-		{"UINT#0 - UINT#1;", "UINT underflow: -1"},
+		{"UINT#0 - UINT#1;", "ERROR (1:8): unsigned integer underflow"},
 
-		// UDINT (0 to 4294967295)
+		// // UDINT (0 to 4294967295)
 		{"UDINT#4294967295 + UINT#1;", "UDINT overflow: 4294967296"},
-		{"UDINT#0 - UINT#1;", "UDINT underflow: -1"},
-		{"ULINT#18446744073709551615 + ULINT#1;", "ULINT overflow"},
-		{"ULINT#0 - ULINT#1;", "ULINT underflow: -1"},
+		{"UDINT#0 - UINT#1;", "ERROR (1:9): unsigned integer underflow"},
+		{"ULINT#18446744073709551615 + ULINT#1;", "ERROR (1:28): unsigned integer overflow"},
+		{"ULINT#0 - ULINT#1;", "ERROR (1:9): unsigned integer underflow"},
 	}
 
 	for _, tt := range tests {

@@ -181,6 +181,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.StringLiteral:
 		return &object.String{Value: node.Value}
 
+	case *ast.WStringLiteral:
+		return &object.WString{Value: node.Value}
+
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
 
@@ -2126,11 +2129,12 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 	case *object.Builtin:
 		// For built-in functions, we evaluate all arguments first.
-		evalArgs := evalExpressions(args, callEnv)
-		if len(evalArgs) == 1 && isError(evalArgs[0]) {
-			return evalArgs[0]
+		evaluatedArgs := evalExpressions(args, callEnv)
+		if len(evaluatedArgs) == 1 && isError(evaluatedArgs[0]) {
+			return evaluatedArgs[0]
 		}
-		return fn.Fn(evalArgs...)
+		result := fn.Fn(evaluatedArgs...)
+		return result
 	default:
 		// If the function object itself is an error, it would have been caught earlier.
 		// This case is for when `function` is not a Function or Builtin object.

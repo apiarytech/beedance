@@ -1986,12 +1986,21 @@ func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
 
 // isEqual is a helper function that uses the main evaluator's comparison logic
 // to determine if two objects are equal.
+// func isEqual(left, right object.Object) bool {
+// 	// We can reuse the comparison logic from the "EQ" builtin.
+// 	// The result of evalComparison will be either TRUE, FALSE, or an Error.
+// 	result := evalComparison("EQ", left, right)
+// 	// We are only interested in whether the result is the singleton TRUE object.
+// 	// Any other result (FALSE, NULL, Error) means they are not considered equal.
+// 	return result == TRUE
+// }
+
 func isEqual(left, right object.Object) bool {
-	// We can reuse the comparison logic from the "EQ" builtin.
-	// The result of evalComparison will be either TRUE, FALSE, or an Error.
-	result := evalComparison("EQ", left, right)
+	// We reuse the full infix evaluation logic for equality, which correctly
+	// handles type promotions (e.g., INT vs REAL) and different object types.
+	// The result will be either TRUE, FALSE, or an Error.
+	result := evalInfixExpression(&ast.InfixExpression{Operator: "="}, left, right)
 	// We are only interested in whether the result is the singleton TRUE object.
-	// Any other result (FALSE, NULL, Error) means they are not considered equal.
 	return result == TRUE
 }
 

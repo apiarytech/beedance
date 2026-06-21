@@ -1225,17 +1225,35 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 			literal = valuePart
 		}
 	}
-	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
-	value, err := strconv.ParseInt(literal, base, bitSize)
-	if err != nil {
-		msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
-		p.errors = append(p.errors, msg)
-		return nil
+
+	literal = strings.ReplaceAll(literal, "_", "")
+
+	// Distinguish between signed and unsigned parsing
+	switch p.curToken.Type {
+	case token.USINT, token.UINT, token.UDINT, token.ULINT:
+		// Parse as unsigned integer
+		uValue, err := strconv.ParseUint(literal, base, bitSize)
+		if err != nil {
+			msg := fmt.Sprintf("could not parse %q as unsigned integer: %v", p.curToken.Literal, err)
+			p.errors = append(p.errors, msg)
+			return nil
+		}
+		// For simplicity in the AST, we store it in a signed int64,
+		// but the evaluator will handle it as unsigned.
+		// This might cause issues for ULINT values > MaxInt64, but works for smaller types.
+		// A better AST would have separate signed/unsigned literal nodes.
+		return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
+	default:
+		// Parse as signed integer
+		value, err := strconv.ParseInt(literal, base, bitSize)
+		if err != nil {
+			msg := fmt.Sprintf("could not parse %q as integer: %v", p.curToken.Literal, err)
+			p.errors = append(p.errors, msg)
+			return nil
+		}
+		lit.Value = value
+		return lit
 	}
-
-	lit.Value = value
-
-	return lit
 }
 
 func (p *Parser) parseRealLiteral() ast.Expression {
