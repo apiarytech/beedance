@@ -221,7 +221,20 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.IfStatement:
 		return evalIfStatement(node, env)
 	case *ast.ForLoopStatement:
-		return evalForLoopStatement(node, env)
+		// Debug: print environment names before executing the loop
+		// println("DEBUG: before FOR loop, env names:")
+		// for _, n := range env.Names() {
+		// 	println("DEBUG:  -", n)
+		// }
+
+		res := evalForLoopStatement(node, env)
+
+		// Debug: print environment names after executing the loop
+		// println("DEBUG: after FOR loop, env names:")
+		// for _, n := range env.Names() {
+		// 	println("DEBUG:  -", n)
+		// }
+		return res
 	case *ast.WhileStatement:
 		return evalWhileStatement(node, env)
 	case *ast.RepeatStatement:
@@ -292,8 +305,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.IlInstructionStatement:
 		return evalIlInstructionStatement(node, env)
 
+	case *ast.AssignmentStatement:
+		return evalAssignmentStatement(node, env)
 	}
-
 	return nil
 }
 
@@ -743,10 +757,22 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 	}
 }
 
-func evalBlockStatement(
-	block *ast.BlockStatement,
-	env *object.Environment,
-) object.Object {
+func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environment) object.Object {
+	// This is where the logic actually is!
+	val := Eval(node.Value, env) // Evaluate the right side (e.g., total + i)
+	if isError(val) {
+		return val
+	}
+	// The Left side is an identifier, so we get its name.
+	if ident, ok := node.Left.(*ast.Identifier); ok {
+		env.Set(ident.Value, val) // Set the new value in the environment.
+	} else {
+		return newError(node, "assignment target must be an identifier")
+	}
+	return val // Assignment statements evaluate to the assigned value.
+}
+
+func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) object.Object {
 	var result object.Object = NULL // Default to NULL
 
 	for _, statement := range block.Statements {
@@ -776,6 +802,18 @@ func evalVarBlockStatement(block *ast.VarBlockDeclaration, env *object.Environme
 		}
 	}
 	return NULL
+}
+
+func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
+	var val object.Object
+	if node.Value != nil {
+		val = Eval(node.Value, env)
+		if isError(val) {
+			return val
+		}
+	}
+	env.Set(node.Name.Value, val)
+	return val
 }
 
 func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Environment) object.Object {
@@ -871,18 +909,6 @@ func applyTimeDateConversion(value, typeName string) object.Object {
 		return &object.DateAndTime{Value: t}
 	}
 	return newBuiltinError("unknown time/date type: %s", typeName)
-}
-
-func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
-	var val object.Object
-	if node.Value != nil {
-		val = Eval(node.Value, env)
-		if isError(val) {
-			return val
-		}
-	}
-	env.Set(node.Name.Value, val)
-	return val
 }
 
 // parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms")
@@ -1571,43 +1597,44 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 }
 
 func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) object.Object {
-	// The control variable and loop body execute in an enclosed environment.
+	// Create an enclosed environment for the loop to isolate the control variable `i`.
+	// This prevents the control variable from leaking into the outer scope.
 	loopEnv := object.NewEnclosedEnvironment(env)
 
-	// 1. Evaluate the initial assignment of the control variable.
+	// 1. Evaluate the initial assignment of the control variable in the loop's environment.
 	initVal := Eval(fls.ControlVar.Value, loopEnv)
 	if isError(initVal) {
 		return initVal
 	}
-	initInt, ok := initVal.(*object.LInt)
+	initIntVal, _, ok := getIntegerObjectValue(initVal)
 	if !ok {
 		return newError(fls.ControlVar, "FOR loop start value must be an integer, got %s", initVal.Type())
 	}
 	controlVarName := fls.ControlVar.Left.(*ast.Identifier).Value
-	loopEnv.Set(controlVarName, initInt)
+	loopEnv.Set(controlVarName, &object.LInt{Value: initIntVal})
 
-	// 2. Evaluate the end value.
+	// 2. Evaluate the end value in the loop's environment.
 	endValObj := Eval(fls.EndValue, loopEnv)
 	if isError(endValObj) {
 		return endValObj
 	}
-	endVal, ok := endValObj.(*object.LInt)
+	endVal, _, ok := getIntegerObjectValue(endValObj)
 	if !ok {
 		return newError(fls.EndValue, "FOR loop end value must be an integer, got %s", endValObj.Type())
 	}
 
-	// 3. Evaluate the step value (or default to 1).
+	// 3. Evaluate the step value (or default to 1).  Used by the BY operator
 	stepVal := int64(1)
 	if fls.StepValue != nil {
 		stepValObj := Eval(fls.StepValue, loopEnv)
 		if isError(stepValObj) {
 			return stepValObj
 		}
-		stepInt, ok := stepValObj.(*object.LInt)
+		stepIntVal, _, ok := getIntegerObjectValue(stepValObj)
 		if !ok {
 			return newError(fls.StepValue, "FOR loop step value must be an integer, got %s", stepValObj.Type())
 		}
-		stepVal = stepInt.Value
+		stepVal = stepIntVal
 	}
 
 	// 4. Execute the loop.
@@ -1618,11 +1645,11 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 
 		// Check termination condition.
 		if stepVal > 0 {
-			if currentVal > endVal.Value {
+			if currentVal > endVal {
 				break
 			}
 		} else { // stepVal <= 0
-			if currentVal < endVal.Value {
+			if currentVal < endVal {
 				break
 			}
 		}
@@ -1639,7 +1666,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 			}
 		}
 
-		// Increment the control variable.
+		// Increment control variable.
 		loopEnv.Set(controlVarName, &object.LInt{Value: currentVal + stepVal})
 	}
 

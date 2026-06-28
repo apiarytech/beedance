@@ -30,7 +30,23 @@ func (e *Environment) GetRaw(name string) (Object, bool) {
 	return obj, ok
 }
 
+func (e *Environment) SetLocal(name string, val Object) Object {
+	e.store[name] = val
+	return val
+}
+
 func (e *Environment) Set(name string, val Object) Object {
+	// Check if the variable exists in the current or any outer environment.
+	// If it exists in an outer environment, update it there.
+	env := e
+	for env != nil {
+		if _, ok := env.store[name]; ok {
+			env.store[name] = val
+			return val
+		}
+		env = env.outer
+	}
+	// If not found in any scope, create it in the current (innermost) one.
 	e.store[name] = val
 	return val
 }

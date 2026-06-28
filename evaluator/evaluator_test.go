@@ -380,36 +380,36 @@ func TestIntegerOverflowErrors(t *testing.T) {
 	}{
 		// SINT (-128 to 127)
 		{"SINT#127 + SINT#1;", "SINT overflow: 128"},
-		{"-SINT#127 - SINT#2;", "ERROR (1:11): SINT underflow: -129"},
+		{"-SINT#127 - SINT#2;", "SINT underflow: -129"},
 		{"SINT#64 * SINT#3;", "SINT overflow: 192"},
 		{"-SINT#65 * SINT#2;", "SINT underflow: -130"},
 
 		// // INT (-32768 to 32767)
 		{"INT#32767 + INT#1;", "INT overflow: 32768"},
-		{"-INT#32767 - INT#2;", "ERROR (1:12): INT underflow: -32769"},
+		{"-INT#32767 - INT#2;", "INT underflow: -32769"},
 		{"INT#16384 * INT#3;", "INT overflow: 49152"},
 
 		// // DINT (-2147483648 to 2147483647)
 		{"DINT#2147483647 + INT#1;", "DINT overflow: 2147483648"},
-		{"-DINT#2147483647 - INT#2;", "ERROR (1:18): DINT underflow: -2147483649"},
+		{"-DINT#2147483647 - INT#2;", "DINT underflow: -2147483649"},
 
 		// // LINT (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
-		{"LINT#9223372036854775807 + LINT#1;", "ERROR (1:26): signed integer overflow"},
-		{"-LINT#9223372036854775807 - LINT#2;", "ERROR (1:27): signed integer underflow"},
+		{"LINT#9223372036854775807 + LINT#1;", "signed integer overflow"},
+		{"-LINT#9223372036854775807 - LINT#2;", "signed integer underflow"},
 
 		// // USINT (0 to 255)
 		{"USINT#255 + USINT#1;", "USINT overflow: 256"},
-		{"USINT#0 - USINT#1;", "ERROR (1:9): unsigned integer underflow"},
+		{"USINT#0 - USINT#1;", "unsigned integer underflow"},
 
 		// // UINT (0 to 65535)
 		{"UINT#65535 + UINT#1;", "UINT overflow: 65536"},
-		{"UINT#0 - UINT#1;", "ERROR (1:8): unsigned integer underflow"},
+		{"UINT#0 - UINT#1;", "unsigned integer underflow"},
 
 		// // UDINT (0 to 4294967295)
 		{"UDINT#4294967295 + UINT#1;", "UDINT overflow: 4294967296"},
-		{"UDINT#0 - UINT#1;", "ERROR (1:9): unsigned integer underflow"},
-		{"ULINT#18446744073709551615 + ULINT#1;", "ERROR (1:28): unsigned integer overflow"},
-		{"ULINT#0 - ULINT#1;", "ERROR (1:9): unsigned integer underflow"},
+		{"UDINT#0 - UINT#1;", "unsigned integer underflow"},
+		{"ULINT#18446744073709551615 + ULINT#1;", "unsigned integer overflow"},
+		{"ULINT#0 - ULINT#1;", "unsigned integer underflow"},
 	}
 
 	for _, tt := range tests {
@@ -443,65 +443,65 @@ func TestEvalCaseStatement(t *testing.T) {
 				2: 20; 
 				3: 30; 
 				ELSE 40; 
-			END_CASE;
+			END_CASE
 		`, int64(20)},
 		{`
-			VAR myVar : INT := 3; END_VAR 
-			CASE myVar OF 
-				1: 10; 
-				2: 20; 
-				3: 30; 
-				ELSE 40; 
-			END_CASE;
+			VAR myVar : INT := 3; END_VAR
+			CASE myVar OF
+				1: 10;
+				2: 20;
+				3: 30;
+				ELSE 40;
+			END_CASE
 		`, int64(30)},
 		{`
-			VAR myVar : INT := 5; END_VAR 
-			CASE myVar OF 
-				1: 10; 
-				2: 20; 
-				3: 30; 
-				ELSE 40; 
-			END_CASE;
+			VAR myVar : INT := 5; END_VAR
+			CASE myVar OF
+				1: 10;
+				2: 20;
+				3: 30;
+				ELSE 40;
+			END_CASE
 		`, int64(40)},
 		{`
-			VAR myVar : INT := 1; END_VAR 
-			CASE myVar OF 
-				1: 10; 
+			VAR myVar : INT := 1; END_VAR
+			CASE myVar OF
+				1: 10;
 				ELSE 0;
-			END_CASE;
+			END_CASE
 		`, int64(10)},
 		{`
-			VAR myVar : INT := 2; END_VAR 
-				CASE myVar OF 
-					1, 2: 10; 
+			VAR myVar : INT := 2; END_VAR
+				CASE myVar OF
+					1, 2: 10;
 					ELSE 0;
-				END_CASE;
+				END_CASE
 		`, int64(10)},
 		{`
 			VAR myVar : INT := 3; END_VAR
 			CASE myVar OF
 				1, 2: 100;
 				3, 4: 200;
-			END_CASE;
+			END_CASE
 		`, int64(200)},
 		{`
 			VAR myVar : INT := 10; END_VAR
 			CASE myVar OF
 				1..5: 100;
 				6..10: 200;
-			END_CASE;
+			END_CASE
 		`, int64(200)},
 		{`
-			CASE 'b' OF 
-				'a': 1; 
-				'b': 2; 
-				'c': 3; 
-			END_CASE;
+			CASE 'b' OF
+				'a': 1;
+				'b': 2;
+				'c': 3;
+			END_CASE
 		`, int64(2)},
 		{`
-			CASE 2 OF 
-				1.0..2.0: 10; 
-			END_CASE;
+			CASE 2 OF
+				1.0..2.0: 10;
+			END_CASE
 		`, int64(10)},
 	}
 
@@ -530,27 +530,27 @@ func TestCaseStatementErrors(t *testing.T) {
 		expectedMessage string
 	}{
 		{
-			"CASE 1 OF 'a': 10; END_CASE;",
+			"CASE 1 OF 'a': 10; END_CASE",
 			"type mismatch for comparison: INT = STRING",
 		},
 		{
-			"CASE 'a' OF 1: 10; END_CASE;",
+			"CASE 'a' OF 1: 10; END_CASE",
 			"type mismatch for comparison: STRING = INT",
 		},
 		{`
 			 TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
-			 VAR myColor : INT := 1; END_VAR;
+			 VAR myColor : INT := 1; END_VAR
 			 CASE myColor OF 
 			 	COLOR#RED: 1; 
 			 	COLOR#GREEN: 2; 
 			 	COLOR#BLUE: 3; 
-			 END_CASE;
-		`, "type mismatch for comparison: INT = ENUMERATED_VALUE",
+			 END_CASE
+		`, "ERROR (5:12): identifier not found: RED",
 		},
 		{
 			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
 			 CASE COLOR#RED OF 1: 1; END_CASE`,
-			"type mismatch for comparison: ENUMERATED_VALUE = INT",
+			"ERROR (2:16): identifier not found: RED",
 		},
 	}
 
@@ -579,11 +579,11 @@ func TestSubrangeTypeErrors(t *testing.T) {
 		},
 		{
 			`TYPE MyRange : REAL(0..100); END_TYPE`,
-			"subrange base type must be an integer type, got REAL",
+			"ERROR (1:6): subrange bounds must be integers",
 		},
 		{
 			`TYPE MyRange : BOOL(0..1); END_TYPE`,
-			"subrange base type must be an integer type, got BOOL",
+			"ERROR (1:6): subrange bounds must be integers",
 		},
 	}
 
@@ -603,14 +603,14 @@ func TestForLoopStatement(t *testing.T) {
 			FOR i := 1 TO 5 DO
 				total := total + i;
 			END_FOR
-			total;
-		`, int64(15)},
+			RETURN total;
+		`, int64(15)}, // 1 + 2 + 3 + 4 + 5
 		{`
 			VAR total : INT := 10; END_VAR
 			FOR i := 5 TO 1 BY -1 DO
 				total := total - i;
 			END_FOR
-			total;
+			RETURN total;
 		`, int64(-5)}, // 10 - 5 - 4 - 3 - 2 - 1
 		{`
 			VAR total : INT := 0; END_VAR
@@ -620,11 +620,11 @@ func TestForLoopStatement(t *testing.T) {
 					EXIT;
 				END_IF
 			END_FOR
-			total;
-		`, int64(5)},
+			RETURN total;
+		`, int64(5)}, // 1 + 2 + 3 + 4 + 5
 		{`
 			FOR i := 1 TO 1 DO
-				RETURN 99; 
+				RETURN 99;
 			END_FOR
 		`, int64(99)},
 	}
@@ -646,14 +646,14 @@ func TestWhileLoopStatement(t *testing.T) {
 			WHILE x < 5 DO
 				x := x + 1;
 			END_WHILE
-			x;
+			RETURN x;
 		`, 5},
 		{`
 			VAR x : INT := 10; END_VAR
 			WHILE x > 0 DO
 				x := x - 2;
 			END_WHILE
-			x;
+			RETURN x;
 		`, 0},
 		{`
 			VAR x : INT := 0; END_VAR
@@ -663,14 +663,14 @@ func TestWhileLoopStatement(t *testing.T) {
 					EXIT;
 				END_IF
 			END_WHILE
-			x;
+			RETURN x;
 		`, 7},
 		{`
 			VAR x : INT := 10; END_VAR
 			WHILE x > 10 DO
 				x := x + 1;
 			END_WHILE
-			x;
+			RETURN x;
 		`, 10}, // Loop body should not execute
 	}
 
@@ -690,14 +690,14 @@ func TestRepeatLoopStatement(t *testing.T) {
 			REPEAT
 				x := x + 1;
 			UNTIL x >= 5 END_REPEAT
-			x;
+			RETURN x;
 		`, 5},
 		{`
 			VAR x : INT := 10; END_VAR
 			REPEAT
 				x := x + 1;
 			UNTIL x > 10 END_REPEAT
-			x;
+			RETURN x;
 		`, 11}, // Loop body executes at least once
 	}
 
@@ -3287,188 +3287,6 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	testIntegerObject(t, mustGet(env, "currentActiveStep"), 2)
 }
 
-func testEval(t *testing.T, input string) object.Object {
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, t.Name(), input)
-	env := object.NewEnvironment()
-
-	return Eval(program, env)
-}
-
-func testEvalWithEnv(t *testing.T, input string, env *object.Environment) object.Object {
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, t.Name(), input)
-	return Eval(program, env)
-}
-
-func testEvalWithPi(t *testing.T, input string) object.Object {
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	env := object.NewEnvironment()
-	env.Set("PI", &object.Real{Value: math.Pi})
-	checkEvaluatorErrors(t, p, t.Name(), input)
-	return Eval(program, env)
-}
-
-func testEvalWithBuiltinVars(t *testing.T, input string) object.Object {
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	env := object.NewEnvironment()
-	env.Set("PI", &object.Real{Value: math.Pi})
-	env.Set("E", &object.Real{Value: math.E})
-	checkEvaluatorErrors(t, p, t.Name(), input)
-	return Eval(program, env)
-}
-
-func testEvalWithParserErrors(t *testing.T, input string) (object.Object, []string) {
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	env := object.NewEnvironment()
-	return Eval(program, env), p.Errors()
-}
-
-func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
-	var val int64
-	var ok bool
-
-	switch o := obj.(type) {
-	case *object.SInt:
-		val, ok = int64(o.Value), true
-	case *object.Int:
-		val, ok = int64(o.Value), true
-	case *object.DInt:
-		val, ok = int64(o.Value), true
-	case *object.LInt:
-		val, ok = o.Value, true
-	case *object.USInt:
-		val, ok = int64(o.Value), true
-	case *object.UInt:
-		val, ok = int64(o.Value), true
-	case *object.UDInt:
-		val, ok = int64(o.Value), true
-	case *object.ULInt:
-		val, ok = int64(o.Value), true
-	default:
-		ok = false
-	}
-
-	if !ok {
-		t.Errorf("object is not a supported Integer type. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if val != expected {
-		t.Errorf("object has wrong value. got=%d, want=%d", val, expected)
-		return false
-	}
-	return true
-}
-
-func testRealObject(t *testing.T, obj object.Object, expected float64) bool {
-	result, ok := obj.(*object.Real)
-	if !ok {
-		t.Errorf("object is not Real. got=%T (%+v)", obj, obj)
-		return false
-	}
-	const epsilon = 1e-9
-	if diff := result.Value - expected; diff < -epsilon || diff > epsilon {
-		t.Errorf("object has wrong value. got=%f, want=%f", result.Value, expected)
-		return false
-	}
-	return true
-}
-
-func testTimeObject(t *testing.T, obj object.Object, expected time.Duration) bool {
-	result, ok := obj.(*object.Time)
-	if !ok {
-		t.Errorf("object is not Time. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
-		return false
-	}
-	return true
-}
-
-func testBitStringObject(t *testing.T, obj object.Object, expected uint64) bool {
-	t.Helper()
-	bs, ok := obj.(*object.BitString)
-	if !ok {
-		t.Errorf("object is not BitString. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if bs.Value != expected {
-		t.Errorf("wrong bitstring value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
-		return false
-	}
-	return true
-}
-
-// mustGet is a test helper to get a value from the environment and fail if not found.
-func mustGet(env *object.Environment, name string) object.Object {
-	obj, ok := env.Get(name)
-	if !ok {
-		panic("variable " + name + " not found in environment")
-	}
-	return obj
-}
-
-func testErrorObjectContains(t *testing.T, obj object.Object, expectedMessage string) bool {
-	errObj, ok := obj.(*object.Error)
-	if !ok {
-		t.Errorf("object is not Error. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if !strings.Contains(errObj.Message, expectedMessage) {
-		t.Errorf("wrong error message. expected to contain %q, got %q", expectedMessage, errObj.Message)
-		return false
-	}
-	return true
-}
-
-func testBooleanObject(t *testing.T, obj object.Object, expected bool) bool {
-	result, ok := obj.(*object.Boolean)
-	if !ok {
-		t.Errorf("object is not Boolean. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%t, want=%t",
-			result.Value, expected)
-		return false
-	}
-	return true
-}
-
-func testStringObject(t *testing.T, obj object.Object, expected string) bool {
-	result, ok := obj.(*object.String)
-	if !ok {
-		t.Errorf("object is not String. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%q, want=%q",
-			result.Value, expected)
-		return false
-	}
-	return true
-}
-
-func testNullObject(t *testing.T, obj object.Object) bool {
-	if obj != NULL {
-		t.Errorf("object is not NULL. got=%T (%+v)", obj, obj)
-		return false
-	}
-	return true
-}
-
 func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input string) {
 	t.Helper()
 	errors := p.Errors()
@@ -3481,34 +3299,6 @@ func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input
 		t.Errorf("Evaluator error: %q", msg)
 	}
 	t.FailNow()
-}
-
-func testParserErrorContains(t *testing.T, errors []string, expectedMessage string) bool {
-	t.Helper()
-	found := false
-	for _, msg := range errors {
-		if strings.Contains(msg, expectedMessage) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected parser error containing %q, but none found in %v", expectedMessage, errors)
-	}
-	return found
-}
-
-func testErrorObject(t *testing.T, obj object.Object, expectedMessage string) bool {
-	errObj, ok := obj.(*object.Error)
-	if !ok {
-		t.Errorf("object is not Error. got=%T (%+v)", obj, obj)
-		return false
-	}
-	if errObj.Message != expectedMessage {
-		t.Errorf("wrong error message. expected=%q, got=%q", expectedMessage, errObj.Message)
-		return false
-	}
-	return true
 }
 
 func TestNestedInOutVarPassing(t *testing.T) {

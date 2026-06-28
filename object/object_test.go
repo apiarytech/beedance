@@ -10,6 +10,20 @@ import (
 	"beedance/token"
 )
 
+func TestSetUpdatesOuterEnvironment(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("a", &LInt{Value: 1})
+	inner := NewEnclosedEnvironment(outer)
+	inner.Set("a", &LInt{Value: 2})
+
+	obj, ok := outer.Get("a")
+	if !ok {
+		t.Fatalf("outer.Get failed to find 'a'")
+	}
+	if li, ok := obj.(*LInt); !ok || li.Value != 2 {
+		t.Fatalf("outer value not updated; got=%v", obj)
+	}
+}
 func TestStringHashKey(t *testing.T) {
 	tests := []struct {
 		name      string
