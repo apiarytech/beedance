@@ -35,9 +35,16 @@ func (e *Environment) SetLocal(name string, val Object) Object {
 	return val
 }
 
+// Set creates or updates a variable in the current, local scope.
+// This is used for variable declaration and shadowing.
 func (e *Environment) Set(name string, val Object) Object {
-	// Check if the variable exists in the current or any outer environment.
-	// If it exists in an outer environment, update it there.
+	e.store[name] = val
+	return val
+}
+
+// Assign updates an existing variable in the current or any outer scope.
+// It walks up the scope chain to find the variable. If not found, it creates it locally.
+func (e *Environment) Assign(name string, val Object) Object {
 	env := e
 	for env != nil {
 		if _, ok := env.store[name]; ok {
@@ -46,7 +53,6 @@ func (e *Environment) Set(name string, val Object) Object {
 		}
 		env = env.outer
 	}
-	// If not found in any scope, create it in the current (innermost) one.
 	e.store[name] = val
 	return val
 }

@@ -549,9 +549,16 @@ func (s *SFC) Inspect() string  { return "SFC" }
 // Step objects represent a step in an SFC.
 type Step struct {
 	Name           *ast.Identifier
-	Actions        []*ast.ActionBlockStatement
+	Body           *ast.BlockStatement // The action calls or ST statements within the step
 	IsActive       bool
 	ActivationTime time.Time // Time when the step became active
+}
+
+// ActionAssociation links an action to a step with a specific qualifier.
+type ActionAssociation struct {
+	Name      string
+	Qualifier string
+	Duration  time.Duration // For timed qualifiers like L, D
 }
 
 func (s *Step) Type() ObjectType { return STEP_OBJ }
@@ -574,15 +581,25 @@ type Action struct {
 
 	// State for action control logic
 	IsActive        bool // The 'Q' flag from the ACTION_CONTROL block
-	ActivationCount int  // For handling 'P' qualifier
+	ActivationCount int  // For handling 'P' (Pulse) qualifier
 	AssociatedSteps []*Step
-	Qualifier       string
+	Qualifier       string // This will now be determined dynamically per cycle
 	Duration        time.Duration
 	TimerStart      time.Time // When the timer for D, L, etc. started
 }
 
 func (a *Action) Type() ObjectType { return ACTION_OBJ }
 func (a *Action) Inspect() string  { return "ACTION " + a.Name.Value }
+
+// IsStored checks if the action has a stored qualifier (S, SD, SL).
+// This is a simplification; a more robust implementation would check the qualifier
+// from the AST for each associated step. For this evaluator's logic, checking
+// the dynamically determined qualifier is sufficient.
+func (a *Action) IsStored() bool {
+	// This check is based on the dynamically determined qualifier for the current cycle.
+	// It's a pragmatic approach for the evaluator's state machine.
+	return a.Qualifier == "S" || a.Qualifier == "SD" || a.Qualifier == "SL" || a.Qualifier == "DS"
+}
 
 // Task represents a runtime task with its configuration and state.
 type Task struct {

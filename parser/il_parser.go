@@ -137,9 +137,9 @@ func (p *Parser) parseIlParenthesizedExpression() ast.Expression {
 // isIlOperator checks if a token type is a common IL operator.
 // This is used as a heuristic to decide whether to parse a POU body as IL or ST.
 func isIlOperator(tok token.TokenType) bool {
-	switch tok {
-	case token.LD, token.ST, token.S, token.R,
-		token.AND, token.OR, token.XOR, token.NOT: // Also common IL operators
+	switch tok { // cspell:disable-line
+	case token.LD, token.ST, token.S, token.R, token.CAL, token.JMP, token.RET,
+		token.AND, token.OR, token.XOR, token.NOT:
 		return true
 	default:
 		return false

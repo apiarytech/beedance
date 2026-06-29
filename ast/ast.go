@@ -1334,12 +1334,26 @@ type StepStatement struct {
 	IsInitial   bool
 	Actions     []*ActionBlockStatement
 	Transitions []*TransitionStatement
+	Body        *BlockStatement // For textual step bodies
 }
 
 func (ss *StepStatement) statementNode()       {}
 func (ss *StepStatement) Pos() (int, int)      { return ss.Token.Row, ss.Token.Column }
 func (ss *StepStatement) TokenLiteral() string { return ss.Token.Literal }
-func (ss *StepStatement) String() string       { return "STEP " + ss.Name.String() }
+func (ss *StepStatement) String() string {
+	var out bytes.Buffer
+	for _, a := range ss.Actions {
+		out.WriteString(a.String())
+	}
+	for _, t := range ss.Transitions {
+		out.WriteString(t.String())
+	}
+	out.WriteString("STEP " + ss.Name.String())
+	if ss.Body != nil {
+		out.WriteString("\n" + ss.Body.String())
+	}
+	return out.String()
+}
 
 type TransitionStatement struct {
 	Token     token.Token // The 'TRANSITION' token

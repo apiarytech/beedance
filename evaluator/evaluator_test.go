@@ -1,7 +1,6 @@
 package evaluator
 
 import (
-	"beedance/ast"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
@@ -712,108 +711,98 @@ func TestSFCExecution(t *testing.T) {
 		PROGRAM TestSFC
 			VAR
 				x : INT := 0;
-				cond1 : BOOL := TRUE;
+				cond1 : BOOL := FALSE;
 				cond2 : BOOL := FALSE;
 			END_VAR
 
-			INITIAL_STEP S1:
-				x := 1;
-			END_STEP
+			ACTION Step1Action: x := 1; END_ACTION
+			ACTION Step2Action: x := x + 10; END_ACTION
+			ACTION Step3Action: x := x + 100; END_ACTION
+
+			INITIAL_STEP S1: Step1Action(); END_STEP
 
 			TRANSITION FROM S1 TO S2 := cond1; END_TRANSITION
 
-			STEP S2:
-				x := x + 10;
-			END_STEP
+			STEP S2: Step2Action(); END_STEP
 
 			TRANSITION FROM S2 TO S3 := cond2; END_TRANSITION
 
-			STEP S3:
-				x := x + 100;
-			END_STEP
+			STEP S3: Step3Action(); END_STEP
+
 		END_PROGRAM
 	`
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestSFCExecution", input)
-
-	// The program declaration itself needs to be evaluated to set up the environment
+	// We need to manage the environment manually for this test to check variables across cycles.
 	env := object.NewEnvironment()
-	Eval(program, env)
+	sfcObj := testEvalWithEnv(t, input, env)
 
-	// Find the program instance in the environment
-	sfcObj, ok := env.Get("TestSFC")
-	if !ok {
-		t.Fatalf("Program 'TestSFC' not found in environment")
-	}
-
-	// For this test, we assume the SFC logic is embedded in the program's body
-	// and can be evaluated. A full implementation would have a more complex POU invocation.
-	// Here, we'll simulate a few cycles.
 	sfc, ok := sfcObj.(*object.SFC)
 	if !ok {
 		t.Fatalf("TestSFC is not an SFC object, got %T", sfcObj)
 	}
+
+	// Ensure transition conditions are false initially to control the test flow.
+	env.Set("cond1", FALSE)
+	env.Set("cond2", FALSE)
+
+	// --- Cycle 1: Initial state ---
+	// S1 is active. The action "x := 1" should execute.
 	evalSFCCycle(sfc, env)
+	if !sfc.Steps["S1"].IsActive {
+		t.Fatal("S1 should be active initially")
+	}
+	testIntegerObject(t, mustGet(env, "x"), 1)
+
+	// --- Cycle 2: Transition to S2 ---
+	// Set the condition and run the cycle. The transition should clear,
+	// S1 should deactivate, and S2 should activate and execute its action.
+	env.Set("cond1", TRUE)
+	evalSFCCycle(sfc, env)
+	if sfc.Steps["S1"].IsActive || !sfc.Steps["S2"].IsActive {
+		t.Fatal("Should have transitioned to S2")
+	}
+	testIntegerObject(t, mustGet(env, "x"), 11) // S1's action ran in cycle 1 (x=1). S2's action runs in cycle 2 (x=1+10).
+
+	// --- Cycle 3: Still in S2 ---
+	// The transition condition `cond2` is FALSE. S2 remains active.
+	// The action "x := x + 10" executes again.
+	evalSFCCycle(sfc, env)
+	testIntegerObject(t, mustGet(env, "x"), 21) // S2's action runs again: 11 + 10
 }
 
 func TestSFCActionQualifiers(t *testing.T) {
 	input := `
 		PROGRAM TestSFCQualifiers
-			VAR
-				// Action variables
-				ActionN, ActionS, ActionR_S, ActionP : BOOL;
-				// Conditions
-				GoToS2, GoToS3, GoToS4, GoToS5, Reset : BOOL;
-			END_VAR
+		VAR
+			// Action variables
+			ActionN, ActionS, ActionP : BOOL;
+			// Conditions
+			GoToS2, GoToS3, GoToS4, Reset : BOOL;
+		END_VAR
 
-			INITIAL_STEP S1:
-				ActionN(N);
-				ActionS(S);
-			END_STEP
+		INITIAL_STEP S1:
+			ActionN(N);
+			ActionS(S);
+		END_STEP
 
-			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+		TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
 
-			STEP S2:
-				ActionP(P);
-			END_STEP
+		STEP S2:
+			ActionP(P);
+		END_STEP
 
-			TRANSITION FROM S2 TO S3 := GoToS3; END_TRANSITION
+		TRANSITION FROM S2 TO S3 := GoToS3; END_TRANSITION
 
-			STEP S3:
-				ActionR_S(R);
-			END_STEP
+		STEP S3:
+			ActionS(R); // Reset the 'ActionS' variable
+		END_STEP
 
-			TRANSITION FROM S3 TO S4 := GoToS4; END_TRANSITION
-
-			STEP S4:
-				(* No actions *)
-			END_STEP
-
-			TRANSITION FROM S4 TO S5 := GoToS5; END_TRANSITION
-
-			STEP S5:
-				(* Final step *)
-			END_STEP
-
-			TRANSITION FROM S5 TO S1 := Reset; END_TRANSITION
-
+		TRANSITION FROM S3 TO S1 := Reset; END_TRANSITION
 		END_PROGRAM
 	`
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestSFCActionQualifiers", input)
-
 	env := object.NewEnvironment()
-	// This will declare the PROGRAM POU
-	Eval(program, env)
-
-	// Now, instantiate the program to get the SFC object
-	progInstance := testEval(t, "TestSFCQualifiers")
+	progInstance := testEvalWithEnv(t, input, env)
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -825,7 +814,6 @@ func TestSFCActionQualifiers(t *testing.T) {
 	testBooleanObject(t, mustGet(env, "ActionN"), true)
 	testBooleanObject(t, mustGet(env, "ActionS"), true)
 	testBooleanObject(t, mustGet(env, "ActionP"), false)
-	testBooleanObject(t, mustGet(env, "ActionR_S"), false)
 
 	// --- Cycle 2: Transition from S1 to S2 ---
 	// Set condition and cycle. S1 becomes inactive, S2 becomes active.
@@ -851,16 +839,8 @@ func TestSFCActionQualifiers(t *testing.T) {
 	// Set condition and cycle. S2 becomes inactive, S3 becomes active.
 	env.Set("GoToS3", TRUE)
 	evalSFCCycle(sfc, env)
-	// ActionS is still TRUE.
-	// ActionR_S is associated with S3 with an R (Reset) qualifier, so it should force ActionS to FALSE.
-	// However, the action being reset is ActionR_S itself, so it becomes false.
-	// Let's test resetting ActionS.
-	// The logic for R is `action.IsActive = false`. So ActionR_S becomes false.
-	testBooleanObject(t, mustGet(env, "ActionR_S"), false)
-	// To test R properly, let's imagine ActionR_S was named ActionS.
-	sfc.Actions["ActionS"].AssociatedSteps = append(sfc.Actions["ActionS"].AssociatedSteps, sfc.Steps["S3"])
-	sfc.Steps["S3"].Actions = append(sfc.Steps["S3"].Actions, &ast.ActionBlockStatement{ActionName: &ast.Identifier{Value: "ActionS"}, Qualifier: &ast.Identifier{Value: "R"}})
-	evalSFCCycle(sfc, env) // Re-evaluate with the modified SFC structure
+	// S3 is now active. It has an 'R' qualifier for 'ActionS'.
+	// This should force 'ActionS' to become FALSE, even though it was 'Set' before.
 	testBooleanObject(t, mustGet(env, "ActionS"), false)
 }
 
@@ -3373,14 +3353,14 @@ func TestPumpControlSFC(t *testing.T) {
 			END_ACTION
 
 			INITIAL_STEP Idle:
-				IdleAction(N);
+				IdleAction();
 			END_STEP
 
 			TRANSITION FROM Idle TO Running := StartButton AND NOT TankHighSensor;
 			END_TRANSITION
 
 			STEP Running:
-				RunningAction(N);
+				RunningAction();
 			END_STEP
 
 			TRANSITION FROM Running TO Idle := TankHighSensor OR TimerDone;
@@ -3388,19 +3368,13 @@ func TestPumpControlSFC(t *testing.T) {
 		END_PROGRAM
 	`
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestPumpControlSFC", input)
-
 	env := object.NewEnvironment()
 	// Evaluate the program to declare the POU and its variables.
-	Eval(program, env)
-
-	// The evaluation of a PROGRAM containing an SFC body should return the SFC object.
-	sfc, ok := mustGet(env, "PumpControlProgram").(*object.SFC)
+	// testEvalWithEnv will parse and evaluate the program, returning the SFC object.
+	sfcObj := testEvalWithEnv(t, input, env)
+	sfc, ok := sfcObj.(*object.SFC)
 	if !ok {
-		t.Fatalf("Evaluation did not return an SFC object. got=%T", mustGet(env, "PumpControlProgram"))
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfcObj)
 	}
 
 	// Helper to run a scan cycle

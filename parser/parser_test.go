@@ -1384,15 +1384,24 @@ func TestProgramWithSFCBody(t *testing.T) {
 		PROGRAM MySFCProgram
 			VAR
 				cond : BOOL;
+				x : INT := 0;
 			END_VAR
 
-			INITIAL_STEP S1:
-			END_STEP
+			ACTION Step1Action:
+				x := x + 1;
+				cond := TRUE;
+			END_ACTION
+
+			ACTION Step2Action:
+				x := x * 2;
+				cond := FALSE;
+			END_ACTION
+
+			INITIAL_STEP S1: Step1Action(); END_STEP
 
 			TRANSITION FROM S1 TO S2 := cond; END_TRANSITION
 
-			STEP S2:
-			END_STEP
+			STEP S2: Step2Action(); END_STEP
 		END_PROGRAM
 	`
 
@@ -1419,14 +1428,14 @@ func TestProgramWithSFCBody(t *testing.T) {
 		t.Fatalf("Program body is not ast.SFCProgram. got=%T", progDecl.Body)
 	}
 
-	if len(sfcBody.Elements) != 3 {
-		t.Fatalf("SFC body does not have 3 elements. got=%d", len(sfcBody.Elements))
+	if len(sfcBody.Elements) != 5 {
+		t.Fatalf("SFC body does not have 5 elements. got=%d", len(sfcBody.Elements))
 	}
 
 	// --- Detailed check of the first element: INITIAL_STEP S1 ---
-	initialStep, ok := sfcBody.Elements[0].(*ast.StepStatement)
+	initialStep, ok := sfcBody.Elements[2].(*ast.StepStatement)
 	if !ok {
-		t.Fatalf("Element 0 is not ast.StepStatement. got=%T", sfcBody.Elements[0])
+		t.Fatalf("Element 2 is not ast.StepStatement. got=%T", sfcBody.Elements[2])
 	}
 	if !initialStep.IsInitial {
 		t.Error("First step should be initial.")
@@ -1436,9 +1445,9 @@ func TestProgramWithSFCBody(t *testing.T) {
 	}
 
 	// --- Detailed check of the second element: TRANSITION ---
-	transition, ok := sfcBody.Elements[1].(*ast.TransitionStatement)
+	transition, ok := sfcBody.Elements[3].(*ast.TransitionStatement)
 	if !ok {
-		t.Fatalf("Element 1 is not ast.TransitionStatement. got=%T", sfcBody.Elements[1])
+		t.Fatalf("Element 3 is not ast.TransitionStatement. got=%T", sfcBody.Elements[3])
 	}
 	if len(transition.From) != 1 || transition.From[0].Value != "S1" {
 		t.Errorf("Transition 'FROM' is not 'S1'. got=%v", transition.From)
@@ -1449,9 +1458,9 @@ func TestProgramWithSFCBody(t *testing.T) {
 	testIdentifier(t, transition.Condition, "cond")
 
 	// --- Detailed check of the third element: STEP S2 ---
-	step2, ok := sfcBody.Elements[2].(*ast.StepStatement)
+	step2, ok := sfcBody.Elements[4].(*ast.StepStatement)
 	if !ok {
-		t.Fatalf("Element 2 is not ast.StepStatement. got=%T", sfcBody.Elements[2])
+		t.Fatalf("Element 4 is not ast.StepStatement. got=%T", sfcBody.Elements[4])
 	}
 	if step2.Name.Value != "S2" {
 		t.Errorf("Step name is not 'S2'. got=%s", step2.Name.Value)
@@ -2709,7 +2718,7 @@ func TestProgramDeclaration(t *testing.T) {
 
 func TestActionStatement(t *testing.T) {
 	input := `
-		ACTION MyAction
+		ACTION MyAction: 
 			x := x + 1;
 		END_ACTION
 	`
@@ -2839,16 +2848,26 @@ func TestStepStatement(t *testing.T) {
 		t.Errorf("Step should not be initial")
 	}
 
-	if len(stmt.Actions) != 2 {
-		t.Fatalf("Expected 2 action associations. got=%d", len(stmt.Actions))
+	if stmt.Body == nil || len(stmt.Body.Statements) != 2 {
+		t.Fatalf("Expected 2 action associations in step body. got=%d", len(stmt.Body.Statements))
 	}
 
-	if stmt.Actions[0].ActionName.Value != "Action1" || stmt.Actions[0].Qualifier.Value != "N" {
-		t.Errorf("Incorrect first action association. got=%s(%s)", stmt.Actions[0].ActionName.Value, stmt.Actions[0].Qualifier.Value)
+	action1Stmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("Statement 1 is not an ExpressionStatement. got=%T", stmt.Body.Statements[0])
+	}
+	action1Call, ok := action1Stmt.Expression.(*ast.CallExpression)
+	if !ok || action1Call.Function.String() != "Action1" {
+		t.Errorf("Incorrect first action association. Expected 'Action1'.")
 	}
 
-	if stmt.Actions[1].ActionName.Value != "Action2" || stmt.Actions[1].Qualifier.Value != "P" {
-		t.Errorf("Incorrect second action association. got=%s(%s)", stmt.Actions[1].ActionName.Value, stmt.Actions[1].Qualifier.Value)
+	action2Stmt, ok := stmt.Body.Statements[1].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("Statement 2 is not an ExpressionStatement. got=%T", stmt.Body.Statements[1])
+	}
+	action2Call, ok := action2Stmt.Expression.(*ast.CallExpression)
+	if !ok || action2Call.Function.String() != "Action2" {
+		t.Errorf("Incorrect second action association. Expected 'Action2'.")
 	}
 }
 
@@ -2880,8 +2899,16 @@ func TestInitialStepStatement(t *testing.T) {
 		t.Errorf("Step should be initial")
 	}
 
-	if len(stmt.Actions) != 1 {
-		t.Fatalf("Expected 1 action association. got=%d", len(stmt.Actions))
+	if stmt.Body == nil || len(stmt.Body.Statements) != 1 {
+		t.Fatalf("Expected 1 action association in step body. got=%d", len(stmt.Body.Statements))
+	}
+
+	actionStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("Statement is not an ExpressionStatement. got=%T", stmt.Body.Statements[0])
+	}
+	if _, ok := actionStmt.Expression.(*ast.CallExpression); !ok {
+		t.Errorf("Incorrect action association. Expected a call expression.")
 	}
 }
 

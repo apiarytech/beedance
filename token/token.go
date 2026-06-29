@@ -195,10 +195,15 @@ const (
 )
 
 var keywords = map[string]TokenType{
-	"FN":    FUNCTION,
-	"TRUE":  TRUE,
-	"FALSE": FALSE,
-	"MACRO": MACRO,
+	"FN":       FUNCTION,
+	"TRUE":     TRUE,
+	"FALSE":    FALSE,
+	"MACRO":    MACRO,
+	"ASSIGN":   ASSIGN,
+	"PLUS":     PLUS,
+	"MINUS":    MINUS,
+	"ASTERISK": ASTERISK,
+	"SLASH":    SLASH,
 	// Variable declaration keywords
 	"VAR":                VAR,
 	"END_VAR":            END_VAR,

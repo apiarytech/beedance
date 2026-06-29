@@ -54,7 +54,12 @@ func (p *Parser) parseActionStatement() ast.Statement {
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	p.nextToken() // Consume the action name identifier
+	// An action declaration is followed by a colon.
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+
+	p.nextToken() // consume COLON
 
 	/* 	// Create a block statement and parse statements into it until END_ACTION.
 	   	// This ensures the body is always a BlockStatement.
@@ -140,23 +145,25 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	}
 	p.nextToken() // consume COLON
 
-	stmt.Actions = []*ast.ActionBlockStatement{}
-	// Loop while the next token is not the end of the step block.
-	for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
-		assoc := p.parseActionBlockStatement()
-		if assoc == nil {
-			// If parsing an action fails, break to avoid an infinite loop.
-			break
-		}
-		stmt.Actions = append(stmt.Actions, assoc)
-		p.nextToken() // Advance to the next token for the next iteration or END_STEP
-	}
+	// stmt.Actions = []*ast.ActionBlockStatement{}
+	// // Loop while the next token is not the end of the step block.
+	// for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
+	// 	assoc := p.parseActionBlockStatement()
+	// 	if assoc == nil {
+	// 		// If parsing an action fails, break to avoid an infinite loop.
+	// 		break
+	// 	}
+	// 	stmt.Actions = append(stmt.Actions, assoc)
+	// 	p.nextToken() // Advance to the next token for the next iteration or END_STEP
+	// }
 
-	// The loop terminates with curToken on END_STEP.
-	if !p.curTokenIs(token.END_STEP) {
-		p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
-	}
+	// // The loop terminates with curToken on END_STEP.
+	// if !p.curTokenIs(token.END_STEP) {
+	// 	p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
+	// }
 
+	// A step body can contain either action associations or a block of ST statements.
+	stmt.Body = p.parseBlockStatementUntil(token.END_STEP)
 	return stmt
 }
 

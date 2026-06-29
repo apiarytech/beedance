@@ -1986,6 +1986,17 @@ func (p *Parser) parseCallArgument() ast.Expression {
 		arg.Target = p.parseExpression(LOWEST)
 		return arg
 	}
+	// Handle action qualifiers (like S, R) which are also IL keywords.
+	// When they appear inside a function call's arguments, they should be treated as identifiers.
+	switch p.curToken.Type {
+	case token.S, token.R: // Add other conflicting keywords here if necessary
+		// Treat the keyword as an identifier in this context because it's an argument.
+		// Qualifiers like N, P, L, D are parsed as regular IDENTs by the lexer,
+		// so they are handled correctly by the default case below.
+		// This switch is only for tokens that are also keywords for other statements.
+		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		return ident
+	}
 
 	// Otherwise, it's a positional argument (an expression)
 	return p.parseExpression(LOWEST)

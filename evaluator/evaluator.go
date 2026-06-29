@@ -102,6 +102,30 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		env.Set(node.Name.Value, fb)
 		return fb
 
+	case *ast.ProgramDeclaration:
+		// When a PROGRAM is declared, we need to process its VAR blocks
+		// and then evaluate its body. If the body is an SFC, this will
+		// return the *object.SFC that can be scheduled.
+		prog := &object.Program{
+			Name:       node.Name,
+			VarInputs:  node.VarInputs,
+			VarOutputs: node.VarOutputs,
+			VarInOuts:  node.VarInOuts,
+			Vars:       node.Vars,
+			Body:       node.Body,
+			Env:        env,
+		}
+		// Set the program definition in the environment.
+		env.Set(node.Name.Value, prog)
+
+		// Evaluate all VAR blocks to populate the environment.
+		for _, varBlock := range node.Vars {
+			Eval(varBlock, env)
+		}
+
+		// Now, evaluate the body within the program's context.
+		return Eval(node.Body, env)
+
 	case *ast.ReturnStatement:
 		val := Eval(node.ReturnValue, env)
 		if isError(val) {
@@ -324,60 +348,55 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 		ActiveSteps: make(map[string]bool),
 	}
 
-	// 1. Build the SFC structure from the AST
+	// 1. First Pass: Pre-populate all defined ACTIONs with their bodies.
+	// This ensures that when we encounter an action call in a step, the
+	// action object (including its ST body) already exists.
+	for _, element := range program.Elements {
+		if actionStmt, ok := element.(*ast.ActionStatement); ok {
+			actionName := actionStmt.Name.Value
+			sfc.Actions[actionName] = &object.Action{Name: actionStmt.Name, Body: actionStmt.Body.(*ast.BlockStatement), AssociatedSteps: []*object.Step{}}
+		}
+	}
+
+	// 2. Second Pass: Build the Step and Transition structure and associate steps with the pre-populated actions.
 	for _, element := range program.Elements {
 		switch elem := element.(type) {
 		case *ast.StepStatement: // Initial steps are also regular steps
 			if elem.IsInitial {
 				sfc.InitialStepName = elem.Name.Value
 			}
-			step := &object.Step{Name: elem.Name, Actions: elem.Actions, IsActive: false}
+			step := &object.Step{Name: elem.Name, Body: elem.Body, IsActive: false}
 			sfc.Steps[elem.Name.Value] = step
-			for _, actionBlock := range elem.Actions {
-				actionName := actionBlock.ActionName.Value
-				if _, ok := sfc.Actions[actionName]; !ok {
-					// This assumes the action is defined elsewhere, e.g., as a boolean variable.
-					// A full implementation would need to look up the action definition.
-					// For now, we create a placeholder.
-					sfc.Actions[actionName] = &object.Action{Name: actionBlock.ActionName}
-				}
-				sfc.Actions[actionName].AssociatedSteps = append(sfc.Actions[actionName].AssociatedSteps, step)
-				// If a duration is specified in the AST, evaluate it and store it.
-				if actionBlock.Duration != nil {
-					durationObj := Eval(actionBlock.Duration, env)
-					if isError(durationObj) {
-						// This should probably be a fatal error during setup
-						return durationObj
-					}
-					if timeObj, ok := durationObj.(*object.Time); ok {
-						sfc.Actions[actionName].Duration = timeObj.Value
-					} else {
-						return newError(actionBlock, "action qualifier duration must be of type TIME, got %s", durationObj.Type())
+
+			// Now, parse the action associations from the step's body
+			if elem.Body != nil {
+				for _, stmt := range elem.Body.Statements {
+					if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
+						if call, ok := exprStmt.Expression.(*ast.CallExpression); ok {
+							actionName := call.Function.String()
+
+							// Ensure the action object exists
+							if _, exists := sfc.Actions[actionName]; !exists {
+								sfc.Actions[actionName] = &object.Action{Name: &ast.Identifier{Value: actionName}}
+							}
+							// Associate this step with the action
+							sfc.Actions[actionName].AssociatedSteps = append(sfc.Actions[actionName].AssociatedSteps, step)
+						}
 					}
 				}
 			}
+
 		case *ast.TransitionStatement:
 			sfc.Transitions = append(sfc.Transitions, &object.Transition{
 				FromSteps: elem.From,
 				ToSteps:   elem.To,
 				Condition: elem.Condition,
 			})
-		case *ast.ActionStatement:
-			// An action can be referenced in a STEP before it is fully defined.
-			// We need to find the existing action object and update its body.
-			action, ok := sfc.Actions[elem.Name.Value]
-			if !ok {
-				// This case is unlikely if steps are parsed correctly, but it's safe to handle.
-				action = &object.Action{Name: elem.Name}
-				sfc.Actions[elem.Name.Value] = action
-			}
-			// The parser ensures the body of an ACTION is a BlockStatement.
-			action.Body, _ = elem.Body.(*ast.BlockStatement)
 
 		}
 	}
 
-	// 2. Initialize the SFC state
+	// 3. Initialize the SFC state
 	if sfc.InitialStepName == "" {
 		return newError(program, "SFC program has no initial step") //
 	}
@@ -391,9 +410,32 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	// Phase 1: Evaluate Action Control Logic
 	for _, action := range sfc.Actions {
-		evaluateAction(action)
+		evaluateAction(action, env)
 	}
-	// Phase 2: Evaluate Transitions
+
+	// Phase 2: Update Action Outputs & Execute Action Bodies
+	// This must happen BEFORE evaluating transitions so that transition conditions
+	// see the current state of the action outputs.
+	for _, action := range sfc.Actions {
+		// Update the boolean variable in the environment to reflect the action's active state.
+		if _, ok := env.Get(action.Name.Value); ok {
+			env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
+		}
+
+		// If the action is active and has a body (ST code), evaluate it.
+		if action.IsActive && action.Body != nil {
+			// We must evaluate the action body in the *same* environment as the SFC cycle
+			// to ensure that assignments within the action (e.g., `x := x + 1`) modify
+			// the actual program variables, not variables in a temporary, enclosed scope.
+			res := Eval(action.Body, env)
+			if isError(res) {
+				// Propagate the error immediately to halt the current SFC cycle.
+				return res
+			}
+		}
+	}
+
+	// Phase 3: Evaluate Transitions
 	transitionsToClear := []*object.Transition{}
 	for _, transition := range sfc.Transitions {
 		// Check if the transition is enabled (all preceding steps are active)
@@ -413,7 +455,7 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 		}
 	}
 
-	// Phase 3: Update Step States
+	// Phase 4: Update Step States for the next cycle
 	for _, transition := range transitionsToClear {
 		for _, fromStep := range transition.FromSteps {
 			delete(sfc.ActiveSteps, fromStep.Value)
@@ -429,17 +471,37 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 		}
 	}
 
-	// Phase 4: Execute Action Bodies
-	for _, action := range sfc.Actions {
-		if action.IsActive && action.Body != nil {
-			evaluated := Eval(action.Body, env)
-			if isError(evaluated) {
-				return evaluated // Propagate errors
+	// Phase 5: Re-evaluate actions for any newly activated steps.
+	// This ensures that the actions of a new step are executed in the same
+	// cycle in which the transition occurs, making the SFC's behavior more immediate.
+	if len(transitionsToClear) > 0 {
+		// Create a set of actions that need re-evaluation to avoid redundant processing.
+		actionsToReEvaluate := make(map[string]*object.Action)
+		for _, transition := range transitionsToClear {
+			for _, toStepIdent := range transition.ToSteps {
+				// Find all actions associated with this newly activated step.
+				for _, action := range sfc.Actions {
+					for _, associatedStep := range action.AssociatedSteps {
+						if associatedStep.Name.Value == toStepIdent.Value {
+							actionsToReEvaluate[action.Name.Value] = action
+						}
+					}
+				}
 			}
 		}
-		// Also handle boolean variable actions
-		if boolAction, ok := env.Get(action.Name.Value); ok && boolAction.Type() == object.BOOLEAN_OBJ {
-			env.Set(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
+
+		// Now, re-run the evaluation and update logic for these specific actions.
+		for _, action := range actionsToReEvaluate {
+			evaluateAction(action, env)
+			if _, ok := env.Get(action.Name.Value); ok {
+				env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
+			}
+			if action.IsActive && action.Body != nil {
+				res := Eval(action.Body, env)
+				if isError(res) {
+					return res // Propagate error if action body fails.
+				}
+			}
 		}
 	}
 
@@ -447,15 +509,19 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 }
 
 // evaluateAction determines the state of a single action based on its associated active steps and qualifiers.
-func evaluateAction(action *object.Action) {
-	qualifier, isStepActive := getHighestPriorityActiveQualifier(action)
+func evaluateAction(action *object.Action, env *object.Environment) {
+	qualifier, isStepActive := getHighestPriorityActiveQualifier(action, env)
 
 	// The action is not influenced by any active step in this cycle.
 	// For non-stored actions, this means they become inactive.
 	// For stored actions, they maintain their state unless reset by another step.
+	// The bug was here: `qualifier` is 'N' by default when no step is active, so we cannot
+	// use it to decide if a stored action should retain its state. Instead, we must
+	// check the action's qualifier that was determined when it *was* active.
 	if !isStepActive {
-		switch qualifier {
-		case "N", "P", "D", "L":
+		// If the action's last active qualifier was not a "Set" or "Stored" type,
+		// it should become inactive when its controlling step deactivates.
+		if action.Qualifier != "S" && action.Qualifier != "SD" && action.Qualifier != "SL" && action.Qualifier != "DS" {
 			action.IsActive = false
 		}
 		// Reset timers and pulse counts for non-stored actions when their steps deactivate.
@@ -519,25 +585,54 @@ func evaluateAction(action *object.Action) {
 
 // getHighestPriorityActiveQualifier finds the highest priority qualifier for an action among all its active associated steps.
 // IEC 61131-3 specifies the precedence: R > S > (all others).
-func getHighestPriorityActiveQualifier(action *object.Action) (qualifier string, isStepActive bool) {
-	qualifierPrecedence := map[string]int{"R": 2, "S": 1}
-	highestQualifier := "N" // Default qualifier
+func getHighestPriorityActiveQualifier(action *object.Action, env *object.Environment) (qualifier string, isStepActive bool) {
+	qualifierPrecedence := map[string]int{"R": 3, "S": 2} // R and S have highest precedence
+	highestQualifier := "N"                               // Default qualifier
 	highestPrecedence := 0
 	anyStepActive := false
 
 	for _, step := range action.AssociatedSteps {
 		if step.IsActive {
 			anyStepActive = true
-			for _, actionBlock := range step.Actions {
-				if actionBlock.ActionName.Value == action.Name.Value {
-					q := "N" // Default
-					if actionBlock.Qualifier != nil {
-						q = actionBlock.Qualifier.Value
+			if step.Body == nil {
+				continue
+			}
+			for _, stmt := range step.Body.Statements {
+				exprStmt, ok := stmt.(*ast.ExpressionStatement)
+				if !ok {
+					continue
+				}
+				callExpr, ok := exprStmt.Expression.(*ast.CallExpression)
+				if !ok {
+					continue
+				}
+
+				if callExpr.Function.String() == action.Name.Value {
+					q := "N" // Default qualifier is Non-stored
+					if len(callExpr.Arguments) > 0 {
+						if qual, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
+							q = qual.Value
+						}
+						// If it's a timed qualifier, parse the duration.
+						switch q {
+						case "D", "L", "SD", "DS", "SL":
+							if len(callExpr.Arguments) > 1 {
+								// The duration is the second argument. We need to evaluate it.
+								// Evaluate in the program's environment.
+								durationObj := Eval(callExpr.Arguments[1], env)
+								if timeObj, ok := durationObj.(*object.Time); ok {
+									action.Duration = timeObj.Value
+								}
+							}
+						}
 					}
-					if precedence, ok := qualifierPrecedence[q]; ok && precedence > highestPrecedence {
-						highestPrecedence = precedence
-						highestQualifier = q
-					} else if highestPrecedence == 0 { // If no R or S found yet, take the current one.
+
+					if precedence, ok := qualifierPrecedence[q]; ok {
+						if precedence > highestPrecedence {
+							highestPrecedence = precedence
+							highestQualifier = q
+						}
+					} else if highestPrecedence == 0 { // If no R or S found yet, take the current one (N, P, etc.)
 						highestQualifier = q
 					}
 				}
@@ -695,15 +790,24 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 
 	case "S": // Set (Operand is a BOOL variable)
 		if targetIdent, ok := node.Operand.(*ast.Identifier); ok {
-			env.Set(targetIdent.Value, TRUE)
-			return TRUE
+			// 'S' is conditional on the Current Result (CR)
+			if cr, ok := env.Get(currentResultVar); ok && isTruthy(cr) {
+				env.Assign(targetIdent.Value, TRUE)
+			}
+			// The result of S is the CR, which is not modified by S.
+			cr, _ := env.Get(currentResultVar)
+			return cr
 		}
 		return newError(node, "operand for S must be a boolean variable")
 
 	case "R": // Reset (Operand is a BOOL variable)
 		if targetIdent, ok := node.Operand.(*ast.Identifier); ok {
-			env.Set(targetIdent.Value, FALSE)
-			return FALSE
+			// 'R' is conditional on the Current Result (CR)
+			if cr, ok := env.Get(currentResultVar); ok && isTruthy(cr) {
+				env.Assign(targetIdent.Value, FALSE)
+			}
+			cr, _ := env.Get(currentResultVar)
+			return cr
 		}
 		return newError(node, "operand for R must be a boolean variable")
 
@@ -765,7 +869,7 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 	}
 	// The Left side is an identifier, so we get its name.
 	if ident, ok := node.Left.(*ast.Identifier); ok {
-		env.Set(ident.Value, val) // Set the new value in the environment.
+		env.Assign(ident.Value, val) // Assign the new value, updating outer scopes if necessary.
 	} else {
 		return newError(node, "assignment target must be an identifier")
 	}

@@ -16,6 +16,30 @@ func TestNewEnvironment(t *testing.T) {
 	}
 }
 
+func TestEnvironment_Assign(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("a", &LInt{Value: 1})
+
+	inner := NewEnclosedEnvironment(outer)
+	inner.Set("b", &LInt{Value: 99}) // A local variable
+
+	// Assign should update the outer scope's variable
+	inner.Assign("a", &LInt{Value: 2})
+
+	// Assign should create a new variable in the inner scope if it doesn't exist anywhere
+	inner.Assign("c", &LInt{Value: 3})
+
+	if val := outer.store["a"].(*LInt).Value; val != 2 {
+		t.Errorf("Outer var 'a' should be updated. want=2, got=%d", val)
+	}
+	if val := inner.store["c"].(*LInt).Value; val != 3 {
+		t.Errorf("Inner var 'c' should be created. want=3, got=%d", val)
+	}
+	if val, ok := outer.store["c"]; ok {
+		t.Errorf("Var 'c' should not be in outer scope, but it was found with value %v", val)
+	}
+}
+
 func TestEnvironmentGetSet(t *testing.T) {
 	env := NewEnvironment()
 	val := &Int{Value: 10}
@@ -106,6 +130,20 @@ func TestEnclosedEnvironmentGet(t *testing.T) {
 	}
 }
 
+func TestSetUpdatesOuterEnvironment(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("a", &LInt{Value: 1})
+	inner := NewEnclosedEnvironment(outer)
+	inner.Assign("a", &LInt{Value: 2})
+
+	obj, ok := outer.Get("a")
+	if !ok {
+		t.Fatalf("outer.Get failed to find 'a'")
+	}
+	if li, ok := obj.(*LInt); !ok || li.Value != 2 {
+		t.Fatalf("outer value not updated; got=%v", obj)
+	}
+}
 func TestEnvironmentGetRaw(t *testing.T) {
 	outer := NewEnvironment()
 	outer.Set("outerVar", &Int{Value: 1})
@@ -149,7 +187,7 @@ func TestEnvironmentNames(t *testing.T) {
 
 	names := inner.Names()
 
-	if len(names) != 2 {
+	if len(names) != 2 { // Should now correctly find var3 and the shadowed var1
 		t.Fatalf("Names() returned wrong number of names. want=2, got=%d", len(names))
 	}
 
