@@ -1550,6 +1550,22 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 	return stmt
 }
 
+func (p *Parser) parseStepList() []*ast.Identifier {
+	defer untrace(trace("parseStepList"))
+	// A step list can be a single identifier, a comma-separated list,
+	// or a parenthesized, comma-separated list.
+	if p.curTokenIs(token.LPAREN) {
+		p.nextToken() // consume '('
+		list := p.parseIdentifierList()
+		if !p.expectPeek(token.RPAREN) {
+			return nil // Error reported by expectPeek
+		}
+		return list
+	}
+	// If not parenthesized, it's a regular identifier list.
+	return p.parseIdentifierList()
+}
+
 func (p *Parser) parseRepeatStatement() ast.Statement {
 	defer untrace(trace("parseRepeatStatement"))
 	stmt := &ast.RepeatStatement{Token: p.curToken}

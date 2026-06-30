@@ -91,24 +91,24 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	stmt := &ast.TransitionStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.FROM) {
-		return nil
+		// Allow recovery even if FROM is missing
+	} else {
+		p.nextToken() // Consume FROM
+		stmt.From = p.parseStepList()
 	}
-
-	p.nextToken() // consume FROM
-	stmt.From = p.parseIdentifierList()
 
 	if !p.expectPeek(token.TO) {
-		return nil
+		// Allow recovery even if TO is missing
+	} else {
+		p.nextToken() // Consume TO
+		stmt.To = p.parseStepList()
 	}
-
-	p.nextToken() // consume TO
-	stmt.To = p.parseIdentifierList()
 
 	if !p.expectPeek(token.ASSIGN) {
 		return nil
 	}
 
-	p.nextToken() // consume :=
+	p.nextToken() // consume ASSIGN
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.SEMICOLON) {

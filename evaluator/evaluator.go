@@ -476,11 +476,23 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	// cycle in which the transition occurs, making the SFC's behavior more immediate.
 	if len(transitionsToClear) > 0 {
 		// Create a set of actions that need re-evaluation to avoid redundant processing.
-		actionsToReEvaluate := make(map[string]*object.Action)
+		actionsToReEvaluate := make(map[string]*object.Action) // cspell:disable-line
 		for _, transition := range transitionsToClear {
+			// Add actions from newly DEACTIVATED steps to ensure they are turned off if non-stored.
+			for _, fromStepIdent := range transition.FromSteps {
+				for _, action := range sfc.Actions {
+					for _, associatedStep := range action.AssociatedSteps {
+						if associatedStep.Name.Value == fromStepIdent.Value {
+							actionsToReEvaluate[action.Name.Value] = action
+						}
+					}
+				}
+			}
+
+			// Add actions from newly ACTIVATED steps.
 			for _, toStepIdent := range transition.ToSteps {
 				// Find all actions associated with this newly activated step.
-				for _, action := range sfc.Actions {
+				for _, action := range sfc.Actions { // cspell:disable-line
 					for _, associatedStep := range action.AssociatedSteps {
 						if associatedStep.Name.Value == toStepIdent.Value {
 							actionsToReEvaluate[action.Name.Value] = action
@@ -533,6 +545,9 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 		}
 		return
 	}
+
+	// If a step is active, this qualifier is now the action's current, controlling qualifier.
+	action.Qualifier = qualifier
 
 	// Apply action control logic based on the highest priority active qualifier.
 	switch qualifier {

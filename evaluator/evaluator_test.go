@@ -122,16 +122,6 @@ func TestBangOperator(t *testing.T) {
 		//{`NOT "hello";`, "ERROR (1:1): unknown operator: NOTSTRING"},
 		// Nested NOT on invalid type should also error
 		{"NOT NOT 5;", "ERROR (1:5): unknown operator: NOTINT"},
-		// ANY_BIT bitwise tests
-		// {"NOT BYTE#16#A5;", uint64(0x5A)}, // NOT 10100101 -> 01011010
-		// {"NOT WORD#16#FF00;", uint64(0x00FF)},
-		// {"NOT DWORD#16#FFFF0000;", uint64(0x0000FFFF)},
-		// {"NOT LWORD#16#FFFFFFFF00000000;", uint64(0x00000000FFFFFFFF)},
-		// Double NOT on bitstrings
-		// {"NOT NOT BYTE#16#A5;", uint64(0xA5)},
-		// {"NOT NOT WORD#16#FF00;", uint64(0xFF00)},
-		// {"NOT NOT DWORD#16#FFFF0000;", uint64(0xFFFF0000)},
-		// {"NOT NOT LWORD#16#FFFFFFFF00000000;", uint64(0xFFFFFFFF00000000)},
 	}
 
 	for _, tt := range tests {
@@ -822,7 +812,7 @@ func TestSFCActionQualifiers(t *testing.T) {
 	// ActionN (Non-stored) becomes FALSE as S1 is no longer active.
 	// ActionS (Set) remains TRUE.
 	// ActionP (Pulse) becomes TRUE for this one cycle.
-	testBooleanObject(t, mustGet(env, "ActionN"), false)
+	testBooleanObject(t, mustGet(env, "ActionN"), false) // N action deactivates with step
 	testBooleanObject(t, mustGet(env, "ActionS"), true)
 	testBooleanObject(t, mustGet(env, "ActionP"), true)
 
@@ -832,7 +822,7 @@ func TestSFCActionQualifiers(t *testing.T) {
 	evalSFCCycle(sfc, env)
 	// ActionP (Pulse) should now be FALSE again.
 	// ActionS remains TRUE.
-	testBooleanObject(t, mustGet(env, "ActionP"), false)
+	testBooleanObject(t, mustGet(env, "ActionP"), false) // P action is only active for one cycle
 	testBooleanObject(t, mustGet(env, "ActionS"), true)
 
 	// --- Cycle 4: Transition from S2 to S3 ---
@@ -840,7 +830,7 @@ func TestSFCActionQualifiers(t *testing.T) {
 	env.Set("GoToS3", TRUE)
 	evalSFCCycle(sfc, env)
 	// S3 is now active. It has an 'R' qualifier for 'ActionS'.
-	// This should force 'ActionS' to become FALSE, even though it was 'Set' before.
+	// This should force 'ActionS' to become FALSE immediately in this cycle.
 	testBooleanObject(t, mustGet(env, "ActionS"), false)
 }
 
@@ -859,9 +849,11 @@ func TestSFCDivergenceConvergence(t *testing.T) {
 				PathA_Active, PathB_Active, PathC_Active, Merged_Active : BOOL;
 				// Conditions
 				SelectA, SelectB, Fork, Join : BOOL;
+				// No Operations
+				NOP : BOOL := FALSE;
 			END_VAR
 
-			INITIAL_STEP S1: END_STEP
+			INITIAL_STEP S1: NOP; END_STEP
 
 			// Selection Divergence
 			TRANSITION FROM S1 TO S2 := SelectA; END_TRANSITION
@@ -884,9 +876,9 @@ func TestSFCDivergenceConvergence(t *testing.T) {
 
 			// Some intermediate steps
 			TRANSITION FROM S5 TO S7 := TRUE; END_TRANSITION
-			STEP S7: END_STEP
+			STEP S7: NOP; END_STEP
 			TRANSITION FROM S6 TO S8 := TRUE; END_TRANSITION
-			STEP S8: END_STEP
+			STEP S8: NOP; END_STEP
 
 			// Simultaneous Convergence (Join)
 			TRANSITION FROM (S7, S8) TO S9 := Join; END_TRANSITION
@@ -905,8 +897,8 @@ func TestSFCDivergenceConvergence(t *testing.T) {
 	// This will declare the PROGRAM POU and its variables
 	Eval(program, env)
 
-	// Now, instantiate the program to get the SFC object
-	progInstance := testEval(t, "TestSFCBranching")
+	// Now, evaluate the program object from the environment to get the SFC instance
+	progInstance := Eval(program.Statements[0], env)
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
@@ -1003,7 +995,7 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	env := object.NewEnvironment()
 	Eval(program, env) // Declare the PROGRAM POU
 
-	progInstance := testEval(t, "TestSFCTimedQualifiers")
+	progInstance := Eval(program.Statements[0], env)
 	sfc, ok := progInstance.(*object.SFC)
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
