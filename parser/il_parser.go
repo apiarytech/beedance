@@ -56,40 +56,39 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 		p.nextToken() // consume the ':'
 	}
 
-	// 2. Parse the operator (e.g., LD, ST, ADD).
-	// The operator is expected to be an identifier.
-	// We check for IDENT or a known IL operator keyword.
+	// 2. Parse the operator (e.g., LD, ST, ADD) and its modifiers.
 	if !p.curTokenIs(token.IDENT) && !isIlOperator(p.curToken.Type) {
 		p.currentError("expected IL operator (e.g., LD, ST), got %s", p.curToken.Type)
 		return nil
 	}
 	operatorStr := p.curToken.Literal
 
-	// 2a. Parse modifiers from the operator string (e.g., 'LDN', 'JMPC').
-	// The lexer provides the full identifier (e.g., "LDN"). We need to split it
-	// into the base operator ("LD") and the modifier ("N").
+	// The lexer provides the full identifier (e.g., "LDN", "JMPC"). We need to split
+	// it into the base operator ("LD") and the modifier ("N", "C").
 	baseOp, modifier := p.extractIlModifiers(operatorStr)
 	stmt.Operator = baseOp
 	stmt.Modifier = modifier
 
-	// 3. Check for the '(' modifier, which defers the operation.
+	// 3. Check for the '(' modifier, which defers the operation and takes precedence.
 	if p.peekTokenIs(token.LPAREN) {
-		stmt.Modifier += "("
-		p.nextToken() // consume the operator IDENT
-		// The operand for a deferred operator is the result of the parenthesized expression block.
-		// We need a new function to parse this special block.
-		stmt.Operand = p.parseIlParenthesizedExpression()
-		// The ')' is consumed by parseIlParenthesizedExpression, so we can fall through.
-	} else if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
+		// This is a deferred operation, e.g., `AND(`
+		stmt.Modifier += "(" // Add '(' to the list of modifiers
+		p.nextToken()        // Consume the operator (e.g., AND)
+		p.nextToken()        // Consume the '('
+		// The operand is the entire block of instructions inside the parentheses.
+		stmt.Operand = p.parseIlProgramBody(token.RPAREN)
+		// parseIlProgramBody will stop at RPAREN, so we don't need to consume it here.
+		return stmt
+	}
 
-		// 4. Parse the optional operand for non-deferred operators.
-		// The operand is an expression that follows the operator.
-		// Not all operators have operands (e.g., RET).
-		// We can check if the next token could start an expression.
-		if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
-			p.nextToken()
-			stmt.Operand = p.parseExpression(LOWEST)
-		}
+	// 4. Parse the optional operand for non-deferred operators.
+	// The operand is an expression that follows the operator.
+	// Not all operators have operands (e.g., RET).
+	// We can check if the next token could start an expression.
+	// An operand is present if the next token is not a statement terminator.
+	if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
+		p.nextToken() // Consume the operator, move to the operand
+		stmt.Operand = p.parseExpression(LOWEST)
 	}
 
 	return stmt
@@ -99,7 +98,6 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 func (p *Parser) extractIlModifiers(op string) (baseOp string, modifier string) {
 	opUpper := strings.ToUpper(op)
 	mod := ""
-
 	// Modifiers are checked from right to left. 'N' can appear before 'C'.
 	if strings.HasSuffix(opUpper, "N") {
 		mod = "N" + mod
@@ -110,28 +108,11 @@ func (p *Parser) extractIlModifiers(op string) (baseOp string, modifier string) 
 		opUpper = opUpper[:len(opUpper)-1]
 	}
 
-	// After stripping modifiers, what remains is the base operator.
-	// We need to find the original casing of the base operator.
-	if len(mod) > 0 {
-		return op[:len(op)-len(mod)], mod
-	}
+	// After stripping modifiers, what remains is the base operator. We need to find
+	// the original casing of the base operator from the input string.
+	baseOp = op[:len(opUpper)]
 
-	return op, ""
-}
-
-// parseIlParenthesizedExpression handles deferred operations like `AND( ... )`.
-func (p *Parser) parseIlParenthesizedExpression() ast.Expression {
-	// The parenthesized expression is a block of IL instructions that acts as a single operand.
-	// We can represent this with a BlockStatement.
-	p.nextToken() // consume '('
-	block := p.parseIlProgramBody(token.RPAREN)
-
-	if !p.curTokenIs(token.RPAREN) {
-		p.currentError("expected ')' to close deferred IL expression, got %s", p.curToken.Type)
-		return nil
-	}
-
-	return block
+	return baseOp, mod
 }
 
 // isIlOperator checks if a token type is a common IL operator.

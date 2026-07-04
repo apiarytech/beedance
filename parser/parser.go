@@ -2012,6 +2012,22 @@ func (p *Parser) parseCallArgument() ast.Expression {
 		// This switch is only for tokens that are also keywords for other statements.
 		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		return ident
+	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
+		token.SINT, token.INT, token.DINT, token.LINT,
+		token.USINT, token.UINT, token.UDINT, token.ULINT,
+		token.REAL, token.LREAL,
+		token.BYTE, token.WORD, token.DWORD, token.LWORD:
+		// Handle typed literals like T#5s, INT#10, etc., when used as arguments.
+		if p.peekTokenIs(token.HASH) {
+			typeIdent := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+			p.nextToken() // consume type, curToken is now '#'
+			p.nextToken() // consume '#', curToken is now the value
+			return &ast.TypedLiteral{
+				Token:    typeIdent.Token,
+				TypeName: typeIdent.Value,
+				Value:    p.parseDateTimeIdentifier(),
+			}
+		}
 	}
 
 	// Otherwise, it's a positional argument (an expression)

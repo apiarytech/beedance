@@ -34,7 +34,7 @@ func TestEvalIntegerExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected)
 	}
 }
 
@@ -66,7 +66,7 @@ func TestEvalBooleanExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testBooleanObject(t, evaluated, tt.expected)
+		testBooleanObject(t, evaluated, tt.input, tt.expected)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestEvalBooleanLogicalExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		testBooleanObject(t, testEval(t, tt.input), tt.expected)
+		testBooleanObject(t, testEval(t, tt.input), tt.input, tt.expected)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestBangOperator(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case bool:
-			testBooleanObject(t, evaluated, expected)
+			testBooleanObject(t, evaluated, "bool", expected)
 		case string:
 			errObj, ok := evaluated.(*object.Error)
 			if !ok {
@@ -245,7 +245,7 @@ func TestIfElseExpressions(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
-			testIntegerObject(t, evaluated, int64(integer))
+			testIntegerObject(t, evaluated, tt.input, int64(integer))
 		} else {
 			testNullObject(t, evaluated)
 		}
@@ -266,7 +266,7 @@ func TestReturnStatements(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected)
 	}
 }
 
@@ -503,7 +503,7 @@ func TestEvalCaseStatement(t *testing.T) {
 				// Our test statements are just integer literals.
 				// In a real program, this might be an assignment, and the result would be the assigned value.
 				// For this test, we check if the evaluated object is the expected integer.
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case nil:
 				testNullObject(t, evaluated)
 			default:
@@ -537,7 +537,7 @@ func TestCaseStatementErrors(t *testing.T) {
 		`, "ERROR (5:12): identifier not found: RED",
 		},
 		{
-			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE 
 			 CASE COLOR#RED OF 1: 1; END_CASE`,
 			"ERROR (2:16): identifier not found: RED",
 		},
@@ -621,7 +621,7 @@ func TestForLoopStatement(t *testing.T) {
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
 		expectedInt, _ := tt.expected.(int64)
-		testIntegerObject(t, evaluated, expectedInt)
+		testIntegerObject(t, evaluated, tt.input, expectedInt)
 	}
 }
 
@@ -665,7 +665,7 @@ func TestWhileLoopStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected)
 	}
 }
 
@@ -692,7 +692,7 @@ func TestRepeatLoopStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected)
 	}
 }
 
@@ -741,7 +741,7 @@ func TestSFCExecution(t *testing.T) {
 	if !sfc.Steps["S1"].IsActive {
 		t.Fatal("S1 should be active initially")
 	}
-	testIntegerObject(t, mustGet(env, "x"), 1)
+	testIntegerObjectInEnv(t, env, "x", 1)
 
 	// --- Cycle 2: Transition to S2 ---
 	// Set the condition and run the cycle. The transition should clear,
@@ -751,13 +751,13 @@ func TestSFCExecution(t *testing.T) {
 	if sfc.Steps["S1"].IsActive || !sfc.Steps["S2"].IsActive {
 		t.Fatal("Should have transitioned to S2")
 	}
-	testIntegerObject(t, mustGet(env, "x"), 11) // S1's action ran in cycle 1 (x=1). S2's action runs in cycle 2 (x=1+10).
+	testIntegerObjectInEnv(t, env, "x", 11) // S1's action ran in cycle 1 (x=1). S2's action runs in cycle 2 (x=1+10).
 
 	// --- Cycle 3: Still in S2 ---
 	// The transition condition `cond2` is FALSE. S2 remains active.
 	// The action "x := x + 10" executes again.
 	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "x"), 21) // S2's action runs again: 11 + 10
+	testIntegerObjectInEnv(t, env, "x", 21) // S2's action runs again: 11 + 10
 }
 
 func TestSFCActionQualifiers(t *testing.T) {
@@ -801,9 +801,10 @@ func TestSFCActionQualifiers(t *testing.T) {
 	// --- Cycle 1: Initial state ---
 	// S1 is active. ActionN and ActionS should be TRUE. ActionP and ActionR_S are FALSE.
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionN"), true)
-	testBooleanObject(t, mustGet(env, "ActionS"), true)
-	testBooleanObject(t, mustGet(env, "ActionP"), false)
+	testBooleanObjectInEnv(t, env, "ActionN", true)
+	testBooleanObjectInEnv(t, env, "ActionS", true)
+	testBooleanObjectInEnv(t, env, "ActionR_S", false)
+	testBooleanObjectInEnv(t, env, "ActionP", false)
 
 	// --- Cycle 2: Transition from S1 to S2 ---
 	// Set condition and cycle. S1 becomes inactive, S2 becomes active.
@@ -812,9 +813,9 @@ func TestSFCActionQualifiers(t *testing.T) {
 	// ActionN (Non-stored) becomes FALSE as S1 is no longer active.
 	// ActionS (Set) remains TRUE.
 	// ActionP (Pulse) becomes TRUE for this one cycle.
-	testBooleanObject(t, mustGet(env, "ActionN"), false) // N action deactivates with step
-	testBooleanObject(t, mustGet(env, "ActionS"), true)
-	testBooleanObject(t, mustGet(env, "ActionP"), true)
+	testBooleanObjectInEnv(t, env, "ActionN", false) // N action deactivates with step
+	testBooleanObjectInEnv(t, env, "ActionS", true)
+	testBooleanObjectInEnv(t, env, "ActionP", true)
 
 	// --- Cycle 3: S2 is active ---
 	// Reset condition. Cycle again.
@@ -822,8 +823,8 @@ func TestSFCActionQualifiers(t *testing.T) {
 	evalSFCCycle(sfc, env)
 	// ActionP (Pulse) should now be FALSE again.
 	// ActionS remains TRUE.
-	testBooleanObject(t, mustGet(env, "ActionP"), false) // P action is only active for one cycle
-	testBooleanObject(t, mustGet(env, "ActionS"), true)
+	testBooleanObjectInEnv(t, env, "ActionP", false) // P action is only active for one cycle
+	testBooleanObjectInEnv(t, env, "ActionS", true)
 
 	// --- Cycle 4: Transition from S2 to S3 ---
 	// Set condition and cycle. S2 becomes inactive, S3 becomes active.
@@ -831,7 +832,99 @@ func TestSFCActionQualifiers(t *testing.T) {
 	evalSFCCycle(sfc, env)
 	// S3 is now active. It has an 'R' qualifier for 'ActionS'.
 	// This should force 'ActionS' to become FALSE immediately in this cycle.
-	testBooleanObject(t, mustGet(env, "ActionS"), false)
+	testBooleanObjectInEnv(t, env, "ActionS", false)
+}
+
+func TestSFCTimedStoredQualifiers(t *testing.T) {
+	// Setup mock time
+	mockTime = time.Date(2026, time.May, 21, 10, 0, 0, 0, time.UTC)
+	originalNowFunc := nowFunc
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	input := `
+		PROGRAM TestSFCTimedStored
+			VAR
+				ActionSD, ActionDS, ActionSL : BOOL;
+				GoToS2 : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1:
+				ActionSD(SD, T#2s);
+				ActionDS(DS, T#3s);
+				ActionSL(SL, T#4s);
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+
+			STEP S2:
+				ActionSD(R); // Reset the SD action
+			END_STEP
+		END_PROGRAM
+	`
+	env := object.NewEnvironment()
+	sfcObj := testEvalWithEnv(t, input, env)
+	sfc, ok := sfcObj.(*object.SFC)
+	if !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfcObj)
+	}
+
+	// --- Cycle 1 (t=0s): S1 active ---
+	// At t=0, S1 is active. SL is active immediately. SD and DS timers start.
+	t.Logf("Cycle 1: t=%s", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", false)
+	testBooleanObjectInEnv(t, env, "ActionDS", false)
+	testBooleanObjectInEnv(t, env, "ActionSL", true)
+
+	// --- Cycle 2 (t=2s): ActionSD (2s timer) becomes active ---
+	advanceMockTime(2 * time.Second) // Advance time to 2s
+	t.Logf("Cycle 2: t=%s", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", true)
+	testBooleanObjectInEnv(t, env, "ActionDS", false)
+	testBooleanObjectInEnv(t, env, "ActionSL", true)
+
+	// --- Cycle 3 (t=3s): ActionDS (3s timer) becomes active ---
+	advanceMockTime(1 * time.Second) // Advance time to 3s
+	t.Logf("Cycle 3: t=%s", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", true) // Stays true
+	testBooleanObjectInEnv(t, env, "ActionDS", true) // DS delay is met
+	testBooleanObjectInEnv(t, env, "ActionSL", true) // Stays true
+
+	// --- Cycle 4 (t=4s): ActionSL (4s timer) becomes inactive ---
+	advanceMockTime(1 * time.Second) // Advance time to 4s
+	t.Logf("Cycle 4: t=%s", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", true)
+	testBooleanObjectInEnv(t, env, "ActionDS", true)
+	testBooleanObjectInEnv(t, env, "ActionSL", false) // SL time limit reached
+
+	// --- Cycle 5 (t=5s): S1 is still active, state is held ---
+	advanceMockTime(1 * time.Second) // Advance time to 5s
+	t.Logf("Cycle 5: t=%s", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", true)
+	testBooleanObjectInEnv(t, env, "ActionDS", true)
+	testBooleanObjectInEnv(t, env, "ActionSL", false)
+
+	// --- Cycle 6 (t=5s): Transition to S2, S1 deactivates ---
+	env.Set("GoToS2", TRUE)
+	t.Logf("Cycle 6: t=%s (Transitioning to S2)", mockTime.Format("15:04:05"))
+	evalSFCCycle(sfc, env)
+	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	// S2 is now active. It resets ActionSD.
+	// ActionDS remains active because it is stored and not reset.
+	// ActionSL was already inactive.
+	testBooleanObjectInEnv(t, env, "ActionSD", false)
+	testBooleanObjectInEnv(t, env, "ActionDS", true)
+	testBooleanObjectInEnv(t, env, "ActionSL", false)
 }
 
 // Mockable time for testing
@@ -1003,58 +1096,58 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 
 	// --- Cycle 1: Initial state (S1 active) ---
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionD_Q"), false) // D: Not active yet
-	testBooleanObject(t, mustGet(env, "ActionL_Q"), true)  // L: Active immediately
+	testBooleanObjectInEnv(t, env, "ActionD_Q", false)
+	testBooleanObjectInEnv(t, env, "ActionL_Q", true)
 
 	// --- Cycle 2: Advance time by 2s ---
 	advanceMockTime(2 * time.Second)
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionD_Q"), false) // D: Still not active
-	testBooleanObject(t, mustGet(env, "ActionL_Q"), true)  // L: Still active
+	testBooleanObjectInEnv(t, env, "ActionD_Q", false)
+	testBooleanObjectInEnv(t, env, "ActionL_Q", true)
 
 	// --- Cycle 3: Advance time by another 2s (total 4s) ---
 	advanceMockTime(2 * time.Second)
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionD_Q"), true)  // D: Now active (5s delay passed)
-	testBooleanObject(t, mustGet(env, "ActionL_Q"), false) // L: Now inactive (3s limit passed)
+	testBooleanObjectInEnv(t, env, "ActionD_Q", false) // D: Not yet active (needs 5s)
+	testBooleanObjectInEnv(t, env, "ActionL_Q", false) // L: Now inactive (3s limit passed)
 
 	// --- Cycle 4: Transition S1 -> S2 (GoToS2 = TRUE) ---
 	env.Set("GoToS2", TRUE)
-	advanceMockTime(1 * time.Second) // Advance time to ensure transitions are processed
+	advanceMockTime(1 * time.Second) // Total elapsed: 5s
 	evalSFCCycle(sfc, env)
 	// S1 is inactive, S2 is active.
-	// ActionD_Q and ActionL_Q should be reset to FALSE.
-	testBooleanObject(t, mustGet(env, "ActionD_Q"), false)
-	testBooleanObject(t, mustGet(env, "ActionL_Q"), false)
-	testBooleanObject(t, mustGet(env, "ActionSD_Q"), false) // SD: Not active yet
-	testBooleanObject(t, mustGet(env, "ActionDS_Q"), false) // DS: Not active yet
+	// ActionD_Q and ActionL_Q (non-stored) are reset to FALSE because S1 deactivated.
+	testBooleanObjectInEnv(t, env, "ActionD_Q", false)
+	testBooleanObjectInEnv(t, env, "ActionL_Q", false)
+	testBooleanObjectInEnv(t, env, "ActionSD_Q", false)
+	testBooleanObjectInEnv(t, env, "ActionDS_Q", false)
 
-	// --- Cycle 5: Advance time by 2s (total 7s) ---
-	advanceMockTime(2 * time.Second)
+	// --- Cycle 5: In S2, advance time by 2s ---
+	advanceMockTime(2 * time.Second) // Total elapsed since S2 activation: 2s
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)  // SD: Now active (2s delay passed)
-	testBooleanObject(t, mustGet(env, "ActionDS_Q"), false) // DS: Still not active
+	testBooleanObjectInEnv(t, env, "ActionSD_Q", true)
+	testBooleanObjectInEnv(t, env, "ActionDS_Q", false)
 
-	// --- Cycle 6: Advance time by another 2s (total 9s) ---
-	advanceMockTime(2 * time.Second)
+	// --- Cycle 6: In S2, advance time by another 2s ---
+	advanceMockTime(2 * time.Second) // Total elapsed since S2 activation: 4s
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)  // SD: Remains active
-	testBooleanObject(t, mustGet(env, "ActionDS_Q"), true)  // DS: Now active (4s delay passed)
-	testBooleanObject(t, mustGet(env, "ActionSL_Q"), false) // SL: Not active yet (S3 not active)
+	testBooleanObjectInEnv(t, env, "ActionSD_Q", true)
+	testBooleanObjectInEnv(t, env, "ActionDS_Q", true)
+	testBooleanObjectInEnv(t, env, "ActionSL_Q", false)
 
 	// --- Cycle 7: Transition S2 -> S3 (GoToS3 = TRUE) ---
 	env.Set("GoToS3", TRUE)
-	advanceMockTime(1 * time.Second) // Advance time
+	advanceMockTime(1 * time.Second)
 	evalSFCCycle(sfc, env)
 	// S2 inactive, S3 active. ActionSD_Q and ActionDS_Q remain TRUE (stored).
-	testBooleanObject(t, mustGet(env, "ActionSD_Q"), true)
-	testBooleanObject(t, mustGet(env, "ActionDS_Q"), true)
-	testBooleanObject(t, mustGet(env, "ActionSL_Q"), true) // SL: Active immediately
+	testBooleanObjectInEnv(t, env, "ActionSD_Q", true)
+	testBooleanObjectInEnv(t, env, "ActionDS_Q", true)
+	testBooleanObjectInEnv(t, env, "ActionSL_Q", true) // SL: Active immediately
 
 	// --- Cycle 8: Advance time by 6s (total 16s) ---
-	advanceMockTime(6 * time.Second)
+	advanceMockTime(6 * time.Second) // Total elapsed since S3 activation: 6s
 	evalSFCCycle(sfc, env)
-	testBooleanObject(t, mustGet(env, "ActionSL_Q"), false) // SL: Now inactive (6s limit passed)
+	testBooleanObjectInEnv(t, env, "ActionSL_Q", false)
 }
 
 func TestSFCActionWithSTBody(t *testing.T) {
@@ -1105,17 +1198,17 @@ func TestSFCActionWithSTBody(t *testing.T) {
 
 	// --- Cycle 1: Initial state (S1 active) ---
 	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 0) // Action body should not have run
+	testIntegerObjectInEnv(t, env, "Counter", 0) // Action body should not have run
 
 	// --- Cycle 2: Transition to S2 ---
 	env.Set("GoToStep2", TRUE)
 	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 1) // Action body runs for the first time
+	testIntegerObjectInEnv(t, env, "Counter", 1) // Action body runs for the first time
 
 	// --- Cycle 3: Still in S2 ---
 	env.Set("GoToStep2", FALSE) // Prevent immediate re-transition
 	evalSFCCycle(sfc, env)
-	testIntegerObject(t, mustGet(env, "Counter"), 2) // Action body runs again
+	testIntegerObjectInEnv(t, env, "Counter", 2) // Action body runs again
 }
 
 func TestFunctionObject(t *testing.T) {
@@ -1152,7 +1245,7 @@ func TestFunctionApplication(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		testIntegerObject(t, testEval(t, tt.input), tt.expected)
+		testIntegerObject(t, testEval(t, tt.input), tt.input, tt.expected)
 	}
 }
 
@@ -1174,14 +1267,12 @@ func TestStringConcatenation(t *testing.T) {
 	input := `"Hello" + " " + "World!";`
 
 	evaluated := testEval(t, input)
-	str, ok := evaluated.(*object.String)
+	_, ok := evaluated.(*object.String)
 	if !ok {
 		t.Fatalf("object is not String. got=%T (%+v)", evaluated, evaluated)
 	}
 
-	if str.Value != "Hello World!" {
-		t.Errorf("String has wrong value. got=%q", str.Value)
-	}
+	testStringObject(t, evaluated, "concatenation", "Hello World!")
 }
 
 func TestBuiltinFunctions(t *testing.T) {
@@ -1214,7 +1305,7 @@ func TestBuiltinFunctions(t *testing.T) {
 
 		switch expected := tt.expected.(type) {
 		case int:
-			testIntegerObject(t, evaluated, int64(expected))
+			testIntegerObject(t, evaluated, tt.input, int64(expected))
 		case nil:
 			testNullObject(t, evaluated)
 		case string:
@@ -1240,7 +1331,7 @@ func TestBuiltinFunctions(t *testing.T) {
 			}
 
 			for i, expectedElem := range expected {
-				testIntegerObject(t, array.Elements[i], int64(expectedElem))
+				testIntegerObject(t, array.Elements[i], "elem", int64(expectedElem))
 			}
 		}
 	}
@@ -1260,9 +1351,9 @@ func TestArrayLiterals(t *testing.T) {
 			len(result.Elements))
 	}
 
-	testIntegerObject(t, result.Elements[0], 1)
-	testIntegerObject(t, result.Elements[1], 4)
-	testIntegerObject(t, result.Elements[2], 6)
+	testIntegerObject(t, result.Elements[0], "1", 1)
+	testIntegerObject(t, result.Elements[1], "4", 4)
+	testIntegerObject(t, result.Elements[2], "6", 6)
 }
 
 func TestArrayIndexExpressions(t *testing.T) {
@@ -1300,7 +1391,7 @@ func TestArrayIndexExpressions(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
-			testIntegerObject(t, evaluated, int64(integer))
+			testIntegerObject(t, evaluated, tt.input, int64(integer))
 		} else {
 			testNullObject(t, evaluated)
 		}
@@ -1342,7 +1433,7 @@ func TestHashIndexExpressions(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
-			testIntegerObject(t, evaluated, int64(integer))
+			testIntegerObject(t, evaluated, tt.input, int64(integer))
 		} else {
 			testNullObject(t, evaluated)
 		}
@@ -1425,7 +1516,7 @@ func TestBuiltinAddSub(t *testing.T) {
 				t.Errorf("input: %q, object is not a known time.Time-based type. got=%T (%+v)", tt.input, evaluated, evaluated)
 			}
 		case int64:
-			testIntegerObject(t, evaluated, expected)
+			testIntegerObject(t, evaluated, tt.input, expected)
 		case float64:
 			realObj, ok := evaluated.(*object.Real)
 			if !ok {
@@ -1491,9 +1582,9 @@ func TestBuiltinMulDiv(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case float64:
-				testRealObject(t, evaluated, expected)
+				testRealObject(t, evaluated, tt.input, expected)
 			case time.Duration:
 				timeObj, ok := evaluated.(*object.Time)
 				if !ok {
@@ -1551,9 +1642,9 @@ func TestBuiltinModExpt(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case float64:
-				testRealObject(t, evaluated, expected)
+				testRealObject(t, evaluated, tt.input, expected)
 			case string: // Error messages
 				errObj, ok := evaluated.(*object.Error)
 				if !ok {
@@ -1668,7 +1759,7 @@ func TestBuiltinComparisonFunctions(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case string:
 				testErrorObject(t, evaluated, expected)
 			default:
@@ -1712,9 +1803,9 @@ func TestBuiltinSQRTAndROUND(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case int64:
-			testIntegerObject(t, evaluated, expected)
-		case float64:
-			testRealObject(t, evaluated, expected)
+			testIntegerObject(t, evaluated, tt.input, expected)
+		case float64: // cspell:disable-line
+			testRealObject(t, evaluated, tt.input, expected)
 		case string:
 			testErrorObject(t, evaluated, expected)
 		}
@@ -1801,7 +1892,7 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 					t.Errorf("wrong value. want=0x%X, got=0x%X", expected, bs.Value)
 				}
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case float64:
 				realObj, ok := evaluated.(*object.Real)
 				if !ok {
@@ -1815,7 +1906,7 @@ func TestBuiltinTypeConversionFunctions(t *testing.T) { // Replaced with more de
 				errObj, ok := evaluated.(*object.Error)
 				if !ok {
 					// Not an error, so it must be a string result
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				} else if !strings.Contains(errObj.Message, expected) {
 					t.Errorf("wrong error message. expected to contain %q, got %q", expected, errObj.Message)
 				}
@@ -1850,10 +1941,10 @@ func TestBuiltinAbsFunction(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+			case int64: // cspell:disable-line
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case string:
 				testErrorObject(t, evaluated, expected)
 			}
@@ -1886,7 +1977,7 @@ func TestBuiltinTruncFunction(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case string:
 				testErrorObject(t, evaluated, expected)
 			default:
@@ -1921,21 +2012,21 @@ func TestBuiltinMoveFunction(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+			case int64: // cspell:disable-line
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case string:
 				// Can be a string result or an error message
 				if _, ok := evaluated.(*object.Error); ok {
 					testErrorObject(t, evaluated, expected)
 				} else {
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				}
 			case time.Duration:
-				testTimeObject(t, evaluated, expected)
+				testTimeObject(t, evaluated, tt.input, expected)
 			case uint64:
 				if bs, ok := evaluated.(*object.BitString); !ok || bs.Value != expected {
 					t.Errorf("object is not correct BitString. want=%d, got=%v", expected, evaluated)
@@ -1995,9 +2086,9 @@ func TestBuiltinMinMaxFunctions(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case float64:
-				testRealObject(t, evaluated, expected)
+				testRealObject(t, evaluated, tt.input, expected)
 			case string:
 				// Can be a string result or an error message
 				if err, ok := evaluated.(*object.Error); ok {
@@ -2005,7 +2096,7 @@ func TestBuiltinMinMaxFunctions(t *testing.T) {
 						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
 					}
 				} else {
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
@@ -2111,7 +2202,7 @@ func TestBuiltinTrigFunctions(t *testing.T) {
 		evaluated := testEvalWithPi(t, tt.input) // Use a helper that defines PI
 		switch expected := tt.expected.(type) {
 		case float64:
-			testRealObject(t, evaluated, expected)
+			testRealObject(t, evaluated, tt.input, expected)
 		case string:
 			testErrorObject(t, evaluated, expected)
 		}
@@ -2164,7 +2255,7 @@ func TestBuiltinInverseTrigFunctions(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case float64:
-			testRealObject(t, evaluated, expected)
+			testRealObject(t, evaluated, tt.input, expected)
 		case string:
 			testErrorObject(t, evaluated, expected)
 		}
@@ -2199,8 +2290,8 @@ func TestBuiltinLogFunctions(t *testing.T) {
 	for _, tt := range tests {
 		evaluated := testEvalWithBuiltinVars(t, tt.input) // Use a helper that defines E
 		switch expected := tt.expected.(type) {
-		case float64:
-			testRealObject(t, evaluated, expected)
+		case float64: // cspell:disable-line
+			testRealObject(t, evaluated, tt.input, expected)
 		case string:
 			testErrorObject(t, evaluated, expected)
 		}
@@ -2226,8 +2317,8 @@ func TestBuiltinExpFunction(t *testing.T) {
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
-		case float64:
-			testRealObject(t, evaluated, expected)
+		case float64: // cspell:disable-line
+			testRealObject(t, evaluated, tt.input, expected)
 		case string:
 			testErrorObject(t, evaluated, expected)
 		}
@@ -2353,10 +2444,10 @@ func TestBuiltinStringFunctions(t *testing.T) {
 					}
 				}
 			} else {
-				testStringObject(t, evaluated, expected)
+				testStringObject(t, evaluated, tt.input, expected)
 			}
 		case int64:
-			testIntegerObject(t, evaluated, expected)
+			testIntegerObject(t, evaluated, tt.input, expected)
 		}
 	}
 }
@@ -2407,9 +2498,9 @@ func TestBuiltinMinMax(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case string:
 				testErrorObject(t, evaluated, expected)
 			default:
@@ -2590,9 +2681,9 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case string:
-				testErrorObject(t, evaluated, expected)
+				testErrorObjectContains(t, evaluated, expected)
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case []int:
 				arr, ok := evaluated.(*object.Array)
 				if !ok {
@@ -2602,7 +2693,7 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 					t.Fatalf("wrong number of elements. want=%d, got=%d", len(expected), len(arr.Elements))
 				}
 				for i, expectedElem := range expected {
-					testIntegerObject(t, arr.Elements[i], int64(expectedElem))
+					testIntegerObject(t, arr.Elements[i], "elem", int64(expectedElem))
 				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
@@ -2648,18 +2739,18 @@ func TestMuxFunction(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case string:
 				if err, ok := evaluated.(*object.Error); ok {
 					if !strings.Contains(err.Message, expected) {
 						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
 					}
 				} else {
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
@@ -2704,19 +2795,19 @@ func TestSelFunction(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
+			case int64: // cspell:disable-line
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case float64:
-				testRealObject(t, evaluated, expected)
+				testRealObject(t, evaluated, tt.input, expected)
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case string:
 				if err, ok := evaluated.(*object.Error); ok {
 					if !strings.Contains(err.Message, expected) {
 						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
 					}
 				} else {
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				}
 			default:
 				t.Fatalf("unhandled expected type: %T", tt.expected)
@@ -2818,18 +2909,18 @@ func TestBuiltinMove(t *testing.T) {
 
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case string:
 				if err, ok := evaluated.(*object.Error); ok {
 					if !strings.Contains(err.Message, expected) {
 						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
 					}
 				} else {
-					testStringObject(t, evaluated, expected)
+					testStringObject(t, evaluated, tt.input, expected)
 				}
 			case time.Duration:
 				// This is a simplified check for the test case.
@@ -2881,7 +2972,7 @@ func TestFunctionCallWithMixedArguments(t *testing.T) {
 	if !ok {
 		t.Fatalf("ResultVar not found in environment")
 	}
-	testIntegerObject(t, resultVar, 30)
+	testIntegerObject(t, resultVar, "ResultVar", 30)
 
 	// 2. Check the value of the variable connected to the output parameter
 	// Expected: NamedOut is `temp` * 2 = 30 * 2 = 60. This should be assigned to OutputVar.
@@ -2889,7 +2980,7 @@ func TestFunctionCallWithMixedArguments(t *testing.T) {
 	if !ok {
 		t.Fatalf("OutputVar not found in environment")
 	}
-	testIntegerObject(t, outputVar, 60)
+	testIntegerObject(t, outputVar, "OutputVar", 60)
 }
 
 func TestStandardFunctionBlocks(t *testing.T) {
@@ -2931,38 +3022,38 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		// --- Cycle 1: Initial state ---
 		env.Set("Start", FALSE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), false)
-		testTimeObject(t, mustGet(env, "ET"), 0)
+		testBooleanObjectInEnv(t, env, "TimerDone", false)
+		testTimeObjectInEnv(t, env, "ET", 0)
 
 		// --- Cycle 2: Rising edge on IN ---
 		env.Set("Start", TRUE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q is still false
-		testTimeObject(t, mustGet(env, "ET"), 0)               // ET is still 0 on the first scan
+		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q is still false
+		testTimeObjectInEnv(t, env, "ET", 0)               // ET is still 0 on the first scan
 
 		// --- Cycle 3: Time advances (3s) ---
 		advanceTime(3 * time.Second)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q is still false
-		testTimeObject(t, mustGet(env, "ET"), 3*time.Second)
+		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q is still false
+		testTimeObjectInEnv(t, env, "ET", 3*time.Second)
 
 		// --- Cycle 4: Time reaches PT (5s) ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), true) // Q is now true
-		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)  // ET is capped at PT
+		testBooleanObjectInEnv(t, env, "TimerDone", true) // Q is now true
+		testTimeObjectInEnv(t, env, "ET", 5*time.Second)  // ET is capped at PT
 
 		// --- Cycle 5: IN is still true, time advances further ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), true) // Q remains true
-		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)  // ET remains capped at PT
+		testBooleanObjectInEnv(t, env, "TimerDone", true) // Q remains true
+		testTimeObjectInEnv(t, env, "ET", 5*time.Second)  // ET remains capped at PT
 
 		// --- Cycle 6: Falling edge on IN ---
 		env.Set("Start", FALSE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerDone"), false) // Q resets to false
-		testTimeObject(t, mustGet(env, "ET"), 0)               // ET resets to 0
+		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q resets to false
+		testTimeObjectInEnv(t, env, "ET", 0)               // ET resets to 0
 	})
 
 	t.Run("CTU - Counter Up", func(t *testing.T) {
@@ -2990,51 +3081,51 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		env.Set("CountUp", FALSE)
 		env.Set("Reset", FALSE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "IsDone"), false)
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
+		testBooleanObjectInEnv(t, env, "IsDone", false)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
 
 		// --- Cycle 2: First rising edge on CU ---
 		env.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
-		testBooleanObject(t, mustGet(env, "IsDone"), false)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
+		testBooleanObjectInEnv(t, env, "IsDone", false)
 
 		// --- Cycle 3: CU is still high (no change) ---
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
 
 		// --- Cycle 4: Falling edge on CU ---
 		env.Set("CountUp", FALSE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 1)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
 
 		// --- Cycle 5: Second rising edge ---
 		env.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 2)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 2)
 		env.Set("CountUp", FALSE)
 		runScan()
 
 		// --- Cycle 6: Third rising edge (reaches PV) ---
 		env.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 3)
-		testBooleanObject(t, mustGet(env, "IsDone"), true) // Q is now true
+		testIntegerObjectInEnv(t, env, "CurrentValue", 3)
+		testBooleanObjectInEnv(t, env, "IsDone", true) // Q is now true
 
 		// --- Cycle 7: Fourth rising edge (CV does not exceed PV in this implementation) ---
 		env.Set("CountUp", FALSE)
 		runScan()
 		env.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 3) // CV is capped
-		testBooleanObject(t, mustGet(env, "IsDone"), true)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 3) // CV is capped
+		testBooleanObjectInEnv(t, env, "IsDone", true)
 
 		// --- Cycle 8: Reset ---
 		env.Set("CountUp", FALSE)
 		env.Set("Reset", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
-		testBooleanObject(t, mustGet(env, "IsDone"), false)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
+		testBooleanObjectInEnv(t, env, "IsDone", false)
 	})
 
 	t.Run("TOF - Timer Off-Delay", func(t *testing.T) {
@@ -3060,26 +3151,26 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		// --- Cycle 1: IN is high ---
 		env.Set("Input", TRUE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerActive"), true)
-		testTimeObject(t, mustGet(env, "ET"), 0)
+		testBooleanObjectInEnv(t, env, "TimerActive", true)
+		testTimeObjectInEnv(t, env, "ET", 0)
 
 		// --- Cycle 2: Falling edge on IN ---
 		env.Set("Input", FALSE)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerActive"), true) // Q remains true
-		testTimeObject(t, mustGet(env, "ET"), 0)
+		testBooleanObjectInEnv(t, env, "TimerActive", true) // Q remains true
+		testTimeObjectInEnv(t, env, "ET", 0)
 
 		// --- Cycle 3: Time advances (3s) ---
 		advanceTime(3 * time.Second)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerActive"), true) // Q still true
-		testTimeObject(t, mustGet(env, "ET"), 3*time.Second)
+		testBooleanObjectInEnv(t, env, "TimerActive", true) // Q still true
+		testTimeObjectInEnv(t, env, "ET", 3*time.Second)
 
 		// --- Cycle 4: Time reaches PT (5s) ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObject(t, mustGet(env, "TimerActive"), false) // Q is now false
-		testTimeObject(t, mustGet(env, "ET"), 5*time.Second)     // ET is capped
+		testBooleanObjectInEnv(t, env, "TimerActive", false) // Q is now false
+		testTimeObjectInEnv(t, env, "ET", 5*time.Second)     // ET is capped
 	})
 
 	t.Run("CTD - Counter Down", func(t *testing.T) {
@@ -3106,14 +3197,14 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		// --- Cycle 1: Load the counter ---
 		env.Set("Load", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 3)
-		testBooleanObject(t, mustGet(env, "IsDone"), false)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 3)
+		testBooleanObjectInEnv(t, env, "IsDone", false)
 
 		// --- Cycle 2: First rising edge on CD ---
 		env.Set("Load", FALSE)
 		env.Set("CountDown", TRUE)
 		runScan()
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 2)
+		testIntegerObjectInEnv(t, env, "CurrentValue", 2)
 		env.Set("CountDown", FALSE)
 		runScan()
 
@@ -3124,8 +3215,8 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		runScan()
 		env.Set("CountDown", TRUE)
 		runScan() // CV = 0
-		testIntegerObject(t, mustGet(env, "CurrentValue"), 0)
-		testBooleanObject(t, mustGet(env, "IsDone"), true) // Q is now true
+		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
+		testBooleanObjectInEnv(t, env, "IsDone", true) // Q is now true
 	})
 }
 
@@ -3163,33 +3254,33 @@ func TestTP_PulseTimer(t *testing.T) {
 	// --- Cycle 1: Initial state ---
 	env.Set("Trigger", FALSE)
 	runScan()
-	testBooleanObject(t, mustGet(env, "PulseOut"), false)
-	testTimeObject(t, mustGet(env, "ET"), 0)
+	testBooleanObjectInEnv(t, env, "PulseOut", false)
+	testTimeObjectInEnv(t, env, "ET", 0)
 
 	// --- Cycle 2: Rising edge on IN, pulse starts ---
 	env.Set("Trigger", TRUE)
 	runScan()
-	testBooleanObject(t, mustGet(env, "PulseOut"), true)
-	testTimeObject(t, mustGet(env, "ET"), 0)
+	testBooleanObjectInEnv(t, env, "PulseOut", true)
+	testTimeObjectInEnv(t, env, "ET", 0)
 
 	// --- Cycle 3: IN goes low, but pulse continues ---
 	advanceTime(2 * time.Second)
 	env.Set("Trigger", FALSE)
 	runScan()
-	testBooleanObject(t, mustGet(env, "PulseOut"), true)
-	testTimeObject(t, mustGet(env, "ET"), 2*time.Second)
+	testBooleanObjectInEnv(t, env, "PulseOut", true)
+	testTimeObjectInEnv(t, env, "ET", 2*time.Second)
 
 	// --- Cycle 4: Time reaches PT, pulse ends ---
 	advanceTime(3 * time.Second) // Total elapsed time is now 5s
 	runScan()
-	testBooleanObject(t, mustGet(env, "PulseOut"), false)
-	testTimeObject(t, mustGet(env, "ET"), 5*time.Second)
+	testBooleanObjectInEnv(t, env, "PulseOut", false)
+	testTimeObjectInEnv(t, env, "ET", 5*time.Second)
 
 	// --- Cycle 5: State after pulse completion ---
 	advanceTime(1 * time.Second)
 	runScan()
-	testBooleanObject(t, mustGet(env, "PulseOut"), false)
-	testTimeObject(t, mustGet(env, "ET"), 0)
+	testBooleanObjectInEnv(t, env, "PulseOut", false)
+	testTimeObjectInEnv(t, env, "ET", 0)
 }
 
 func TestFunctionBlockWithSFCBody(t *testing.T) {
@@ -3245,18 +3336,18 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	// The FB is called with doTransition = FALSE.
 	// The SFC should be in S1, and ActiveStepOut should be 1.
 	runScan()
-	testIntegerObject(t, mustGet(env, "currentActiveStep"), 1)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
 
 	// --- Cycle 2: Still in S1 ---
 	// doTransition is still FALSE, so no transition should occur.
 	runScan()
-	testIntegerObject(t, mustGet(env, "currentActiveStep"), 1)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
 
 	// --- Cycle 3: Transition to S2 ---
 	// Set the input condition to TRUE and run the scan.
 	env.Set("doTransition", TRUE)
 	runScan()
-	testIntegerObject(t, mustGet(env, "currentActiveStep"), 2)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
 }
 
 func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input string) {
@@ -3318,12 +3409,12 @@ func TestNestedInOutVarPassing(t *testing.T) {
 	// OuterFunc passes it to InnerFunc.
 	// InnerFunc modifies it to 5 * 2 = 10.
 	// This change should propagate all the way back to OriginalVar.
-	testIntegerObject(t, mustGet(env, "OriginalVar"), 10)
+	testIntegerObjectInEnv(t, env, "OriginalVar", 10)
 
 	// After the second call `InnerFunc(InnerVar := OriginalVar)`:
 	// OriginalVar is now 10.
 	// InnerFunc modifies it to 10 * 2 = 20.
-	testIntegerObject(t, mustGet(env, "OriginalVar"), 20)
+	testIntegerObjectInEnv(t, env, "OriginalVar", 20)
 }
 
 func TestPumpControlSFC(t *testing.T) {
@@ -3384,7 +3475,7 @@ func TestPumpControlSFC(t *testing.T) {
 	if !sfc.Steps["Idle"].IsActive {
 		t.Fatal("SFC should be in 'Idle' step initially.")
 	}
-	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+	testBooleanObjectInEnv(t, env, "PumpMotor", false)
 
 	// --- Cycle 2: Transition to Running ---
 	// Press the start button. Tank is not high. Pump should turn on.
@@ -3394,7 +3485,7 @@ func TestPumpControlSFC(t *testing.T) {
 	if !sfc.Steps["Running"].IsActive {
 		t.Fatal("SFC should have transitioned to 'Running' step.")
 	}
-	testBooleanObject(t, mustGet(env, "PumpMotor"), true)
+	testBooleanObjectInEnv(t, env, "PumpMotor", true)
 
 	// --- Cycle 3: Transition back to Idle via TankHighSensor ---
 	// Release start button, sensor indicates tank is full. Pump should turn off.
@@ -3405,7 +3496,7 @@ func TestPumpControlSFC(t *testing.T) {
 	if !sfc.Steps["Idle"].IsActive {
 		t.Fatal("SFC should have transitioned back to 'Idle' step.")
 	}
-	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+	testBooleanObjectInEnv(t, env, "PumpMotor", false)
 
 	// --- Cycle 4 & 5: Transition to Running, then stop via TimerDone ---
 	env.Set("TankHighSensor", FALSE)
@@ -3414,7 +3505,7 @@ func TestPumpControlSFC(t *testing.T) {
 	env.Set("StartButton", FALSE)
 	env.Set("TimerDone", TRUE)
 	runScan() // Go to Idle
-	testBooleanObject(t, mustGet(env, "PumpMotor"), false)
+	testBooleanObjectInEnv(t, env, "PumpMotor", false)
 }
 
 func TestTypedLiteralEvaluation(t *testing.T) {
@@ -3450,12 +3541,12 @@ func TestTypedLiteralEvaluation(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, expected)
-			case float64:
-				testRealObject(t, evaluated, expected)
+			case int64: // cspell:disable-line
+				testIntegerObject(t, evaluated, tt.input, expected)
+			case float64: // cspell:disable-line
+				testRealObject(t, evaluated, tt.input, expected)
 			case bool:
-				testBooleanObject(t, evaluated, expected)
+				testBooleanObject(t, evaluated, tt.input, expected)
 			case uint64:
 				bs, ok := evaluated.(*object.BitString)
 				if !ok {

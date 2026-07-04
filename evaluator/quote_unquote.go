@@ -96,6 +96,32 @@ func convertObjectToASTNode(obj object.Object) ast.Node {
 		}
 		return &ast.BitStringLiteral{Token: t, Value: obj.Value, Width: obj.Width}
 
+	case *object.String:
+		t := token.Token{
+			Type:    token.STRING_LITERAL,
+			Literal: obj.Value,
+		}
+		return &ast.StringLiteral{Token: t, Value: obj.Value}
+
+	case *object.WString:
+		t := token.Token{
+			Type:    token.WSTRING_LITERAL,
+			Literal: obj.Value,
+		}
+		return &ast.WStringLiteral{Token: t, Value: obj.Value}
+
+	case *object.Time:
+		t := token.Token{Type: token.TIME, Literal: obj.Inspect()}
+		return &ast.Identifier{Token: t, Value: obj.Inspect()}
+
+	case *object.Date:
+		t := token.Token{Type: token.DATE, Literal: obj.Inspect()}
+		return &ast.Identifier{Token: t, Value: obj.Inspect()}
+
+	case *object.TimeOfDay:
+		t := token.Token{Type: token.TIME_OF_DAY, Literal: obj.Inspect()}
+		return &ast.Identifier{Token: t, Value: obj.Inspect()}
+
 	case *object.Quote:
 		return obj.Node
 

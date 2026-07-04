@@ -524,6 +524,46 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 func evaluateAction(action *object.Action, env *object.Environment) {
 	qualifier, isStepActive := getHighestPriorityActiveQualifier(action, env)
 
+	// Use the current qualifier if a step is active, otherwise use the stored one.
+	activeQualifier := action.Qualifier
+	if isStepActive {
+		activeQualifier = qualifier
+	}
+
+	// First, handle all timed qualifiers. Their logic must be evaluated on every
+	// cycle, even if their controlling step is not active, to correctly process timers.
+	// We use action.Qualifier, which stores the qualifier from the last active cycle.
+	switch activeQualifier {
+	case "D":
+		if isStepActive { // Timer only starts/runs when step is active
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = time.Since(action.TimerStart) >= action.Duration
+		}
+	case "L":
+		if isStepActive { // Timer only starts/runs when step is active
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = time.Since(action.TimerStart) < action.Duration
+		}
+	case "SD", "DS":
+		if isStepActive && action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		// For stored timers, the check continues even if the step is inactive.
+		if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration {
+			action.IsActive = true
+		}
+	case "SL":
+		if isStepActive && action.TimerStart.IsZero() {
+			action.TimerStart = nowFunc()
+		}
+		// The time limit check must continue even if the step is inactive.
+		action.IsActive = !action.TimerStart.IsZero() && time.Since(action.TimerStart) < action.Duration
+	}
+
 	// The action is not influenced by any active step in this cycle.
 	// For non-stored actions, this means they become inactive.
 	// For stored actions, they maintain their state unless reset by another step.
@@ -536,14 +576,20 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 		if action.Qualifier != "S" && action.Qualifier != "SD" && action.Qualifier != "SL" && action.Qualifier != "DS" {
 			action.IsActive = false
 		}
-		// Reset timers and pulse counts for non-stored actions when their steps deactivate.
-		if qualifier == "D" || qualifier == "L" {
+		// Reset timers for non-stored timed actions when their steps deactivate.
+		if action.Qualifier == "D" || action.Qualifier == "L" {
 			action.TimerStart = time.Time{}
 		}
 		if qualifier == "P" {
 			action.ActivationCount = 0
 		}
 		return
+	}
+	// If we are here, the step is active.
+	// If the current qualifier is different from the last active one, it might mean
+	// a different step with a different qualifier took over. Reset timers.
+	if qualifier != action.Qualifier {
+		action.TimerStart = time.Time{}
 	}
 
 	// If a step is active, this qualifier is now the action's current, controlling qualifier.
@@ -567,34 +613,6 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 			action.IsActive = false
 		}
 		action.ActivationCount++
-	case "D":
-		if action.TimerStart.IsZero() {
-			action.TimerStart = nowFunc()
-		}
-		action.IsActive = time.Since(action.TimerStart) >= action.Duration
-	case "L":
-		if action.TimerStart.IsZero() {
-			action.TimerStart = nowFunc()
-		}
-		action.IsActive = time.Since(action.TimerStart) < action.Duration
-	case "SD", "DS": // Stored and Delayed (DS is functionally identical in this model)
-		if action.TimerStart.IsZero() {
-			action.TimerStart = nowFunc()
-		}
-		if time.Since(action.TimerStart) >= action.Duration {
-			action.IsActive = true
-		}
-	case "SL":
-		if action.TimerStart.IsZero() {
-			action.TimerStart = nowFunc()
-		}
-		// The action becomes active immediately but is stored. It will only be deactivated
-		// by an 'R' qualifier or when the time limit expires.
-		if time.Since(action.TimerStart) >= action.Duration {
-			action.IsActive = false
-		} else {
-			action.IsActive = true
-		}
 	}
 }
 
@@ -1030,57 +1048,88 @@ func applyTimeDateConversion(value, typeName string) object.Object {
 	return newBuiltinError("unknown time/date type: %s", typeName)
 }
 
+// applyBitStringConversion handles conversions for BYTE, WORD, etc. from a string value.
+func applyBitStringConversion(value, typeName string) object.Object {
+	width, ok := getBitStringWidth(typeName)
+	if !ok {
+		return newBuiltinError("unknown bit-string type: %s", typeName)
+	}
+
+	base := 10 // Default to decimal
+	valueStr := value
+	if strings.Contains(value, "#") {
+		parts := strings.SplitN(value, "#", 2)
+		if len(parts) == 2 {
+			parsedBase, err := strconv.Atoi(parts[0])
+			if err == nil && (parsedBase == 2 || parsedBase == 8 || parsedBase == 10 || parsedBase == 16) {
+				base = parsedBase
+				valueStr = parts[1]
+			}
+		}
+	}
+
+	valueStr = strings.ReplaceAll(valueStr, "_", "")
+
+	val, err := strconv.ParseUint(valueStr, base, width)
+	if err != nil {
+		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+			return newBuiltinError("value %q is out of range for type %s", valueStr, typeName)
+		}
+		return newBuiltinError("could not parse %q as %s (base %d): %v", valueStr, typeName, base, err)
+	}
+
+	return &object.BitString{Value: val, Width: width}
+}
+
 // parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms")
 // into a time.Duration. This is a simplified implementation.
 func parseDuration(s string) (time.Duration, error) {
 	isNegative := false
+	originalString := s
+
 	if strings.HasPrefix(s, "-") {
 		isNegative = true
 		s = s[1:] // Strip the negative sign for parsing
 	}
 
-	s = strings.ToLower(s)
 	totalDuration := time.Duration(0)
+	s = strings.ReplaceAll(s, "_", "") // Remove underscores for easier parsing
 
-	// A more robust implementation would use a regex, but for now, we can split by '_'
-	parts := strings.Split(s, "_")
-	// TODO: Add validation to ensure parts are in the correct order (d, h, m, s, ms)
-	// and that only the last part has a fractional value.
+	if s == "" {
+		return 0, fmt.Errorf("invalid duration string %q", originalString)
+	}
 
-	for _, part := range parts {
-		if strings.Contains(part, "d") {
-			val, err := strconv.ParseFloat(strings.TrimSuffix(part, "d"), 64)
-			if err != nil {
-				return 0, err
+	// Use Go's time.ParseDuration by reformatting the string.
+	// It understands units like h, m, s, ms, us, ns.
+	// We need to insert separators that ParseDuration understands.
+	var reformat strings.Builder
+	var numPart strings.Builder
+
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || r == '.' {
+			numPart.WriteRune(r)
+		} else {
+			// We hit a unit character (d, h, m, s).
+			// Write the number part and the unit.
+			reformat.WriteString(numPart.String())
+			numPart.Reset()
+			reformat.WriteRune(r)
+			// If the unit is 's', we need to check for 'ms'
+			if r == 's' && reformat.Len() > 1 && reformat.String()[reformat.Len()-2] == 'm' {
+				// It was 'ms', continue
+			} else {
+				// Add a space to separate units for ParseDuration
+				reformat.WriteRune(' ')
 			}
-			totalDuration += time.Duration(val * 24 * float64(time.Hour))
-		} else if strings.Contains(part, "h") {
-			val, err := strconv.ParseFloat(strings.TrimSuffix(part, "h"), 64)
-			if err != nil {
-				return 0, err
-			}
-			totalDuration += time.Duration(val * float64(time.Hour))
-		} else if strings.Contains(part, "ms") {
-			val, err := strconv.ParseFloat(strings.TrimSuffix(part, "ms"), 64)
-			if err != nil {
-				return 0, err
-			}
-			totalDuration += time.Duration(val * float64(time.Millisecond))
-		} else if strings.Contains(part, "m") {
-			val, err := strconv.ParseFloat(strings.TrimSuffix(part, "m"), 64)
-			if err != nil {
-				return 0, err
-			}
-			totalDuration += time.Duration(val * float64(time.Minute))
-		} else if strings.Contains(part, "s") {
-			// This must be last to avoid matching 'ms'
-			dur, err := time.ParseDuration(part)
-			if err != nil {
-				return 0, err
-			}
-			totalDuration += dur
 		}
 	}
+
+	// Parse the reformatted string
+	parsedDur, err := time.ParseDuration(strings.TrimSpace(reformat.String()))
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration string %q", originalString)
+	}
+	totalDuration += parsedDur
 
 	if isNegative {
 		totalDuration = -totalDuration
@@ -2037,6 +2086,22 @@ func evalIdentifier(
 		}
 	}
 
+	// Check if the identifier is a typed literal like T#5s or BYTE#16#FF
+	if strings.Contains(node.Value, "#") {
+		parts := strings.SplitN(node.Value, "#", 2)
+		if len(parts) == 2 {
+			typeName := parts[0]
+			valueStr := parts[1]
+
+			if isTimeDateKeyword(typeName) {
+				return applyTimeDateConversion(valueStr, typeName)
+			}
+			if isBitStringTypeCheck(typeName) {
+				return applyBitStringConversion(valueStr, typeName)
+			}
+		}
+	}
+
 	return newError(node, "identifier not found: %s", node.Value)
 }
 
@@ -2087,6 +2152,16 @@ func newBuiltinError(format string, a ...interface{}) *object.Error {
 func isError(obj object.Object) bool {
 	if obj != nil {
 		return obj.Type() == object.ERROR_OBJ
+	}
+	return false
+}
+
+// isBitStringType checks if a string corresponds to an IEC 61131-3 bit-string type keyword.
+func isBitStringTypeCheck(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "BYTE", "WORD", "DWORD", "LWORD":
+		return true
 	}
 	return false
 }
@@ -2807,4 +2882,17 @@ func getFloat64Value(obj object.Object) (float64, bool) {
 func isIntegerTypeName(name string) bool {
 	return name == "SINT" || name == "INT" || name == "DINT" || name == "LINT" ||
 		name == "USINT" || name == "UINT" || name == "UDINT" || name == "ULINT"
+}
+
+// isTimeDateKeyword checks if a string corresponds to an IEC 61131-3 time/date type keyword.
+func isTimeDateKeyword(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "TIME", "T",
+		"DATE", "D",
+		"TIME_OF_DAY", "TOD",
+		"DATE_AND_TIME", "DT":
+		return true
+	}
+	return false
 }

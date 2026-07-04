@@ -56,9 +56,9 @@ func TestFunctionBlock_EN_ENO(t *testing.T) {
 	runScan()
 
 	// Check that the timer is running and ENO is TRUE.
-	testBooleanObject(t, mustGet(env, "TimerDone"), false)
-	testTimeObject(t, mustGet(env, "ElapsedTime"), 2*time.Second)
-	testBooleanObject(t, mustGet(env, "EnableOut"), true)
+	testBooleanObjectInEnv(t, env, "TimerDone", false)
+	testTimeObjectInEnv(t, env, "ElapsedTime", 2*time.Second)
+	testBooleanObjectInEnv(t, env, "EnableOut", true)
 
 	// --- Cycle 2: Disable the function block. ---
 	// The timer should "freeze". Its internal state and outputs should not change,
@@ -69,10 +69,10 @@ func TestFunctionBlock_EN_ENO(t *testing.T) {
 
 	// Check that the outputs are held from the last enabled state.
 	// The timer should NOT have completed. ElapsedTime should still be 2s.
-	testBooleanObject(t, mustGet(env, "TimerDone"), false)
-	testTimeObject(t, mustGet(env, "ElapsedTime"), 2*time.Second)
+	testBooleanObjectInEnv(t, env, "TimerDone", false)
+	testTimeObjectInEnv(t, env, "ElapsedTime", 2*time.Second)
 	// ENO must be FALSE because EN is FALSE.
-	testBooleanObject(t, mustGet(env, "EnableOut"), false)
+	testBooleanObjectInEnv(t, env, "EnableOut", false)
 
 	// --- Cycle 3: Re-enable the function block. ---
 	// The timer should now resume from where it was frozen.
@@ -84,7 +84,7 @@ func TestFunctionBlock_EN_ENO(t *testing.T) {
 	runScan()
 
 	// Check that the timer has now completed.
-	testBooleanObject(t, mustGet(env, "TimerDone"), true)
-	testTimeObject(t, mustGet(env, "ElapsedTime"), 5*time.Second)
-	testBooleanObject(t, mustGet(env, "EnableOut"), true)
+	testBooleanObjectInEnv(t, env, "TimerDone", true)
+	testTimeObjectInEnv(t, env, "ElapsedTime", 5*time.Second)
+	testBooleanObjectInEnv(t, env, "EnableOut", true)
 }

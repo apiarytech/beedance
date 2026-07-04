@@ -30,7 +30,7 @@ func testEvalWithEnv(t *testing.T, input string, env *object.Environment) object
 	return Eval(program, env)
 }
 
-func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
+func testIntegerObject(t *testing.T, obj object.Object, name string, expected int64) bool {
 	t.Helper()
 	var val int64
 	var ok bool
@@ -61,13 +61,23 @@ func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
 		return false
 	}
 	if val != expected {
-		t.Errorf("object has wrong value. got=%d, want=%d", val, expected)
+		t.Errorf("variable '%s' has wrong value. got=%d, want=%d", name, val, expected)
 		return false
 	}
 	return true
 }
 
-func testBooleanObject(t *testing.T, obj object.Object, expected bool) bool {
+func testIntegerObjectInEnv(t *testing.T, env *object.Environment, name string, expected int64) bool {
+	t.Helper()
+	return testIntegerObject(t, mustGet(env, name), name, expected)
+}
+
+func testBooleanObjectInEnv(t *testing.T, env *object.Environment, name string, expected bool) bool {
+	t.Helper()
+	return testBooleanObject(t, mustGet(env, name), name, expected)
+}
+
+func testBooleanObject(t *testing.T, obj object.Object, name string, expected bool) bool {
 	t.Helper()
 	result, ok := obj.(*object.Boolean)
 	if !ok {
@@ -75,14 +85,13 @@ func testBooleanObject(t *testing.T, obj object.Object, expected bool) bool {
 		return false
 	}
 	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%t, want=%t",
-			result.Value, expected)
+		t.Errorf("variable '%s' has wrong value. got=%t, want=%t", name, result.Value, expected)
 		return false
 	}
 	return true
 }
 
-func testTimeObject(t *testing.T, obj object.Object, expected time.Duration) bool {
+func testTimeObject(t *testing.T, obj object.Object, name string, expected time.Duration) bool {
 	t.Helper()
 	result, ok := obj.(*object.Time)
 	if !ok {
@@ -90,10 +99,15 @@ func testTimeObject(t *testing.T, obj object.Object, expected time.Duration) boo
 		return false
 	}
 	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+		t.Errorf("variable '%s' has wrong value. got=%s, want=%s", name, result.Value, expected)
 		return false
 	}
 	return true
+}
+
+func testTimeObjectInEnv(t *testing.T, env *object.Environment, name string, expected time.Duration) bool {
+	t.Helper()
+	return testTimeObject(t, mustGet(env, name), name, expected)
 }
 
 func testNullObject(t *testing.T, obj object.Object) bool {
@@ -142,18 +156,24 @@ func mustGet(env *object.Environment, name string) object.Object {
 	return obj
 }
 
-func testRealObject(t *testing.T, obj object.Object, expected float64) bool {
-	result, ok := obj.(*object.Real)
+func testRealObject(t *testing.T, obj object.Object, name string, expected float64) bool {
+	t.Helper()
+	val, ok := getFloat64Value(obj)
 	if !ok {
-		t.Errorf("object is not Real. got=%T (%+v)", obj, obj)
+		t.Errorf("object is not a REAL type. got=%T (%+v)", obj, obj)
 		return false
 	}
 	const epsilon = 1e-9
-	if diff := result.Value - expected; diff < -epsilon || diff > epsilon {
-		t.Errorf("object has wrong value. got=%f, want=%f", result.Value, expected)
+	if diff := val - expected; diff < -epsilon || diff > epsilon {
+		t.Errorf("variable '%s' has wrong value. got=%f, want=%f", name, val, expected)
 		return false
 	}
 	return true
+}
+
+func testRealObjectInEnv(t *testing.T, env *object.Environment, name string, expected float64) bool {
+	t.Helper()
+	return testRealObject(t, mustGet(env, name), name, expected)
 }
 
 func testBitStringObject(t *testing.T, obj object.Object, expected uint64) bool {
@@ -170,18 +190,23 @@ func testBitStringObject(t *testing.T, obj object.Object, expected uint64) bool 
 	return true
 }
 
-func testStringObject(t *testing.T, obj object.Object, expected string) bool {
+func testStringObject(t *testing.T, obj object.Object, name string, expected string) bool {
+	t.Helper()
 	result, ok := obj.(*object.String)
 	if !ok {
 		t.Errorf("object is not String. got=%T (%+v)", obj, obj)
 		return false
 	}
 	if result.Value != expected {
-		t.Errorf("object has wrong value. got=%q, want=%q",
-			result.Value, expected)
+		t.Errorf("variable '%s' has wrong value. got=%q, want=%q", name, result.Value, expected)
 		return false
 	}
 	return true
+}
+
+func testStringObjectInEnv(t *testing.T, env *object.Environment, name string, expected string) bool {
+	t.Helper()
+	return testStringObject(t, mustGet(env, name), name, expected)
 }
 
 func testParserErrorContains(t *testing.T, errors []string, expectedMessage string) bool {

@@ -852,6 +852,58 @@ func TestBitStringLiteralParsing(t *testing.T) {
 	}
 }
 
+func TestTypedTimeDateLiterals(t *testing.T) {
+	tests := []struct {
+		input        string
+		expectedType string
+		expectedVal  string
+	}{
+		// TIME literals
+		{"T#5s;", "T", "T#5s"},
+		{"TIME#1h_30m;", "TIME", "TIME#1h_30m"},
+		{"T#-10s_500ms;", "T", "T#-10s_500ms"},
+
+		// DATE literals
+		{"D#2026-05-21;", "D", "D#2026-05-21"},
+		{"DATE#2026-05-21;", "DATE", "DATE#2026-05-21"},
+
+		// TIME_OF_DAY literals
+		{"TOD#14:30:00;", "TOD", "TOD#14:30:00"},
+		{"TIME_OF_DAY#14:30:00.123;", "TIME_OF_DAY", "TIME_OF_DAY#14:30:00.123"},
+
+		// DATE_AND_TIME literals
+		{"DT#2026-05-21-14:30:00;", "DT", "DT#2026-05-21-14:30:00"},
+		{"DATE_AND_TIME#2026-05-21-14:30:00.5;", "DATE_AND_TIME", "DATE_AND_TIME#2026-05-21-14:30:00.5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p, "TestTypedTimeDateLiterals", tt.input)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			ident, ok := stmt.Expression.(*ast.Identifier)
+			if !ok {
+				t.Fatalf("stmt.Expression is not ast.Identifier. got=%T for input %q", stmt.Expression, tt.input)
+			}
+
+			if ident.Value != tt.expectedVal {
+				t.Errorf("Identifier value not %q. got=%q", tt.expectedVal, ident.Value)
+			}
+		})
+	}
+}
+
 func TestRealLiteralExpression(t *testing.T) {
 	tests := []struct {
 		input         string
