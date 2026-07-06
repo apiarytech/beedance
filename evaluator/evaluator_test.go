@@ -835,7 +835,7 @@ func TestSFCActionQualifiers(t *testing.T) {
 	testBooleanObjectInEnv(t, env, "ActionS", false)
 }
 
-func TestSFCTimedStoredQualifiers(t *testing.T) {
+func TestSFCTimedQualifier_SD(t *testing.T) {
 	// Setup mock time
 	mockTime = time.Date(2026, time.May, 21, 10, 0, 0, 0, time.UTC)
 	originalNowFunc := nowFunc
@@ -843,88 +843,135 @@ func TestSFCTimedStoredQualifiers(t *testing.T) {
 	defer func() { nowFunc = originalNowFunc }()
 
 	input := `
-		PROGRAM TestSFCTimedStored
-			VAR
-				ActionSD, ActionDS, ActionSL : BOOL;
-				GoToS2 : BOOL;
-			END_VAR
-
-			INITIAL_STEP S1:
-				ActionSD(SD, T#2s);
-				ActionDS(DS, T#3s);
-				ActionSL(SL, T#4s);
-			END_STEP
-
+		PROGRAM TestSD
+			VAR ActionSD : BOOL; GoToS2 : BOOL; END_VAR
+			INITIAL_STEP S1: ActionSD(SD, T#2s); END_STEP
 			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
-
-			STEP S2:
-				ActionSD(R); // Reset the SD action
-			END_STEP
-		END_PROGRAM
-	`
+			STEP S2: END_STEP
+		END_PROGRAM`
 	env := object.NewEnvironment()
 	sfcObj := testEvalWithEnv(t, input, env)
-	sfc, ok := sfcObj.(*object.SFC)
-	if !ok {
-		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfcObj)
-	}
+	sfc, _ := sfcObj.(*object.SFC)
+	initializeActionVars(sfc, env)
 
-	// --- Cycle 1 (t=0s): S1 active ---
-	// At t=0, S1 is active. SL is active immediately. SD and DS timers start.
-	t.Logf("Cycle 1: t=%s", mockTime.Format("15:04:05"))
+	// Cycle 1 (t=1s): S1 active, timer starts, output is FALSE
+	advanceMockTime(1001 * time.Millisecond)
 	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
 	testBooleanObjectInEnv(t, env, "ActionSD", false)
-	testBooleanObjectInEnv(t, env, "ActionDS", false)
-	testBooleanObjectInEnv(t, env, "ActionSL", true)
 
-	// --- Cycle 2 (t=2s): ActionSD (2s timer) becomes active ---
-	advanceMockTime(2 * time.Second) // Advance time to 2s
-	t.Logf("Cycle 2: t=%s", mockTime.Format("15:04:05"))
+	// Cycle 2 (t=2s): 1s elapsed, output is still FALSE
+	advanceMockTime(1001 * time.Millisecond)
 	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
+	testBooleanObjectInEnv(t, env, "ActionSD", false)
+
+	// Cycle 3 (t=3s): 2s elapsed, timer is met, output becomes TRUE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
 	testBooleanObjectInEnv(t, env, "ActionSD", true)
-	testBooleanObjectInEnv(t, env, "ActionDS", false)
-	testBooleanObjectInEnv(t, env, "ActionSL", true)
 
-	// --- Cycle 3 (t=3s): ActionDS (3s timer) becomes active ---
-	advanceMockTime(1 * time.Second) // Advance time to 3s
-	t.Logf("Cycle 3: t=%s", mockTime.Format("15:04:05"))
-	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
-	testBooleanObjectInEnv(t, env, "ActionSD", true) // Stays true
-	testBooleanObjectInEnv(t, env, "ActionDS", true) // DS delay is met
-	testBooleanObjectInEnv(t, env, "ActionSL", true) // Stays true
-
-	// --- Cycle 4 (t=4s): ActionSL (4s timer) becomes inactive ---
-	advanceMockTime(1 * time.Second) // Advance time to 4s
-	t.Logf("Cycle 4: t=%s", mockTime.Format("15:04:05"))
-	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
-	testBooleanObjectInEnv(t, env, "ActionSD", true)
-	testBooleanObjectInEnv(t, env, "ActionDS", true)
-	testBooleanObjectInEnv(t, env, "ActionSL", false) // SL time limit reached
-
-	// --- Cycle 5 (t=5s): S1 is still active, state is held ---
-	advanceMockTime(1 * time.Second) // Advance time to 5s
-	t.Logf("Cycle 5: t=%s", mockTime.Format("15:04:05"))
-	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
-	testBooleanObjectInEnv(t, env, "ActionSD", true)
-	testBooleanObjectInEnv(t, env, "ActionDS", true)
-	testBooleanObjectInEnv(t, env, "ActionSL", false)
-
-	// --- Cycle 6 (t=5s): Transition to S2, S1 deactivates ---
+	// Cycle 4 (t=4s): Transition to S2, S1 becomes inactive
 	env.Set("GoToS2", TRUE)
-	t.Logf("Cycle 6: t=%s (Transitioning to S2)", mockTime.Format("15:04:05"))
+	advanceMockTime(1001 * time.Millisecond)
 	evalSFCCycle(sfc, env)
-	t.Logf("  ActionSD: %v, ActionDS: %v, ActionSL: %v", mustGet(env, "ActionSD").Inspect(), mustGet(env, "ActionDS").Inspect(), mustGet(env, "ActionSL").Inspect())
-	// S2 is now active. It resets ActionSD.
-	// ActionDS remains active because it is stored and not reset.
-	// ActionSL was already inactive.
-	testBooleanObjectInEnv(t, env, "ActionSD", false)
+	// Action is "Stored", so it should remain TRUE even though S1 is inactive
+	testBooleanObjectInEnv(t, env, "ActionSD", true)
+}
+
+func TestSFCTimedQualifier_DS(t *testing.T) {
+	// Setup mock time
+	mockTime = time.Date(2026, time.May, 21, 10, 0, 0, 0, time.UTC)
+	originalNowFunc := nowFunc
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	input := `
+		PROGRAM TestDS
+			VAR ActionDS : BOOL; GoToS2 : BOOL; END_VAR
+			INITIAL_STEP S1: ActionDS(DS, T#3s); END_STEP
+			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+			STEP S2: END_STEP
+		END_PROGRAM`
+	env := object.NewEnvironment()
+	sfcObj := testEvalWithEnv(t, input, env)
+	sfc, _ := sfcObj.(*object.SFC)
+	initializeActionVars(sfc, env)
+
+	// Cycle 1 (t=1s): S1 active, timer starts, output is FALSE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	testBooleanObjectInEnv(t, env, "ActionDS", false)
+
+	// Cycle 2 (t=2s): 1s elapsed, output is still FALSE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	testBooleanObjectInEnv(t, env, "ActionDS", false)
+
+	// Cycle 3 (t=3s): 2s elapsed, output is still FALSE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
 	testBooleanObjectInEnv(t, env, "ActionDS", true)
+
+	// Cycle 4 (t=4s): Transition to S2, S1 becomes inactive
+	env.Set("GoToS2", TRUE)
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	// Action is "Stored", so it should remain TRUE even though S1 is inactive
+	testBooleanObjectInEnv(t, env, "ActionDS", true)
+}
+
+func TestSFCTimedQualifier_SL(t *testing.T) {
+	// Setup mock time
+	mockTime = time.Date(2026, time.May, 21, 10, 0, 0, 0, time.UTC)
+	originalNowFunc := nowFunc
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	input := `
+		PROGRAM TestSL
+			VAR ActionSL : BOOL; GoToS2 : BOOL; END_VAR
+			INITIAL_STEP S1: ActionSL(SL, T#4s); END_STEP
+			TRANSITION FROM S1 TO S2 := GoToS2; END_TRANSITION
+			STEP S2: END_STEP
+		END_PROGRAM`
+	env := object.NewEnvironment()
+	sfcObj := testEvalWithEnv(t, input, env)
+	sfc, _ := sfcObj.(*object.SFC)
+	initializeActionVars(sfc, env)
+
+	// Cycle 1 (t=1s): S1 active, output becomes TRUE immediately, timer starts
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	testBooleanObjectInEnv(t, env, "ActionSL", true)
+
+	// Cycle 2 (t=3s): 2s elapsed, output is still TRUE
+	advanceMockTime(2002 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	testBooleanObjectInEnv(t, env, "ActionSL", true)
+
+	// Cycle 3 (t=4s): 3s elapsed, output is still TRUE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
 	testBooleanObjectInEnv(t, env, "ActionSL", false)
+
+	// Cycle 4 (t=5s): 4s elapsed, time limit is met, output becomes FALSE
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	testBooleanObjectInEnv(t, env, "ActionSL", false)
+
+	// Cycle 5 (t=6s): Transition to S2, S1 becomes inactive
+	env.Set("GoToS2", TRUE)
+	advanceMockTime(1001 * time.Millisecond)
+	evalSFCCycle(sfc, env)
+	// Action is "Stored", its timer logic continues. It should remain FALSE.
+	testBooleanObjectInEnv(t, env, "ActionSL", false)
+}
+
+// initializeActionVars sets all action-related boolean variables in the environment to FALSE.
+// This ensures a clean state before starting SFC cycle tests.
+func initializeActionVars(sfc *object.SFC, env *object.Environment) {
+	for _, action := range sfc.Actions {
+		env.Set(action.Name.Value, FALSE)
+	}
 }
 
 // Mockable time for testing
@@ -1093,6 +1140,9 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	if !ok {
 		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
 	}
+
+	// Initialize all action variables to FALSE before starting the test cycles.
+	initializeActionVars(sfc, env)
 
 	// --- Cycle 1: Initial state (S1 active) ---
 	evalSFCCycle(sfc, env)

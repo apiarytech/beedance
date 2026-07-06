@@ -534,34 +534,44 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 	// cycle, even if their controlling step is not active, to correctly process timers.
 	// We use action.Qualifier, which stores the qualifier from the last active cycle.
 	switch activeQualifier {
-	case "D":
-		if isStepActive { // Timer only starts/runs when step is active
-			if action.TimerStart.IsZero() {
-				action.TimerStart = nowFunc()
-			}
-			action.IsActive = time.Since(action.TimerStart) >= action.Duration
-		}
-	case "L":
-		if isStepActive { // Timer only starts/runs when step is active
-			if action.TimerStart.IsZero() {
-				action.TimerStart = nowFunc()
-			}
-			action.IsActive = time.Since(action.TimerStart) < action.Duration
-		}
 	case "SD", "DS":
 		if isStepActive && action.TimerStart.IsZero() {
+			// On first active scan, start the timer but keep the action inactive.
 			action.TimerStart = nowFunc()
-		}
-		// For stored timers, the check continues even if the step is inactive.
-		if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration {
+			action.IsActive = false
+		} else if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration && !action.IsActive {
+			// Only set to true if the timer has expired; otherwise, don't touch the state.
+			// This check runs on every cycle for stored timers.
 			action.IsActive = true
 		}
 	case "SL":
 		if isStepActive && action.TimerStart.IsZero() {
+			// On first active scan, start the timer and make the action active.
 			action.TimerStart = nowFunc()
+			action.IsActive = true
+		} else if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration && action.IsActive {
+			// For subsequent cycles (even if step is inactive), the state is determined by the timer.
+			// This ensures it turns off correctly and stays off.
+			action.IsActive = false
 		}
-		// The time limit check must continue even if the step is inactive.
-		action.IsActive = !action.TimerStart.IsZero() && time.Since(action.TimerStart) < action.Duration
+	case "D": // Non-stored delayed
+		if isStepActive {
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = time.Since(action.TimerStart) >= action.Duration
+		} else {
+			action.IsActive = false // Reset when step is inactive
+		}
+	case "L": // Non-stored limited
+		if isStepActive {
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = time.Since(action.TimerStart) < action.Duration
+		} else {
+			action.IsActive = false // Reset when step is inactive
+		}
 	}
 
 	// The action is not influenced by any active step in this cycle.
@@ -570,12 +580,12 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 	// The bug was here: `qualifier` is 'N' by default when no step is active, so we cannot
 	// use it to decide if a stored action should retain its state. Instead, we must
 	// check the action's qualifier that was determined when it *was* active.
-	if !isStepActive {
+	if !isStepActive { // cspell:disable-line
 		// If the action's last active qualifier was not a "Set" or "Stored" type,
 		// it should become inactive when its controlling step deactivates.
 		if action.Qualifier != "S" && action.Qualifier != "SD" && action.Qualifier != "SL" && action.Qualifier != "DS" {
 			action.IsActive = false
-		}
+		} // cspell:disable-line
 		// Reset timers for non-stored timed actions when their steps deactivate.
 		if action.Qualifier == "D" || action.Qualifier == "L" {
 			action.TimerStart = time.Time{}

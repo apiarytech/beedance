@@ -41,7 +41,7 @@ func TestArrayBoundFunctions(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			switch expected := tt.expected.(type) {
 			case int64:
-				testIntegerObject(t, evaluated, expected)
+				testIntegerObject(t, evaluated, tt.input, expected)
 			case string:
 				testErrorObjectContains(t, evaluated, expected)
 			}
