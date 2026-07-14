@@ -766,6 +766,8 @@ var builtins = map[string]*object.Builtin{
 			return &object.LInt{Value: int64(len(arg.Elements))}
 		case *object.String:
 			return &object.LInt{Value: int64(len(arg.Value))}
+		case *object.WString:
+			return &object.LInt{Value: int64(len(arg.Value))}
 		default:
 			return newBuiltinError("argument to `LEN` not supported, got %s", args[0].Type())
 		}

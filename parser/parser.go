@@ -127,6 +127,16 @@ func New(l *lexer.Lexer) *Parser {
 	// We treat them like identifiers at this stage.
 	p.registerPrefix(token.TIME, p.parseDataTypeKeyword)
 	p.registerPrefix(token.DATE, p.parseDataTypeKeyword)
+	// Register keywords that are also infix operators but can be used as
+	// function calls (e.g., "MOD(a, b)"). When they appear in a prefix position,
+	// they should be parsed as identifiers to enable function call parsing.
+	p.registerPrefix(token.MOD, p.parseIdentifier)
+	p.registerPrefix(token.AND, p.parseIdentifier)
+	p.registerPrefix(token.OR, p.parseIdentifier)
+	p.registerPrefix(token.XOR, p.parseIdentifier)
+	p.registerPrefix(token.NAND, p.parseIdentifier)
+	p.registerPrefix(token.NOR, p.parseIdentifier)
+
 	p.registerPrefix(token.TIME_OF_DAY, p.parseDataTypeKeyword)
 	p.registerPrefix(token.DATE_AND_TIME, p.parseDataTypeKeyword)
 
@@ -136,7 +146,9 @@ func New(l *lexer.Lexer) *Parser {
 
 	// Grouped Expressions
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
-	p.registerPrefix(token.FUNCTION, p.parseFunctionLiteral)
+	// The non-standard anonymous function syntax from Monkey is now triggered by CPT.
+	// This avoids ambiguity with the standard FUNCTION keyword.
+	// p.registerPrefix(token.CPT, p.parseFunctionLiteral)
 	p.registerPrefix(token.MACRO, p.parseMacroLiteral)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(token.LBRACE, p.parseHashLiteral)

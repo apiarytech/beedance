@@ -524,105 +524,80 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 func evaluateAction(action *object.Action, env *object.Environment) {
 	qualifier, isStepActive := getHighestPriorityActiveQualifier(action, env)
 
-	// Use the current qualifier if a step is active, otherwise use the stored one.
-	activeQualifier := action.Qualifier
+	// --- Case 1: The controlling step is ACTIVE ---
 	if isStepActive {
-		activeQualifier = qualifier
+		// If the qualifier has changed from a previous active step, reset timers/counters.
+		if qualifier != action.Qualifier {
+			action.TimerStart = time.Time{}
+			action.ActivationCount = 0
+		}
+		// The current qualifier is now the action's controlling qualifier.
+		action.Qualifier = qualifier
+
+		switch qualifier {
+		case "N", "S":
+			action.IsActive = true
+		case "R":
+			action.IsActive = false
+			action.TimerStart = time.Time{} // Reset timer on R
+		case "P":
+			action.IsActive = (action.ActivationCount == 0)
+			action.ActivationCount++
+		case "D": // Non-stored delayed
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = nowFunc().Sub(action.TimerStart) >= action.Duration
+		case "L": // Non-stored limited
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+			}
+			action.IsActive = nowFunc().Sub(action.TimerStart) < action.Duration
+		case "SD", "DS": // Stored delayed
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+				action.IsActive = false // Stays false until timer elapses
+			} else {
+				// Only turn it on if timer is met, don't turn it off.
+				if nowFunc().Sub(action.TimerStart) >= action.Duration {
+					action.IsActive = true
+				}
+			}
+		case "SL": // Stored limited
+			if action.TimerStart.IsZero() {
+				action.TimerStart = nowFunc()
+				action.IsActive = true // Active immediately
+			}
+			if !action.TimerStart.IsZero() && nowFunc().Sub(action.TimerStart) >= action.Duration {
+				action.IsActive = false
+			}
+		}
+		return // Done with active step logic.
 	}
 
-	// First, handle all timed qualifiers. Their logic must be evaluated on every
-	// cycle, even if their controlling step is not active, to correctly process timers.
-	// We use action.Qualifier, which stores the qualifier from the last active cycle.
-	switch activeQualifier {
+	// --- Case 2: The controlling step is NOT ACTIVE ---
+	// The action's behavior now depends on its stored qualifier from when it was last active.
+	switch action.Qualifier {
+	case "S":
+		// Stored, remains active.
 	case "SD", "DS":
-		if isStepActive && action.TimerStart.IsZero() {
-			// On first active scan, start the timer but keep the action inactive.
-			action.TimerStart = nowFunc()
-			action.IsActive = false
-		} else if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration && !action.IsActive {
-			// Only set to true if the timer has expired; otherwise, don't touch the state.
-			// This check runs on every cycle for stored timers.
+		// Stored delayed, timer continues.
+		if !action.TimerStart.IsZero() && nowFunc().Sub(action.TimerStart) >= action.Duration && !action.IsActive {
 			action.IsActive = true
 		}
 	case "SL":
-		if isStepActive && action.TimerStart.IsZero() {
-			// On first active scan, start the timer and make the action active.
-			action.TimerStart = nowFunc()
-			action.IsActive = true
-		} else if !action.TimerStart.IsZero() && time.Since(action.TimerStart) >= action.Duration && action.IsActive {
-			// For subsequent cycles (even if step is inactive), the state is determined by the timer.
-			// This ensures it turns off correctly and stays off.
+		// Stored limited, timer continues.
+		if !action.TimerStart.IsZero() && nowFunc().Sub(action.TimerStart) >= action.Duration {
 			action.IsActive = false
 		}
-	case "D": // Non-stored delayed
-		if isStepActive {
-			if action.TimerStart.IsZero() {
-				action.TimerStart = nowFunc()
-			}
-			action.IsActive = time.Since(action.TimerStart) >= action.Duration
-		} else {
-			action.IsActive = false // Reset when step is inactive
-		}
-	case "L": // Non-stored limited
-		if isStepActive {
-			if action.TimerStart.IsZero() {
-				action.TimerStart = nowFunc()
-			}
-			action.IsActive = time.Since(action.TimerStart) < action.Duration
-		} else {
-			action.IsActive = false // Reset when step is inactive
-		}
-	}
-
-	// The action is not influenced by any active step in this cycle.
-	// For non-stored actions, this means they become inactive.
-	// For stored actions, they maintain their state unless reset by another step.
-	// The bug was here: `qualifier` is 'N' by default when no step is active, so we cannot
-	// use it to decide if a stored action should retain its state. Instead, we must
-	// check the action's qualifier that was determined when it *was* active.
-	if !isStepActive { // cspell:disable-line
-		// If the action's last active qualifier was not a "Set" or "Stored" type,
-		// it should become inactive when its controlling step deactivates.
-		if action.Qualifier != "S" && action.Qualifier != "SD" && action.Qualifier != "SL" && action.Qualifier != "DS" {
-			action.IsActive = false
-		} // cspell:disable-line
-		// Reset timers for non-stored timed actions when their steps deactivate.
-		if action.Qualifier == "D" || action.Qualifier == "L" {
-			action.TimerStart = time.Time{}
-		}
-		if qualifier == "P" {
-			action.ActivationCount = 0
-		}
-		return
-	}
-	// If we are here, the step is active.
-	// If the current qualifier is different from the last active one, it might mean
-	// a different step with a different qualifier took over. Reset timers.
-	if qualifier != action.Qualifier {
-		action.TimerStart = time.Time{}
-	}
-
-	// If a step is active, this qualifier is now the action's current, controlling qualifier.
-	action.Qualifier = qualifier
-
-	// Apply action control logic based on the highest priority active qualifier.
-	switch qualifier {
-	case "R":
+	default:
+		// All other qualifiers are non-stored (N, P, D, L, R). They become inactive.
 		action.IsActive = false
-		// Resetting a stored action should also reset its timer.
+	}
+
+	// Reset timers for non-stored timed actions when their step deactivates.
+	if action.Qualifier == "D" || action.Qualifier == "L" {
 		action.TimerStart = time.Time{}
-	case "S":
-		action.IsActive = true
-	case "N":
-		action.IsActive = true
-	case "P":
-		// Activate only on the first scan cycle that the step is active.
-		if action.ActivationCount == 0 {
-			action.IsActive = true
-		} else {
-			action.IsActive = false
-		}
-		action.ActivationCount++
 	}
 }
 
@@ -1164,6 +1139,8 @@ func evalInfixExpression(
 		return evalNumericInfixExpression(node, left, right)
 	case left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ:
 		return evalBooleanInfixExpression(node, left, right)
+	case left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ:
+		return evalWStringInfixExpression(node, left, right)
 	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ:
 		return evalStringInfixExpression(node, left, right)
 	case left.Type() == object.BITSTRING_OBJ && right.Type() == object.BITSTRING_OBJ: // New: BitString operations
@@ -1902,6 +1879,19 @@ func evalRepeatStatement(rs *ast.RepeatStatement, env *object.Environment) objec
 	return NULL
 }
 
+func evalWStringInfixExpression(
+	node *ast.InfixExpression,
+	left, right object.Object,
+) object.Object {
+	if node.Operator != "+" {
+		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
+	}
+
+	leftVal := left.(*object.WString).Value
+	rightVal := right.(*object.WString).Value
+	return &object.WString{Value: leftVal + rightVal}
+}
+
 func evalStringInfixExpression(
 	node *ast.InfixExpression,
 	left, right object.Object,
@@ -2147,9 +2137,14 @@ func isTruthy(obj object.Object) bool {
 }
 
 func newError(node ast.Node, format string, a ...interface{}) *object.Error {
-	line, col := node.Pos()
+	if node != nil {
+		line, col := node.Pos()
+		return &object.Error{
+			Message: fmt.Sprintf("ERROR (%d:%d): %s", line, col, fmt.Sprintf(format, a...)),
+		}
+	}
 	return &object.Error{
-		Message: fmt.Sprintf("ERROR (%d:%d): %s", line, col, fmt.Sprintf(format, a...)),
+		Message: fmt.Sprintf("ERROR: %s", fmt.Sprintf(format, a...)),
 	}
 }
 
@@ -2205,6 +2200,13 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 	case *object.Function:
 		// Create a new environment for the function's execution, enclosed by the function's definition environment.
 		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+		if fn.Name != nil {
+			// Pre-declare the function name as a variable in the local scope.
+			// This prevents assignments to the function name (which sets the return value)
+			// from overwriting the function definition in the outer scope.
+			extendedEnv.Set(fn.Name.Value, NULL)
+		}
+
 		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, extendedEnv)
 		if err != nil {
 			return err
@@ -2260,6 +2262,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if !ok {
 			// A function must always return a value. If not explicitly set, it's an error or has a default.
 			// For simplicity, we'll return NULL, but a stricter implementation might error.
+			// With the change above, this will now correctly retrieve the initial NULL value if no assignment was made.
+			returnValue, _ = extendedEnv.Get(fn.Name.Value)
 		}
 		return returnValue
 
@@ -2475,10 +2479,13 @@ func unwrapReturnValue(obj object.Object) object.Object {
 }
 
 func evalIndexExpression(node ast.Node, left, index object.Object) object.Object {
-	switch {
-	case left.Type() == object.ARRAY_OBJ && index.Type() == object.LINT_OBJ:
-		return evalArrayIndexExpression(left, index)
-	case left.Type() == object.HASH_OBJ:
+	switch left.Type() {
+	case object.ARRAY_OBJ:
+		if _, _, ok := getIntegerObjectValue(index); ok {
+			return evalArrayIndexExpression(left, index)
+		}
+		return newError(node, "array index must be an integer, got %s", index.Type())
+	case object.HASH_OBJ:
 		return evalHashIndexExpression(node, left, index)
 	default:
 		return newError(node, "index operator not supported: %s", left.Type())
@@ -2487,7 +2494,7 @@ func evalIndexExpression(node ast.Node, left, index object.Object) object.Object
 
 func evalArrayIndexExpression(array, index object.Object) object.Object {
 	arrayObject := array.(*object.Array)
-	idx := index.(*object.LInt).Value
+	idx, _, _ := getIntegerObjectValue(index)
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
