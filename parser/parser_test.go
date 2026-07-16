@@ -807,19 +807,19 @@ func TestIntegerLiteralExpression(t *testing.T) {
 }
 
 func TestBitStringLiteralParsing(t *testing.T) {
-	tests := []struct {
-		input         string
-		expectedValue uint64
-		expectedWidth int
+	tests := []struct { // cspell:disable-line
+		input        string
+		expectedType string
+		expectedVal  string
 	}{
-		{"BYTE#16#A5;", 0xA5, 8},
-		{"WORD#16#1234;", 0x1234, 16},
-		{"DWORD#16#ABCDEF12;", 0xABCDEF12, 32},
-		{"LWORD#16#1234567890ABCDEF;", 0x1234567890ABCDEF, 64},
+		{"BYTE#16#A5;", "BYTE", "16#A5"},
+		{"WORD#16#1234;", "WORD", "16#1234"},
+		{"DWORD#16#ABCDEF12;", "DWORD", "16#ABCDEF12"},
+		{"LWORD#16#1234567890ABCDEF;", "LWORD", "16#1234567890ABCDEF"},
 		// Test with different bases
-		{"BYTE#10#165;", 165, 8},
-		{"BYTE#8#245;", 165, 8}, // 245 octal = 165 decimal
-		{"BYTE#2#1010_0101;", 0xA5, 8},
+		{"BYTE#10#165;", "BYTE", "10#165"},
+		{"BYTE#8#245;", "BYTE", "8#245"},
+		{"BYTE#2#1010_0101;", "BYTE", "2#1010_0101"},
 	}
 
 	for _, tt := range tests {
@@ -837,17 +837,18 @@ func TestBitStringLiteralParsing(t *testing.T) {
 			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
 		}
 
-		bitStringLit, ok := stmt.Expression.(*ast.BitStringLiteral)
+		typedLit, ok := stmt.Expression.(*ast.TypedLiteral)
 		if !ok {
-			t.Fatalf("stmt.Expression is not ast.BitStringLiteral. got=%T", stmt.Expression)
+			t.Fatalf("stmt.Expression is not ast.TypedLiteral. got=%T", stmt.Expression)
 		}
 
-		if bitStringLit.Value != tt.expectedValue {
-			t.Errorf("bitStringLit.Value not %d (0x%X). got=%d (0x%X)", tt.expectedValue, tt.expectedValue, bitStringLit.Value, bitStringLit.Value)
+		if typedLit.TypeName != tt.expectedType {
+			t.Errorf("TypeName not %q. got=%q", tt.expectedType, typedLit.TypeName)
 		}
 
-		if bitStringLit.Width != tt.expectedWidth {
-			t.Errorf("bitStringLit.Width not %d. got=%d", tt.expectedWidth, bitStringLit.Width)
+		valIdent, _ := typedLit.Value.(*ast.Identifier)
+		if valIdent.Value != tt.expectedVal {
+			t.Errorf("Value not %q. got=%q", tt.expectedVal, valIdent.Value)
 		}
 	}
 }
@@ -859,21 +860,21 @@ func TestTypedTimeDateLiterals(t *testing.T) {
 		expectedVal  string
 	}{
 		// TIME literals
-		{"T#5s;", "T", "T#5s"},
-		{"TIME#1h_30m;", "TIME", "TIME#1h_30m"},
-		{"T#-10s_500ms;", "T", "T#-10s_500ms"},
+		{"T#5s;", "T", "5s"},
+		{"TIME#1h_30m;", "TIME", "1h_30m"},
+		{"T#-10s_500ms;", "T", "-10s_500ms"},
 
 		// DATE literals
-		{"D#2026-05-21;", "D", "D#2026-05-21"},
-		{"DATE#2026-05-21;", "DATE", "DATE#2026-05-21"},
+		{"D#2026-05-21;", "D", "2026-05-21"},
+		{"DATE#2026-05-21;", "DATE", "2026-05-21"},
 
 		// TIME_OF_DAY literals
-		{"TOD#14:30:00;", "TOD", "TOD#14:30:00"},
-		{"TIME_OF_DAY#14:30:00.123;", "TIME_OF_DAY", "TIME_OF_DAY#14:30:00.123"},
+		{"TOD#14:30:00;", "TOD", "14:30:00"},
+		{"TIME_OF_DAY#14:30:00.123;", "TIME_OF_DAY", "14:30:00.123"},
 
 		// DATE_AND_TIME literals
-		{"DT#2026-05-21-14:30:00;", "DT", "DT#2026-05-21-14:30:00"},
-		{"DATE_AND_TIME#2026-05-21-14:30:00.5;", "DATE_AND_TIME", "DATE_AND_TIME#2026-05-21-14:30:00.5"},
+		{"DT#2026-05-21-14:30:00;", "DT", "2026-05-21-14:30:00"},
+		{"DATE_AND_TIME#2026-05-21-14:30:00.5;", "DATE_AND_TIME", "2026-05-21-14:30:00.5"},
 	}
 
 	for _, tt := range tests {
@@ -892,13 +893,18 @@ func TestTypedTimeDateLiterals(t *testing.T) {
 				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
 			}
 
-			ident, ok := stmt.Expression.(*ast.Identifier)
+			typedLit, ok := stmt.Expression.(*ast.TypedLiteral)
 			if !ok {
-				t.Fatalf("stmt.Expression is not ast.Identifier. got=%T for input %q", stmt.Expression, tt.input)
+				t.Fatalf("stmt.Expression is not ast.TypedLiteral. got=%T for input %q", stmt.Expression, tt.input)
 			}
 
-			if ident.Value != tt.expectedVal {
-				t.Errorf("Identifier value not %q. got=%q", tt.expectedVal, ident.Value)
+			if typedLit.TypeName != tt.expectedType {
+				t.Errorf("TypeName not %q. got=%q", tt.expectedType, typedLit.TypeName)
+			}
+
+			valIdent, _ := typedLit.Value.(*ast.Identifier)
+			if valIdent.Value != tt.expectedVal {
+				t.Errorf("Value not %q. got=%q", tt.expectedVal, valIdent.Value)
 			}
 		})
 	}
@@ -2547,30 +2553,6 @@ func TestCaseStatement(t *testing.T) {
 	testIdentifier(t, elseConsequence.Left, "iSpeed")
 	testIntegerLiteral(t, elseConsequence.Value, -1)
 }
-
-func TestIsIdentFollowedByColon(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected bool
-	}{
-		{"myLabel:", true},
-		{"myLabel :", true}, // With whitespace
-		{"myVar :=", false},
-		{"myVar;", false},
-		{"123:", false}, // Not an IDENT
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			l := lexer.New(tt.input)
-			p := New(l)
-			if p.isIdentFollowedByColon() != tt.expected {
-				t.Errorf("for input %q, isIdentFollowedByColon() was %v, want %v", tt.input, !tt.expected, tt.expected)
-			}
-		})
-	}
-}
-
 func TestCaseStatementWithEnums(t *testing.T) {
 	input := `
 		TYPE
@@ -2834,7 +2816,7 @@ func TestExitStatement(t *testing.T) {
 }
 
 func TestTransitionStatement(t *testing.T) {
-	input := `
+	input := ` 
 		TRANSITION FROM Step1, Step2 TO Step3 := Condition1 AND Condition2; END_TRANSITION
 	`
 

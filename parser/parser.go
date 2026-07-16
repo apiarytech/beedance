@@ -113,16 +113,17 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.DIRECT_VAR, p.parseDirectVariable)
 
 	// Numeric literals (which can also be part of a typed literal)
-	p.registerPrefix(token.INT, p.parseIntegerLiteral)
-	p.registerPrefix(token.REAL, p.parseRealLiteral)
-	p.registerPrefix(token.SINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.DINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.LINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.USINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.UINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.UDINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.ULINT, p.parseIntegerLiteral)
-	p.registerPrefix(token.LREAL, p.parseRealLiteral)
+	p.registerPrefix(token.INT, p.parseIntOrType)
+	p.registerPrefix(token.REAL, p.parseRealOrType)
+	p.registerPrefix(token.SINT, p.parseIntOrType)
+	p.registerPrefix(token.DINT, p.parseIntOrType)
+	p.registerPrefix(token.LINT, p.parseIntOrType)
+	p.registerPrefix(token.USINT, p.parseIntOrType)
+	p.registerPrefix(token.UINT, p.parseIntOrType)
+	p.registerPrefix(token.UDINT, p.parseIntOrType)
+	p.registerPrefix(token.ULINT, p.parseIntOrType)
+	p.registerPrefix(token.LREAL, p.parseRealOrType)
+	p.registerPrefix(token.BOOL, p.parseIdentifier)
 	// Time and Date keywords can start a typed literal expression (e.g., T#5s).
 	// We treat them like identifiers at this stage.
 	p.registerPrefix(token.TIME, p.parseDataTypeKeyword)
@@ -136,7 +137,18 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.XOR, p.parseIdentifier)
 	p.registerPrefix(token.NAND, p.parseIdentifier)
 	p.registerPrefix(token.NOR, p.parseIdentifier)
+	p.registerPrefix(token.GT, p.parseIdentifier)
+	p.registerPrefix(token.GE, p.parseIdentifier)
+	p.registerPrefix(token.EQ, p.parseIdentifier)
+	p.registerPrefix(token.LE, p.parseIdentifier)
+	p.registerPrefix(token.LT, p.parseIdentifier)
+	p.registerPrefix(token.NEQ, p.parseIdentifier)
+	p.registerPrefix(token.MIN, p.parseIdentifier)
+	p.registerPrefix(token.MAX, p.parseIdentifier)
+	p.registerPrefix(token.MOVE, p.parseIdentifier)
 
+	p.registerPrefix(token.S, p.parseIdentifier)
+	p.registerPrefix(token.R, p.parseIdentifier)
 	p.registerPrefix(token.TIME_OF_DAY, p.parseDataTypeKeyword)
 	p.registerPrefix(token.DATE_AND_TIME, p.parseDataTypeKeyword)
 
@@ -154,10 +166,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.LBRACE, p.parseHashLiteral)
 	p.registerPrefix(token.STRUCT, p.parseStructDefinition)
 	// Bit-string literals
-	p.registerPrefix(token.BYTE, p.parseBitStringLiteral)
-	p.registerPrefix(token.WORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.DWORD, p.parseBitStringLiteral)
-	p.registerPrefix(token.LWORD, p.parseBitStringLiteral)
+	p.registerPrefix(token.BYTE, p.parseIdentifier)
+	p.registerPrefix(token.WORD, p.parseIdentifier)
+	p.registerPrefix(token.DWORD, p.parseIdentifier)
+	p.registerPrefix(token.LWORD, p.parseIdentifier)
 
 	p.infixParseFns = make(map[token.TokenType]infixParseFn)
 	p.registerInfix(token.PLUS, p.parseInfixExpression)
@@ -190,7 +202,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
-
+	p.registerInfix(token.HASH, p.parseTypedLiteralExpression)
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
 	p.nextToken()
@@ -222,12 +234,6 @@ func (p *Parser) nextToken() {
 	}
 }
 
-func (p *Parser) isIdentFollowedByColon() bool {
-	// This helper checks if the current token is an identifier
-	// and is immediately followed by a colon, like a label.
-	return p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)
-}
-
 func (p *Parser) curTokenIs(t token.TokenType) bool {
 	return p.curToken.Type == t
 }
@@ -255,43 +261,6 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 		// }
 		return false
 	}
-}
-
-// parseDateTimeIdentifier consumes tokens to build a single identifier for date/time literals.
-// It handles constructs like `5s`, `5m_10s`, `2026-05-21`, and `14:30:00.5`.
-func (p *Parser) parseDateTimeIdentifier() ast.Expression {
-	defer untrace(trace("parseDateTimeIdentifier"))
-	startToken := p.curToken
-	var builder strings.Builder
-
-	// Consume tokens that can be part of a date/time literal value.
-	// This loop continues as long as the tokens are numbers, identifiers (for units like 's', 'ms'),
-	// or separators like '-', ':', and '.'.
-	for {
-		if p.curTokenIs(token.INT) || p.curTokenIs(token.REAL) || p.curTokenIs(token.IDENT) ||
-			p.curTokenIs(token.MINUS) || p.curTokenIs(token.COLON) || p.curTokenIs(token.DOT) {
-			builder.WriteString(p.curToken.Literal)
-
-			// Peek ahead to see if the next token is also part of the literal.
-			if !(p.peekTokenIs(token.INT) || p.peekTokenIs(token.REAL) || p.peekTokenIs(token.IDENT) ||
-				p.peekTokenIs(token.MINUS) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.DOT)) {
-				break
-			}
-			p.nextToken()
-		} else {
-			break // Not a valid date/time token, so we stop.
-		}
-	}
-
-	combinedLiteral := builder.String()
-	combinedToken := token.Token{
-		Type:    token.IDENT,
-		Literal: combinedLiteral,
-		Row:     startToken.Row,
-		Column:  startToken.Column,
-		Pos:     startToken.Pos,
-	}
-	return &ast.Identifier{Token: combinedToken, Value: combinedLiteral}
 }
 
 func (p *Parser) Errors() []string {
@@ -1109,8 +1078,18 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 }
 
 func (p *Parser) isDataTypeToken(tok token.Token) bool {
-	isBuiltIn := (tok.Type >= token.BOOL && tok.Type <= token.STRUCT) || tok.Type == token.STRING || tok.Type == token.WSTRING
-	return isBuiltIn || tok.Type == token.IDENT
+	switch tok.Type {
+	case token.BOOL, token.SINT, token.INT, token.DINT, token.LINT,
+		token.USINT, token.UINT, token.UDINT, token.ULINT,
+		token.REAL, token.LREAL, token.STRING, token.WSTRING,
+		token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
+		token.BYTE, token.WORD, token.DWORD, token.LWORD,
+		token.ARRAY, token.STRUCT,
+		token.IDENT: // User-defined types are identifiers
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
@@ -1166,24 +1145,8 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) parseIdentifier() ast.Expression {
 	defer untrace(trace("parseIdentifier"))
-	// Check if this identifier is the start of a user-defined typed literal (e.g., "COLOR#RED").
-	// This is a more direct way of parsing this construct than relying on the generic infix parser,
-	// which helps avoid conflicts with keyword-based typed literals (e.g., T#5s).
-	if p.peekTokenIs(token.HASH) {
-		typeIdent := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-		p.nextToken() // Consume the type identifier, curToken is now '#'
-		p.nextToken() // Consume '#', curToken is now the value identifier (e.g., 'RED')
-
-		valueIdent := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-		return &ast.TypedLiteral{
-			Token:    typeIdent.Token,
-			TypeName: typeIdent.Value,
-			Value:    valueIdent,
-		}
-	}
-	// If not followed by '#', it's a simple identifier.
+	// An identifier is just an identifier. The Pratt parser's infix logic
+	// will handle what comes next (like a '#' for a typed literal).
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 }
 
@@ -1194,72 +1157,37 @@ func (p *Parser) parseDataTypeKeyword() ast.Expression {
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	defer untrace(trace("parseIntegerLiteral"))
 	lit := &ast.IntegerLiteral{Token: p.curToken}
-
-	literal := p.curToken.Literal
+	literal := strings.ReplaceAll(p.curToken.Literal, "_", "")
 	base := 10
-	bitSize := 64 // Default to LINT/ULINT size
+	valueStr := literal
 
-	// Handle typed literals where the lexer provides the full string, e.g., "SINT#10"
-	// or based literals like "16#FF".
 	if strings.Contains(literal, "#") {
 		parts := strings.SplitN(literal, "#", 2)
 		if len(parts) == 2 {
-			typePart := parts[0]
-			valuePart := parts[1]
-
-			// Determine bitSize based on the typePart
-			switch token.LookupIdent(strings.ToUpper(typePart)) {
-			case token.SINT, token.USINT, token.BYTE:
-				bitSize = 8
-			case token.INT, token.UINT:
-				bitSize = 16
-			case token.DINT, token.UDINT:
-				bitSize = 32
-			case token.LINT, token.ULINT:
-				bitSize = 64
-			default:
-				// This is a non-typed based literal like 16#FF.
-				// The typePart is the base.
-				valuePart = literal
+			parsedBase, err := strconv.Atoi(parts[0])
+			if err == nil && (parsedBase == 2 || parsedBase == 8 || parsedBase == 10 || parsedBase == 16) {
+				base = parsedBase
+				valueStr = parts[1]
 			}
-
-			// Check for based literal within the value part (e.g., DINT#16#FF)
-			if strings.Contains(valuePart, "#") {
-				baseParts := strings.SplitN(valuePart, "#", 2)
-				if len(baseParts) == 2 {
-					parsedBase, err := strconv.Atoi(baseParts[0])
-					if err == nil {
-						base = parsedBase
-					}
-					valuePart = baseParts[1]
-				}
-			}
-			literal = valuePart
 		}
 	}
-
-	literal = strings.ReplaceAll(literal, "_", "")
 
 	// Distinguish between signed and unsigned parsing
 	switch p.curToken.Type {
 	case token.USINT, token.UINT, token.UDINT, token.ULINT:
 		// Parse as unsigned integer
-		uValue, err := strconv.ParseUint(literal, base, bitSize)
+		uValue, err := strconv.ParseUint(valueStr, base, 64)
 		if err != nil {
-			msg := fmt.Sprintf("could not parse %q as unsigned integer: %v", p.curToken.Literal, err)
+			msg := fmt.Sprintf("could not parse %q as unsigned integer", p.curToken.Literal)
 			p.errors = append(p.errors, msg)
 			return nil
 		}
-		// For simplicity in the AST, we store it in a signed int64,
-		// but the evaluator will handle it as unsigned.
-		// This might cause issues for ULINT values > MaxInt64, but works for smaller types.
-		// A better AST would have separate signed/unsigned literal nodes.
 		return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
 	default:
 		// Parse as signed integer
-		value, err := strconv.ParseInt(literal, base, bitSize)
+		value, err := strconv.ParseInt(valueStr, base, 64)
 		if err != nil {
-			msg := fmt.Sprintf("could not parse %q as integer: %v", p.curToken.Literal, err)
+			msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
 			p.errors = append(p.errors, msg)
 			return nil
 		}
@@ -1271,14 +1199,10 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 func (p *Parser) parseRealLiteral() ast.Expression {
 	defer untrace(trace("parseRealLiteral"))
 	lit := &ast.RealLiteral{Token: p.curToken}
-
-	literal := p.curToken.Literal
-
-	bitSize := 64 // Always parse to float64 to maintain precision
-
+	bitSize := 64
 	lit.Precision = bitSize
-	literal = strings.ReplaceAll(literal, "_", "") // Remove underscores
-
+	literal := strings.ReplaceAll(p.curToken.Literal, "_", "")
+	// The lexer does not produce based real literals, so we can parse directly.
 	value, err := strconv.ParseFloat(literal, bitSize)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as real", literal)
@@ -1289,71 +1213,71 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 	return lit
 }
 
-func (p *Parser) parseBitStringLiteral() ast.Expression {
-	defer untrace(trace("parseBitStringLiteral"))
-	lit := &ast.BitStringLiteral{Token: p.curToken}
+// func (p *Parser) parseBitStringLiteral() ast.Expression {
+// 	defer untrace(trace("parseBitStringLiteral"))
+// 	lit := &ast.BitStringLiteral{Token: p.curToken}
 
-	var width int
-	switch p.curToken.Type {
-	case token.BYTE:
-		width = 8
-	case token.WORD:
-		width = 16
-	case token.DWORD:
-		width = 32
-	case token.LWORD:
-		width = 64
-	default:
-		// This case should ideally not be reached if prefix functions are registered correctly.
-		p.errors = append(p.errors, fmt.Sprintf("unknown bitstring type: %s", p.curToken.Type))
-		return nil
-	}
-	lit.Width = width
+// 	var width int
+// 	switch p.curToken.Type {
+// 	case token.BYTE:
+// 		width = 8
+// 	case token.WORD:
+// 		width = 16
+// 	case token.DWORD:
+// 		width = 32
+// 	case token.LWORD:
+// 		width = 64
+// 	default:
+// 		// This case should ideally not be reached if prefix functions are registered correctly.
+// 		p.errors = append(p.errors, fmt.Sprintf("unknown bitstring type: %s", p.curToken.Type))
+// 		return nil
+// 	}
+// 	lit.Width = width
 
-	literal := p.curToken.Literal // e.g., "BYTE#16#FF" or "WORD#FF"
+// 	literal := p.curToken.Literal // e.g., "BYTE#16#FF" or "WORD#FF"
 
-	parts := strings.SplitN(literal, "#", 2) // cspell:disable-line
-	if len(parts) < 2 {
-		p.errors = append(p.errors, fmt.Sprintf("invalid bitstring literal format: %q", literal))
-		return nil
-	}
-	valuePart := parts[1] // e.g., "16#FF" or "FF"
+// 	parts := strings.SplitN(literal, "#", 2) // cspell:disable-line
+// 	if len(parts) < 2 {
+// 		p.errors = append(p.errors, fmt.Sprintf("invalid bitstring literal format: %q", literal))
+// 		return nil
+// 	}
+// 	valuePart := parts[1] // e.g., "16#FF" or "FF"
 
-	var base int = 16 // Default base for bit strings if not specified, as per IEC 61131-3
-	var valueStr string = valuePart
+// 	var base int = 16 // Default base for bit strings if not specified, as per IEC 61131-3
+// 	var valueStr string = valuePart
 
-	// Check if the value part itself contains a base (e.g., "16#FF")
-	if strings.Contains(valuePart, "#") {
-		valueParts := strings.SplitN(valuePart, "#", 2)
-		if len(valueParts) == 2 {
-			parsedBase, err := strconv.Atoi(valueParts[0])
-			if err != nil {
-				p.errors = append(p.errors, fmt.Sprintf("invalid base in bitstring literal: %q", valueParts[0]))
-				return nil
-			}
-			base = parsedBase
-			valueStr = valueParts[1]
-		}
-	}
+// 	// Check if the value part itself contains a base (e.g., "16#FF")
+// 	if strings.Contains(valuePart, "#") {
+// 		valueParts := strings.SplitN(valuePart, "#", 2)
+// 		if len(valueParts) == 2 {
+// 			parsedBase, err := strconv.Atoi(valueParts[0])
+// 			if err != nil {
+// 				p.errors = append(p.errors, fmt.Sprintf("invalid base in bitstring literal: %q", valueParts[0]))
+// 				return nil
+// 			}
+// 			base = parsedBase
+// 			valueStr = valueParts[1]
+// 		}
+// 	}
 
-	// Remove underscores from the value string before parsing
-	valueStr = strings.ReplaceAll(valueStr, "_", "")
+// 	// Remove underscores from the value string before parsing
+// 	valueStr = strings.ReplaceAll(valueStr, "_", "")
 
-	val, err := strconv.ParseUint(valueStr, base, width)
-	if err != nil {
-		// Check if the error is due to the value being out of range for the specified width.
-		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
-			p.errors = append(p.errors, fmt.Sprintf("value %q is out of range for type %s (width %d)", valueStr, p.curToken.Type, width))
-		} else {
-			// Handle other parsing errors.
-			p.errors = append(p.errors, fmt.Sprintf("could not parse %q as %s (base %d): %s", valueStr, p.curToken.Type, base, err.Error()))
-		}
-		return nil
-	}
+// 	val, err := strconv.ParseUint(valueStr, base, width)
+// 	if err != nil {
+// 		// Check if the error is due to the value being out of range for the specified width.
+// 		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+// 			p.errors = append(p.errors, fmt.Sprintf("value %q is out of range for type %s (width %d)", valueStr, p.curToken.Type, width))
+// 		} else {
+// 			// Handle other parsing errors.
+// 			p.errors = append(p.errors, fmt.Sprintf("could not parse %q as %s (base %d): %s", valueStr, p.curToken.Type, base, err.Error()))
+// 		}
+// 		return nil
+// 	}
 
-	lit.Value = val
-	return lit
-}
+// 	lit.Value = val
+// 	return lit
+// }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	defer untrace(trace("parseStringLiteral")) // cspell:disable-line
@@ -1705,6 +1629,137 @@ func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 	return stmt
 }
 
+func isTimeDateKeyword(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "TIME", "T", "DATE", "D", "TIME_OF_DAY", "TOD", "DATE_AND_TIME", "DT":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Parser) parseTypedLiteralExpression(left ast.Expression) ast.Expression {
+	// 'left' is the type name (e.g., the identifier 'INT' or 'COLOR').
+	// The current token is '#'.
+	if left == nil {
+		// The prefix parser already logged an error and returned nil.
+		// We cannot form a TypedLiteral without a type, so we propagate the nil
+		// to prevent a panic on `left.Token()`.
+		// cspell:disable-next-line
+		return nil
+	}
+
+	// The type name must be an identifier.
+	typeIdent, ok := left.(*ast.Identifier)
+	if !ok {
+		p.currentError("left side of # for typed literal must be a type identifier, got %T", left) // cspell:disable-line
+		return nil
+	}
+	lit := &ast.TypedLiteral{Token: typeIdent.Token}
+	lit.TypeName = typeIdent.Value
+
+	p.nextToken() // Consume '#'
+
+	// The value part is now parsed as a single identifier containing the whole value string.
+	lit.Value = p.parseIecLiteralValue(lit.TypeName)
+
+	return lit
+}
+
+// parseIecLiteralValue consumes tokens to build a single identifier that represents the value
+// part of a typed literal (e.g., the "5s" in "T#5s" or "16#FF" in "BYTE#16#FF").
+// This makes the parser smarter by grouping tokens based on the context of a typed literal,
+// simplifying the evaluator which can then parse the resulting string.
+func (p *Parser) parseIecLiteralValue(typeName string) ast.Expression {
+	defer untrace(trace("parseIecLiteralValue"))
+	startToken := p.curToken
+	var builder strings.Builder
+
+	isTimeType := isTimeDateKeyword(typeName)
+
+	// Handle optional sign for time durations or negative numbers
+	if p.curTokenIs(token.MINUS) {
+		builder.WriteString(p.curToken.Literal)
+		p.nextToken()
+	}
+
+	if isTimeType {
+		// This loop stitches together what the lexer has broken apart for time literals.
+		for {
+			isAllowed := false
+			switch p.curToken.Type {
+			case token.INT, token.REAL, token.IDENT, token.DOT, token.MINUS, token.S, token.DATE, token.COLON:
+				isAllowed = true
+			}
+
+			if !isAllowed {
+				break
+			}
+
+			builder.WriteString(p.curToken.Literal)
+
+			// Peek ahead to see if the next token could also be part of the literal.
+			peekIsAllowed := false
+			switch p.peekToken.Type {
+			case token.INT, token.REAL, token.IDENT, token.DOT, token.MINUS, token.S, token.DATE, token.COLON:
+				peekIsAllowed = true
+			}
+
+			if peekIsAllowed {
+				p.nextToken() // It's part of the literal, consume and continue
+			} else {
+				goto end_loop
+			}
+		}
+	} else {
+		// For numeric, bit-string, or enum types, the value is a single token.
+		// The lexer already handles based literals (e.g., 16#FF) as one token.
+		switch p.curToken.Type {
+		case token.INT, token.REAL, token.IDENT, token.TRUE, token.FALSE:
+			builder.WriteString(p.curToken.Literal)
+		default:
+			// This case might be hit if a value is missing, e.g., `INT#;`
+			// The check for an empty combinedLiteral below will handle this.
+		}
+	}
+end_loop:
+
+	combinedLiteral := builder.String()
+	if combinedLiteral == "" {
+		p.currentError("expected a value for typed literal")
+		return nil
+	}
+
+	// We return an Identifier node containing the full literal string.
+	return &ast.Identifier{
+		Token: token.Token{
+			Type:    token.IDENT,
+			Literal: combinedLiteral,
+			Row:     startToken.Row,
+			Column:  startToken.Column,
+			Pos:     startToken.Pos,
+		},
+		Value: combinedLiteral,
+	}
+}
+
+func (p *Parser) parseIntOrType() ast.Expression {
+	// If the literal can be parsed as an integer, it's an integer literal.
+	if _, err := strconv.ParseInt(p.curToken.Literal, 10, 64); err == nil {
+		return p.parseIntegerLiteral()
+	}
+	// Otherwise, it's a type keyword like 'INT', so treat it as an identifier.
+	return p.parseIdentifier()
+}
+
+func (p *Parser) parseRealOrType() ast.Expression {
+	if _, err := strconv.ParseFloat(p.curToken.Literal, 64); err == nil {
+		return p.parseRealLiteral()
+	}
+	return p.parseIdentifier()
+}
+
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	defer untrace(trace("parseExpressionStatement"))
 	stmt := &ast.ExpressionStatement{Token: p.curToken}
@@ -1997,7 +2052,7 @@ func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expressio
 func (p *Parser) parseCallArgument() ast.Expression {
 	defer untrace(trace("parseCallArgument"))
 	// Check for named arguments (IDENT := or IDENT =>)
-	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ASSIGN) {
+	if p.peekTokenIs(token.ASSIGN) {
 		// Input argument: In1 := 10
 		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken() // consume IDENT, curToken is now ASSIGN
@@ -2005,7 +2060,7 @@ func (p *Parser) parseCallArgument() ast.Expression {
 		p.nextToken() // consume ASSIGN
 		arg.Value = p.parseExpression(LOWEST)
 		return arg
-	} else if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ARROW) {
+	} else if p.peekTokenIs(token.ARROW) {
 		// Output argument: Out1 => Res1
 		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken() // consume IDENT, curToken is now ARROW
@@ -2013,33 +2068,6 @@ func (p *Parser) parseCallArgument() ast.Expression {
 		p.nextToken() // consume ARROW
 		arg.Target = p.parseExpression(LOWEST)
 		return arg
-	}
-	// Handle action qualifiers (like S, R) which are also IL keywords.
-	// When they appear inside a function call's arguments, they should be treated as identifiers.
-	switch p.curToken.Type {
-	case token.S, token.R: // Add other conflicting keywords here if necessary
-		// Treat the keyword as an identifier in this context because it's an argument.
-		// Qualifiers like N, P, L, D are parsed as regular IDENTs by the lexer,
-		// so they are handled correctly by the default case below.
-		// This switch is only for tokens that are also keywords for other statements.
-		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		return ident
-	case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
-		token.SINT, token.INT, token.DINT, token.LINT,
-		token.USINT, token.UINT, token.UDINT, token.ULINT,
-		token.REAL, token.LREAL,
-		token.BYTE, token.WORD, token.DWORD, token.LWORD:
-		// Handle typed literals like T#5s, INT#10, etc., when used as arguments.
-		if p.peekTokenIs(token.HASH) {
-			typeIdent := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-			p.nextToken() // consume type, curToken is now '#'
-			p.nextToken() // consume '#', curToken is now the value
-			return &ast.TypedLiteral{
-				Token:    typeIdent.Token,
-				TypeName: typeIdent.Value,
-				Value:    p.parseDateTimeIdentifier(),
-			}
-		}
 	}
 
 	// Otherwise, it's a positional argument (an expression)
@@ -2067,64 +2095,6 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	}
 
 	return exp
-}
-
-// isDateTimeKeyword checks if an identifier is a time/date keyword or abbreviation.
-func isDateTimeKeyword(ident string) bool {
-	// This logic is central to parsing and belongs in the parser, not the lexer.
-	upper := strings.ToUpper(ident)
-	switch upper {
-	case "TIME", "T",
-		"DATE", "D",
-		"TIME_OF_DAY", "TOD",
-		"DATE_AND_TIME", "DT":
-		return true
-	default:
-		return false
-	}
-}
-
-// parseDateTimeLiteral consumes tokens to build a single identifier for date/time literals.
-// It handles constructs like `5s`, `5m_10s`, `2026-05-21`, and `14:30:00.5`.
-func (p *Parser) parseDateTimeLiteral(typeName string) ast.Expression {
-	defer untrace(trace(fmt.Sprintf("parseDateTimeLiteral (type: %s)", typeName)))
-	startToken := p.curToken
-	var builder strings.Builder
-
-	// Consume tokens that can be part of a date/time literal value.
-	// This loop continues as long as the tokens are numbers, identifiers (for units like 's', 'ms'),
-	// or separators like '-', ':', and '.'.
-	for {
-		// The token must be a number, an identifier, or a separator.
-		if p.curTokenIs(token.INT) || p.curTokenIs(token.REAL) || p.curTokenIs(token.IDENT) ||
-			p.curTokenIs(token.MINUS) || p.curTokenIs(token.COLON) {
-			builder.WriteString(p.curToken.Literal)
-
-			// Peek ahead to see if the next token is also part of the literal.
-			// We stop if the next token is a semicolon, parenthesis, or another operator
-			// that would not be part of a date/time string.
-			if !(p.peekTokenIs(token.INT) || p.peekTokenIs(token.REAL) || p.peekTokenIs(token.IDENT) ||
-				p.peekTokenIs(token.MINUS) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.DOT)) {
-				break
-			}
-			p.nextToken()
-		} else {
-			// The first token was not a valid start for a date/time value.
-			p.currentError("invalid value for date/time literal, got %s", p.curToken.Type)
-			return nil
-		}
-	}
-
-	// Create a new identifier token that represents the entire literal value.
-	combinedLiteral := builder.String()
-	combinedToken := token.Token{
-		Type:    token.IDENT,
-		Literal: combinedLiteral,
-		Row:     startToken.Row,
-		Column:  startToken.Column,
-		Pos:     startToken.Pos,
-	}
-	return &ast.Identifier{Token: combinedToken, Value: combinedLiteral}
 }
 
 func (p *Parser) parseHashLiteral() ast.Expression {

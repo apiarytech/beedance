@@ -93,14 +93,14 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	if !p.expectPeek(token.FROM) {
 		// Allow recovery even if FROM is missing
 	} else {
-		p.nextToken() // Consume FROM
+		p.nextToken() // consume FROM
 		stmt.From = p.parseStepList()
 	}
 
 	if !p.expectPeek(token.TO) {
 		// Allow recovery even if TO is missing
 	} else {
-		p.nextToken() // Consume TO
+		p.nextToken() // consume TO
 		stmt.To = p.parseStepList()
 	}
 

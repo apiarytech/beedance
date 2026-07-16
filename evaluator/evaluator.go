@@ -3,9 +3,9 @@ package evaluator
 import (
 	"beedance/ast"
 	"beedance/object"
-	"beedance/token"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +25,21 @@ var (
 	// nowFunc is a variable that can be overridden for testing purposes.
 	nowFunc = time.Now
 )
+
+var integerTypeRanges = map[string]struct {
+	minSigned   int64
+	maxSigned   int64
+	maxUnsigned uint64
+}{
+	"SINT":  {math.MinInt8, math.MaxInt8, 0},
+	"INT":   {math.MinInt16, math.MaxInt16, 0},
+	"DINT":  {math.MinInt32, math.MaxInt32, 0},
+	"LINT":  {math.MinInt64, math.MaxInt64, 0},
+	"USINT": {0, 0, math.MaxUint8},
+	"UINT":  {0, 0, math.MaxUint16},
+	"UDINT": {0, 0, math.MaxUint32},
+	"ULINT": {0, 0, math.MaxUint64},
+}
 
 // standardFBs holds the definitions for standard function blocks like TON, CTU, etc.
 var standardFBs = map[string]*object.BuiltinFunctionBlock{
@@ -134,64 +149,66 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return &object.ReturnValue{Value: val}
 
 	case *ast.TypedLiteral:
-		// The parser gives us a TypedLiteral for constructs like `INT#10` or `DATE#'2023-01-01'`.
-		// The `Value` field of the AST node is an expression that needs to be evaluated.
-		// For `INT#10`, `node.Value` is an `IntegerLiteral`.
-		// For `DATE#'...'`, `node.Value` is an `Identifier` with the date string.
-		valueObj := Eval(node.Value, env)
-		if isError(valueObj) {
-			return valueObj
+		targetTypeName := node.TypeName
+		if !isKnownType(targetTypeName, env) {
+			return newError(node, "unknown type: %s", targetTypeName)
 		}
 
-		targetTypeName := node.TypeName
-		// The source type is derived from the evaluated object.
+		// The parser now gives us an identifier with the full value string.
+		valueIdent, ok := node.Value.(*ast.Identifier)
+		if !ok {
+			return newError(node, "internal error: value for typed literal is not an identifier, got %T", node.Value)
+		}
+		valueStr := valueIdent.Value
 
-		// 1. Handle enumerated typed literals (e.g., COLOR#RED)
+		// 1. Handle time/date types
+		if isTimeDateKeyword(targetTypeName) {
+			return applyTimeDateConversion(valueStr, targetTypeName)
+		}
+
+		// Handle BOOL type
+		if isBooleanType(targetTypeName) {
+			upperVal := strings.ToUpper(valueStr)
+			if upperVal == "1" || upperVal == "TRUE" {
+				return TRUE
+			}
+			if upperVal == "0" || upperVal == "FALSE" {
+				return FALSE
+			}
+			return newError(node, "invalid value for BOOL literal: %s", valueStr)
+		}
+
+		// 2. Handle bit string types (BYTE, WORD, etc.)
+		if isBitStringTypeCheck(targetTypeName) {
+			// These can have a base, e.g., BYTE#16#FF. The valueStr will be "16#FF".
+			return applyBitStringConversion(valueStr, targetTypeName)
+		}
+
+		// 3. Handle numeric types (INT, REAL, etc.)
+		if isIntegerTypeName(targetTypeName) || isRealType(targetTypeName) {
+			return applyNumericConversion(valueStr, targetTypeName)
+		}
+
+		// 4. Handle enumerated types (e.g., COLOR#RED)
 		if enumTypeObj, ok := env.Get(targetTypeName); ok {
 			if enumType, isEnumType := enumTypeObj.(*object.EnumeratedType); isEnumType {
-				if enumVal, isEnumVal := valueObj.(*object.EnumeratedValue); isEnumVal {
-					if _, exists := enumType.Values[enumVal.Value]; exists {
-						return &object.EnumeratedValue{TypeName: targetTypeName, Value: enumVal.Value}
-					}
-					return newError(node, "enumerated value '%s' not found in type '%s'", enumVal.Value, targetTypeName)
+				if _, exists := enumType.Values[valueStr]; exists {
+					return &object.EnumeratedValue{TypeName: targetTypeName, Value: valueStr}
 				}
-				return newError(node, "expected enumerated value, got %s", valueObj.Type())
+				return newError(node, "enumerated value '%s' not found in type '%s'", valueStr, targetTypeName)
 			}
 		}
 
-		// 2. Handle time/date typed literals (e.g., DATE#'2023-01-01')
-		if timeDateObj := applyTimeDateConversion(valueObj.Inspect(), targetTypeName); timeDateObj.Type() != object.ERROR_OBJ {
-			return timeDateObj
-		}
-
-		// 3. Handle other typed literals (e.g., INT#10, REAL#1.23)
-		return applyConversion(valueObj, string(valueObj.Type()), targetTypeName)
+		return newError(node, "unsupported typed literal: %s#%s", targetTypeName, valueStr)
 
 	// Expressions
 	case *ast.IntegerLiteral:
-		switch node.Token.Type {
-		case token.SINT:
-			return &object.SInt{Value: int8(node.Value)}
-		case token.INT:
-			return &object.Int{Value: int16(node.Value)}
-		case token.DINT:
-			return &object.DInt{Value: int32(node.Value)}
-		case token.LINT:
-			return &object.LInt{Value: node.Value}
-		default:
-			return &object.LInt{Value: node.Value}
-		}
+		// Untyped integer literals are treated as the largest possible integer type (LINT)
+		// to allow for implicit type promotion in expressions without overflow.
+		return &object.LInt{Value: node.Value}
 	case *ast.UnsignedIntegerLiteral:
-		switch node.Token.Type {
-		case token.USINT:
-			return &object.USInt{Value: uint8(node.Value)}
-		case token.UINT:
-			return &object.UInt{Value: uint16(node.Value)}
-		case token.UDINT:
-			return &object.UDInt{Value: uint32(node.Value)}
-		case token.ULINT:
-			return &object.ULInt{Value: node.Value}
-		}
+		// Untyped unsigned integer literals are treated as ULINT.
+		return &object.ULInt{Value: node.Value}
 
 	case *ast.RealLiteral:
 		// Distinguish between REAL and LREAL based on the precision set by the parser.
@@ -880,14 +897,26 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 }
 
 func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environment) object.Object {
-	// This is where the logic actually is!
-	val := Eval(node.Value, env) // Evaluate the right side (e.g., total + i)
+	val := Eval(node.Value, env) // Evaluate the right side
 	if isError(val) {
 		return val
 	}
-	// The Left side is an identifier, so we get its name.
+
 	if ident, ok := node.Left.(*ast.Identifier); ok {
-		env.Assign(ident.Value, val) // Assign the new value, updating outer scopes if necessary.
+		// Check if the variable we are assigning to is a pointer (VAR_IN_OUT).
+		// We use GetRaw to only check the current function's scope for the pointer object itself.
+		if existing, ok := env.GetRaw(ident.Value); ok {
+			if ptr, isPtr := existing.(*object.Pointer); isPtr {
+				// It's a pointer. Assign the value to the variable in the pointed-to environment.
+				// Use Assign on the pointer's environment to handle nested pointers correctly.
+				ptr.Env.Assign(ptr.Name, val)
+				return val
+			}
+		}
+		// It's not a pointer in the local scope, so it's a regular assignment.
+		// Use Assign to update the variable in the current or an outer scope.
+		env.Assign(ident.Value, val)
+
 	} else {
 		return newError(node, "assignment target must be an identifier")
 	}
@@ -933,6 +962,40 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		if isError(val) {
 			return val
 		}
+	} else {
+		// No initial value. Check if it's a function block type that needs instantiation.
+		if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
+			// Evaluate the type name to see if it's a known FB.
+			// We need to create a temporary identifier to evaluate.
+			typeIdentifier := &ast.Identifier{Token: typeSpec.Token, Value: typeSpec.TokenLiteral()}
+			typeObj := Eval(typeIdentifier, env) // This will call evalIdentifier
+
+			switch typeDef := typeObj.(type) {
+			case *object.FunctionBlock:
+				// User-defined FB. Create an instance.
+				instanceEnv := object.NewEnclosedEnvironment(typeDef.Env)
+				val = &object.FunctionBlockInstance{
+					Definition: typeDef,
+					Env:        instanceEnv,
+				}
+				// If the function block has an SFC body, we need to create the SFC
+				// instance and store it within the FB instance's environment.
+				if sfcAST, isSFC := typeDef.Body.(*ast.SFCProgram); isSFC {
+					// The SFC object holds the state (active steps, etc.)
+					sfcObj := evalSFCProgram(sfcAST, instanceEnv)
+					instanceEnv.Set("__sfc_instance__", sfcObj)
+				}
+			case *object.BuiltinFunctionBlock:
+				// Standard FB. Create an instance.
+				instanceEnv := object.NewEnclosedEnvironment(env)
+				// Store the logic function in the instance's environment.
+				instanceEnv.Set("__fb_logic__", typeDef)
+				val = &object.FunctionBlockInstance{
+					Definition: nil, // Built-ins don't have an AST definition
+					Env:        instanceEnv,
+				}
+			}
+		}
 	}
 	env.Set(node.Name.Value, val)
 	return val
@@ -959,7 +1022,12 @@ func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Envir
 			}
 			env.Set(decl.Name.Value, enumType)
 		} else if subrange, ok := decl.Subrange.(*ast.InfixExpression); ok && subrange.Operator == ".." {
-			// This is a subrange type declaration, e.g., TYPE MyRange : INT(0..100); END_TYPE
+			// Validate that the base type is an integer type before evaluating bounds.
+			baseTypeStr := decl.DataType.String()
+			if !isIntegerTypeName(baseTypeStr) {
+				return newError(decl, "subrange base type must be an integer type, got %s", baseTypeStr)
+			}
+
 			lower := Eval(subrange.Left, env)
 			if isError(lower) {
 				return lower
@@ -968,23 +1036,16 @@ func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Envir
 			if isError(upper) {
 				return upper
 			}
-			lowerInt, okL := lower.(*object.LInt)
-			upperInt, okU := upper.(*object.LInt)
+			lowerIntVal, _, okL := getIntegerObjectValue(lower)
+			upperIntVal, _, okU := getIntegerObjectValue(upper)
 			if !okL || !okU {
-				return newError(decl, "subrange bounds must be integers")
+				return newError(decl, "subrange bounds must be integers, got %s and %s", lower.Type(), upper.Type())
 			}
-
-			// Validate that the base type is an integer type
-			baseTypeStr := decl.DataType.String()
-			if !isIntegerTypeName(baseTypeStr) {
-				return newError(decl, "subrange base type must be an integer type, got %s", baseTypeStr)
-			}
-
 			enumType := &object.SubrangeType{
 				Name:       decl.Name.Value,
-				BaseType:   object.ObjectType(baseTypeStr),
-				LowerBound: lowerInt.Value,
-				UpperBound: upperInt.Value,
+				BaseType:   object.ObjectType(strings.ToUpper(baseTypeStr)),
+				LowerBound: lowerIntVal,
+				UpperBound: upperIntVal,
 			}
 			env.Set(decl.Name.Value, enumType)
 		}
@@ -1058,7 +1119,7 @@ func applyBitStringConversion(value, typeName string) object.Object {
 	val, err := strconv.ParseUint(valueStr, base, width)
 	if err != nil {
 		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
-			return newBuiltinError("value %q is out of range for type %s", valueStr, typeName)
+			return newBuiltinError("value %s is out of range for type %s", valueStr, typeName)
 		}
 		return newBuiltinError("could not parse %q as %s (base %d): %v", valueStr, typeName, base, err)
 	}
@@ -1069,52 +1130,72 @@ func applyBitStringConversion(value, typeName string) object.Object {
 // parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms")
 // into a time.Duration. This is a simplified implementation.
 func parseDuration(s string) (time.Duration, error) {
-	isNegative := false
 	originalString := s
-
+	isNegative := false
 	if strings.HasPrefix(s, "-") {
 		isNegative = true
-		s = s[1:] // Strip the negative sign for parsing
+		s = s[1:]
+	}
+
+	// Per the standard, underscores are for readability and can be ignored.
+	s = strings.ReplaceAll(s, "_", "")
+	// Work with lowercase for unit matching.
+	s = strings.ToLower(s)
+
+	if s == "" {
+		// An empty string after the prefix (e.g., T#) is not a valid duration.
+		return 0, fmt.Errorf("invalid duration string: empty")
 	}
 
 	totalDuration := time.Duration(0)
-	s = strings.ReplaceAll(s, "_", "") // Remove underscores for easier parsing
+	remaining := s
 
-	if s == "" {
-		return 0, fmt.Errorf("invalid duration string %q", originalString)
+	// This regex will find all number-unit pairs.
+	// It finds a number (int or float) followed by letters.
+	re := regexp.MustCompile(`(\d*\.?\d+)([a-z]+)`)
+	matches := re.FindAllStringSubmatch(remaining, -1)
+
+	if len(matches) == 0 && remaining != "" {
+		return 0, fmt.Errorf("invalid duration format in %q", originalString)
 	}
 
-	// Use Go's time.ParseDuration by reformatting the string.
-	// It understands units like h, m, s, ms, us, ns.
-	// We need to insert separators that ParseDuration understands.
-	var reformat strings.Builder
-	var numPart strings.Builder
+	parsedStr := ""
+	for _, match := range matches {
+		numPart := match[1]
+		unitPart := match[2]
+		parsedStr += numPart + unitPart
 
-	for _, r := range s {
-		if (r >= '0' && r <= '9') || r == '.' {
-			numPart.WriteRune(r)
-		} else {
-			// We hit a unit character (d, h, m, s).
-			// Write the number part and the unit.
-			reformat.WriteString(numPart.String())
-			numPart.Reset()
-			reformat.WriteRune(r)
-			// If the unit is 's', we need to check for 'ms'
-			if r == 's' && reformat.Len() > 1 && reformat.String()[reformat.Len()-2] == 'm' {
-				// It was 'ms', continue
-			} else {
-				// Add a space to separate units for ParseDuration
-				reformat.WriteRune(' ')
-			}
+		val, err := strconv.ParseFloat(numPart, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid number %q in duration string %q", numPart, originalString)
 		}
+
+		var unitDuration time.Duration
+		switch unitPart {
+		case "d":
+			unitDuration = 24 * time.Hour
+		case "h":
+			unitDuration = time.Hour
+		case "m":
+			unitDuration = time.Minute
+		case "s":
+			unitDuration = time.Second
+		case "ms":
+			unitDuration = time.Millisecond
+		case "us":
+			unitDuration = time.Microsecond
+		case "ns":
+			unitDuration = time.Nanosecond
+		default:
+			return 0, fmt.Errorf("unknown duration unit %q in string %q", unitPart, originalString)
+		}
+		totalDuration += time.Duration(val * float64(unitDuration))
 	}
 
-	// Parse the reformatted string
-	parsedDur, err := time.ParseDuration(strings.TrimSpace(reformat.String()))
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration string %q", originalString)
+	// Check if the entire string was parsed by the regex.
+	if parsedStr != s {
+		return 0, fmt.Errorf("unparsed characters in duration string %q", originalString)
 	}
-	totalDuration += parsedDur
 
 	if isNegative {
 		totalDuration = -totalDuration
@@ -1139,9 +1220,9 @@ func evalInfixExpression(
 		return evalNumericInfixExpression(node, left, right)
 	case left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ:
 		return evalBooleanInfixExpression(node, left, right)
-	case left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ:
+	case left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ && node.Operator == "+":
 		return evalWStringInfixExpression(node, left, right)
-	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ:
+	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ && node.Operator == "+":
 		return evalStringInfixExpression(node, left, right)
 	case left.Type() == object.BITSTRING_OBJ && right.Type() == object.BITSTRING_OBJ: // New: BitString operations
 		return evalBitStringInfixExpression(node, left, right)
@@ -1303,7 +1384,7 @@ func evalFloatInfixExpression(node *ast.InfixExpression, leftVal, rightVal float
 		return nativeBoolToBooleanObject(leftVal > rightVal)
 	case "=", "EQ":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=", "NE":
+	case "!=", "<>", "NE":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
 	case "<=", "LE":
 		return nativeBoolToBooleanObject(leftVal <= rightVal)
@@ -1494,7 +1575,7 @@ func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Ob
 	}
 
 	if resultIsUnsigned {
-		return checkAndCreateIntegerObject(node, resultType, 0, uResultValue, true)
+		return checkAndCreateIntegerObject(node, resultType, int64(uResultValue), uResultValue, true)
 	} else {
 		return checkAndCreateIntegerObject(node, resultType, resultValue, 0, false)
 	}
@@ -1883,10 +1964,6 @@ func evalWStringInfixExpression(
 	node *ast.InfixExpression,
 	left, right object.Object,
 ) object.Object {
-	if node.Operator != "+" {
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-
 	leftVal := left.(*object.WString).Value
 	rightVal := right.(*object.WString).Value
 	return &object.WString{Value: leftVal + rightVal}
@@ -1896,10 +1973,6 @@ func evalStringInfixExpression(
 	node *ast.InfixExpression,
 	left, right object.Object,
 ) object.Object {
-	if node.Operator != "+" {
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-
 	leftVal := left.(*object.String).Value
 	rightVal := right.(*object.String).Value
 	return &object.String{Value: leftVal + rightVal}
@@ -2161,6 +2234,24 @@ func isError(obj object.Object) bool {
 	return false
 }
 
+// isKnownType checks if a type name is a built-in type or a user-defined type in the environment.
+func isKnownType(typeName string, env *object.Environment) bool {
+	upper := strings.ToUpper(typeName)
+	// Check built-in scalar types
+	if isIntegerTypeName(upper) || isRealType(upper) || isBooleanType(upper) || isStringType(upper) || isBitStringType(upper) {
+		return true
+	}
+	// Check built-in time/date types
+	if isTimeDateKeyword(upper) {
+		return true
+	}
+	// Check user-defined types (enums, structs) in the environment
+	if _, ok := env.Get(upper); ok {
+		return true
+	}
+	return false
+}
+
 // isBitStringType checks if a string corresponds to an IEC 61131-3 bit-string type keyword.
 func isBitStringTypeCheck(name string) bool {
 	upper := strings.ToUpper(name)
@@ -2307,8 +2398,11 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if enValue == FALSE {
 			// Return the primary output of the FB if it exists, otherwise NULL.
 			// The outputs are not updated.
-			if primaryOutput, ok := fn.Env.Get(fn.Definition.Name.Value); ok {
-				return primaryOutput
+			// For built-in FBs, Definition is nil. They don't have a primary output in this sense.
+			if fn.Definition != nil {
+				if primaryOutput, ok := fn.Env.Get(fn.Definition.Name.Value); ok {
+					return primaryOutput
+				}
 			}
 			return NULL
 		}
@@ -2320,7 +2414,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if fn.Definition == nil {
 			// It's a built-in FB instance.
 			// 1. Copy input arguments into the instance environment.
-			_, _, err := extendFunctionEnv(nil, args, callEnv, fn.Env)
+			_, outputMappings, err := extendFunctionEnv(nil, args, callEnv, fn.Env)
 			if err != nil {
 				return err
 			}
@@ -2328,8 +2422,21 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			// 2. Execute the built-in logic.
 			logicFnObj, _ := fn.Env.Get("__fb_logic__")
 			logicFn := logicFnObj.(*object.BuiltinFunctionBlock).Fn
-			return logicFn(fn.Env, callEnv)
+			result = logicFn(fn.Env, callEnv)
 
+			// 3. Handle output arguments (=>).
+			for _, mapping := range outputMappings {
+				val, ok := fn.Env.Get(mapping.SourceParamName)
+				if !ok {
+					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
+				}
+
+				if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
+					callEnv.Set(targetIdent.Value, val)
+				} else {
+					return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
+				}
+			}
 		} else {
 			// It's a user-defined FB instance.
 			extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env)
@@ -2337,8 +2444,20 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				return err
 			}
 
-			// Execute the function block body.
-			result = Eval(fn.Definition.Body, extendedEnv)
+			// Check if this FB instance has an SFC body.
+			if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
+				sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
+				if !isSFC {
+					return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
+				}
+				// Run one cycle of the SFC. This will update the variables in extendedEnv.
+				// The result of a cycle is not the primary return value, outputs are handled via mapping.
+				result = evalSFCCycle(sfcInstance, extendedEnv)
+			} else {
+				// It's a standard ST-based function block.
+				// Execute the function block body.
+				result = Eval(fn.Definition.Body, extendedEnv)
+			}
 
 			// Handle output arguments (=>).
 			for _, mapping := range outputMappings {
@@ -2394,11 +2513,34 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 	for _, argNode := range args {
 		switch arg := argNode.(type) {
 		case *ast.NamedArgument: // Handle `InputName := Value`
-			val := Eval(arg.Value, callEnv)
-			if isError(val) {
-				return nil, nil, val.(*object.Error)
+			paramName := arg.Name.Value
+			// Check if this is a VAR_IN_OUT parameter
+			if isInOutParam(paramName, def) {
+				// The argument must be a variable identifier to be passed by reference.
+				if argIdent, ok := arg.Value.(*ast.Identifier); ok {
+					// Check if the argument being passed is itself a VAR_IN_OUT from the calling function's perspective.
+					// If so, we need to pass the pointer, not the value.
+					if val, ok := callEnv.Get(argIdent.Value); ok {
+						if ptr, isPtr := val.(*object.Pointer); isPtr {
+							// It's a nested IN_OUT pass. Propagate the pointer.
+							targetEnv.Set(paramName, ptr)
+							continue // Go to next argument
+						}
+					}
+					// It's a direct variable, so create a new pointer to it.
+					ptr := &object.Pointer{Name: argIdent.Value, Env: callEnv}
+					targetEnv.Set(paramName, ptr)
+				} else {
+					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramName)
+				}
+			} else {
+				// It's a VAR_INPUT, so pass by value.
+				val := Eval(arg.Value, callEnv)
+				if isError(val) {
+					return nil, nil, val.(*object.Error)
+				}
+				targetEnv.Set(paramName, val)
 			}
-			targetEnv.Set(arg.Name.Value, val)
 
 		case *ast.OutputArgument: // Handle `OutputName => TargetVar`
 			// The target variable is an AST node (e.g., Identifier), not an evaluated object yet.
@@ -2594,10 +2736,59 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 // isComparisonOperator checks if a given operator string is a comparison operator.
 func isComparisonOperator(op string) bool {
 	switch op {
-	case "=", "!=", "<", ">", "<=", ">=":
+	case "=", "!=", "<>", "<", ">", "<=", ">=":
 		return true
 	default:
 		return false
+	}
+}
+
+// applyNumericConversion handles conversions for INT, REAL, etc. from a string value.
+func applyNumericConversion(value, typeName string) object.Object {
+	base := 10
+	valueStr := value
+	upperTypeName := strings.ToUpper(typeName)
+
+	if strings.Contains(value, "#") {
+		parts := strings.SplitN(value, "#", 2)
+		if len(parts) == 2 {
+			parsedBase, err := strconv.Atoi(parts[0])
+			if err == nil && (parsedBase == 2 || parsedBase == 8 || parsedBase == 10 || parsedBase == 16) {
+				base = parsedBase
+				valueStr = parts[1]
+			}
+		}
+	}
+	valueStr = strings.ReplaceAll(valueStr, "_", "")
+
+	if isRealType(upperTypeName) {
+		val, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil {
+			return newBuiltinError("could not parse %q as %s: %v", value, typeName, err)
+		}
+		return &object.Real{Value: val}
+	}
+
+	if strings.HasPrefix(upperTypeName, "U") { // Unsigned
+		uVal, err := strconv.ParseUint(valueStr, base, 64)
+		if err != nil {
+			return newBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+		}
+		targetRange := integerTypeRanges[upperTypeName]
+		if uVal > targetRange.maxUnsigned {
+			return newBuiltinError("value %d is out of range for type %s", uVal, typeName)
+		}
+		return checkAndCreateIntegerObject(nil, object.ObjectType(upperTypeName), 0, uVal, true)
+	} else { // Signed
+		val, err := strconv.ParseInt(valueStr, base, 64)
+		if err != nil {
+			return newBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+		}
+		targetRange := integerTypeRanges[upperTypeName]
+		if val < targetRange.minSigned || val > targetRange.maxSigned {
+			return newBuiltinError("value %d is out of range for type %s", val, typeName)
+		}
+		return checkAndCreateIntegerObject(nil, object.ObjectType(upperTypeName), val, 0, false)
 	}
 }
 
@@ -2639,6 +2830,13 @@ func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) o
 		leftVal := left.(*object.String).Value
 		rightVal := right.(*object.String).Value
 		// For strings, all comparison operators are valid.
+		return evalGenericComparison(node.Operator, leftVal, rightVal)
+	}
+
+	// Handle WString comparisons
+	if left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ {
+		leftVal := left.(*object.WString).Value
+		rightVal := right.(*object.WString).Value
 		return evalGenericComparison(node.Operator, leftVal, rightVal)
 	}
 
@@ -2842,7 +3040,7 @@ func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) o
 	switch op {
 	case "=":
 		return nativeBoolToBooleanObject(leftVal == rightVal) // This now works for strings too
-	case "!=":
+	case "!=", "<>":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
 	case "<":
 		return nativeBoolToBooleanObject(leftVal < rightVal)

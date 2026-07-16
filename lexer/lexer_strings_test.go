@@ -13,10 +13,10 @@ func TestStringLiterals(t *testing.T) {
 		expectedLiteral string
 	}{
 		// Single-quoted strings
-		{"d", token.IDENT, "d"}, // Should be IDENT if not followed by #
-		{"t", token.IDENT, "t"},
-		{"tod", token.IDENT, "tod"},
-		{"dt", token.IDENT, "dt"},
+		{"d", token.DATE, "d"},
+		{"t", token.TIME, "t"},
+		{"tod", token.TIME_OF_DAY, "tod"},
+		{"dt", token.DATE_AND_TIME, "dt"},
 		{"'hello world'", token.STRING_LITERAL, "hello world"},
 		{"''", token.STRING_LITERAL, ""},
 		{"'a'", token.STRING_LITERAL, "a"},

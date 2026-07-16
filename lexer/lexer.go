@@ -198,50 +198,6 @@ func (l *Lexer) NextToken() token.Token {
 			// This logic is now simplified. The parser will handle `TYPE#value`.
 			// The lexer just needs to tokenize `DATE`, `#`, and the value separately.
 			tok.Type = token.LookupIdent(ident)
-
-			// If this is a typed literal prefix (e.g., INT, BYTE, TIME) followed by a '#',
-			// we consume the entire literal as a single token. This simplifies the parser.
-			if isTypedLiteralPrefix(ident) && l.ch == '#' {
-				l.readChar() // consume the identifier to move to '#'
-
-				// The logic for reading the rest of the literal depends on the type.
-				switch tok.Type {
-				case token.SINT, token.INT, token.DINT, token.LINT,
-					token.USINT, token.UINT, token.UDINT, token.ULINT:
-					// Integer literals can also have a base (e.g., DINT#16#FF)
-					l.readBasedIntegerPart()
-				case token.REAL, token.LREAL:
-					// Real literals have a specific format (e.g., REAL#1.23)
-					l.readRealPart()
-				case token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME:
-					// Time and date literals have complex string values (e.g., T#5m_10s)
-					l.readTimeLiteralValue()
-				case token.BYTE, token.WORD, token.DWORD, token.LWORD: // Bit-string literals share the same format as based integers
-					l.readBasedIntegerPart()
-				}
-
-				tok.Literal = l.input[startPos:l.position] // The literal is the full string "TYPE#Value"
-				return tok                                 // Return the complete token
-			}
-			// Special handling for short-form date/time keywords (D, T, TOD, DT).
-			// They should only be treated as keywords if followed by a '#'.
-			// Otherwise, they are just regular identifiers.
-			if isShortTimeDateKeyword(ident) {
-				tempPos := l.position
-				tempReadPos := l.readPos
-				tempCh := l.ch
-				l.skipWhitespace()
-				isFollowedByHash := l.ch == '#'
-				l.position = tempPos
-				l.readPos = tempReadPos
-				l.ch = tempCh
-
-				if !isFollowedByHash {
-					// It's not followed by '#', so treat it as a regular identifier.
-					tok.Type = token.IDENT
-				}
-			}
-
 			return tok
 		} else if isDigit(l.ch) {
 			tok.Literal, tok.Type = l.readNumber()
@@ -351,7 +307,10 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 
 		// Read the value part based on the detected base
 		digitCheckFn := getDigitCheckFn(base)
-		for (digitCheckFn(l.ch) || l.ch == '_') && (l.ch != 'e' && l.ch != 'E') {
+		for digitCheckFn(l.ch) || l.ch == '_' {
+			if base != 16 && (l.ch == 'e' || l.ch == 'E') {
+				break
+			}
 			l.readChar()
 		}
 
@@ -548,35 +507,6 @@ func isTypedLiteralPrefix(ident string) bool {
 		token.USINT, token.UINT, token.UDINT, token.ULINT,
 		token.REAL, token.LREAL,
 		token.BYTE, token.WORD, token.DWORD, token.LWORD:
-		return true
-	default:
-		return false
-	}
-}
-
-// isTimeDateKeyword checks if an identifier is a time/date keyword or abbreviation.
-// It returns the corresponding token type and a boolean indicating if it's a match.
-func isTimeDateKeyword(ident string) (token.TokenType, bool) {
-	upper := strings.ToUpper(ident)
-	switch upper {
-	case "TIME", "T":
-		return token.TIME, true
-	case "DATE", "D":
-		return token.DATE, true
-	case "TIME_OF_DAY", "TOD":
-		return token.TIME_OF_DAY, true
-	case "DATE_AND_TIME", "DT":
-		return token.DATE_AND_TIME, true
-	}
-	return token.ILLEGAL, false
-}
-
-// isShortTimeDateKeyword checks if an identifier is one of the short-form
-// keywords that require special lookahead handling.
-func isShortTimeDateKeyword(ident string) bool {
-	upper := strings.ToUpper(ident)
-	switch upper {
-	case "T", "D", "TOD", "DT":
 		return true
 	default:
 		return false

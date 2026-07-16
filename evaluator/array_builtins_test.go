@@ -30,7 +30,7 @@ func TestArrayBoundFunctions(t *testing.T) {
 		{"UPPER_BOUND([1]);", "wrong number of arguments for UPPER_BOUND. got=1, want=2"},
 		{"LOWER_BOUND(1, 1);", "argument 1 to `LOWER_BOUND` must be of type ARRAY, got LINT"},
 		{"UPPER_BOUND('hello', 1);", "argument 1 to `UPPER_BOUND` must be of type ARRAY, got STRING"},
-		{"LOWER_BOUND([], 1.0);", "argument 2 to `LOWER_BOUND` must be of type INT, got REAL"},
+		{"LOWER_BOUND([], 1.0);", "argument 2 to `LOWER_BOUND` must be of type INT, got LREAL"},
 		{"UPPER_BOUND([], TRUE);", "argument 2 to `UPPER_BOUND` must be of type INT, got BOOLEAN"},
 		{"LOWER_BOUND([], 2);", "invalid dimension 2 for 1D array"},
 		{"UPPER_BOUND([], 0);", "invalid dimension 0 for 1D array"},

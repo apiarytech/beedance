@@ -110,11 +110,10 @@ var builtins = map[string]*object.Builtin{
 				return newBuiltinError("wrong number of arguments for INSERT. got=%d, want=3", len(args))
 			}
 
-			pos, ok := args[2].(*object.LInt)
+			p, _, ok := getIntegerObjectValue(args[2])
 			if !ok {
 				return newBuiltinError("argument 3 to `INSERT` must be INTEGER, got %s", args[2].Type())
 			}
-			p := pos.Value
 
 			switch in1 := args[0].(type) {
 			case *object.Array:
@@ -153,8 +152,23 @@ var builtins = map[string]*object.Builtin{
 				}
 				idx := p - 1
 				return &object.String{Value: in1.Value[:idx] + in2.Value + in1.Value[idx:]}
+			case *object.WString:
+				in2, ok := args[1].(*object.WString)
+				if !ok {
+					return newBuiltinError("argument 2 to `INSERT` for wstrings must be WSTRING, got %s", args[1].Type())
+				}
+				strLen := int64(len(in1.Value))
+
+				if p < 1 {
+					p = 1
+				}
+				if p > strLen+1 {
+					p = strLen + 1
+				}
+				idx := p - 1
+				return &object.WString{Value: in1.Value[:idx] + in2.Value + in1.Value[idx:]}
 			default:
-				return newBuiltinError("argument 1 to `INSERT` must be ARRAY or STRING, got %s", args[0].Type())
+				return newBuiltinError("argument 1 to `INSERT` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
 			}
 		},
 	},
@@ -164,20 +178,18 @@ var builtins = map[string]*object.Builtin{
 				return newBuiltinError("wrong number of arguments for DELETE. got=%d, want=3", len(args))
 			}
 
-			length, ok := args[1].(*object.LInt)
+			l, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `DELETE` must be INTEGER, got %s", args[1].Type())
 			}
 
-			pos, ok := args[2].(*object.LInt)
+			p, _, ok := getIntegerObjectValue(args[2])
 			if !ok {
 				return newBuiltinError("argument 3 to `DELETE` must be INTEGER, got %s", args[2].Type())
 			}
 
 			switch in1 := args[0].(type) {
 			case *object.Array:
-				l := length.Value
-				p := pos.Value
 				arrLen := int64(len(in1.Elements))
 
 				if l <= 0 || p < 1 || p > arrLen {
@@ -194,8 +206,6 @@ var builtins = map[string]*object.Builtin{
 				return &object.Array{Elements: newElements}
 
 			case *object.String:
-				l := length.Value
-				p := pos.Value
 				strLen := int64(len(in1.Value))
 
 				if l <= 0 || p < 1 || p > strLen {
@@ -209,8 +219,22 @@ var builtins = map[string]*object.Builtin{
 				}
 
 				return &object.String{Value: in1.Value[:start] + in1.Value[end:]}
+			case *object.WString:
+				strLen := int64(len(in1.Value))
+
+				if l <= 0 || p < 1 || p > strLen {
+					return in1 // Return original string if params are invalid/noop
+				}
+
+				start := p - 1
+				end := start + l
+				if end > strLen {
+					end = strLen
+				}
+
+				return &object.WString{Value: in1.Value[:start] + in1.Value[end:]}
 			default:
-				return newBuiltinError("argument 1 to `DELETE` must be ARRAY or STRING, got %s", args[0].Type())
+				return newBuiltinError("argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
 			}
 		},
 	},
@@ -250,33 +274,55 @@ var builtins = map[string]*object.Builtin{
 				}
 				return &object.String{Value: sb.String()}
 
+			case object.WSTRING_OBJ:
+				var sb strings.Builder
+				for _, arg := range args {
+					if str, ok := arg.(*object.WString); ok {
+						sb.WriteString(str.Value)
+					} else {
+						return newBuiltinError("all arguments to `CONCAT` must be of the same type (WSTRING), got %s", arg.Type())
+					}
+				}
+				return &object.WString{Value: sb.String()}
+
 			default:
-				return newBuiltinError("arguments to `CONCAT` must be either all ARRAYs or all STRINGs, got %s", args[0].Type())
+				return newBuiltinError("arguments to `CONCAT` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
 			}
 		},
 	},
+
 	"LEFT": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for LEFT. got=%d, want=2", len(args))
 			}
-			str, ok := args[0].(*object.String)
-			if !ok {
-				return newBuiltinError("argument 1 to `LEFT` must be STRING, got %s", args[0].Type())
-			}
-			length, ok := args[1].(*object.LInt)
+			length, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `LEFT` must be INTEGER, got %s", args[1].Type())
 			}
 
-			l := length.Value
-			if l <= 0 {
-				return &object.String{Value: ""}
+			switch str := args[0].(type) {
+			case *object.String:
+				l := length
+				if l <= 0 {
+					return &object.String{Value: ""}
+				}
+				if l >= int64(len(str.Value)) {
+					return str
+				}
+				return &object.String{Value: str.Value[:l]}
+			case *object.WString:
+				l := length
+				if l <= 0 {
+					return &object.WString{Value: ""}
+				}
+				if l >= int64(len(str.Value)) {
+					return str
+				}
+				return &object.WString{Value: str.Value[:l]}
+			default:
+				return newBuiltinError("argument 1 to `LEFT` must be STRING or WSTRING, got %s", args[0].Type())
 			}
-			if l >= int64(len(str.Value)) {
-				return str
-			}
-			return &object.String{Value: str.Value[:l]}
 		},
 	},
 	"RIGHT": {
@@ -284,24 +330,34 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 2 {
 				return newBuiltinError("wrong number of arguments for RIGHT. got=%d, want=2", len(args))
 			}
-			str, ok := args[0].(*object.String)
-			if !ok {
-				return newBuiltinError("argument 1 to `RIGHT` must be STRING, got %s", args[0].Type())
-			}
-			length, ok := args[1].(*object.LInt)
+			length, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `RIGHT` must be INTEGER, got %s", args[1].Type())
 			}
+			l := length
 
-			l := length.Value
-			sLen := int64(len(str.Value))
-			if l <= 0 {
-				return &object.String{Value: ""}
+			switch str := args[0].(type) {
+			case *object.String:
+				sLen := int64(len(str.Value))
+				if l <= 0 {
+					return &object.String{Value: ""}
+				}
+				if l >= sLen {
+					return str
+				}
+				return &object.String{Value: str.Value[sLen-l:]}
+			case *object.WString:
+				sLen := int64(len(str.Value))
+				if l <= 0 {
+					return &object.WString{Value: ""}
+				}
+				if l >= sLen {
+					return str
+				}
+				return &object.WString{Value: str.Value[sLen-l:]}
+			default:
+				return newBuiltinError("argument 1 to `RIGHT` must be STRING or WSTRING, got %s", args[0].Type())
 			}
-			if l >= sLen {
-				return str
-			}
-			return &object.String{Value: str.Value[sLen-l:]}
 		},
 	},
 	"MID": {
@@ -309,32 +365,41 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 3 {
 				return newBuiltinError("wrong number of arguments for MID. got=%d, want=3", len(args))
 			}
-			str, ok := args[0].(*object.String)
-			if !ok {
-				return newBuiltinError("argument 1 to `MID` must be STRING, got %s", args[0].Type())
-			}
-			length, ok := args[1].(*object.LInt)
-			if !ok {
+			l, _, okL := getIntegerObjectValue(args[1])
+			if !okL {
 				return newBuiltinError("argument 2 to `MID` must be INTEGER, got %s", args[1].Type())
 			}
-			pos, ok := args[2].(*object.LInt)
-			if !ok {
+			p, _, okP := getIntegerObjectValue(args[2])
+			if !okP {
 				return newBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
 			}
 
-			l := length.Value
-			p := pos.Value
-			sLen := int64(len(str.Value))
-
-			if l <= 0 || p <= 0 || p > sLen {
-				return &object.String{Value: ""}
+			switch str := args[0].(type) {
+			case *object.String:
+				sLen := int64(len(str.Value))
+				if l <= 0 || p <= 0 || p > sLen {
+					return &object.String{Value: ""}
+				}
+				start := p - 1 // Convert from 1-based to 0-based index
+				end := start + l
+				if end > sLen {
+					end = sLen
+				}
+				return &object.String{Value: str.Value[start:end]}
+			case *object.WString:
+				sLen := int64(len(str.Value))
+				if l <= 0 || p <= 0 || p > sLen {
+					return &object.WString{Value: ""}
+				}
+				start := p - 1 // Convert from 1-based to 0-based index
+				end := start + l
+				if end > sLen {
+					end = sLen
+				}
+				return &object.WString{Value: str.Value[start:end]}
+			default:
+				return newBuiltinError("argument 1 to `MID` must be STRING or WSTRING, got %s", args[0].Type())
 			}
-			start := p - 1 // Convert from 1-based to 0-based index
-			end := start + l
-			if end > sLen {
-				end = sLen
-			}
-			return &object.String{Value: str.Value[start:end]}
 		},
 	},
 	"FIND": {
@@ -351,21 +416,23 @@ var builtins = map[string]*object.Builtin{
 				}
 				index := strings.Index(in1.Value, in2.Value)
 				return &object.LInt{Value: int64(index + 1)}
-
+			case *object.WString:
+				in2, ok := args[1].(*object.WString)
+				if !ok {
+					return newBuiltinError("argument 2 to `FIND` for wstrings must be WSTRING, got %s", args[1].Type())
+				}
+				index := strings.Index(in1.Value, in2.Value)
+				return &object.LInt{Value: int64(index + 1)}
 			case *object.Array:
 				toFind := args[1]
 				for i, elem := range in1.Elements {
-					// For simplicity, we use the equality rules of the language.
-					// This means direct comparison for basic types.
-					// A more complex implementation could use `evalInfixExpression` for `==`.
 					if isEqual(elem, toFind) {
 						return &object.LInt{Value: int64(i + 1)} // 1-based index
 					}
 				}
 				return &object.LInt{Value: 0} // Not found
-
 			default:
-				return newBuiltinError("argument 1 to `FIND` must be STRING or ARRAY, got %s", args[0].Type())
+				return newBuiltinError("argument 1 to `FIND` must be STRING, WSTRING, or ARRAY, got %s", args[0].Type())
 			}
 		},
 	},
@@ -374,50 +441,63 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 4 {
 				return newBuiltinError("wrong number of arguments for REPLACE. got=%d, want=4", len(args))
 			}
-			in1, ok := args[0].(*object.String)
-			if !ok {
-				return newBuiltinError("argument 1 to `REPLACE` must be STRING, got %s", args[0].Type())
-			}
-			in2, ok := args[1].(*object.String)
-			if !ok {
-				return newBuiltinError("argument 2 to `REPLACE` must be STRING, got %s", args[1].Type())
-			}
-			length, ok := args[2].(*object.LInt)
-			if !ok {
+			l, _, okL := getIntegerObjectValue(args[2])
+			if !okL {
 				return newBuiltinError("argument 3 to `REPLACE` must be INTEGER, got %s", args[2].Type())
 			}
-			pos, ok := args[3].(*object.LInt)
-			if !ok {
+			p, _, okP := getIntegerObjectValue(args[3])
+			if !okP {
 				return newBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
 			}
 
-			l := length.Value
-			p := pos.Value
-			str1 := in1.Value
-			str2 := in2.Value
-			sLen := int64(len(str1))
-
-			if p < 1 {
-				p = 1
-			}
 			if l < 0 {
 				l = 0
 			}
-
-			start := p - 1 // Convert to 0-based index
-
-			if start >= sLen {
-				return &object.String{Value: str1 + str2}
+			if p < 1 {
+				p = 1
 			}
 
-			endDelete := start + l
-			if endDelete > sLen {
-				endDelete = sLen
+			switch in1 := args[0].(type) {
+			case *object.String:
+				in2, ok := args[1].(*object.String)
+				if !ok {
+					return newBuiltinError("argument 2 to `REPLACE` must be STRING, got %s", args[1].Type())
+				}
+				str1 := in1.Value
+				str2 := in2.Value
+				sLen := int64(len(str1))
+				start := p - 1
+				if start >= sLen {
+					return &object.String{Value: str1 + str2}
+				}
+				endDelete := start + l
+				if endDelete > sLen {
+					endDelete = sLen
+				}
+				return &object.String{Value: str1[:start] + str2 + str1[endDelete:]}
+			case *object.WString:
+				in2, ok := args[1].(*object.WString)
+				if !ok {
+					return newBuiltinError("argument 2 to `REPLACE` must be WSTRING, got %s", args[1].Type())
+				}
+				str1 := in1.Value
+				str2 := in2.Value
+				sLen := int64(len(str1))
+				start := p - 1
+				if start >= sLen {
+					return &object.WString{Value: str1 + str2}
+				}
+				endDelete := start + l
+				if endDelete > sLen {
+					endDelete = sLen
+				}
+				return &object.WString{Value: str1[:start] + str2 + str1[endDelete:]}
+			default:
+				return newBuiltinError("argument 1 to `REPLACE` must be STRING or WSTRING, got %s", args[0].Type())
 			}
-
-			return &object.String{Value: str1[:start] + str2 + str1[endDelete:]}
 		},
 	},
+
 	"SHL": {
 		Fn: func(args ...object.Object) object.Object {
 			if len(args) != 2 {
@@ -427,15 +507,15 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `SHL` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.LInt)
+			nVal, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `SHL` must be INTEGER, got %s", args[1].Type())
 			}
-			if n.Value < 0 {
-				return newBuiltinError("shift amount for `SHL` must be non-negative, got %d", n.Value)
+			if nVal < 0 {
+				return newBuiltinError("shift amount for `SHL` must be non-negative, got %d", nVal)
 			}
 
-			shiftAmount := uint(n.Value)
+			shiftAmount := uint(nVal)
 			result := in.Value << shiftAmount
 
 			// Apply mask to ensure the result stays within the bitstring's width
@@ -454,14 +534,14 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `SHR` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.LInt)
+			nVal, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `SHR` must be INTEGER, got %s", args[1].Type())
 			}
-			if n.Value < 0 {
-				return newBuiltinError("shift amount for `SHR` must be non-negative, got %d", n.Value)
+			if nVal < 0 {
+				return newBuiltinError("shift amount for `SHR` must be non-negative, got %d", nVal)
 			}
-			shiftAmount := uint(n.Value)
+			shiftAmount := uint(nVal)
 			result := in.Value >> shiftAmount
 
 			// Apply mask to ensure the result stays within the bitstring's width
@@ -480,15 +560,15 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `ROL` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.LInt)
+			nVal, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `ROL` must be INTEGER, got %s", args[1].Type())
 			}
-			if n.Value < 0 {
-				return newBuiltinError("rotate amount for `ROL` must be non-negative, got %d", n.Value)
+			if nVal < 0 {
+				return newBuiltinError("rotate amount for `ROL` must be non-negative, got %d", nVal)
 			}
 
-			k := int(n.Value)
+			k := int(nVal)
 			var result uint64
 			switch in.Width {
 			case 8:
@@ -512,14 +592,14 @@ var builtins = map[string]*object.Builtin{
 			if !ok {
 				return newBuiltinError("argument 1 to `ROR` must be a bitstring type, got %s", args[0].Type())
 			}
-			n, ok := args[1].(*object.LInt)
+			nVal, _, ok := getIntegerObjectValue(args[1])
 			if !ok {
 				return newBuiltinError("argument 2 to `ROR` must be INTEGER, got %s", args[1].Type())
 			}
-			if n.Value < 0 {
-				return newBuiltinError("rotate amount for `ROR` must be non-negative, got %d", n.Value)
+			if nVal < 0 {
+				return newBuiltinError("rotate amount for `ROR` must be non-negative, got %d", nVal)
 			}
-			k := int(n.Value)
+			k := int(nVal)
 			var result uint64
 			switch in.Width {
 			case 8:
@@ -692,12 +772,22 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ROUND. got=%d, want=1", len(args))
 			}
-			if args[0].Type() != object.REAL_OBJ {
+			var val float64
+			var ok bool
+			switch arg := args[0].(type) {
+			case *object.Real:
+				val, ok = arg.Value, true
+			case *object.LReal:
+				val, ok = arg.Value, true
+			default:
+				ok = false
+			}
+			if !ok {
 				return newBuiltinError("argument to `ROUND` must be REAL, got %s", args[0].Type())
 			}
-			realVal := args[0].(*object.Real).Value
 			// Per IEC 60559 (IEEE 754), the default rounding mode is "round half to even".
-			return &object.LInt{Value: int64(math.Round(realVal))}
+			// The standard specifies DINT as the return type, but we use LINT for simplicity.
+			return &object.LInt{Value: int64(math.Round(val))}
 		},
 	},
 	"ABS": {
@@ -705,29 +795,34 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for ABS. got=%d, want=1", len(args))
 			}
-			switch arg := args[0].(type) {
+			arg := args[0]
+			switch v := arg.(type) {
 			case *object.SInt:
-				if arg.Value < 0 {
-					return &object.SInt{Value: -arg.Value}
+				if v.Value < 0 {
+					return &object.SInt{Value: -v.Value}
 				}
-				return arg
+				return v
 			case *object.Int:
-				if arg.Value < 0 {
-					return &object.Int{Value: -arg.Value}
+				if v.Value < 0 {
+					return &object.Int{Value: -v.Value}
 				}
-				return arg
+				return v
 			case *object.DInt:
-				if arg.Value < 0 {
-					return &object.DInt{Value: -arg.Value}
+				if v.Value < 0 {
+					return &object.DInt{Value: -v.Value}
 				}
-				return arg
+				return v
 			case *object.LInt:
-				if arg.Value < 0 {
-					return &object.LInt{Value: -arg.Value}
+				if v.Value < 0 {
+					return &object.LInt{Value: -v.Value}
 				}
-				return arg
+				return v
+			case *object.USInt, *object.UInt, *object.UDInt, *object.ULInt:
+				return v // ABS of unsigned is the value itself
 			case *object.Real:
-				return &object.Real{Value: math.Abs(arg.Value)} //
+				return &object.Real{Value: math.Abs(v.Value)}
+			case *object.LReal:
+				return &object.LReal{Value: math.Abs(v.Value)}
 			default:
 				return newBuiltinError("argument to `ABS` not supported, got %s", args[0].Type())
 			}
@@ -738,11 +833,20 @@ var builtins = map[string]*object.Builtin{
 			if len(args) != 1 {
 				return newBuiltinError("wrong number of arguments for TRUNC. got=%d, want=1", len(args))
 			}
-			if args[0].Type() != object.REAL_OBJ {
+			var val float64
+			var ok bool
+			switch arg := args[0].(type) {
+			case *object.Real:
+				val, ok = arg.Value, true
+			case *object.LReal:
+				val, ok = arg.Value, true
+			default:
+				ok = false
+			}
+			if !ok {
 				return newBuiltinError("argument to `TRUNC` must be REAL, got %s", args[0].Type())
 			}
-			realVal := args[0].(*object.Real).Value
-			return &object.LInt{Value: int64(math.Trunc(realVal))}
+			return &object.LInt{Value: int64(math.Trunc(val))}
 		},
 	},
 	"ADD":  {Fn: addBuiltin},
@@ -957,9 +1061,9 @@ func bitwiseBuiltin(op string, args ...object.Object) object.Object {
 	for i := 1; i < len(args); i++ {
 		nextVal := args[i].(*object.BitString).Value
 		switch op {
-		case "AND":
+		case "AND", "NAND":
 			result &= nextVal
-		case "OR":
+		case "OR", "NOR":
 			result |= nextVal
 		case "XOR":
 			result ^= nextVal
@@ -1152,6 +1256,12 @@ func divBuiltin(args ...object.Object) object.Object {
 
 	// Handle all numeric types
 	if isNumeric(arg1) && isNumeric(arg2) {
+		// Check for division by zero before delegating to the infix evaluator.
+		// This ensures a consistent "BUILTIN ERROR" message for the DIV function.
+		val2, isNumeric := getFloat64Value(arg2)
+		if isNumeric && val2 == 0.0 {
+			return newBuiltinError("division by zero")
+		}
 		return evalNumericInfixExpression(&ast.InfixExpression{Operator: "/"}, arg1, arg2)
 	}
 
@@ -1217,98 +1327,23 @@ func comparisonBuiltin(op string) object.BuiltinFunction {
 
 // evalComparison centralizes the logic for all comparison operations.
 func evalComparison(op string, left, right object.Object) object.Object {
-	// Type promotion for mixed REAL and INTEGER comparisons.
-	// If one operand is REAL/LREAL and the other is any integer type, promote the integer to REAL.
-	if isRealType(string(left.Type())) {
-		if val, _, ok := getIntegerObjectValue(right); ok {
-			right = &object.Real{Value: float64(val)}
-		}
-	} else if isRealType(string(right.Type())) {
-		if val, _, ok := getIntegerObjectValue(left); ok {
-			left = &object.Real{Value: float64(val)}
-		}
+	// Map functional operator names to their symbolic equivalents, which are
+	// handled by the main evalInfixExpression logic.
+	opMap := map[string]string{
+		"GT": ">",
+		"GE": ">=",
+		"EQ": "=",
+		"LE": "<=",
+		"LT": "<",
+		"NE": "<>",
 	}
-
-	if left.Type() != right.Type() {
-		return newBuiltinError("type mismatch for comparison: %s %s %s", left.Type(), op, right.Type())
+	symbolicOp, ok := opMap[op]
+	if !ok {
+		return newBuiltinError("internal error: unknown comparison operator %s", op)
 	}
-
-	var result bool
-	switch l := left.(type) {
-	case *object.LInt:
-		r := right.(*object.LInt).Value
-		switch op {
-		case "GT":
-			result = l.Value > r
-		case "GE":
-			result = l.Value >= r
-		case "EQ":
-			result = l.Value == r
-		case "LE":
-			result = l.Value <= r
-		case "LT":
-			result = l.Value < r
-		case "NE":
-			result = l.Value != r
-		}
-	case *object.Real:
-		r := right.(*object.Real).Value
-		switch op {
-		case "GT":
-			result = l.Value > r
-		case "GE":
-			result = l.Value >= r
-		case "EQ":
-			result = l.Value == r
-		case "LE":
-			result = l.Value <= r
-		case "LT":
-			result = l.Value < r
-		case "NE":
-			result = l.Value != r
-		}
-	case *object.String:
-		r := right.(*object.String).Value
-		switch op {
-		case "GT":
-			result = l.Value > r
-		case "GE":
-			result = l.Value >= r
-		case "EQ":
-			result = l.Value == r
-		case "LE":
-			result = l.Value <= r
-		case "LT":
-			result = l.Value < r
-		case "NE":
-			result = l.Value != r
-		}
-	case *object.Boolean:
-		r := right.(*object.Boolean).Value
-		// For booleans, only EQ and NE are typically used, but others are valid.
-		// We can treat FALSE as 0 and TRUE as 1 for comparison.
-		li, ri := 0, 0
-		if l.Value {
-			li = 1
-		}
-		if r {
-			ri = 1
-		}
-		return evalComparison(op, &object.LInt{Value: int64(li)}, &object.LInt{Value: int64(ri)})
-
-	default:
-		// For other types, fall back to simple equality/inequality checks.
-		// This covers TIME, DATE, etc., where direct value comparison is meaningful.
-		if op == "EQ" {
-			return nativeBoolToBooleanObject(isEqual(left, right))
-		}
-		if op == "NE" {
-			return nativeBoolToBooleanObject(!isEqual(left, right))
-		}
-		return newBuiltinError("unsupported operand types for %s: %s", op, left.Type())
-	}
-
-	return nativeBoolToBooleanObject(result)
+	// Create a dummy InfixExpression node to reuse the main evaluation logic.
+	dummyNode := &ast.InfixExpression{Operator: symbolicOp}
+	return evalInfixExpression(dummyNode, left, right)
 }
 
 // muxBuiltin implements the MUX standard function.
@@ -1354,21 +1389,6 @@ func genericConversionBuiltin(fromType, toType string) *object.Builtin {
 	}
 }
 
-var integerTypeRanges = map[string]struct {
-	minSigned   int64
-	maxSigned   int64
-	maxUnsigned uint64
-}{
-	"SINT":  {math.MinInt8, math.MaxInt8, 0},
-	"INT":   {math.MinInt16, math.MaxInt16, 0},
-	"DINT":  {math.MinInt32, math.MaxInt32, 0},
-	"LINT":  {math.MinInt64, math.MaxInt64, 0},
-	"USINT": {0, 0, math.MaxUint8},
-	"UINT":  {0, 0, math.MaxUint16},
-	"UDINT": {0, 0, math.MaxUint32},
-	"ULINT": {0, 0, math.MaxUint64},
-}
-
 var bitStringTypeRanges = map[string]uint64{
 	"BYTE":  math.MaxUint8,
 	"WORD":  math.MaxUint16,
@@ -1378,16 +1398,31 @@ var bitStringTypeRanges = map[string]uint64{
 
 // applyConversion handles the logic for converting an object from one type to another.
 func applyConversion(input object.Object, fromType, toType string) object.Object {
-	// Validate that the input object's type matches the 'fromType' part of the function name.
-	// This is a sanity check; the language is strongly typed, but this adds robustness.
-	if !strings.HasPrefix(string(input.Type()), fromType) && fromType != "ANY_INT" && fromType != "ANY_REAL" {
-		// Allow ANY_INT to be converted from any integer type, etc.
-		// This is a simplification; a full implementation would check generic type hierarchies.
-		isNumericConversion := (fromType == "ANY_INT" && isIntegerType(string(input.Type()))) ||
-			(fromType == "ANY_REAL" && isNumeric(input))
+	// More flexible validation:
+	// Allow conversions where the input type belongs to the same family as the 'fromType'.
+	// For example, allow INT input for a DINT_TO_SINT function.
+	actualType := string(input.Type())
+	isValidFromType := false
+	if (isIntegerType(fromType) && isIntegerType(actualType)) ||
+		(isBooleanType(fromType) && isBooleanType(actualType)) ||
+		(isRealType(fromType) && isRealType(actualType)) ||
+		(isStringType(fromType) && isStringType(actualType)) ||
+		(isBitStringType(fromType) && isBitStringType(actualType)) ||
+		(fromType == "ANY_INT" && isIntegerType(actualType)) ||
+		(fromType == "ANY_REAL" && isNumeric(input)) ||
+		(fromType == "BCD" && actualType == string(object.BITSTRING_OBJ)) ||
+		(actualType == fromType) {
+		isValidFromType = true
+	}
 
-		if !isNumericConversion {
-			return newBuiltinError("type mismatch for %s_TO_%s: input is %s, expected %s", fromType, toType, input.Type(), fromType)
+	if !isValidFromType {
+		return newBuiltinError("type mismatch for %s_TO_%s: input is %s, expected a %s type", fromType, toType, actualType, fromType)
+	}
+
+	// Handle BCD_TO_* conversions first, as they take a BitString and produce another type.
+	if fromType == "BCD" {
+		if isIntegerType(toType) {
+			return bcdToInt(input)
 		}
 	}
 
@@ -1453,7 +1488,34 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 
 	// Handle conversions to String types
 	if isStringType(toType) {
-		return &object.String{Value: input.Inspect()}
+		// Special handling for specific types to match IEC 61131-3 format.
+		switch val := input.(type) {
+		case *object.Boolean:
+			if val.Value {
+				return &object.String{Value: "TRUE"}
+			}
+			return &object.String{Value: "FALSE"}
+		case *object.Time:
+			// The standard isn't super explicit, but `t.Value.String()` gives a readable format like "1m30s".
+			return &object.String{Value: val.Value.String()}
+		case *object.Real, *object.LReal:
+			floatVal, _ := getFloat64Value(val)
+			return &object.String{Value: fmt.Sprintf("%f", floatVal)}
+		default:
+			// For other types, Inspect() is a reasonable default.
+			return &object.String{Value: input.Inspect()}
+		}
+	}
+
+	// Handle conversions to Boolean types
+	if isBooleanType(toType) {
+		switch input.(type) {
+		case *object.LInt, *object.SInt, *object.Int, *object.DInt, *object.USInt, *object.UInt, *object.UDInt, *object.ULInt:
+			iVal, _, _ := getIntegerObjectValue(input)
+			return nativeBoolToBooleanObject(iVal != 0)
+		}
+		// Other conversions to BOOL are not standard, e.g., from STRING.
+		return newBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 	}
 
 	// Handle conversions to Bit-string types (BYTE, WORD, etc.)
@@ -1489,11 +1551,6 @@ func applyConversion(input object.Object, fromType, toType string) object.Object
 			return newBuiltinError("conversion from %s to BCD is not supported", input.Type())
 		}
 	}
-	if fromType == "BCD" {
-		if isIntegerType(toType) {
-			return bcdToInt(input)
-		}
-	}
 
 	return newBuiltinError("conversion to type %s is not supported", toType)
 }
@@ -1503,12 +1560,19 @@ func isIntegerType(typeName string) bool {
 		typeName == "USINT" || typeName == "UINT" || typeName == "UDINT" || typeName == "ULINT"
 }
 
+func isBooleanType(typeName string) bool {
+	upper := strings.ToUpper(typeName)
+	return upper == "BOOL" || upper == "BOOLEAN"
+}
+
 func isRealType(typeName string) bool {
-	return typeName == "REAL" || typeName == "LREAL"
+	upper := strings.ToUpper(typeName)
+	return upper == "REAL" || upper == "LREAL"
 }
 
 func isStringType(typeName string) bool {
-	return typeName == "STRING" || typeName == "WSTRING"
+	upper := strings.ToUpper(typeName)
+	return upper == "STRING" || upper == "WSTRING"
 }
 
 func isBitStringType(typeName string) bool {
@@ -1565,15 +1629,16 @@ func bcdToInt(input object.Object) object.Object {
 
 	bcdVal := uint16(bs.Value)
 	var result int64
-	var multiplier int64 = 1
 
-	for i := 0; i < 4; i++ {
+	// Iterate from most significant nibble (3) to least significant (0)
+	for i := 3; i >= 0; i-- {
 		nibble := (bcdVal >> (i * 4)) & 0xF
 		if nibble > 9 {
+			// Report error on the first invalid nibble found from the left.
 			return newBuiltinError("invalid BCD format: nibble %d has value %d > 9", i, nibble)
 		}
-		result += int64(nibble) * multiplier
-		multiplier *= 10
+		// Build the integer value from left to right.
+		result = result*10 + int64(nibble)
 	}
 
 	return &object.LInt{Value: result}
@@ -1722,17 +1787,18 @@ func evalCTU(instanceEnv, callEnv *object.Environment) object.Object {
 
 // evalCTD implements the logic for the CTD (Counter Down) standard function block.
 func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
-	cd, _ := instanceEnv.Get("CD")
-	ld, _ := instanceEnv.Get("LD")
+	cdObj, _ := instanceEnv.Get("CD")
+	ldObj, _ := instanceEnv.Get("LD")
 	pv, _ := instanceEnv.Get("PV")
 	lastCD, _ := instanceEnv.GetRaw("__lastCD")
 	cvObj, _ := instanceEnv.Get("CV")
 
-	cdBool, _ := cd.(*object.Boolean)
-	ldBool, _ := ld.(*object.Boolean)
+	// Gracefully handle nil inputs by treating them as FALSE.
+	cdBool := nativeBoolToBooleanObject(isTruthy(cdObj))
+	ldBool := nativeBoolToBooleanObject(isTruthy(ldObj))
 	pvInt, _, ok := getIntegerObjectValue(pv)
-	if cdBool == nil || ldBool == nil || !ok {
-		return newBuiltinError("CTD requires CD (BOOL), LD (BOOL), and PV (any INT type) inputs")
+	if !ok {
+		return newBuiltinError("CTD requires a PV (Preset Value) input of an integer type")
 	}
 
 	lastCDBool := lastCD == TRUE
@@ -1743,6 +1809,8 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 
 	if ldBool == TRUE {
 		cv = pvInt
+		// When loading, we must also update the last CD state to prevent a false trigger on the next scan.
+		instanceEnv.Set("__lastCD", cdBool)
 	} else if cdBool.Value && !lastCDBool { // Rising edge on CD
 		if cv > 0 { // Standard says count down to min value
 			cv--
@@ -1751,7 +1819,7 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 
 	q := nativeBoolToBooleanObject(cv <= 0)
 
-	instanceEnv.Set("__lastCD", cd)
+	instanceEnv.Set("__lastCD", cdBool)
 	instanceEnv.Set("Q", q)
 	instanceEnv.Set("CV", &object.LInt{Value: cv})
 

@@ -163,6 +163,8 @@ const (
 	INITIAL_STEP       = "INITIAL_STEP"
 	RETURN             = "RETURN"
 	MOVE               = "MOVE"
+	MIN                = "MIN"
+	MAX                = "MAX"
 	NIL                = "NIL"
 
 	// Data Type Keywords
@@ -285,6 +287,8 @@ var keywords = map[string]TokenType{
 	"ON":                 ON,
 	"WITH":               WITH,
 	"TASK":               TASK,
+	"MIN":                MIN,
+	"MAX":                MAX,
 	"MOVE":               MOVE,
 	"NIL":                NIL,
 	"SINGLE":             SINGLE,

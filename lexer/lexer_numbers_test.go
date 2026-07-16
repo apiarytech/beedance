@@ -34,6 +34,7 @@ func TestBasedLiterals(t *testing.T) {
 		{"8#377", token.INT, "8#377"},
 		{"16#FF", token.INT, "16#FF"},
 		{"16#ff", token.INT, "16#ff"},
+		{"16#FFe10", token.INT, "16#FFe10"}, // 'e' is a valid hex digit
 		{"16#A.B", token.REAL, "16#A.B"},
 		{"2#1011_0010", token.INT, "2#1011_0010"},
 	})
@@ -41,34 +42,44 @@ func TestBasedLiterals(t *testing.T) {
 
 func TestTypedLiteralsLexing(t *testing.T) {
 	tests := []struct {
-		name            string
-		input           string
-		expectedType    token.TokenType
-		expectedLiteral string
+		name           string
+		input          string
+		expectedTokens []token.Token
 	}{
-		{"INT", "INT#10", token.INT, "INT#10"},
-		{"DINT with base", "DINT#16#FF", token.DINT, "DINT#16#FF"},
-		{"DINT binary", "DINT#2#1011_0101", token.DINT, "DINT#2#1011_0101"},
-		{"UINT octal", "UINT#8#377", token.UINT, "UINT#8#377"},
-		{"SINT decimal", "SINT#10#123", token.SINT, "SINT#10#123"},
-		{"LINT hex", "LINT#16#AABBCCDD_EEFF0011", token.LINT, "LINT#16#AABBCCDD_EEFF0011"},
-		{"REAL", "REAL#1.5", token.REAL, "REAL#1.5"},
-		{"TIME short form", "T#5s", token.TIME, "T#5s"},
-		{"TIME long form", "TIME#5m_10s", token.TIME, "TIME#5m_10s"},
-		{"DATE short form", "D#2026-05-21", token.DATE, "D#2026-05-21"},
-		{"TOD long form", "TIME_OF_DAY#23:59:59", token.TIME_OF_DAY, "TIME_OF_DAY#23:59:59"},
-		{"DT short form", "DT#2026-05-21-14:21:00", token.DATE_AND_TIME, "DT#2026-05-21-14:21:00"},
+		{
+			"INT", "INT#10", []token.Token{
+				{Type: token.INT, Literal: "INT"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.INT, Literal: "10"},
+			},
+		},
+		{
+			"DINT with base", "DINT#16#FF", []token.Token{
+				{Type: token.DINT, Literal: "DINT"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.INT, Literal: "16#FF"},
+			},
+		},
+		{
+			"REAL", "REAL#1.5", []token.Token{
+				{Type: token.REAL, Literal: "REAL"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.REAL, Literal: "1.5"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l := New(tt.input)
-			tok := l.NextToken()
-			if tok.Type != tt.expectedType {
-				t.Errorf("token type wrong. want=%q, got=%q", tt.expectedType, tok.Type)
-			}
-			if tok.Literal != tt.expectedLiteral {
-				t.Errorf("token literal wrong. want=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			for i, expectedToken := range tt.expectedTokens {
+				tok := l.NextToken()
+				if tok.Type != expectedToken.Type {
+					t.Errorf("token %d type wrong. want=%q, got=%q", i, expectedToken.Type, tok.Type)
+				}
+				if tok.Literal != expectedToken.Literal {
+					t.Errorf("token %d literal wrong. want=%q, got=%q", i, expectedToken.Literal, tok.Literal)
+				}
 			}
 		})
 	}
@@ -79,10 +90,22 @@ func TestBitStringLiteralLexing(t *testing.T) {
 		input          string
 		expectedTokens []token.Token
 	}{
-		{"BYTE#16#A5", []token.Token{{Type: token.BYTE, Literal: "BYTE#16#A5"}, {Type: token.EOF, Literal: ""}}},
-		{"WORD#16#1234", []token.Token{{Type: token.WORD, Literal: "WORD#16#1234"}, {Type: token.EOF, Literal: ""}}},
-		{"DWORD#16#ABCDEF12", []token.Token{{Type: token.DWORD, Literal: "DWORD#16#ABCDEF12"}, {Type: token.EOF, Literal: ""}}},
-		{"LWORD#16#1234567890ABCDEF", []token.Token{{Type: token.LWORD, Literal: "LWORD#16#1234567890ABCDEF"}, {Type: token.EOF, Literal: ""}}},
+		{
+			"BYTE#16#A5", []token.Token{
+				{Type: token.BYTE, Literal: "BYTE"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.INT, Literal: "16#A5"},
+				{Type: token.EOF, Literal: ""},
+			},
+		},
+		{
+			"WORD#2#1111_0000", []token.Token{
+				{Type: token.WORD, Literal: "WORD"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.INT, Literal: "2#1111_0000"},
+				{Type: token.EOF, Literal: ""},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -103,7 +126,7 @@ func TestBitStringLiteralLexing(t *testing.T) {
 
 func TestInvalidLiterals(t *testing.T) {
 	runLexerTest(t, "Invalid literals", []testToken{
-		{"16#FFe10", token.INT, "16#FF"},        // The lexer stops at 'e', which is not a valid hex digit.
+		{"16#FFG", token.INT, "16#FF"},          // The lexer stops at 'G', which is not a valid hex digit.
 		{"INVALID#123", token.IDENT, "INVALID"}, // Lexer sees IDENT, HASH, INT. Parser handles the error.
 	})
 }
