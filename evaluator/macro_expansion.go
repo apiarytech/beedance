@@ -15,22 +15,32 @@ import (
 )
 
 func DefineMacros(program *ast.Program, env *object.Environment) {
-	definitions := []int{}
+	var newStmts []ast.Statement
 
-	for i, statement := range program.Statements {
-		if isMacroDefinition(statement) {
-			addMacro(statement, env)
-			definitions = append(definitions, i)
+	for _, stmt := range program.Statements {
+		if varBlock, ok := stmt.(*ast.VarBlockDeclaration); ok {
+			var newDecls []*ast.VarDeclStatement
+			// Iterate over declarations within the VAR block
+			for _, decl := range varBlock.Declarations {
+				if isMacroDefinition(decl) {
+					addMacro(decl, env)
+					// Do not add the macro declaration to the new list
+				} else {
+					newDecls = append(newDecls, decl)
+				}
+			}
+			// If the VAR block is not empty after removing macros, keep it.
+			if len(newDecls) > 0 {
+				varBlock.Declarations = newDecls
+				newStmts = append(newStmts, varBlock)
+			}
+			// If the VAR block becomes empty, it is effectively removed.
+		} else {
+			// Keep non-VAR block statements
+			newStmts = append(newStmts, stmt)
 		}
 	}
-
-	for i := len(definitions) - 1; i >= 0; i = i - 1 {
-		definitionIndex := definitions[i]
-		program.Statements = append(
-			program.Statements[:definitionIndex],
-			program.Statements[definitionIndex+1:]...,
-		)
-	}
+	program.Statements = newStmts
 }
 
 func isMacroDefinition(node ast.Statement) bool {
@@ -40,11 +50,7 @@ func isMacroDefinition(node ast.Statement) bool {
 	}
 
 	_, ok = varDecl.Value.(*ast.MacroLiteral)
-	if !ok {
-		return false
-	}
-
-	return true
+	return ok
 }
 
 func addMacro(stmt ast.Statement, env *object.Environment) {
@@ -76,6 +82,13 @@ func ExpandMacros(program ast.Node, env *object.Environment) ast.Node {
 		evalEnv := extendMacroEnv(macro, args)
 
 		evaluated := Eval(macro.Body, evalEnv)
+
+		// If the macro body fails to evaluate (e.g., due to a parsing error in the
+		// macro definition), we cannot expand it. Return the original macro call
+		// node. The test will then fail cleanly on the string comparison.
+		if isError(evaluated) {
+			return node
+		}
 
 		quote, ok := evaluated.(*object.Quote)
 		if !ok {

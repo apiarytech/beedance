@@ -1932,12 +1932,11 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 		// Per the standard, if both count up and count down are triggered, nothing happens.
 		if cuRising && !cdRising {
 			// The standard allows counting up to the max value of the integer type.
-			if cv < math.MaxInt16 { // Assuming INT for now, could be DINT/LINT
+			if cv < pvInt {
 				cv++
 			}
 		} else if cdRising && !cuRising {
-			// The standard allows counting down to the min value of the integer type.
-			if cv > math.MinInt16 {
+			if cv > 0 {
 				cv--
 			}
 		}
@@ -2040,9 +2039,9 @@ func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
 	// 4. SR Logic: Reset has priority.
 	// Q1 := (S1 OR Q1) AND (NOT R);
 	// Or, as a clearer sequence:
-	if r == TRUE {
+	if rBool == TRUE {
 		q1 = false
-	} else if s1 == TRUE {
+	} else if s1Bool == TRUE {
 		q1 = true
 	}
 	// If both are FALSE, q1 remains unchanged.
@@ -2096,9 +2095,9 @@ func evalRS(instanceEnv, callEnv *object.Environment) object.Object {
 	// 4. RS Logic: Set has priority.
 	// Q1 := S OR (Q1 AND (NOT R1));
 	// Or, as a clearer sequence:
-	if s == TRUE {
+	if sBool == TRUE {
 		q1 = true
-	} else if r1 == TRUE {
+	} else if r1Bool == TRUE {
 		q1 = false
 	}
 	// If both are FALSE, q1 remains unchanged.

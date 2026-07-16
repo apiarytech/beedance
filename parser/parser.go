@@ -170,6 +170,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.WORD, p.parseIdentifier)
 	p.registerPrefix(token.DWORD, p.parseIdentifier)
 	p.registerPrefix(token.LWORD, p.parseIdentifier)
+	p.registerPrefix(token.SR, p.parseIdentifier)
+	p.registerPrefix(token.RS, p.parseIdentifier)
 
 	p.infixParseFns = make(map[token.TokenType]infixParseFn)
 	p.registerInfix(token.PLUS, p.parseInfixExpression)
@@ -1080,7 +1082,7 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 func (p *Parser) isDataTypeToken(tok token.Token) bool {
 	switch tok.Type {
 	case token.BOOL, token.SINT, token.INT, token.DINT, token.LINT,
-		token.USINT, token.UINT, token.UDINT, token.ULINT,
+		token.USINT, token.UINT, token.UDINT, token.ULINT, token.SR, token.RS, token.MACRO,
 		token.REAL, token.LREAL, token.STRING, token.WSTRING,
 		token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
 		token.BYTE, token.WORD, token.DWORD, token.LWORD,

@@ -311,6 +311,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.CallExpression:
 		// Special handling for 'quote' macro
 		if node.Function.TokenLiteral() == "quote" {
+			if len(node.Arguments) != 1 {
+				return newError(node, "wrong number of arguments for quote. got=%d, want=1", len(node.Arguments))
+			}
 			return quote(node.Arguments[0], env)
 		}
 
@@ -2374,109 +2377,103 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		}
 
 	case *object.FunctionBlockInstance:
-		// Check for EN input. If not provided, it defaults to TRUE.
+		// For a function block, we must first process the arguments to populate its
+		// internal environment and identify output mappings. This must happen before
+		// we check EN, because the output mappings need to be processed even if EN is false.
+		extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env)
+		if err != nil {
+			return err
+		}
+
+		// Check for EN input from the now-populated environment. Defaults to TRUE.
 		enValue := TRUE
-		for _, arg := range args {
-			if namedArg, ok := arg.(*ast.NamedArgument); ok && namedArg.Name.Value == "EN" {
-				evaluatedEn := Eval(namedArg.Value, callEnv)
-				if isError(evaluatedEn) {
-					return evaluatedEn
-				}
-				if boolVal, ok := evaluatedEn.(*object.Boolean); ok {
-					enValue = boolVal
-				} else {
-					return newError(arg, "EN input must be of type BOOL, got %s", evaluatedEn.Type())
-				}
-				break
+		if enObj, ok := extendedEnv.Get("EN"); ok {
+			if boolVal, isBool := enObj.(*object.Boolean); isBool {
+				enValue = boolVal
 			}
 		}
 
 		// Set ENO to the value of EN by default.
-		fn.Env.Set("ENO", enValue)
+		extendedEnv.Set("ENO", enValue)
+
+		var result object.Object
 
 		// If EN is FALSE, do not execute the function block body.
 		if enValue == FALSE {
-			// Return the primary output of the FB if it exists, otherwise NULL.
-			// The outputs are not updated.
-			// For built-in FBs, Definition is nil. They don't have a primary output in this sense.
-			if fn.Definition != nil {
-				if primaryOutput, ok := fn.Env.Get(fn.Definition.Name.Value); ok {
-					return primaryOutput
-				}
-			}
-			return NULL
-		}
-
-		var result object.Object
-		//var err *object.Error
-
-		// For built-in FBs, the definition is nil, and logic is stored in the env.
-		if fn.Definition == nil {
-			// It's a built-in FB instance.
-			// 1. Copy input arguments into the instance environment.
-			_, outputMappings, err := extendFunctionEnv(nil, args, callEnv, fn.Env)
-			if err != nil {
-				return err
-			}
-
-			// 2. Execute the built-in logic.
-			logicFnObj, _ := fn.Env.Get("__fb_logic__")
-			logicFn := logicFnObj.(*object.BuiltinFunctionBlock).Fn
-			result = logicFn(fn.Env, callEnv)
-
-			// 3. Handle output arguments (=>).
-			for _, mapping := range outputMappings {
-				val, ok := fn.Env.Get(mapping.SourceParamName)
-				if !ok {
-					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
-				}
-
-				if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
-					callEnv.Set(targetIdent.Value, val)
-				} else {
-					return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
-				}
-			}
+			result = NULL // No execution, but we still handle output mappings.
 		} else {
-			// It's a user-defined FB instance.
-			extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env)
-			if err != nil {
-				return err
-			}
-
-			// Check if this FB instance has an SFC body.
-			if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
-				sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
-				if !isSFC {
-					return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
-				}
-				// Run one cycle of the SFC. This will update the variables in extendedEnv.
-				// The result of a cycle is not the primary return value, outputs are handled via mapping.
-				result = evalSFCCycle(sfcInstance, extendedEnv)
+			// EN is TRUE, execute the block.
+			if fn.Definition == nil {
+				// Built-in FB
+				logicFnObj, _ := extendedEnv.Get("__fb_logic__")
+				logicFn := logicFnObj.(*object.BuiltinFunctionBlock).Fn
+				result = logicFn(extendedEnv, callEnv)
 			} else {
-				// It's a standard ST-based function block.
-				// Execute the function block body.
-				result = Eval(fn.Definition.Body, extendedEnv)
-			}
-
-			// Handle output arguments (=>).
-			for _, mapping := range outputMappings {
-				val, ok := extendedEnv.Get(mapping.SourceParamName)
-				if !ok {
-					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
-				}
-
-				if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
-					callEnv.Set(targetIdent.Value, val)
+				// User-defined FB
+				if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
+					sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
+					if !isSFC {
+						return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
+					}
+					result = evalSFCCycle(sfcInstance, extendedEnv)
 				} else {
-					return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
+					result = Eval(fn.Definition.Body, extendedEnv)
 				}
 			}
 		}
 
 		// If the block execution resulted in an error, set ENO to FALSE.
 		if isError(result) {
-			fn.Env.Set("ENO", FALSE)
+			extendedEnv.Set("ENO", FALSE)
+		}
+
+		// Handle all output arguments (=>) after execution (or non-execution).
+		// This is crucial for updating the caller's scope, especially for ENO.
+		for _, mapping := range outputMappings {
+			val, ok := extendedEnv.Get(mapping.SourceParamName)
+			if !ok {
+				// If the block was disabled, the output might not have been set in this cycle.
+				// It should retain its value from the previous cycle, which is already in fn.Env.
+				// So, if it's not found, it's a genuine internal error.
+				if enValue == TRUE {
+					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
+				}
+				continue // Skip mapping if block is disabled and output was never set.
+			}
+
+			switch targetNode := mapping.TargetVarNode.(type) {
+			case *ast.Identifier:
+				// Use Assign to correctly update variables in outer scopes.
+				callEnv.Assign(targetNode.Value, val)
+
+			case *ast.IndexExpression:
+				// Handle assignment to an array element, e.g., Out => MyArray[1]
+				arrayObj := Eval(targetNode.Left, callEnv)
+				if isError(arrayObj) {
+					return arrayObj
+				}
+				array, ok := arrayObj.(*object.Array)
+				if !ok {
+					return newError(targetNode.Left, "left side of index expression for output argument must be an ARRAY, got %s", arrayObj.Type())
+				}
+
+				indexObj := Eval(targetNode.Index, callEnv)
+				if isError(indexObj) {
+					return indexObj
+				}
+				idx, _, ok := getIntegerObjectValue(indexObj)
+				if !ok {
+					return newError(targetNode.Index, "array index for output argument must be an integer, got %s", indexObj.Type())
+				}
+
+				if idx < 0 || idx >= int64(len(array.Elements)) {
+					return newError(targetNode, "index out of bounds for output assignment: %d", idx)
+				}
+				array.Elements[idx] = val
+
+			default:
+				return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
+			}
 		}
 
 		return result
@@ -2503,9 +2500,9 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 	positionalParamIndex := 0 // Index for positional parameters in paramDecls
 
 	var paramDecls []*ast.VarDeclStatement
-	if fbDef, ok := def.(*object.FunctionBlock); ok {
+	if fbDef, ok := def.(*object.FunctionBlock); ok && fbDef != nil {
 		paramDecls = fbDef.VarInputs
-	} else if fDef, ok := def.(*object.Function); ok {
+	} else if fDef, ok := def.(*object.Function); ok && fDef != nil {
 		paramDecls = fDef.VarInputs
 	}
 	// If def is nil, it's a built-in FB, and we just write to the targetEnv.
@@ -2598,9 +2595,9 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 // isInOutParam checks if a parameter name is declared as VAR_IN_OUT in a function/FB definition.
 func isInOutParam(paramName string, def object.Object) bool {
 	var inOutDecls []*ast.VarDeclStatement
-	if fbDef, ok := def.(*object.FunctionBlock); ok {
+	if fbDef, ok := def.(*object.FunctionBlock); ok && fbDef != nil {
 		inOutDecls = fbDef.VarInOuts
-	} else if fDef, ok := def.(*object.Function); ok {
+	} else if fDef, ok := def.(*object.Function); ok && fDef != nil {
 		inOutDecls = fDef.VarInOuts
 	}
 

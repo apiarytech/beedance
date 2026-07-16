@@ -186,6 +186,8 @@ const (
 	LWORD   = "LWORD"
 	ARRAY   = "ARRAY"
 	STRING  = "STRING"
+	SR      = "SR"
+	RS      = "RS"
 )
 
 // Task-specific keywords
@@ -320,6 +322,8 @@ var keywords = map[string]TokenType{
 	"LWORD":              LWORD,
 	"ARRAY":              ARRAY,
 	"STRING":             STRING,
+	"SR":                 SR,
+	"RS":                 RS,
 	"RANGE":              RANGE,
 }
 

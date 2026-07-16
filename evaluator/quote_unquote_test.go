@@ -12,25 +12,25 @@ func TestQuote(t *testing.T) {
 		expected string
 	}{
 		{
-			`quote(5)`,
+			`quote(5);`,
 			`5`,
 		},
 		{
-			`quote(5 + 8)`,
+			`quote(5 + 8);`,
 			`(5 + 8)`,
 		},
 		{
-			`quote(foobar)`,
+			`quote(foobar);`,
 			`foobar`,
 		},
 		{
-			`quote(foobar + barfoo)`,
+			`quote(foobar + barfoo);`,
 			`(foobar + barfoo)`,
 		},
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(t, tt.input)
+		evaluated := testEval(t, tt.input) // This helper checks for parser errors
 		quote, ok := evaluated.(*object.Quote)
 		if !ok {
 			t.Fatalf("expected *object.Quote. got=%T (%+v)",
@@ -53,22 +53,34 @@ func TestQuoteUnquote(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{`quote(unquote(4))`, `4`},
-		{`quote(unquote(4 + 4))`, `8`},
-		{`quote(8 + unquote(4 + 4))`, `(8 + 8)`},
-		{`quote(unquote(4 + 4) + 8)`, `(8 + 8)`},
-		{`VAR foobar : INT := 8; END_VAR quote(unquote(foobar))`, `8`},
-		{`quote(unquote(TRUE))`, `TRUE`},
-		{`quote(unquote(TRUE == FALSE))`, `FALSE`},
-		{`quote(unquote(quote(4 + 4)))`, `(4 + 4)`},
-		{`VAR quotedInfixExpression : QUOTE := quote(4 + 4); END_VAR quote(unquote(4 + 4) + unquote(quotedInfixExpression))`, `(8 + (4 + 4))`},
+		{`quote(unquote(4));`, `4`},
+		{`quote(unquote(4 + 4));`, `8`},
+		{`quote(8 + unquote(4 + 4));`, `(8 + 8)`},
+		{`quote(unquote(4 + 4) + 8);`, `(8 + 8)`},
+		{`VAR foobar : INT := 8; END_VAR quote(unquote(foobar));`, `8`},
+		{`quote(unquote(TRUE));`, `TRUE`},
+		{`quote(unquote(TRUE = FALSE));`, `FALSE`},
+		{`quote(unquote(quote(4 + 4)));`, `(4 + 4)`},
+		{`VAR quotedInfixExpression : INT := quote(4 + 4); END_VAR quote(unquote(4 + 4) + unquote(quotedInfixExpression));`, `(8 + (4 + 4))`},
 	}
 
 	for _, tt := range tests {
-		evaluated := testEval(t, tt.input)
-		_, ok := evaluated.(*object.Quote)
-		if !ok {
-			t.Fatalf("expected *object.Quote. got=%T (%+v)", evaluated, evaluated)
-		}
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(t, tt.input)
+			quote, ok := evaluated.(*object.Quote)
+			if !ok {
+				t.Fatalf("expected *object.Quote. got=%T (%+v)",
+					evaluated, evaluated)
+			}
+
+			if quote.Node == nil {
+				t.Fatalf("quote.Node is nil")
+			}
+
+			if quote.Node.String() != tt.expected {
+				t.Errorf("not equal. got=%q, want=%q",
+					quote.Node.String(), tt.expected)
+			}
+		})
 	}
 }

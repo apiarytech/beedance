@@ -62,9 +62,9 @@ func convertObjectToASTNode(obj object.Object) ast.Node {
 	case *object.Boolean:
 		var t token.Token
 		if obj.Value {
-			t = token.Token{Type: token.TRUE, Literal: "true"}
+			t = token.Token{Type: token.TRUE, Literal: "TRUE"}
 		} else {
-			t = token.Token{Type: token.FALSE, Literal: "false"}
+			t = token.Token{Type: token.FALSE, Literal: "FALSE"}
 		}
 		return &ast.Boolean{Token: t, Value: obj.Value}
 
