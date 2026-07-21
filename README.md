@@ -57,10 +57,66 @@ For example, the parser is designed to be context-aware. This allows it to corre
 
 ## Getting Started
 
-To start the `beedance` Read-Eval-Print-Loop (REPL), you can run the following command from the project root:
+The primary way to use `beedance` is through its command-line interface, which supports a Read-Eval-Print-Loop (REPL), file execution, and direct string evaluation.
+
+### Command-Line Flags
+
+You can run `beedance` with the following flags:
+
+*   **No flags:** Starts the interactive REPL.
+    ```sh
+    go run main.go
+    ```
+*   **`-iec` :** Executes a program from a `.st` file.
+    ```sh
+    go run main.go -iec /path/to/your/program.st
+    ```
+*   **`-e`:** Evaluates a single string of Structured Text.
+    ```sh
+    go run main.go -e "MyVar := 10 + 20;"
+    ```
+*   **`-trace`:** Enables detailed parser tracing, which is useful for debugging the parsing process.
+    ```sh
+    go run main.go -trace -iec /path/to/your/program.st
+    ```
+
+### Examples
+
+#### Simple State Machine in Structured Text
+
+The following example demonstrates a simple timed-state machine using a `TON` (Timer On-Delay) function block and a `CASE` statement. This code can be saved in a file (e.g., `traffic_light.st`) and executed with `go run main.go -iec traffic_light.st`.
 
 ```sh
-go run main.go
+PROGRAM Traffic_Light
+	VAR
+		State : INT := 0;
+		StateTimer : TON;
+		Green_Light : BOOL;
+		Yellow_Light : BOOL;
+		Red_Light : BOOL;
+	END_VAR
+
+	(* Call the timer instance on every scan *)
+	StateTimer(IN := TRUE, PT := T#5s);
+
+	CASE State OF
+		0: (* Green State *)
+			Green_Light := TRUE;
+			Yellow_Light := FALSE;
+			Red_Light := FALSE;
+			IF StateTimer.Q THEN State := 1; StateTimer(IN := FALSE); END_IF
+
+		1: (* Yellow State *)
+			Green_Light := FALSE;
+			Yellow_Light := TRUE;
+			IF StateTimer.Q THEN State := 2; StateTimer(IN := FALSE); END_IF
+
+		2: (* Red State *)
+			Yellow_Light := FALSE;
+			Red_Light := TRUE;
+			IF StateTimer.Q THEN State := 0; StateTimer(IN := FALSE); END_IF
+	END_CASE
+END_PROGRAM
 ```
 
 ## Licensing

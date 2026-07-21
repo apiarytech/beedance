@@ -31,6 +31,7 @@ func main() {
 	trace := flag.Bool("trace", false, "Enable parser tracing")
 	versionFlag := flag.Bool("version", false, "Print the application version")
 	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
+	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
 	flag.Parse()
 
 	if *versionFlag {
@@ -45,6 +46,11 @@ func main() {
 
 	if *iecFile != "" {
 		executeFile(*iecFile, os.Stdout)
+		os.Exit(0)
+	}
+
+	if *evalStr != "" {
+		executeString(*evalStr, os.Stdout)
 		os.Exit(0)
 	}
 
@@ -91,6 +97,25 @@ func executeFile(filepath string, out io.Writer) {
 	evaluated := evaluator.Eval(program, env)
 
 	io.WriteString(out, evaluated.Inspect()+"\n")
+}
+
+func executeString(input string, out io.Writer) {
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 0 {
+		printParserErrors(out, p.Errors())
+		return
+	}
+
+	env := object.NewEnvironment()
+	evaluated := evaluator.Eval(program, env)
+
+	// Only print the result if it's not NULL, to keep the output clean for simple assignments.
+	if evaluated != nil && evaluated.Type() != object.NULL_OBJ {
+		io.WriteString(out, evaluated.Inspect()+"\n")
+	}
 }
 
 func printParserErrors(out io.Writer, errors []string) {
