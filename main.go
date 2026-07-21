@@ -7,16 +7,22 @@
  *
  * See the LICENSE files in the project root for full license text.
  */
+
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/user"
 
+	"beedance/evaluator"
+	"beedance/lexer"
+	"beedance/object"
 	"beedance/parser"
 	"beedance/repl"
-	"beedance/tui"
 )
 
 const version = "0.1.0"
@@ -24,7 +30,7 @@ const version = "0.1.0"
 func main() {
 	trace := flag.Bool("trace", false, "Enable parser tracing")
 	versionFlag := flag.Bool("version", false, "Print the application version")
-	simpleREPL := flag.Bool("simple", false, "Run a simple command-line REPL instead of the TUI")
+	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
 	flag.Parse()
 
 	if *versionFlag {
@@ -32,21 +38,64 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *simpleREPL {
-		fmt.Printf("Beedance IEC 61131-3 Interpreter v%s (Simple REPL)\n", version)
-		fmt.Println("Type 'exit' to quit.")
-		repl.Start(os.Stdin, os.Stdout)
+	if *trace {
+		parser.SetTracing(true)
+		fmt.Println("Parser tracing enabled.")
+	}
+
+	if *iecFile != "" {
+		executeFile(*iecFile, os.Stdout)
 		os.Exit(0)
 	}
 
-	if *trace {
-		// Redirect trace output to a file to keep the TUI clean.
-		logFile, _ := os.OpenFile("trace.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		os.Stderr = logFile
-		defer logFile.Close()
-		parser.SetTracing(true)
+	user, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Hello %s! This is the Beedance (IEC 61131) programming language!\n",
+		user.Username)
+	fmt.Printf("Feel free to type in commands\n")
+	repl.Start(os.Stdin, os.Stdout)
+}
+
+func executeFile(filepath string, out io.Writer) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		fmt.Fprintf(out, "Error opening file: %s\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Read the entire file content
+	scanner := bufio.NewScanner(file)
+	var input string
+	for scanner.Scan() {
+		input += scanner.Text() + "\n"
 	}
 
-	// Launch the main TUI application
-	tui.StartTUI()
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(out, "Error reading file: %s\n", err)
+		return
+	}
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 0 {
+		printParserErrors(out, p.Errors())
+		return
+	}
+
+	env := object.NewEnvironment()
+	evaluated := evaluator.Eval(program, env)
+
+	io.WriteString(out, evaluated.Inspect()+"\n")
+}
+
+func printParserErrors(out io.Writer, errors []string) {
+	io.WriteString(out, "Parser errors:\n")
+	for _, msg := range errors {
+		io.WriteString(out, "\t"+msg+"\n")
+	}
 }

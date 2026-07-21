@@ -2214,11 +2214,14 @@ func isTruthy(obj object.Object) bool {
 
 func newError(node ast.Node, format string, a ...interface{}) *object.Error {
 	if node != nil {
+
 		line, col := node.Pos()
+
 		return &object.Error{
 			Message: fmt.Sprintf("ERROR (%d:%d): %s", line, col, fmt.Sprintf(format, a...)),
 		}
 	}
+
 	return &object.Error{
 		Message: fmt.Sprintf("ERROR: %s", fmt.Sprintf(format, a...)),
 	}

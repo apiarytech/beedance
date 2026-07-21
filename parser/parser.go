@@ -362,6 +362,8 @@ func (p *Parser) ParseProgram() *ast.Program {
 				program.Statements = append(program.Statements, stmt)
 			}
 			// After a successful parse, advance to the next token.
+			// Block statements manage their own token consumption, so we only
+			// advance if it's not a block.
 			p.nextToken()
 		}()
 	}

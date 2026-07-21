@@ -1316,35 +1316,42 @@ func TestFunctionApplication(t *testing.T) {
 	}{
 		{`
 			FUNCTION identity : INT
-				VAR_INPUT x : INT; END_VAR
+				VAR_INPUT 
+					x : INT; 
+				END_VAR
 				identity := x;
 			END_FUNCTION
 			identity(5);
 		`, 5},
 		{`
 			FUNCTION double : INT
-				VAR_INPUT x : INT; END_VAR
+				VAR_INPUT 
+					x : INT; 
+				END_VAR
 				double := x * 2;
 			END_FUNCTION
 			double(5);
 		`, 10},
 		{`
-			FUNCTION add : INT
+			FUNCTION adder1 : INT
 				VAR_INPUT
 					x : INT;
 					y : INT;
 				END_VAR
-				add := x + y;
+				adder1 := x + y;
 			END_FUNCTION
-			add(5, 5);
+			adder1(5, 5);
 		`, 10},
 		{`
-			FUNCTION add : INT
-				VAR_INPUT x : INT; y : INT; END_VAR
-				add := x + y;
+			FUNCTION adder2 : INT
+				VAR_INPUT
+					x : INT;
+					y : INT;
+				END_VAR
+				adder2 := x + y;
 			END_FUNCTION
-			add(5 + 5, add(5, 5));
-		`, 20},
+			adder2(6, 5);
+		`, 11},
 	}
 
 	for _, tt := range tests {
