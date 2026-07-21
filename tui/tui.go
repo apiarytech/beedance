@@ -20,12 +20,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	lg "github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
-	tree "github.com/mariusor/bubbles-tree"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	lg "charm.land/lipgloss/v2"
+	"charm.land/log/v2"
 )
 
 // menuItem represents a top-level menu item
@@ -34,21 +33,73 @@ type menuItem struct {
 	items []string // For now, just a list of names for sub-items
 }
 
+// --- Project Model Structs ---
+
+// Program represents a single program POU.
+type Program struct {
+	Name string
+}
+
+// Task represents a task that contains programs.
+type Task struct {
+	Name     string
+	Programs []Program
+}
+
+// Resource represents a resource that contains tasks.
+type Resource struct {
+	Name  string
+	Tasks []Task
+}
+
+// Configuration represents the top-level configuration containing resources.
+type Configuration struct {
+	Name      string
+	Resources []Resource
+}
+
+// AddResource appends a new resource to the configuration.
+func (c *Configuration) AddResource(resource Resource) {
+	c.Resources = append(c.Resources, resource)
+}
+
+// AddTask appends a new task to the resource.
+func (r *Resource) AddTask(task Task) {
+	r.Tasks = append(r.Tasks, task)
+}
+
+// --- TUI Tree Node ---
+
+// treeNode is the data structure used by the rendering component.
+type treeNode struct {
+	data     string
+	children []treeNode
+}
+
 var menuItems = []menuItem{
 	{name: "File", items: []string{"New Project", "Open...", "Close Project", "Save", "Save As...", "Import/Export", "Print", "Exit"}},
-	{name: "Build", items: []string{"Lex/Parse/Evaluate", "Compile", "Run/Pause/Stop"}},
-	{name: "Edit", items: []string{"Undo/Redo", "Cut/Copy/Paste/Delete", "Select All", "Find/Replace/Browse"}},
+	{name: "Build", items: []string{"Lex/Parse/Evaluate", "Compile", "Run", "Pause", "Stop"}}, // cspell:disable-line
+	{name: "Edit", items: []string{"Undo", "Redo", "Cut", "Copy", "Paste", "Delete", "Select All", "Find", "Replace", "Browse"}},
 	{name: "View", items: []string{"Show/Hide panels: Left Right and Bottom"}},
 }
 
-// A simple item for the tree bubble, implementing the tree.Node interface.
-type treeNode struct {
-	data     string
-	children []tree.Node
+// toTreeNode converts the project model into a treeNode structure for rendering.
+func (c *Configuration) toTreeNode() treeNode {
+	root := treeNode{data: "CONFIGURATION " + c.Name}
+	for _, res := range c.Resources {
+		resNode := treeNode{data: "RESOURCE " + res.Name}
+		for _, task := range res.Tasks {
+			taskNode := treeNode{data: "TASK " + task.Name}
+			for _, prog := range task.Programs {
+				progNode := treeNode{data: "PROGRAM " + prog.Name}
+				taskNode.children = append(taskNode.children, progNode)
+			}
+			resNode.children = append(resNode.children, taskNode)
+		}
+		root.children = append(root.children, resNode)
+	}
+	return root
 }
-
-func (n treeNode) Data() interface{}     { return n.data }
-func (n treeNode) Children() []tree.Node { return n.children }
 
 // focusablePanel is an enum for the different focusable areas of the TUI.
 type focusablePanel int
@@ -68,6 +119,7 @@ const (
 	promptModeConfirmClose
 	promptModeConfirmNew
 	promptModeOpen
+	promptModeConfirmExit
 )
 
 // Define styles for the panels
@@ -114,17 +166,27 @@ var (
 				Border(lg.NormalBorder()).
 				BorderForeground(lg.Color("86")) // A bright green for focus
 
+	statusBarStyle = lg.NewStyle().
+			Background(lg.Color("235")).
+			Foreground(lg.Color("248"))
+
+	statusErrStyle = lg.NewStyle().
+			Inherit(statusBarStyle).
+			Foreground(lg.Color("196")) // Red
 )
 
 type model struct {
 	width, height      int
 	env                *object.Environment
+	project            Configuration
 	err                error
 	selectedMenu       int // Index of the selected top-level menu
-	tree               tree.Model
-	builtinsTree       tree.Model
+	projectTree        treeNode
+	builtinsTree       treeNode
+	projectTreeCursor  []int
+	builtinsTreeCursor []int
 	log                *log.Logger
-	logOutput          *strings.Builder
+	logOutput          *strings.Builder // cspell:disable-line
 	logViewport        viewport.Model
 	textarea           textarea.Model
 	lastTreeSelection  string
@@ -146,56 +208,53 @@ type model struct {
 }
 
 func InitialModel() model {
-	// Create the tree structure based on the IEC 61131-3 software model.
-	rootNode := treeNode{
-		data: "CONFIGURATION CELL_1",
-		children: []tree.Node{
-			treeNode{
-				data: "RESOURCE STATION_1",
-				children: []tree.Node{
-					treeNode{data: "TASK SLOW_1", children: []tree.Node{treeNode{data: "PROGRAM P1"}}},
-					treeNode{data: "TASK FAST_1", children: []tree.Node{treeNode{data: "PROGRAM P2"}}},
+	// Create the dynamic project structure.
+	project := Configuration{
+		Name: "CELL_1",
+		Resources: []Resource{
+			{
+				Name: "STATION_1",
+				Tasks: []Task{
+					{Name: "SLOW_1", Programs: []Program{{Name: "P1"}}},
+					{Name: "FAST_1", Programs: []Program{{Name: "P2"}}},
 				},
 			},
-			treeNode{
-				data: "RESOURCE STATION_2",
-				children: []tree.Node{
-					treeNode{data: "TASK PER_2", children: []tree.Node{treeNode{data: "PROGRAM P1"}}},
-					treeNode{data: "TASK INT_2", children: []tree.Node{treeNode{data: "PROGRAM P4"}}},
+			{
+				Name: "STATION_2",
+				Tasks: []Task{
+					{Name: "PER_2", Programs: []Program{{Name: "P1"}}},
+					{Name: "INT_2", Programs: []Program{{Name: "P4"}}},
 				},
 			},
 		},
 	}
-
-	t := tree.New(rootNode)
+	rootNode := project.toTreeNode()
 
 	// Create the built-ins tree structure.
 	builtinsRoot := treeNode{
 		data: "Snippets",
-		children: []tree.Node{
-			treeNode{
+		children: []treeNode{
+			{
 				data: "BUILTINS",
-				children: []tree.Node{
-					treeNode{data: "ADD"},
-					treeNode{data: "SUB"},
-					treeNode{data: "TON"},
-					treeNode{data: "CTU"},
-					treeNode{data: "R_TRIG"},
+				children: []treeNode{
+					{data: "ADD"},
+					{data: "SUB"},
+					{data: "TON"},
+					{data: "CTU"},
+					{data: "R_TRIG"},
 				},
 			},
-			treeNode{
+			{
 				data: "MATH",
-				children: []tree.Node{
-					treeNode{data: "SIN"},
-					treeNode{data: "COS"},
-					treeNode{data: "TAN"},
-					treeNode{data: "SQRT"},
+				children: []treeNode{
+					{data: "SIN"},
+					{data: "COS"},
+					{data: "TAN"},
+					{data: "SQRT"},
 				},
 			},
 		},
 	}
-
-	bt := tree.New(builtinsRoot)
 
 	// --- Textarea setup ---
 	ta := textarea.New()
@@ -301,8 +360,6 @@ func InitialModel() model {
 		token.FALSE:           lg.NewStyle().Foreground(lg.Color("135")),
 		token.STRING_LITERAL:  lg.NewStyle().Foreground(lg.Color("114")), // Green
 		token.WSTRING_LITERAL: lg.NewStyle().Foreground(lg.Color("114")),
-		token.INTEGER_LITERAL: lg.NewStyle().Foreground(lg.Color("135")),
-		token.REAL_LITERAL:    lg.NewStyle().Foreground(lg.Color("135")),
 
 		// Identifiers and others
 		token.IDENT:   lg.NewStyle().Foreground(lg.Color("229")), // Light Yellow
@@ -311,25 +368,28 @@ func InitialModel() model {
 
 	// --- Log setup ---
 	logOutput := &strings.Builder{}
-	logger := log.New(logOutput)
+	logger := log.NewWithOptions(logOutput, log.Options{})
 	logger.SetLevel(log.DebugLevel)
 	logger.SetTimeFormat("15:04:05")
 
-	vp := viewport.New(0, 0) // Will be sized in View()
-	middleVp := viewport.New(0, 0)
+	vp := viewport.New() // Will be sized in View()
+	middleVp := viewport.New()
 	middleVp.SetContent("Select a POU from the tree to view its code. Press Enter to edit.")
 
 	m := model{
 		env:                object.NewEnvironment(),
+		project:            project,
 		err:                nil,
 		selectedMenu:       0, // Start with "File" selected
-		tree:               t,
-		builtinsTree:       bt,
+		projectTree:        rootNode,
+		builtinsTree:       builtinsRoot,
+		projectTreeCursor:  []int{0},
+		builtinsTreeCursor: []int{0},
 		log:                logger,
 		logOutput:          logOutput,
 		logViewport:        vp, // cspell:disable-line
 		textarea:           ta,
-		lastTreeSelection:  rootNode.Data().(string),
+		lastTreeSelection:  rootNode.data,
 		pousContent:        make(map[string]string), // cspell:disable-line
 		styles:             styles,
 		middleViewport:     middleVp,
@@ -367,12 +427,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.promptMode != promptModeNone {
 			switch m.promptMode {
-			case promptModeSaveAs, promptModeOpen:
-				switch msg.Type {
-				case tea.KeyEsc:
+			case promptModeSaveAs, promptModeOpen: // cspell:disable-line
+				switch msg.String() {
+				case "esc":
 					m.promptMode = promptModeNone
 					m.promptInput.Blur()
-				case tea.KeyEnter:
+				case "enter":
 					if m.promptMode == promptModeSaveAs {
 						m.currentProjectPath = m.promptInput.Value()
 						m.saveProject()
@@ -398,6 +458,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "esc":
 					m.promptMode = promptModeNone
 				}
+			case promptModeConfirmExit:
+				switch strings.ToLower(msg.String()) {
+				case "y":
+					m.saveProject()
+					return m, tea.Quit
+				case "n":
+					return m, tea.Quit
+				case "esc":
+					m.promptMode = promptModeNone
+				}
 			}
 			// If it was a text input prompt, we need to batch the command.
 			if m.promptMode == promptModeSaveAs || m.promptMode == promptModeOpen {
@@ -406,19 +476,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		} else { // No prompt is active, handle normal TUI interaction
 			// Global keybindings first
-			if msg.Type == tea.KeyCtrlC {
+			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
 			}
 
 			// Handle F5 for evaluation
-			if msg.Type == tea.KeyF5 {
+			if msg.String() == "f5" {
 				m.evaluateCode()
 				return m, nil
 			}
 
 			// Handle focus switching with Tab
-			switch msg.Type {
-			case tea.KeyTab:
+			switch msg.String() {
+			case "tab":
 				m.focusIndex = (m.focusIndex + 1) % 4 // Cycle through 4 panels
 				m.editorFocus = (m.focusIndex == editorPanel)
 				if m.editorFocus {
@@ -427,7 +497,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textarea.Blur()
 				}
 				return m, nil
-			case tea.KeyShiftTab:
+			case "shift+tab":
 				m.focusIndex = (m.focusIndex - 1 + 4) % 4
 				m.editorFocus = (m.focusIndex == editorPanel)
 				if m.editorFocus {
@@ -442,21 +512,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.focusIndex {
 			case menuPanel:
 				if m.menuOpen {
-					switch msg.Type {
-					case tea.KeyUp:
+					switch msg.String() {
+					case "up":
 						if m.selectedMenuItem > 0 {
 							m.selectedMenuItem--
 						}
-					case tea.KeyDown:
+					case "down":
 						if m.selectedMenuItem < len(menuItems[m.selectedMenu].items)-1 {
 							m.selectedMenuItem++
 						}
-					case tea.KeyEnter:
+					case "enter":
 						selectedMenuName := menuItems[m.selectedMenu].name
 						selectedItemName := menuItems[m.selectedMenu].items[m.selectedMenuItem]
 
 						if selectedMenuName == "File" {
 							switch selectedItemName {
+							case "New Project":
+								if m.isDirty {
+									m.promptMode = promptModeConfirmNew
+								} else {
+									m.newProject()
+								}
+								m.menuOpen = false
+								return m, nil
+							case "Close Project":
+								if m.isDirty {
+									m.promptMode = promptModeConfirmClose
+								} else {
+									m.newProject()
+								}
+								m.menuOpen = false
+								return m, nil
 							case "Save":
 								m.saveProject()
 							case "Save As...":
@@ -470,7 +556,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.menuOpen = false
 								return m, m.promptInput.Focus()
 							case "Exit":
-								return m, tea.Quit
+								if m.isDirty {
+									m.promptMode = promptModeConfirmExit
+								} else {
+									return m, tea.Quit
+								}
+								m.menuOpen = false
 							default:
 								m.log.Infof("Menu item selected: %s -> %s", selectedMenuName, selectedItemName)
 							}
@@ -480,28 +571,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.log.Infof("Menu item selected: %s -> %s", selectedMenuName, selectedItemName)
 						}
 
+						if selectedMenuName == "Edit" {
+							switch selectedItemName {
+							// case "Add Resource":
+							// 	m.addResource()
+							// case "Add Task":
+							// 	m.addTask()
+							default:
+								m.log.Infof("Menu item selected: %s -> %s", selectedMenuName, selectedItemName)
+							}
+						} else {
+							m.log.Infof("Menu item selected: %s -> %s", selectedMenuName, selectedItemName)
+
+						}
+
 						m.menuOpen = false
-					case tea.KeyEsc:
+					case "esc":
 						m.menuOpen = false
 					}
 				} else {
-					switch msg.Type {
-					case tea.KeyLeft:
+					switch msg.String() {
+					case "left":
 						m.selectedMenu = (m.selectedMenu - 1 + len(menuItems)) % len(menuItems)
-					case tea.KeyRight:
+					case "right":
 						m.selectedMenu = (m.selectedMenu + 1) % len(menuItems)
-					case tea.KeyEnter:
+					case "enter":
 						m.menuOpen = true
 						m.selectedMenuItem = 0
-					case tea.KeyEsc:
+					case "esc":
 						// If menu is not open, Esc does nothing here, but could be used to unfocus
 					}
 				}
 				return m, nil
 
 			case projectTreePanel:
-				m.tree, cmd = m.tree.Update(msg)
-				cmds = append(cmds, cmd)
+				switch msg.String() {
+				case "up":
+					m.moveCursor(&m.projectTree, &m.projectTreeCursor, -1)
+				case "down":
+					m.moveCursor(&m.projectTree, &m.projectTreeCursor, 1)
+				case "enter":
+					// On enter, if the node has children, toggle expansion (not implemented yet).
+					// If it's a leaf, we could switch focus to the editor.
+					selectedNode := m.getSelectedNode(&m.projectTree, m.projectTreeCursor)
+					if selectedNode != nil && len(selectedNode.children) == 0 {
+						m.focusIndex = editorPanel
+						m.editorFocus = true
+						return m, m.textarea.Focus()
+					}
+				}
+				// After moving cursor, update the selected item
+				m.updateSelectionFromCursor()
+				return m, nil
 
 			case editorPanel:
 				oldValue := m.textarea.Value()
@@ -512,20 +633,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 
 			case builtinsTreePanel:
-				if msg.Type == tea.KeyEnter {
-					selected := m.builtinsTree.GetSelected()
-					if selected != nil && len(selected.Children()) == 0 {
-						m.textarea.InsertString(selected.Data().(string))
+				switch msg.String() {
+				case "up":
+					m.moveCursor(&m.builtinsTree, &m.builtinsTreeCursor, -1)
+				case "down":
+					m.moveCursor(&m.builtinsTree, &m.builtinsTreeCursor, 1)
+				case "enter":
+					selectedNode := m.getSelectedNode(&m.builtinsTree, m.builtinsTreeCursor)
+					if selectedNode != nil && len(selectedNode.children) == 0 {
+						m.textarea.InsertString(selectedNode.data)
 						m.isDirty = true
 						// Switch focus back to the editor
 						m.focusIndex = editorPanel
 						m.editorFocus = true
 						return m, m.textarea.Focus()
 					}
-				} else {
-					m.builtinsTree, cmd = m.builtinsTree.Update(msg)
-					cmds = append(cmds, cmd)
 				}
+				return m, nil
 			}
 		}
 
@@ -544,15 +668,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Check if tree selection changed and update the textarea content.
-	if selected := m.tree.GetSelected(); selected != nil && m.focusIndex == projectTreePanel {
-		selectedID := selected.Data().(string)
-		if selectedID != m.lastTreeSelection {
-			m.updatePousContentFromEditor()
-			m.lastTreeSelection = selectedID
-			m.loadPousContentToEditor()
-			m.updateMiddleViewport()
-		}
-	}
+	// This is now handled by the cursor movement logic in the update case.
+	// The `updateSelectionFromCursor` function will take care of this.
+
+	// Update the middle viewport if not in editor mode
+	m.updateMiddleViewport()
 
 	// Also update the log viewport to handle scrolling etc.
 	m.logViewport, cmd = m.logViewport.Update(msg) // cspell:disable-line
@@ -639,12 +759,28 @@ func (m *model) newProject() {
 	m.isDirty = false
 
 	// Reset UI components to initial state
-	rootNode := treeNode{data: "CONFIGURATION CELL_1", children: []tree.Node{treeNode{data: "RESOURCE STATION_1", children: []tree.Node{treeNode{data: "TASK SLOW_1", children: []tree.Node{treeNode{data: "PROGRAM P1"}}}, treeNode{data: "TASK FAST_1", children: []tree.Node{treeNode{data: "PROGRAM P2"}}}}}, treeNode{data: "RESOURCE STATION_2", children: []tree.Node{treeNode{data: "TASK PER_2", children: []tree.Node{treeNode{data: "PROGRAM P1"}}}, treeNode{data: "TASK INT_2", children: []tree.Node{treeNode{data: "PROGRAM P4"}}}}}}}
-	newTree := tree.New(rootNode) // cspell:disable-line
-	m.tree = newTree
-	m.lastTreeSelection = rootNode.Data().(string)
+	m.projectTree = treeNode{
+		data: "CONFIGURATION CELL_1",
+		children: []treeNode{
+			{ // cspell:disable-line
+				data: "RESOURCE STATION_1",
+				children: []treeNode{
+					{data: "TASK SLOW_1", children: []treeNode{{data: "PROGRAM P1"}}},
+					{data: "TASK FAST_1", children: []treeNode{{data: "PROGRAM P2"}}},
+				},
+			},
+			{
+				data: "RESOURCE STATION_2",
+				children: []treeNode{
+					{data: "TASK PER_2", children: []treeNode{{data: "PROGRAM P1"}}},
+					{data: "TASK INT_2", children: []treeNode{{data: "PROGRAM P4"}}},
+				},
+			},
+		},
+	}
 
 	// Reset editor
+	m.lastTreeSelection = m.projectTree.data
 	initialContent := fmt.Sprintf("Selected: %s", m.lastTreeSelection)
 	m.textarea.SetValue(initialContent)
 	m.pousContent[m.lastTreeSelection] = initialContent
@@ -654,19 +790,20 @@ func (m *model) newProject() {
 }
 
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Type != tea.MouseRelease {
+	mouse := msg.Mouse()
+	if mouse.Button != tea.MouseLeft {
 		return m, nil
 	}
 
 	// --- Calculate panel dimensions and positions ---
-	docWidth := m.width - docStyle.GetHorizontalFrameSize()
+	docWidth := m.width - docStyle.GetHorizontalFrameSize() // cspell:disable-line
 	docHeight := m.height - docStyle.GetVerticalFrameSize()
-	docTop, docLeft := docStyle.GetMargin()
+	docTop, _, _, docLeft := docStyle.GetMargin()
 
 	topPanelHeight := 1
 	statusBarHeight := 1
 	dropdownHeight := 0
-	if m.menuOpen {
+	if m.menuOpen { // cspell:disable-line
 		dropdownHeight = len(menuItems[m.selectedMenu].items) + 2
 	}
 	bottomPanelHeight := docHeight / 5
@@ -687,8 +824,8 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	rightPanelX := middlePanelX + middlePanelWidth
 
 	// --- Check Menu Bar ---
-	if msg.Y == topPanelY {
-		x := msg.X - docLeft
+	if mouse.Y == topPanelY {
+		x := mouse.X - docLeft
 		currentX := 0
 		for i, mi := range menuItems {
 			itemWidth := lg.Width(" " + mi.name + " ")
@@ -708,38 +845,34 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// --- Check Dropdown Menu ---
-	if m.menuOpen && msg.Y >= dropdownY+1 && msg.Y < dropdownY+dropdownHeight-1 {
-		relativeY := msg.Y - (dropdownY + 1) // +1 for top border
+	if m.menuOpen && mouse.Y >= dropdownY+1 && mouse.Y < dropdownY+dropdownHeight-1 {
+		relativeY := mouse.Y - (dropdownY + 1) // +1 for top border
 		if relativeY >= 0 && relativeY < len(menuItems[m.selectedMenu].items) {
 			m.selectedMenuItem = relativeY
 			// Simulate Enter key press to execute the item
-			return m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			return m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		}
 	}
 
 	// --- Check Left Panel (Project Tree) ---
-	if msg.X >= leftPanelX && msg.X < leftPanelX+leftPanelWidth && msg.Y >= mainContentY && msg.Y < mainContentY+mainContentHeight {
+	if mouse.X >= leftPanelX && mouse.X < leftPanelX+leftPanelWidth && mouse.Y >= mainContentY && mouse.Y < mainContentY+mainContentHeight {
 		m.focusIndex = projectTreePanel
 		m.menuOpen = false // Close menu if clicking elsewhere
-		var cmd tea.Cmd
-		m.tree, cmd = m.tree.Update(msg)
-		return m, cmd
+		// Mouse click on tree is not implemented for selection in this version.
+		return m, nil
 	}
 
 	// --- Check Right Panel (Built-ins Tree) ---
-	if msg.X >= rightPanelX && msg.X < rightPanelX+rightPanelWidth && msg.Y >= mainContentY && msg.Y < mainContentY+mainContentHeight {
+	if mouse.X >= rightPanelX && mouse.X < rightPanelX+rightPanelWidth && mouse.Y >= mainContentY && mouse.Y < mainContentY+mainContentHeight {
 		m.focusIndex = builtinsTreePanel
-		m.menuOpen = false
+		m.menuOpen = false // Close menu if clicking elsewhere
 		var cmd tea.Cmd
-		m.builtinsTree, cmd = m.builtinsTree.Update(msg)
-		// After the tree updates from the click, the item is selected.
-		// Now we can simulate the 'Enter' press to insert it.
-		m, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		return m, tea.Batch(cmd, enterCmd)
+		// Mouse click on tree is not implemented for selection in this version.
+		return m, cmd
 	}
 
 	// --- Check Middle Panel (Editor) ---
-	if msg.X >= middlePanelX && msg.X < middlePanelX+middlePanelWidth && msg.Y >= mainContentY && msg.Y < mainContentY+mainContentHeight {
+	if mouse.X >= middlePanelX && mouse.X < middlePanelX+middlePanelWidth && mouse.Y >= mainContentY && mouse.Y < mainContentY+mainContentHeight {
 		m.focusIndex = editorPanel
 		m.menuOpen = false
 		return m, m.textarea.Focus()
@@ -832,6 +965,20 @@ func (m *model) updateMiddleViewport() {
 	m.middleViewport.SetContent(m.highlightWithLineNumbers(m.textarea.Value()))
 }
 
+// updateSelectionFromCursor updates the `lastTreeSelection` based on the current cursor position.
+func (m *model) updateSelectionFromCursor() {
+	if m.focusIndex == projectTreePanel {
+		selectedNode := m.getSelectedNode(&m.projectTree, m.projectTreeCursor)
+		if selectedNode != nil {
+			if selectedNode.data != m.lastTreeSelection {
+				m.updatePousContentFromEditor()
+				m.lastTreeSelection = selectedNode.data
+				m.loadPousContentToEditor()
+			}
+		}
+	}
+}
+
 // renderTopPanel renders the menu bar.
 func (m model) renderTopPanel(width int) string {
 	styleToUse := topPanelStyle
@@ -842,7 +989,7 @@ func (m model) renderTopPanel(width int) string {
 	var menuStrings []string
 	for i, mi := range menuItems {
 		if i == m.selectedMenu {
-			menuStrings = append(menuStrings, selectedMenuItemStyle.Render(" "+mi.name+" "))
+			menuStrings = append(menuStrings, selectedMenuItemStyle.Render(" "+mi.name+" ")) // cspell:disable-line
 		} else {
 			menuStrings = append(menuStrings, menuItemStyle.Render(" "+mi.name+" "))
 		}
@@ -890,7 +1037,7 @@ func (m model) renderStatusBar(width int) string {
 	var focusStr string
 	switch m.focusIndex {
 	case menuPanel:
-		focusStr = "Menu"
+		focusStr = "Menu" // cspell:disable-line
 	case projectTreePanel:
 		focusStr = "Project Tree"
 	case editorPanel:
@@ -923,20 +1070,25 @@ func (m model) renderStatusBar(width int) string {
 
 	statusGroup := lg.JoinHorizontal(lg.Top, lexerStatus, " | ", parserStatus, " | ", evaluatorStatus, " | ", compileStatus)
 
-	leftPart := lg.JoinHorizontal(lg.Top, focus, " | ", fileStr)
+	leftPart := lg.JoinHorizontal(lg.Top, focus, " | ", fileStr) // cspell:disable-line
 
-	remainingWidth := width - lg.Width(leftPart) - lg.Width(statusGroup) - statusBarStyle.GetHorizontalPadding()
+	remainingWidth := width - lg.Width(leftPart) - lg.Width(statusGroup) - statusBarStyle.GetHorizontalPadding() // cspell:disable-line
 	if remainingWidth < 0 {
-		remainingWidth = 0
+		remainingWidth = 0 // cspell:disable-line
 	}
 	spring := strings.Repeat(" ", remainingWidth)
 
 	return statusBarStyle.Render(lg.JoinHorizontal(lg.Top, leftPart, spring, statusGroup))
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
+	v := tea.NewView("Beedance TUI")
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeAllMotion
+
 	if m.width == 0 || m.height == 0 {
-		return "Initializing..."
+		v.SetContent("Initializing...")
+		return v
 	}
 
 	// Define panel dimensions
@@ -962,17 +1114,19 @@ func (m model) View() string {
 	dropdownView := m.renderDropdownView()
 
 	// Set component sizes before rendering
-	m.textarea.SetWidth(middlePanelWidth)
-	m.textarea.SetHeight(mainContentHeight - middlePanelStyle.GetVerticalFrameSize()) // Account for border
+	m.textarea.SetWidth(middlePanelWidth - middlePanelStyle.GetHorizontalFrameSize())
+	m.textarea.SetHeight(mainContentHeight - middlePanelStyle.GetVerticalFrameSize())
 
-	m.middleViewport.Width = middlePanelWidth
-	m.middleViewport.Height = mainContentHeight - middlePanelStyle.GetVerticalFrameSize()
+	middleViewport := m.middleViewport
+	middleViewport.SetWidth(middlePanelWidth - middlePanelStyle.GetHorizontalFrameSize())
+	middleViewport.SetHeight(mainContentHeight - middlePanelStyle.GetVerticalFrameSize())
 
 	// Set viewport size and content before rendering
-	m.logViewport.Width = docWidth
-	m.logViewport.Height = bottomPanelHeight - bottomPanelStyle.GetVerticalFrameSize() // Account for border
-	m.logViewport.SetContent(m.logOutput.String())
-	m.logViewport.GotoBottom()
+	logViewport := m.logViewport
+	logViewport.SetWidth(docWidth - bottomPanelStyle.GetHorizontalFrameSize())
+	logViewport.SetHeight(bottomPanelHeight - bottomPanelStyle.GetVerticalFrameSize())
+	logViewport.SetContent(m.logOutput.String())
+	logViewport.GotoBottom()
 
 	bottomPanel := bottomPanelStyle.
 		Width(docWidth).
@@ -988,7 +1142,7 @@ func (m model) View() string {
 	leftPanel := leftPanelStyleToUse.
 		Width(leftPanelWidth).
 		Height(mainContentHeight).
-		Render(m.tree.View())
+		Render(m.renderTree(&m.projectTree, m.projectTreeCursor, m.focusIndex == projectTreePanel))
 
 	rightPanelStyleToUse := rightPanelStyle
 	if m.focusIndex == builtinsTreePanel {
@@ -997,7 +1151,7 @@ func (m model) View() string {
 	rightPanel := rightPanelStyleToUse.
 		Width(rightPanelWidth).
 		Height(mainContentHeight).
-		Render(m.builtinsTree.View())
+		Render(m.renderTree(&m.builtinsTree, m.builtinsTreeCursor, m.focusIndex == builtinsTreePanel))
 
 	// Render the middle panel with either the viewport or textarea.
 	var middlePanel string
@@ -1012,7 +1166,7 @@ func (m model) View() string {
 		middlePanel = middlePanelStyle.
 			Width(middlePanelWidth).
 			Height(mainContentHeight).
-			Render(m.middleViewport.View())
+			Render(middleViewport.View())
 	}
 
 	// Join panels
@@ -1047,24 +1201,131 @@ func (m model) View() string {
 			promptContent = "Do you want to save the changes to your project before creating a new one?\n\n(Y)es / (N)o / (Esc)ancel"
 		case promptModeConfirmClose:
 			promptTitle = "Unsaved Changes"
-			promptContent = "Do you want to save the changes to your project before closing?\n\n(Y)es / (N)o / (Esc)ancel"
+			promptContent = "Do you want to save the changes to your project before closing it?\n\n(Y)es / (N)o / (Esc)ancel"
+		case promptModeConfirmExit:
+			promptTitle = "Unsaved Changes"
+			promptContent = "Do you want to save the changes to your project before exiting?\n\n(Y)es / (N)o / (Esc)ancel"
 		}
 
-		promptBox := lg.NewStyle().
-			Border(lg.NormalBorder(), true).
-			BorderForeground(lg.Color("240")).
-			Padding(1, 2).
-			Render(promptTitle + "\n\n" + promptContent)
-
-		return lg.Place(m.width, m.height, lg.Center, lg.Center, promptBox, lg.WithOverlay(docStyle.Render(fullLayout)))
+		dialogBox := lg.Place(m.width, m.height, lg.Center, lg.Center,
+			lg.NewStyle().Border(lg.NormalBorder()).BorderForeground(lg.Color("62")).Padding(1, 2).Render(promptTitle+"\n\n"+promptContent),
+		)
+		v.SetContent(lg.JoinVertical(lg.Left, fullLayout, dialogBox))
+		return v
 	}
-
-	return docStyle.Render(fullLayout)
+	v.SetContent(fullLayout)
+	return v
 }
 
-// StartTUI is the entry point for the TUI application.
+func (m *model) addResource() {
+	// Implementation for adding a resource
+}
+
+func (m *model) addTask() {
+	// Implementation for adding a task
+}
+
+func (m *model) moveCursor(tree *treeNode, cursor *[]int, direction int) {
+	if len(*cursor) == 0 {
+		*cursor = []int{0} // Start at the first node if cursor is invalid
+		return
+	}
+
+	if direction == 1 { // Move down
+		// 1. Try to move to the first child
+		node := m.getSelectedNode(tree, *cursor)
+		if node != nil && len(node.children) > 0 {
+			*cursor = append(*cursor, 0)
+			return
+		}
+
+		// 2. Try to move to the next sibling
+		tempCursor := *cursor
+		for len(tempCursor) > 0 {
+			parentPath := tempCursor[:len(tempCursor)-1]
+			parent := m.getSelectedNode(tree, parentPath)
+			if parent == nil { // Should not happen with valid logic
+				return
+			}
+			nextSiblingIndex := tempCursor[len(tempCursor)-1] + 1
+			if nextSiblingIndex < len(parent.children) {
+				*cursor = append(parentPath, nextSiblingIndex)
+				return
+			}
+			// 3. No more siblings, move up and try again
+			tempCursor = parentPath
+		}
+	} else if direction == -1 { // Move up
+		// 1. Try to move to the previous sibling's last descendant
+		if (*cursor)[len(*cursor)-1] > 0 {
+			prevSiblingIndex := (*cursor)[len(*cursor)-1] - 1
+			newPath := append((*cursor)[:len(*cursor)-1], prevSiblingIndex)
+			node := m.getSelectedNode(tree, newPath)
+			// Traverse to the deepest, last child
+			for len(node.children) > 0 {
+				lastChildIndex := len(node.children) - 1
+				newPath = append(newPath, lastChildIndex)
+				node = &node.children[lastChildIndex]
+			}
+			*cursor = newPath
+			return
+		}
+
+		// 2. No previous sibling, move up to the parent
+		if len(*cursor) > 1 {
+			*cursor = (*cursor)[:len(*cursor)-1]
+		}
+	}
+}
+
+func (m *model) getSelectedNode(tree *treeNode, cursor []int) *treeNode {
+	node := tree
+	for _, index := range cursor {
+		if index < 0 || index >= len(node.children) {
+			return nil // Invalid cursor path
+		}
+		node = &node.children[index]
+	}
+	return node
+}
+
+func (m *model) renderTree(node *treeNode, cursor []int, isFocused bool) string {
+	var sb strings.Builder
+	m.renderNode(&sb, node, cursor, []int{}, isFocused)
+	return sb.String()
+}
+
+func (m *model) renderNode(sb *strings.Builder, node *treeNode, cursor []int, path []int, isFocused bool) {
+	prefix := ""
+	if len(path) > 0 {
+		for i := 0; i < len(path)-1; i++ {
+			prefix += " │  "
+		}
+		prefix += " ├─ "
+	}
+
+	isCursorOnNode := len(path) == len(cursor)
+	for i := range path {
+		if path[i] != cursor[i] {
+			isCursorOnNode = false
+			break
+		}
+	}
+
+	line := prefix + node.data
+	if isFocused && isCursorOnNode {
+		// Apply a style to highlight the selected node when its panel is focused.
+		sb.WriteString(selectedMenuItemStyle.Render(line) + "\n")
+	} else {
+		sb.WriteString(line + "\n")
+	}
+}
+
+// StartTUI is the entry point for the Bubble Tea application.
 func StartTUI() {
-	p := tea.NewProgram(InitialModel(), tea.WithAltScreen(), tea.WithMouseAllMotion())
+	// tea.WithAltScreen() provides a clean exit, restoring the terminal.
+	// tea.WithMouseAllMotion() enables mouse support for clicking and scrolling.
+	p := tea.NewProgram(InitialModel())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)

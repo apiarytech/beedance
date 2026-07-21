@@ -2198,7 +2198,7 @@ func TestParsingHashLiteralsWithExpressions(t *testing.T) {
 }
 
 func TestMacroLiteralParsing(t *testing.T) {
-	input := `macro(x, y) { x + y; };`
+	input := `MACRO(x, y) { x + y; };`
 
 	l := lexer.New(input)
 	p := New(l)

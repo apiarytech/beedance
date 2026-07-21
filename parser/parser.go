@@ -66,6 +66,15 @@ var precedences = map[token.TokenType]int{
 	token.HASH:      MEMBER, // Typed literals have similar precedence to member access.
 }
 
+var ilMnemonics = map[string]bool{
+	"LD": true, "LDN": true, "ST": true, "STN": true, "S": true, "R": true,
+	"ADD": true, "SUB": true, "MUL": true, "DIV": true, "GT": true, "GE": true,
+	"EQ": true, "NE": true, "LE": true, "LT": true, "JMP": true, "JMPC": true,
+	"JMPCN": true, "CAL": true, "CALC": true, "CALCN": true, "RET": true,
+	"RETC": true, "RETCN": true, "AND": true, "ANDN": true, "OR": true,
+	"ORN": true, "XOR": true, "XORN": true, "NOT": true,
+}
+
 type (
 	prefixParseFn func() ast.Expression
 	infixParseFn  func(ast.Expression) ast.Expression
@@ -273,6 +282,19 @@ func (p *Parser) peekError(t token.TokenType) {
 	p.specificError("expected next token to be %s, got %s instead", t, p.peekToken.Type)
 }
 
+func (p *Parser) isIlInstruction() bool {
+	if p.curToken.Type != token.IDENT {
+		return false
+	}
+	// If it's a function call, it's not an IL instruction in this context.
+	// It will be parsed as an ExpressionStatement.
+	if p.peekTokenIs(token.LPAREN) {
+		return false
+	}
+	_, isMnemonic := ilMnemonics[strings.ToUpper(p.curToken.Literal)]
+	return isMnemonic
+}
+
 // synchronizeParser advances the parser's tokens until it finds a likely start of a new statement.
 // This is used after a parsing panic to get the parser back to a stable state.
 func (p *Parser) synchronizeParser() {
@@ -391,12 +413,19 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
+		if p.isIlInstruction() {
+			return p.parseIlInstructionStatement()
+		}
 		if p.peekTokenIs(token.ASSIGN) {
 			return p.parseAssignmentStatement()
-		} else {
-			return p.parseExpressionStatement()
 		}
+		return p.parseExpressionStatement()
 	default:
+		// Heuristic for IL: if it's an identifier that is a mnemonic, parse as IL.
+		// This helps catch IL instructions that are not explicitly handled above.
+		if p.isIlInstruction() {
+			return p.parseIlInstructionStatement()
+		}
 		return p.parseExpressionStatement()
 	}
 }
@@ -411,6 +440,28 @@ func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	// The main loop will call nextToken() to move to the next statement.
 	return stmt
 }
+
+func (p *Parser) parseIlInstructionStatement() ast.Statement {
+	defer untrace(trace("parseIlInstructionStatement"))
+	stmt := &ast.IlInstructionStatement{Token: p.curToken, Operator: strings.ToUpper(p.curToken.Literal)}
+
+	// Heuristic to check for an operand. If the next token is an end-of-block
+	// or another statement keyword, we assume no operand.
+	switch p.peekToken.Type {
+	case token.END_PROGRAM, token.END_FUNCTION, token.END_FUNCTION_BLOCK, token.END_ACTION, token.END_STEP, token.END_TRANSITION, token.EOF:
+		return stmt
+	}
+	if isStatementStartKeyword(p.peekToken.Type) {
+		return stmt
+	}
+
+	// There is an operand.
+	p.nextToken() // consume operator
+	stmt.Operand = p.parseExpression(LOWEST)
+
+	return stmt
+}
+
 func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 	defer untrace(trace("parseSingleVarDecl"))
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
