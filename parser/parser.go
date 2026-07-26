@@ -1595,33 +1595,24 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 
 	p.nextToken() // Consurem OF
 
-	// Parse case branches
 	for !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.END_CASE) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.END_CASE) {
-		branch := &ast.CaseBranch{Token: p.curToken}
-		branch.Values = []ast.Expression{}
-
-		// Parse comma-separated values
+		branch := &ast.CaseBranch{Token: p.curToken, Values: []ast.Expression{}}
 		for {
-			branch.Values = append(branch.Values, p.parseCaseValue())
-
-			if !p.peekTokenIs(token.COMMA) { // If the next token is NOT a comma, we're done with this list of values
+			branch.Values = append(branch.Values, p.parseExpression(LOWEST))
+			if !p.peekTokenIs(token.COMMA) {
 				break
 			}
-			// If we are here, p.peekToken IS a COMMA.
-			p.nextToken() // Consume the last token of the current value (e.g., 'RED')
-			p.nextToken() // Consume the comma ',' to position for the next value
+			p.nextToken() // Consume expression
+			p.nextToken() // Consume comma
 		}
 
 		if !p.expectPeek(token.COLON) {
 			return nil
 		}
-		p.nextToken() // Move to the start of the statement
 
-		branch.Consequence = p.parseStatement()
-		if es, ok := branch.Consequence.(*ast.ExpressionStatement); ok && es.Expression == nil {
-			branch.Consequence = p.parseBlockStatementUntil(token.ELSE, token.END_CASE)
-		}
-		p.nextToken() // After parsing a statement, curToken is ';'. Advance to the next token.
+		p.nextToken() // consume COLON, move to start of consequence
+
+		branch.Consequence = p.parseBlockStatementUntil(token.ELSE, token.END_CASE)
 		stmt.Cases = append(stmt.Cases, branch)
 	}
 
@@ -1636,15 +1627,6 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	}
 
 	return stmt
-}
-
-func (p *Parser) parseCaseValue() ast.Expression {
-	defer untrace(trace("parseCaseValue"))
-
-	// A case label can be any valid expression, including literals (5),
-	// ranges (1..10), or typed literals (COLOR#RED). The general
-	// expression parser is designed to handle all of these cases correctly.
-	return p.parseExpression(LOWEST)
 }
 
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
@@ -1864,6 +1846,14 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 	}
 
 	for !isEndToken(p.curToken.Type) && !p.curTokenIs(token.EOF) {
+		// Heuristic for CASE statements: A new case label can start with any expression
+		// (e.g., an INT like `3`, an IDENT like `MyState`). If we see a token that
+		// could start an expression and is followed by a comma or colon, it's very
+		// likely the start of the next case label list, so we should stop parsing statements for the current branch.
+		if p.isStartOfCaseLabel() {
+			break
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -1874,6 +1864,21 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		p.nextToken()
 	}
 	return block
+}
+
+// isStartOfCaseLabel is a heuristic to detect the beginning of a new case label list.
+func (p *Parser) isStartOfCaseLabel() bool {
+	// Check if the current token can start an expression.
+	if _, ok := p.prefixParseFns[p.curToken.Type]; !ok {
+		return false
+	}
+
+	// Look ahead to see if it's followed by a comma or colon, which are strong
+	// indicators of a case label list (e.g., `3, 4:` or `MyState:`).
+	if p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.RANGE) || p.peekTokenIs(token.HASH) {
+		return true
+	}
+	return false
 }
 
 func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {

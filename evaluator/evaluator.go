@@ -1764,7 +1764,11 @@ func evalCaseStatement(cs *ast.CaseStatement, env *object.Environment) object.Ob
 				return err // Propagate errors from case value evaluation
 			}
 			if matches {
-				return Eval(branch.Consequence, env)
+				consequenceResult := Eval(branch.Consequence, env)
+				if isError(consequenceResult) {
+					return consequenceResult
+				}
+				return consequenceResult
 			}
 		}
 	}
@@ -1788,19 +1792,25 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 			return false, upperBound.(*object.Error)
 		}
 
-		// Check selector >= lowerBound
-		ge := evalInfixExpression(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
-		if err, isErr := ge.(*object.Error); isErr {
-			return false, err
+		// If all are numeric, use numeric comparison to handle type promotion (e.g., INT vs REAL).
+		if isNumeric(selector) && isNumeric(lowerBound) && isNumeric(upperBound) {
+			ge := evalNumericInfixExpression(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
+			if err, isErr := ge.(*object.Error); isErr {
+				return false, err
+			}
+
+			le := evalNumericInfixExpression(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
+			if err, isErr := le.(*object.Error); isErr {
+				return false, err
+			}
+			return ge == TRUE && le == TRUE, nil
 		}
 
-		// Check selector <= upperBound
-		le := evalInfixExpression(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
-		if err, isErr := le.(*object.Error); isErr {
-			return false, err
-		}
+		// Fallback to generic comparison for non-numeric types.
+		ge := evalComparisonInfix(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
+		le := evalComparisonInfix(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
 
-		return ge == TRUE && le == TRUE, nil
+		return isTruthy(ge) && isTruthy(le), nil
 	}
 
 	// Handle single values

@@ -652,7 +652,7 @@ func (rs *RepeatStatement) String() string {
 type CaseBranch struct {
 	Token       token.Token // The first token of the value list
 	Values      []Expression
-	Consequence Statement
+	Consequence *BlockStatement
 }
 
 func (cb *CaseBranch) statementNode()       {}

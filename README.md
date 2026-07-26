@@ -86,35 +86,54 @@ You can run `beedance` with the following flags:
 
 The following example demonstrates a simple timed-state machine using a `TON` (Timer On-Delay) function block and a `CASE` statement. This code can be saved in a file (e.g., `traffic_light.st`) and executed with `go run main.go -iec traffic_light.st`.
 
-```sh
+```iecst
 PROGRAM Traffic_Light
 	VAR
 		State : INT := 0;
 		StateTimer : TON;
+		EnableTimer : BOOL;
 		Green_Light : BOOL;
 		Yellow_Light : BOOL;
 		Red_Light : BOOL;
 	END_VAR
 
-	(* Call the timer instance on every scan *)
-	StateTimer(IN := TRUE, PT := T#5s);
+	(* A single, clear call to the timer instance on every scan. *)
+	(* The IN parameter is controlled by the state machine logic. *)
+	StateTimer(IN := EnableTimer, PT := T#5s);
 
 	CASE State OF
 		0: (* Green State *)
-			Green_Light := TRUE;
+			Green_Light  := TRUE;
 			Yellow_Light := FALSE;
-			Red_Light := FALSE;
-			IF StateTimer.Q THEN State := 1; StateTimer(IN := FALSE); END_IF
+			Red_Light    := FALSE;
+			EnableTimer  := TRUE; (* Timer runs during this state *)
+
+			IF StateTimer.Q THEN
+				State := 1;
+				EnableTimer := FALSE; (* Reset timer for the next state *)
+			END_IF
 
 		1: (* Yellow State *)
 			Green_Light := FALSE;
 			Yellow_Light := TRUE;
-			IF StateTimer.Q THEN State := 2; StateTimer(IN := FALSE); END_IF
+			Red_Light    := FALSE;
+			EnableTimer  := TRUE;
+
+			IF StateTimer.Q THEN
+				State := 2;
+				EnableTimer := FALSE;
+			END_IF
 
 		2: (* Red State *)
+			Green_Light  := FALSE;
 			Yellow_Light := FALSE;
 			Red_Light := TRUE;
-			IF StateTimer.Q THEN State := 0; StateTimer(IN := FALSE); END_IF
+			EnableTimer  := TRUE;
+
+			IF StateTimer.Q THEN
+				State := 0;
+				EnableTimer := FALSE;
+			END_IF
 	END_CASE
 END_PROGRAM
 ```
