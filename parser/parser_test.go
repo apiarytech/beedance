@@ -2505,9 +2505,12 @@ func TestCaseStatement(t *testing.T) {
 	if len(case1.Values) != 1 || !testIntegerLiteral(t, case1.Values[0], 0) {
 		t.Errorf("incorrect values for case 1. got=%v", case1.Values)
 	}
-	consequence1, ok := case1.Consequence.(*ast.AssignmentStatement)
+	if len(case1.Consequence.Statements) != 1 {
+		t.Fatalf("Consequence for case 1 should have 1 statement, got %d", len(case1.Consequence.Statements))
+	}
+	consequence1, ok := case1.Consequence.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Errorf("consequence for case 1 is not AssignmentStatement. got=%T", case1.Consequence)
+		t.Errorf("consequence for case 1 is not AssignmentStatement. got=%T", case1.Consequence.Statements[0])
 	}
 	testIdentifier(t, consequence1.Left, "iSpeed")
 	testIntegerLiteral(t, consequence1.Value, 0)
@@ -2517,9 +2520,12 @@ func TestCaseStatement(t *testing.T) {
 	if len(case2.Values) != 3 || !testIntegerLiteral(t, case2.Values[0], 1) || !testIntegerLiteral(t, case2.Values[1], 2) || !testIntegerLiteral(t, case2.Values[2], 3) {
 		t.Errorf("incorrect values for case 2. got=%v", case2.Values)
 	}
-	consequence2, ok := case2.Consequence.(*ast.AssignmentStatement)
+	if len(case2.Consequence.Statements) != 1 {
+		t.Fatalf("Consequence for case 2 should have 1 statement, got %d", len(case2.Consequence.Statements))
+	}
+	consequence2, ok := case2.Consequence.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Errorf("consequence for case 2 is not AssignmentStatement. got=%T", case2.Consequence)
+		t.Errorf("consequence for case 2 is not AssignmentStatement. got=%T", case2.Consequence.Statements[0])
 	}
 	testIdentifier(t, consequence2.Left, "iSpeed")
 	testIntegerLiteral(t, consequence2.Value, 50)
@@ -2532,9 +2538,12 @@ func TestCaseStatement(t *testing.T) {
 	if !testInfixExpression(t, 0, case3.Values[0], 4, "..", 7) {
 		return
 	}
-	consequence3, ok := case3.Consequence.(*ast.AssignmentStatement)
+	if len(case3.Consequence.Statements) != 1 {
+		t.Fatalf("Consequence for case 3 should have 1 statement, got %d", len(case3.Consequence.Statements))
+	}
+	consequence3, ok := case3.Consequence.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
-		t.Errorf("consequence for case 3 is not AssignmentStatement. got=%T", case3.Consequence)
+		t.Errorf("consequence for case 3 is not AssignmentStatement. got=%T", case3.Consequence.Statements[0])
 	}
 	testIdentifier(t, consequence3.Left, "iSpeed")
 	testIntegerLiteral(t, consequence3.Value, 100)
