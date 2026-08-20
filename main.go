@@ -12,17 +12,24 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
+	"go/format"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
+	"path/filepath"
 
+	"beedance/compiler"
 	"beedance/evaluator"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
 	"beedance/repl"
+	"beedance/transpiler"
+	"beedance/vm"
 )
 
 const version = "0.1.0"
@@ -32,6 +39,8 @@ func main() {
 	versionFlag := flag.Bool("version", false, "Print the application version")
 	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
 	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
+	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
+	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
 	flag.Parse()
 
 	if *versionFlag {
@@ -39,18 +48,34 @@ func main() {
 		os.Exit(0)
 	}
 
+	var engine string
+	if *vmFlag {
+		engine = "vm"
+	} else {
+		engine = "eval"
+	}
+
 	if *trace {
 		parser.SetTracing(true)
 		fmt.Println("Parser tracing enabled.")
 	}
 
+	if *goFile != "" {
+		if *iecFile == "" {
+			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -go flag to specify the input file.")
+			os.Exit(1)
+		}
+		transpileFile(*iecFile, *goFile, os.Stdout)
+		os.Exit(0)
+	}
+
 	if *iecFile != "" {
-		executeFile(*iecFile, os.Stdout)
+		executeFile(*iecFile, os.Stdout, engine)
 		os.Exit(0)
 	}
 
 	if *evalStr != "" {
-		executeString(*evalStr, os.Stdout)
+		executeString(*evalStr, os.Stdout, engine)
 		os.Exit(0)
 	}
 
@@ -60,11 +85,11 @@ func main() {
 	}
 	fmt.Printf("Hello %s! This is the Beedance (IEC 61131) programming language!\n",
 		user.Username)
-	fmt.Printf("Feel free to type in commands\n")
-	repl.Start(os.Stdin, os.Stdout)
+	fmt.Printf("Feel free to type in commands. Using %s engine.\n", engine)
+	repl.Start(os.Stdin, os.Stdout, engine)
 }
 
-func executeFile(filepath string, out io.Writer) {
+func executeFile(filepath string, out io.Writer, engine string) {
 	file, err := os.Open(filepath)
 	if err != nil {
 		fmt.Fprintf(out, "Error opening file: %s\n", err)
@@ -93,13 +118,38 @@ func executeFile(filepath string, out io.Writer) {
 		return
 	}
 
-	env := object.NewEnvironment()
-	evaluated := evaluator.Eval(program, env)
+	if engine == "vm" {
+		symbolTable := compiler.NewSymbolTable()
+		for i, v := range object.Builtins {
+			symbolTable.DefineBuiltin(i, v.Name)
+		}
+		globals := make([]object.Object, vm.GlobalsSize)
 
-	io.WriteString(out, evaluated.Inspect()+"\n")
+		comp := compiler.NewWithState(symbolTable, nil)
+		err := comp.Compile(program)
+		if err != nil {
+			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
+			return
+		}
+
+		machine := vm.NewWithGlobalsStore(comp.Bytecode(), globals)
+		err = machine.Run()
+		if err != nil {
+			fmt.Fprintf(out, "Woops! Executing bytecode failed:\n %s\n", err)
+			return
+		}
+
+		lastPopped := machine.LastPoppedStackElem()
+		io.WriteString(out, lastPopped.Inspect())
+		io.WriteString(out, "\n")
+	} else {
+		env := object.NewEnvironment()
+		evaluated := evaluator.Eval(program, env)
+		io.WriteString(out, evaluated.Inspect()+"\n")
+	}
 }
 
-func executeString(input string, out io.Writer) {
+func executeString(input string, out io.Writer, engine string) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -109,11 +159,32 @@ func executeString(input string, out io.Writer) {
 		return
 	}
 
-	env := object.NewEnvironment()
-	evaluated := evaluator.Eval(program, env)
+	if engine == "vm" {
+		symbolTable := compiler.NewSymbolTable()
+		for i, v := range object.Builtins {
+			symbolTable.DefineBuiltin(i, v.Name)
+		}
+		globals := make([]object.Object, vm.GlobalsSize)
 
-	// Only print the result if it's not NULL, to keep the output clean for simple assignments.
-	if evaluated != nil && evaluated.Type() != object.NULL_OBJ {
+		comp := compiler.NewWithState(symbolTable, nil)
+		err := comp.Compile(program)
+		if err != nil {
+			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
+			return
+		}
+
+		machine := vm.NewWithGlobalsStore(comp.Bytecode(), globals)
+		err = machine.Run()
+		if err != nil {
+			fmt.Fprintf(out, "Woops! Executing bytecode failed:\n %s\n", err)
+			return
+		}
+
+		lastPopped := machine.LastPoppedStackElem()
+		io.WriteString(out, lastPopped.Inspect()+"\n")
+	} else {
+		env := object.NewEnvironment()
+		evaluated := evaluator.Eval(program, env)
 		io.WriteString(out, evaluated.Inspect()+"\n")
 	}
 }
@@ -122,5 +193,77 @@ func printParserErrors(out io.Writer, errors []string) {
 	io.WriteString(out, "Parser errors:\n")
 	for _, msg := range errors {
 		io.WriteString(out, "\t"+msg+"\n")
+	}
+}
+
+func transpileFile(inputFile, outputFile string, out io.Writer) {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		fmt.Fprintf(out, "Error opening input file: %s\n", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var input string
+	for scanner.Scan() {
+		input += scanner.Text() + "\n"
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(out, "Error reading input file: %s\n", err)
+		return
+	}
+
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 0 {
+		printParserErrors(out, p.Errors())
+		return
+	}
+
+	var buf bytes.Buffer
+	// --- Start of Go file generation ---
+	// 1. Write the file header with package and imports.
+	buf.WriteString("package main\n\n")
+	buf.WriteString("import (\n")
+	buf.WriteString("\t\"time\"\n")
+	buf.WriteString("\n")
+	buf.WriteString("\t\"github.com/apiarytech/royaljelly/config\"\n")
+	buf.WriteString("\t\"github.com/apiarytech/royaljelly/iec\"\n")
+	buf.WriteString(")\n\n")
+
+	// 2. Transpile the IEC 61131-3 code.
+	t := transpiler.New(&buf)
+	// The transpiler will find and process PROGRAM, FUNCTION_BLOCK, etc.
+	if err := t.Transpile(program); err != nil {
+		fmt.Fprintf(out, "Transpilation error: %s\n", err)
+		return
+	}
+
+	// 3. Format the generated Go source code.
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		fmt.Fprintf(out, "Error formatting generated Go code: %s\n", err)
+		// Even if formatting fails, write the unformatted code for debugging.
+		formatted = buf.Bytes()
+	}
+
+	// 4. Write the final, formatted code to the output file.
+	err = os.WriteFile(outputFile, formatted, 0644)
+	if err != nil {
+		fmt.Fprintf(out, "Error writing to output file: %s\n", err)
+		return
+	}
+
+	fmt.Fprintf(out, "Successfully transpiled %s to %s\n", inputFile, outputFile)
+
+	// Automatically run go mod tidy on the output file's directory
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = filepath.Dir(outputFile)
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(out, "Warning: 'go mod tidy' failed: %s\n", err)
 	}
 }

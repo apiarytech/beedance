@@ -50,6 +50,12 @@ A core principle of the `beedance` parser is a clean separation of concerns:
 
 This three-tiered separation makes the codebase significantly easier to read, debug, and extend compared to more traditional approaches where these components are tightly coupled.
 ### Standards Compliance
+### Extensible Backend Architecture
+
+Beyond its tree-walking evaluator, `beedance` is designed with a flexible backend architecture. The AST produced by the parser can be consumed by different components, allowing for multiple execution or compilation strategies. This makes it possible to add new backends, such as:
+
+*   **Go Compiler:** A compiler that translates IEC 61131-3 source code directly into Go source code. This enables further compilation to highly-optimized native binaries or WebAssembly (WASM) modules using tools like TinyGo.
+*   **VM Compiler:** A compiler that generates bytecode for a custom, high-performance virtual machine, offering a significant speed advantage over direct evaluation.
 
 A primary goal of `beedance` is to adhere as closely as possible to the IEC 61131-3 standard. The flexible parser architecture is key to achieving this.
 
@@ -57,30 +63,71 @@ For example, the parser is designed to be context-aware. This allows it to corre
 
 ## Getting Started
 
-The primary way to use `beedance` is through its command-line interface, which supports a Read-Eval-Print-Loop (REPL), file execution, and direct string evaluation.
+The primary way to use `beedance` is through its command-line interface, which supports evaluation (REPL, file execution) and compilation.
 
 ### Command-Line Flags
 
-You can run `beedance` with the following flags:
+You can run `beedance` with the following flags. By default (with no flags), it runs the interactive REPL using the tree-walking evaluator.
 
-*   **No flags:** Starts the interactive REPL.
+*   **No flags:** Starts the interactive REPL (evaluator mode).
     ```sh
     go run main.go
     ```
-*   **`-iec` :** Executes a program from a `.st` file.
+*   **`-vm`:** Use the bytecode virtual machine instead of the default tree-walking evaluator. This flag can be combined with the REPL, `-iec`, or `-e`.
+    ```sh
+    go run main.go -vm
+    ```
+*   **`-iec <path>`:** Executes a program from a source file (e.g., `.st`).
     ```sh
     go run main.go -iec /path/to/your/program.st
     ```
-*   **`-e`:** Evaluates a single string of Structured Text.
+*   **`-e "<string>"`:** Evaluates a single string of code.
     ```sh
     go run main.go -e "MyVar := 10 + 20;"
     ```
-*   **`-trace`:** Enables detailed parser tracing, which is useful for debugging the parsing process.
+*   **`-trace`:** Enables detailed parser tracing, which is useful for debugging the parsing process. This can be combined with other flags.
     ```sh
     go run main.go -trace -iec /path/to/your/program.st
     ```
+*   **`-go <path>`:** Transpiles an IEC 61131-3 source file into a Go source file. This flag must be used in conjunction with `-iec`.
+    ```sh
+    go run main.go -iec /path/to/your/program.st -go /path/to/output.go
+    ```
+*   **`-version`:** Prints the application version.
+    ```sh
+    go run main.go -version
+    ```
 
 ### Examples
+
+#### Running the REPL
+You can start the REPL with either the evaluator (default) or the VM.
+```sh
+# Start REPL with the evaluator
+go run .
+
+# Start REPL with the virtual machine
+go run . -vm
+```
+
+#### Executing a File
+The `-iec` flag can be combined with `-vm` to choose the execution engine.
+```sh
+# Execute a file with the evaluator
+go run . -iec /path/to/your/program.st
+
+# Execute a file with the virtual machine
+go run . -vm -iec /path/to/your/program.st
+```
+
+#### Transpiling to Go
+The `-go` flag allows you to convert an IEC 61131-3 Structured Text file into a Go source file. This is useful for integrating with Go-native runtimes like `royaljelly`.
+
+```sh
+# Transpile a .st file to a .go file
+go run . -iec /path/to/your/program.st -go /path/to/transpiled.go
+```
+
 
 #### Simple State Machine in Structured Text
 

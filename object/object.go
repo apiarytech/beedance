@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"beedance/ast"
+	"beedance/code"
 )
 
 type ObjectType string
@@ -70,6 +71,8 @@ const (
 	SUBRANGE_TYPE_OBJ           = "SUBRANGE_TYPE"
 	PROGRAM_OBJ                 = "PROGRAM"
 	PROGRAM_INSTANCE_OBJ        = "PROGRAM_INSTANCE"
+	COMPILED_FUNCTION_OBJ       = "COMPILED_FUNCTION_OBJ"
+	CLOSURE_OBJ                 = "CLOSURE"
 )
 
 // Generic ANY types
@@ -786,4 +789,25 @@ func (pi *ProgramInstance) Inspect() string {
 		return fmt.Sprintf("INSTANCE OF %s", pi.Definition.Name.Value)
 	}
 	return "PROGRAM_INSTANCE"
+}
+
+type CompiledFunction struct {
+	Instructions  code.Instructions
+	NumLocals     int
+	NumParameters int
+}
+
+func (cf *CompiledFunction) Type() ObjectType { return COMPILED_FUNCTION_OBJ }
+func (cf *CompiledFunction) Inspect() string {
+	return fmt.Sprintf("CompiledFunction[%p]", cf)
+}
+
+type Closure struct {
+	Fn   *CompiledFunction
+	Free []Object
+}
+
+func (c *Closure) Type() ObjectType { return CLOSURE_OBJ }
+func (c *Closure) Inspect() string {
+	return fmt.Sprintf("Closure[%p]", c)
 }
