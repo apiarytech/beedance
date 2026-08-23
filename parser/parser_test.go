@@ -301,6 +301,27 @@ func TestStructTypeDeclaration(t *testing.T) {
 	}
 }
 
+func TestVarInFunctionError(t *testing.T) {
+	input := `
+	FUNCTION MyFunc : INT
+		VAR
+			x : INT;
+		END_VAR
+		MyFunc := x;
+	END_FUNCTION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	p.ParseProgram()
+
+	if len(p.Errors()) == 0 {
+		t.Fatalf("Expected parser error for VAR in FUNCTION, but got none")
+	}
+
+	expectedError := "VAR declarations are not allowed in a FUNCTION"
+	assertErrorContains(t, p.Errors(), expectedError)
+}
+
 func TestComplexTypeBlockDeclaration(t *testing.T) {
 	input := `
 		TYPE
@@ -575,12 +596,32 @@ func TestAccessVarDeclarations(t *testing.T) {
 		t.Fatalf("Expected 2 access variables. got=%d", len(stmt.Vars))
 	}
 
-	if !testVarDeclStatement(t, stmt.Vars[0], "Path1", "MyFB") {
-		return
+	decl1 := stmt.Vars[0]
+	if decl1.Name.Value != "Path1" {
+		t.Errorf("decl1.Name.Value not 'Path1'. got=%s", decl1.Name.Value)
+	}
+	if decl1.AccessPath.String() != "MyFB" {
+		t.Errorf("decl1.AccessPath not 'MyFB'. got=%s", decl1.AccessPath.String())
+	}
+	if decl1.AccessType != "READ_ONLY" {
+		t.Errorf("decl1.AccessType not 'READ_ONLY'. got=%s", decl1.AccessType)
+	}
+	if decl1.DataType != nil {
+		t.Errorf("decl1.DataType should be nil for VAR_ACCESS. got=%v", decl1.DataType)
 	}
 
-	if !testVarDeclStatement(t, stmt.Vars[1], "Path2", "OtherFB") {
-		return
+	decl2 := stmt.Vars[1]
+	if decl2.Name.Value != "Path2" {
+		t.Errorf("decl2.Name.Value not 'Path2'. got=%s", decl2.Name.Value)
+	}
+	if decl2.AccessPath.String() != "OtherFB" {
+		t.Errorf("decl2.AccessPath not 'OtherFB'. got=%s", decl2.AccessPath.String())
+	}
+	if decl2.AccessType != "READ_WRITE" {
+		t.Errorf("decl2.AccessType not 'READ_WRITE'. got=%s", decl2.AccessType)
+	}
+	if decl2.DataType != nil {
+		t.Errorf("decl2.DataType should be nil for VAR_ACCESS. got=%v", decl2.DataType)
 	}
 }
 
@@ -683,8 +724,8 @@ func TestGlobalVarDeclarations(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestConfigVarDeclarations", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestGlobalVarDeclarations", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -1319,7 +1360,7 @@ func TestIfElseStatement(t *testing.T) {
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestCallExpressionParsing", input)
+	checkParserErrors(t, p, "TestIfElseStatement", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain %d statements. got=%d\n",
@@ -2759,6 +2800,321 @@ func TestProgramDeclaration(t *testing.T) {
 	testIntegerLiteral(t, bodyStmt.Value, 10)
 }
 
+func TestProgramDeclarationWithGlobalVar(t *testing.T) {
+	input := `
+		PROGRAM MyProgramWithGlobals
+			VAR_GLOBAL
+				Global1 : INT;
+			END_VAR
+
+			VAR
+				Local1 : BOOL;
+			END_VAR
+
+			Local1 := TRUE;
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramDeclarationWithGlobalVar", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	progDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ProgramDeclaration. got=%T", program.Statements[0])
+	}
+
+	if progDecl.Name.Value != "MyProgramWithGlobals" {
+		t.Errorf("Program name is not 'MyProgramWithGlobals'. got=%s", progDecl.Name.Value)
+	}
+
+	// Check for VAR_GLOBAL block
+	if len(progDecl.VarGlobal) != 1 {
+		t.Fatalf("Expected 1 VAR_GLOBAL block. got=%d", len(progDecl.VarGlobal))
+	}
+
+	globalBlock := progDecl.VarGlobal[0]
+	if len(globalBlock.Vars) != 1 {
+		t.Fatalf("Expected 1 global variable declaration. got=%d", len(globalBlock.Vars))
+	}
+	if !testVarDeclStatement(t, globalBlock.Vars[0], "Global1", "INT") {
+		return
+	}
+
+	// Check for local VAR block
+	if len(progDecl.Vars) != 1 {
+		t.Fatalf("Expected 1 local VAR declaration. got=%d", len(progDecl.Vars))
+	}
+	if !testVarDeclStatement(t, progDecl.Vars[0], "Local1", "BOOL") {
+		return
+	}
+
+	// Check body
+	body, ok := progDecl.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Program body is not a BlockStatement. got=%T", progDecl.Body)
+	}
+	if len(body.Statements) != 1 {
+		t.Fatalf("Program body does not have 1 statement. got=%d", len(body.Statements))
+	}
+}
+
+func TestFunctionBlockDeclarationWithInOut(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MyFBWithInOut
+			VAR_IN_OUT
+				InOutVar : REAL;
+			END_VAR
+
+			InOutVar := InOutVar + 1.0;
+		END_FUNCTION_BLOCK
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockDeclarationWithInOut", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if fb.Name.Value != "MyFBWithInOut" {
+		t.Errorf("Function block name is not 'MyFBWithInOut'. got=%s", fb.Name.Value)
+	}
+
+	if len(fb.VarInOuts) != 1 {
+		t.Fatalf("Expected 1 VAR_IN_OUT declaration. got=%d", len(fb.VarInOuts))
+	}
+
+	inOutVar := fb.VarInOuts[0]
+	if !testVarDeclStatement(t, inOutVar, "InOutVar", "REAL") {
+		return
+	}
+
+	body, ok := fb.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Function block body is not a BlockStatement. got=%T", fb.Body)
+	}
+
+	if len(body.Statements) != 1 {
+		t.Fatalf("Function block body does not have 1 statement. got=%d", len(body.Statements))
+	}
+
+	testAssignmentStatement(t, body.Statements[0], "InOutVar", "(InOutVar + 1.0)")
+}
+
+func TestFunctionBlockWithSFCBody(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MySFC_FB
+			VAR
+				cond : BOOL;
+			END_VAR
+
+			INITIAL_STEP S1:
+			END_STEP
+
+			TRANSITION FROM S1 TO S2 := cond; END_TRANSITION
+
+			STEP S2:
+			END_STEP
+		END_FUNCTION_BLOCK
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockWithSFCBody", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if fb.Name.Value != "MySFC_FB" {
+		t.Errorf("Function block name is not 'MySFC_FB'. got=%s", fb.Name.Value)
+	}
+
+	sfcBody, ok := fb.Body.(*ast.SFCProgram)
+	if !ok {
+		t.Fatalf("Function block body is not *ast.SFCProgram. got=%T", fb.Body)
+	}
+
+	if len(sfcBody.Elements) != 3 {
+		t.Fatalf("SFC body should have 3 elements. got=%d", len(sfcBody.Elements))
+	}
+
+	// Check the first element (INITIAL_STEP)
+	initialStep, ok := sfcBody.Elements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("SFC element 0 is not *ast.StepStatement. got=%T", sfcBody.Elements[0])
+	}
+	if !initialStep.IsInitial {
+		t.Error("First step should be an initial step.")
+	}
+	if initialStep.Name.Value != "S1" {
+		t.Errorf("Initial step name is not 'S1'. got=%s", initialStep.Name.Value)
+	}
+}
+
+func TestIlProgramParsing(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(t *testing.T, body *ast.BlockStatement)
+	}{
+		{
+			"Basic IL Instructions",
+			`
+				FUNCTION_BLOCK MyIlProgram
+					VAR
+						Start : BOOL;
+						Counter : INT;
+						Result : INT;
+					END_VAR
+
+					LD    Start
+					ADD   Counter
+					ST    Result
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 3 {
+					t.Fatalf("Function block body does not have 3 statements. got=%d", len(body.Statements))
+				}
+
+				// Test instruction 1: LD Start
+				inst1 := testIlInstruction(t, body.Statements[0], "LD", "Start")
+				// Test instruction 2: ADD Counter
+				inst2 := testIlInstruction(t, body.Statements[1], "ADD", "Counter")
+				// Test instruction 3: ST Result
+				inst3 := testIlInstruction(t, body.Statements[2], "ST", "Result")
+
+				if inst1 == nil || inst2 == nil || inst3 == nil {
+					t.Fatalf("One or more IL instructions failed to parse correctly.")
+				}
+			},
+		},
+		{
+			"Simple LD/ST",
+			`
+				FUNCTION_BLOCK TestFB
+					VAR A, B : INT; END_VAR
+					LD    A
+					ST    B
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 2 {
+					t.Fatalf("Expected 2 statements, got %d", len(body.Statements))
+				}
+				testIlInstruction(t, body.Statements[0], "LD", "A")
+				testIlInstruction(t, body.Statements[1], "ST", "B")
+			},
+		},
+		{
+			"Labels and Modifiers",
+			`
+				FUNCTION_BLOCK TestFB
+					VAR C : BOOL; END_VAR
+					Loop: LDN   C
+					JMPC  Loop
+					RET
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 3 {
+					t.Fatalf("Expected 3 statements, got %d", len(body.Statements))
+				}
+				inst1 := testIlInstruction(t, body.Statements[0], "LD", "C", "N")
+				if inst1.Label == nil || inst1.Label.Value != "Loop" {
+					t.Errorf("Instruction 1 has incorrect label. want='Loop', got=%v", inst1.Label)
+				}
+				testIlInstruction(t, body.Statements[1], "JMP", "Loop", "C")
+				testIlInstruction(t, body.Statements[2], "RET", "")
+			},
+		},
+		{
+			"Parenthesized Expression",
+			`
+				FUNCTION_BLOCK TestFB
+					VAR A, B, C : INT; END_VAR
+					LD(
+						LD A
+						ADD B )
+					ST C
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 2 {
+					t.Fatalf("Expected 2 statements, got %d", len(body.Statements))
+				}
+				// Manually check the LD( instruction because testIlInstruction is too simple for it.
+				ldInst, ok := body.Statements[0].(*ast.IlInstructionStatement)
+				if !ok {
+					t.Fatalf("Statement 0 is not IlInstructionStatement. got=%T", body.Statements[0])
+				}
+				if ldInst.Operator != "LD" {
+					t.Errorf("Operator is not LD. got=%s", ldInst.Operator)
+				}
+				if ldInst.Modifier != "(" {
+					t.Errorf("Modifier is not '('. got=%s", ldInst.Modifier)
+				}
+				parenBlock, ok := ldInst.Operand.(*ast.BlockStatement)
+				if !ok {
+					t.Fatalf("Operand of LD( is not a BlockStatement. got=%T", ldInst.Operand)
+				}
+				if len(parenBlock.Statements) != 2 {
+					t.Fatalf("Parenthesized block should have 2 statements. got=%d", len(parenBlock.Statements))
+				}
+				testIlInstruction(t, parenBlock.Statements[0], "LD", "A")
+				testIlInstruction(t, parenBlock.Statements[1], "ADD", "B")
+
+				testIlInstruction(t, body.Statements[1], "ST", "C")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p, tt.name, tt.input)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+			}
+
+			body, ok := fb.Body.(*ast.BlockStatement)
+			if !ok {
+				t.Fatalf("Function block body is not a BlockStatement. got=%T", fb.Body)
+			}
+
+			tt.check(t, body)
+		})
+	}
+}
+
 func TestActionStatement(t *testing.T) {
 	input := `
 		ACTION MyAction: 
@@ -2800,6 +3156,42 @@ func TestActionStatement(t *testing.T) {
 
 	testIdentifier(t, bodyStmt.Left, "x")
 	testInfixExpression(t, 0, bodyStmt.Value, "x", "+", 1)
+}
+
+func testIlInstruction(t *testing.T, s ast.Statement, operator, operand string, modifiers ...string) *ast.IlInstructionStatement {
+	t.Helper()
+	inst, ok := s.(*ast.IlInstructionStatement)
+	if !ok {
+		t.Fatalf("Statement is not IlInstructionStatement. got=%T", s)
+		return nil
+	}
+
+	if inst.Operator != operator {
+		t.Errorf("Instruction operator is incorrect. want=%q, got=%q", operator, inst.Operator)
+	}
+
+	if operand != "" {
+		if inst.Operand == nil {
+			t.Errorf("Instruction operand is nil, want=%q", operand)
+		} else if inst.Operand.String() != operand {
+			t.Errorf("Instruction operand is incorrect. want=%q, got=%q", operand, inst.Operand.String())
+		}
+	} else {
+		if inst.Operand != nil {
+			t.Errorf("Instruction operand is not nil, want=nil, got=%q", inst.Operand.String())
+		}
+	}
+
+	expectedModifier := ""
+	if len(modifiers) > 0 {
+		expectedModifier = modifiers[0]
+	}
+
+	if inst.Modifier != expectedModifier {
+		t.Errorf("Instruction modifier is incorrect. want=%q, got=%q", expectedModifier, inst.Modifier)
+	}
+
+	return inst
 }
 
 func TestExitStatement(t *testing.T) {
@@ -3414,72 +3806,6 @@ func TestMissingEndProgramErrorRecovery(t *testing.T) {
 	}
 }
 
-func TestIlProgramParsing(t *testing.T) {
-	input := `
-		FUNCTION_BLOCK MyIlProgram
-			VAR
-				Start : BOOL; 
-				Counter : INT;
-				Result : INT;
-			END_VAR
-
-			LD    Start
-			ADD   Counter
-			ST    Result
-		END_FUNCTION_BLOCK
-	`
-
-	l := lexer.New(input)
-	p := New(l)
-	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestIlProgramParsing", input)
-
-	if len(program.Statements) != 1 {
-		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
-	}
-
-	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
-	if !ok {
-		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
-	}
-
-	body, ok := fb.Body.(*ast.BlockStatement)
-	if !ok {
-		t.Fatalf("Function block body is not a BlockStatement. got=%T", fb.Body)
-	}
-
-	if len(body.Statements) != 3 {
-		t.Fatalf("Function block body does not have 3 statements. got=%d", len(body.Statements))
-	}
-
-	// Test instruction 1: LD Start
-	inst1, ok := body.Statements[0].(*ast.IlInstructionStatement)
-	if !ok {
-		t.Fatalf("Statement 1 is not IlInstructionStatement. got=%T", body.Statements[0])
-	}
-	if inst1.Operator != "LD" || inst1.Operand.String() != "Start" {
-		t.Errorf("Instruction 1 is incorrect. Expected 'LD Start', got '%s %s'", inst1.Operator, inst1.Operand)
-	}
-
-	// Test instruction 2: ADD Counter
-	inst2, ok := body.Statements[1].(*ast.IlInstructionStatement)
-	if !ok {
-		t.Fatalf("Statement 2 is not IlInstructionStatement. got=%T", body.Statements[1])
-	}
-	if inst2.Operator != "ADD" || inst2.Operand.String() != "Counter" {
-		t.Errorf("Instruction 2 is incorrect. Expected 'ADD Counter', got '%s %s'", inst2.Operator, inst2.Operand)
-	}
-
-	// Test instruction 3: ST Result
-	inst3, ok := body.Statements[2].(*ast.IlInstructionStatement)
-	if !ok {
-		t.Fatalf("Statement 3 is not IlInstructionStatement. got=%T", body.Statements[2])
-	}
-	if inst3.Operator != "ST" || inst3.Operand.String() != "Result" {
-		t.Errorf("Instruction 3 is incorrect. Expected 'ST Result', got '%s %s'", inst3.Operator, inst3.Operand)
-	}
-}
-
 func TestDirectVariableParsing(t *testing.T) {
 	input := `
 		VAR
@@ -3583,6 +3909,8 @@ func testLiteralExpression(
 		return testIntegerLiteral(t, exp, int64(v))
 	case int64:
 		return testIntegerLiteral(t, exp, v)
+	case float64:
+		return testRealLiteral(t, exp, v)
 	case string:
 		return testIdentifier(t, exp, v)
 	case bool:
@@ -3590,6 +3918,24 @@ func testLiteralExpression(
 	}
 	t.Errorf("type of exp not handled. got=%T", exp)
 	return false
+}
+
+func testAssignmentStatement(t *testing.T, stmt ast.Statement, left, rightValueString string) bool {
+	t.Helper()
+	assignStmt, ok := stmt.(*ast.AssignmentStatement)
+	if !ok {
+		t.Errorf("stmt not *ast.AssignmentStatement. got=%T", stmt)
+		return false
+	}
+	if assignStmt.Left.String() != left {
+		t.Errorf("assignStmt.Left.String() not %q. got=%q", left, assignStmt.Left.String())
+		return false
+	}
+	if assignStmt.Value.String() != rightValueString {
+		t.Errorf("assignStmt.Value.String() not %q. got=%q", rightValueString, assignStmt.Value.String())
+		return false
+	}
+	return true
 }
 
 func testIntegerLiteral(t *testing.T, il ast.Expression, value int64) bool {

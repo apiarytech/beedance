@@ -5,6 +5,7 @@ import (
 	"beedance/compiler"
 	"beedance/object"
 	"fmt"
+	"math"
 )
 
 const StackSize = 2048
@@ -79,7 +80,8 @@ func (vm *VM) Run() error {
 		case code.OpPop:
 			vm.pop()
 
-		case code.OpAdd, code.OpSub, code.OpMul, code.OpDiv:
+		case code.OpAdd, code.OpSub, code.OpMul, code.OpDiv, code.OpMod, code.OpExponent,
+			code.OpAnd, code.OpOr, code.OpXor, code.OpNand, code.OpNor:
 			err = vm.executeBinaryOperation(op)
 
 		case code.OpTrue:
@@ -88,7 +90,8 @@ func (vm *VM) Run() error {
 		case code.OpFalse:
 			err = vm.push(False)
 
-		case code.OpEqual, code.OpNotEqual, code.OpGreaterThan:
+		case code.OpEqual, code.OpNotEqual, code.OpGreaterThan, code.OpLessThan,
+			code.OpGreaterThanOrEqual, code.OpLessThanOrEqual:
 			err = vm.executeComparison(op)
 
 		case code.OpBang:
@@ -222,6 +225,31 @@ func (vm *VM) pop() object.Object {
 	return o
 }
 
+func (vm *VM) executeBinaryBooleanOperation(
+	op code.Opcode,
+	left, right object.Object,
+) error {
+	leftValue := left.(*object.Boolean).Value
+	rightValue := right.(*object.Boolean).Value
+
+	var result bool
+	switch op {
+	case code.OpAnd:
+		result = leftValue && rightValue
+	case code.OpOr:
+		result = leftValue || rightValue
+	case code.OpXor:
+		result = leftValue != rightValue
+	case code.OpNand:
+		result = !(leftValue && rightValue)
+	case code.OpNor:
+		result = !(leftValue || rightValue)
+	default:
+		return fmt.Errorf("unknown boolean operator: %d", op)
+	}
+	return vm.push(nativeBoolToBooleanObject(result))
+}
+
 func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
@@ -230,6 +258,8 @@ func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	rightType := right.Type()
 
 	switch {
+	case leftType == object.BOOLEAN_OBJ && rightType == object.BOOLEAN_OBJ:
+		return vm.executeBinaryBooleanOperation(op, left, right)
 	case isInteger(left) && isInteger(right):
 		return vm.executeBinaryIntegerOperation(op, left, right)
 	case leftType == object.STRING_OBJ && rightType == object.STRING_OBJ:
@@ -257,7 +287,27 @@ func (vm *VM) executeBinaryIntegerOperation(
 	case code.OpMul:
 		result = leftValue * rightValue
 	case code.OpDiv:
+		if rightValue == 0 {
+			return fmt.Errorf("division by zero")
+		}
 		result = leftValue / rightValue
+	case code.OpMod:
+		if rightValue == 0 {
+			return fmt.Errorf("division by zero")
+		}
+		result = leftValue % rightValue
+	case code.OpExponent:
+		result = int64(math.Pow(float64(leftValue), float64(rightValue)))
+	case code.OpAnd:
+		result = leftValue & rightValue
+	case code.OpOr:
+		result = leftValue | rightValue
+	case code.OpXor:
+		result = leftValue ^ rightValue
+	case code.OpNand:
+		result = ^(leftValue & rightValue)
+	case code.OpNor:
+		result = ^(leftValue | rightValue)
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
@@ -293,11 +343,17 @@ func (vm *VM) executeIntegerComparison(
 
 	switch op {
 	case code.OpEqual:
-		return vm.push(nativeBoolToBooleanObject(rightValue == leftValue))
+		return vm.push(nativeBoolToBooleanObject(leftValue == rightValue))
 	case code.OpNotEqual:
-		return vm.push(nativeBoolToBooleanObject(rightValue != leftValue))
+		return vm.push(nativeBoolToBooleanObject(leftValue != rightValue))
 	case code.OpGreaterThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case code.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+	case code.OpGreaterThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue >= rightValue))
+	case code.OpLessThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
 	}

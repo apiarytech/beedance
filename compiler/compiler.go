@@ -8,6 +8,13 @@ import (
 	"sort"
 )
 
+// CompiledProgram holds the separated bytecode for a program's one-time
+// initialization and its cyclic execution logic.
+type CompiledProgram struct {
+	InitBytecode   *Bytecode
+	CyclicBytecode *Bytecode
+}
+
 type Compiler struct {
 	constants []object.Object
 
@@ -45,6 +52,51 @@ func NewWithState(s *SymbolTable, constants []object.Object) *Compiler {
 	return compiler
 }
 
+// CompileProgram orchestrates the compilation of a program declaration into
+// separate initialization and cyclic execution bytecode.
+func CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
+	// Create two separate compilers to handle the two passes.
+	// They share the same symbol table to ensure variable indices are consistent.
+	symbolTable := NewSymbolTable()
+	constants := []object.Object{}
+
+	initCompiler := NewWithState(symbolTable, constants)
+	cyclicCompiler := NewWithState(symbolTable, constants)
+
+	// --- Initialization Pass ---
+	// The init compiler processes ALL var blocks to set up the initial state.
+	for _, block := range node.VarGlobal {
+		initCompiler.Compile(block)
+	}
+	for _, block := range node.VarExternal {
+		initCompiler.Compile(block)
+	}
+	for _, block := range node.VarAccess {
+		initCompiler.Compile(block)
+	}
+	for _, block := range node.VarTemp {
+		initCompiler.Compile(block)
+	}
+	for _, decl := range node.Vars {
+		initCompiler.Compile(decl)
+	}
+
+	// --- Cyclic Pass ---
+	// The cyclic compiler only re-initializes VAR_TEMP blocks and then runs the body.
+	for _, block := range node.VarTemp {
+		cyclicCompiler.Compile(block)
+	}
+
+	if err := cyclicCompiler.Compile(node.Body); err != nil {
+		return nil, err
+	}
+
+	return &CompiledProgram{
+		InitBytecode:   initCompiler.Bytecode(),
+		CyclicBytecode: cyclicCompiler.Bytecode(),
+	}, nil
+}
+
 func (c *Compiler) Compile(node ast.Node) error {
 	switch node := node.(type) {
 	case *ast.Program:
@@ -55,6 +107,85 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
+	case *ast.ProgramDeclaration:
+		// When compiling a program, we process all its variable blocks first
+		// to populate the symbol table, then compile the body.
+		for _, block := range node.VarGlobal {
+			if err := c.Compile(block); err != nil {
+				return err
+			}
+		}
+		for _, block := range node.VarExternal {
+			if err := c.Compile(block); err != nil {
+				return err
+			}
+		}
+		for _, block := range node.VarAccess {
+			if err := c.Compile(block); err != nil {
+				return err
+			}
+		}
+		for _, block := range node.VarTemp {
+			if err := c.Compile(block); err != nil {
+				return err
+			}
+		}
+		return c.Compile(node.Body)
+
+	case *ast.FunctionDeclaration:
+		// This is a statement that defines a function in the current scope.
+		// First, define the function name in the current scope so it can be captured in a closure.
+		symbol := c.symbolTable.Define(node.Name.Value)
+
+		// Then, compile the function body itself.
+		c.enterScope()
+		c.symbolTable.DefineFunctionName(node.Name.Value) // For recursion
+
+		// Define the function name as a local variable to hold the return value.
+		c.symbolTable.Define(node.Name.Value)
+
+		for _, p := range node.VarInputs {
+			c.symbolTable.DefineVarInput(p.Name.Value)
+		}
+
+		for _, p := range node.VarOutputs {
+			c.symbolTable.Define(p.Name.Value)
+		}
+
+		err := c.Compile(node.Body)
+		if err != nil {
+			return err
+		}
+
+		// After the body, load the return value from its variable and return it.
+		// This handles the `FunctionName := ...` return style of IEC 61131-3.
+		returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
+		if !ok {
+			// This should not happen if we defined it above.
+			return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
+		}
+		c.loadSymbol(returnSymbol)
+		c.emit(code.OpReturnValue)
+
+		freeSymbols := c.symbolTable.FreeSymbols
+		numLocals := c.symbolTable.numDefinitions
+		instructions := c.leaveScope()
+
+		compiledFn := &object.CompiledFunction{
+			Instructions:  instructions,
+			NumLocals:     numLocals,
+			NumParameters: len(node.VarInputs),
+		}
+		fnIndex := c.addConstant(compiledFn)
+
+		// Create the closure and assign it to the variable in the outer scope.
+		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
+		if symbol.Scope == GlobalScope {
+			c.emit(code.OpSetGlobal, symbol.Index)
+		} else {
+			c.emit(code.OpSetLocal, symbol.Index)
+		}
+
 	case *ast.ExpressionStatement:
 		err := c.Compile(node.Expression)
 		if err != nil {
@@ -62,21 +193,86 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(code.OpPop)
 
-	case *ast.InfixExpression:
-		if node.Operator == "<" {
-			err := c.Compile(node.Right)
-			if err != nil {
-				return err
-			}
-
-			err = c.Compile(node.Left)
-			if err != nil {
-				return err
-			}
-			c.emit(code.OpGreaterThan)
-			return nil
+	case *ast.AssignmentStatement:
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
 		}
 
+		symbol, ok := c.symbolTable.Resolve(node.Left.(*ast.Identifier).Value)
+		if !ok {
+			return fmt.Errorf("undefined variable %s", node.Left.(*ast.Identifier).Value)
+		}
+		c.setSymbol(symbol)
+		err = c.setSymbol(symbol)
+		if err != nil {
+			return err
+		}
+
+	case *ast.VarBlockDeclaration:
+		for _, decl := range node.Declarations {
+			err := c.Compile(decl)
+			if err != nil {
+				return err
+			}
+		}
+
+	case *ast.GlobalVarDeclaration:
+		for _, decl := range node.Vars {
+			err := c.Compile(decl)
+			if err != nil {
+				return err
+			}
+		}
+
+	case *ast.ExternalVarDeclaration:
+		for _, decl := range node.Vars {
+			err := c.Compile(decl)
+			if err != nil {
+				return err
+			}
+		}
+
+	case *ast.AccessVarDeclaration:
+		// This block handles VAR_ACCESS declarations.
+		// We assume the parser has been updated to place the full access path
+		// (e.g., "MyProgram.MyVariable") into an `AccessPath` field on the VarDeclStatement.
+		for _, decl := range node.Vars {
+			if decl.AccessPath == nil {
+				return fmt.Errorf("internal compiler error: VAR_ACCESS for '%s' is missing an access path", decl.Name.Value)
+			}
+			pathIndex := c.addConstant(&object.String{Value: decl.AccessPath.String()})
+			c.symbolTable.DefineExternal(decl.Name.Value, pathIndex)
+		}
+
+	case *ast.TempVarDeclaration:
+		for _, decl := range node.Vars {
+			err := c.Compile(decl)
+			if err != nil {
+				return err
+			}
+		}
+
+	case *ast.VarDeclStatement:
+		symbol := c.symbolTable.Define(node.Name.Value)
+
+		if node.Value != nil {
+			err := c.Compile(node.Value)
+			if err != nil {
+				return err
+			}
+		} else {
+			// If no initial value is provided, push null onto the stack.
+			c.emit(code.OpNull)
+		}
+
+		if symbol.Scope == GlobalScope {
+			c.emit(code.OpSetGlobal, symbol.Index)
+		} else {
+			c.emit(code.OpSetLocal, symbol.Index)
+		}
+
+	case *ast.InfixExpression:
 		err := c.Compile(node.Left)
 		if err != nil {
 			return err
@@ -96,12 +292,36 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(code.OpMul)
 		case "/":
 			c.emit(code.OpDiv)
+		case "**":
+			c.emit(code.OpExponent)
+		case "MOD":
+			c.emit(code.OpMod)
 		case ">":
 			c.emit(code.OpGreaterThan)
+		case "<":
+			c.emit(code.OpLessThan)
+		case ">=":
+			c.emit(code.OpGreaterThanOrEqual)
+		case "<=":
+			c.emit(code.OpLessThanOrEqual)
 		case "==":
+			c.emit(code.OpEqual)
+		case "=":
 			c.emit(code.OpEqual)
 		case "!=":
 			c.emit(code.OpNotEqual)
+		case "<>":
+			c.emit(code.OpNotEqual)
+		case "AND":
+			c.emit(code.OpAnd)
+		case "OR":
+			c.emit(code.OpOr)
+		case "XOR":
+			c.emit(code.OpXor)
+		case "NAND":
+			c.emit(code.OpNand)
+		case "NOR":
+			c.emit(code.OpNor)
 		default:
 			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
@@ -109,6 +329,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.IntegerLiteral:
 		lint := &object.LInt{Value: node.Value}
 		c.emit(code.OpConstant, c.addConstant(lint))
+
+	case *ast.RealLiteral:
+		lreal := &object.LReal{Value: node.Value}
+		c.emit(code.OpConstant, c.addConstant(lreal))
 
 	case *ast.Boolean:
 		if node.Value {
@@ -421,9 +645,30 @@ func (c *Compiler) loadSymbol(s Symbol) {
 		c.emit(code.OpGetBuiltin, s.Index)
 	case FreeScope:
 		c.emit(code.OpGetFree, s.Index)
+	case ExternalScope:
+		c.emit(code.OpGetExternal, s.Index)
 	case FunctionScope:
 		c.emit(code.OpCurrentClosure)
 	}
+}
+
+func (c *Compiler) setSymbol(s Symbol) error {
+	if s.IsReadOnly {
+		return fmt.Errorf("cannot assign to read-only variable '%s'", s.Name)
+	}
+	switch s.Scope {
+	case GlobalScope:
+		c.emit(code.OpSetGlobal, s.Index)
+	case LocalScope:
+		c.emit(code.OpSetLocal, s.Index)
+	case FreeScope:
+		c.emit(code.OpSetFree, s.Index)
+	case ExternalScope:
+		c.emit(code.OpSetExternal, s.Index)
+	default:
+		return fmt.Errorf("cannot set symbol with scope %s", s.Scope)
+	}
+	return nil
 }
 
 type Bytecode struct {

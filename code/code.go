@@ -61,6 +61,8 @@ const (
 	OpSub
 	OpMul
 	OpDiv
+	OpMod
+	OpExponent
 
 	OpTrue
 	OpFalse
@@ -68,6 +70,15 @@ const (
 	OpEqual
 	OpNotEqual
 	OpGreaterThan
+	OpLessThan
+	OpGreaterThanOrEqual
+	OpLessThanOrEqual
+
+	OpAnd
+	OpOr
+	OpXor
+	OpNand
+	OpNor
 
 	OpMinus
 	OpBang
@@ -98,7 +109,12 @@ const (
 
 	OpGetFree
 
+	OpSetFree
+
 	OpCurrentClosure
+
+	OpGetExternal
+	OpSetExternal
 )
 
 type Definition struct {
@@ -113,16 +129,27 @@ var definitions = map[Opcode]*Definition{
 
 	OpPop: {"OpPop", []int{}},
 
-	OpSub: {"OpSub", []int{}},
-	OpMul: {"OpMul", []int{}},
-	OpDiv: {"OpDiv", []int{}},
+	OpSub:      {"OpSub", []int{}},
+	OpMul:      {"OpMul", []int{}},
+	OpDiv:      {"OpDiv", []int{}},
+	OpMod:      {"OpMod", []int{}},
+	OpExponent: {"OpExponent", []int{}},
 
 	OpTrue:  {"OpTrue", []int{}},
 	OpFalse: {"OpFalse", []int{}},
 
-	OpEqual:       {"OpEqual", []int{}},
-	OpNotEqual:    {"OpNotEqual", []int{}},
-	OpGreaterThan: {"OpGreaterThan", []int{}},
+	OpEqual:              {"OpEqual", []int{}},
+	OpNotEqual:           {"OpNotEqual", []int{}},
+	OpGreaterThan:        {"OpGreaterThan", []int{}},
+	OpLessThan:           {"OpLessThan", []int{}},
+	OpGreaterThanOrEqual: {"OpGreaterThanOrEqual", []int{}},
+	OpLessThanOrEqual:    {"OpLessThanOrEqual", []int{}},
+
+	OpAnd:  {"OpAnd", []int{}},
+	OpOr:   {"OpOr", []int{}},
+	OpXor:  {"OpXor", []int{}},
+	OpNand: {"OpNand", []int{}},
+	OpNor:  {"OpNor", []int{}},
 
 	OpMinus: {"OpMinus", []int{}},
 	OpBang:  {"OpBang", []int{}},
@@ -153,7 +180,12 @@ var definitions = map[Opcode]*Definition{
 
 	OpGetFree: {"OpGetFree", []int{1}},
 
+	OpSetFree: {"OpSetFree", []int{1}},
+
 	OpCurrentClosure: {"OpCurrentClosure", []int{}},
+
+	OpGetExternal: {"OpGetExternal", []int{2}},
+	OpSetExternal: {"OpSetExternal", []int{2}},
 }
 
 func Lookup(op byte) (*Definition, error) {

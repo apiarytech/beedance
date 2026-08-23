@@ -72,7 +72,7 @@ var ilMnemonics = map[string]bool{
 	"EQ": true, "NE": true, "LE": true, "LT": true, "JMP": true, "JMPC": true,
 	"JMPCN": true, "CAL": true, "CALC": true, "CALCN": true, "RET": true,
 	"RETC": true, "RETCN": true, "AND": true, "ANDN": true, "OR": true,
-	"ORN": true, "XOR": true, "XORN": true, "NOT": true,
+	"ORN": true, "XOR": true, "XORN": true, "NOT": true, "ABS": true,
 }
 
 type (
@@ -84,8 +84,9 @@ type Parser struct {
 	l      *lexer.Lexer
 	errors []string
 
-	curToken  token.Token
-	peekToken token.Token
+	curToken   token.Token
+	peekToken  token.Token
+	peek2Token token.Token // Second lookahead token
 
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
@@ -217,13 +218,15 @@ func New(l *lexer.Lexer) *Parser {
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
 	p.nextToken()
+	p.nextToken()
 
 	return p
 }
 
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
-	p.peekToken = p.l.NextToken()
+	p.peekToken = p.peek2Token
+	p.peek2Token = p.l.NextToken()
 
 	// Check for lexer errors and create parser errors for them.
 	switch p.curToken.Type {
@@ -251,6 +254,10 @@ func (p *Parser) curTokenIs(t token.TokenType) bool {
 
 func (p *Parser) peekTokenIs(t token.TokenType) bool {
 	return p.peekToken.Type == t
+}
+
+func (p *Parser) peek2TokenIs(t token.TokenType) bool {
+	return p.peek2Token.Type == t
 }
 
 func (p *Parser) expectPeek(t token.TokenType) bool {
@@ -283,14 +290,32 @@ func (p *Parser) peekError(t token.TokenType) {
 }
 
 func (p *Parser) isIlInstruction() bool {
-	if p.curToken.Type != token.IDENT {
+	if !p.isIlMnemonic() {
 		return false
 	}
-	// If it's a function call, it's not an IL instruction in this context.
-	// It will be parsed as an ExpressionStatement.
+
+	// The token is a known IL mnemonic. Now, we must resolve the ambiguity between
+	// an ST function call like `ADD(5)` and a deferred IL operation like `ADD(LD A)`.
 	if p.peekTokenIs(token.LPAREN) {
-		return false
+		// Heuristic: Look at the token *inside* the parenthesis (peek2Token).
+		// If it's an unambiguous IL keyword, it's a deferred IL operation.
+		// Otherwise, we assume it's a standard ST function call.
+		nextTokenAfterParen := p.peek2Token
+		switch nextTokenAfterParen.Type {
+		case token.LD, token.ST, token.S, token.R, token.JMP, token.CAL, token.RET:
+			// e.g., ADD(LD A) -> This is IL
+			return true
+		default:
+			// e.g., ADD(5) or ADD(MyVar). Assume ST function call.
+			return false
+		}
 	}
+	// It's a mnemonic not followed by '(', so it's a standard IL instruction (e.g., LD var).
+	return true
+}
+
+func (p *Parser) isIlMnemonic() bool {
+	// Check if the literal (e.g., "LD", "ADD") is a known mnemonic.
 	_, isMnemonic := ilMnemonics[strings.ToUpper(p.curToken.Literal)]
 	return isMnemonic
 }
@@ -373,6 +398,21 @@ func (p *Parser) ParseProgram() *ast.Program {
 
 func (p *Parser) parseStatement() ast.Statement {
 	defer untrace(trace("parseStatement"))
+
+	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
+	if p.isIlInstruction() {
+		switch p.curToken.Type {
+		// These mnemonics are also ST operators. In an ST context, they should be parsed as expressions.
+		case token.AND, token.OR, token.XOR, token.NOT, token.MOD:
+			return p.parseExpressionStatement()
+		// These mnemonics are unambiguous or are handled as function calls by the expression parser.
+		// If isIlInstruction is true, it means they are not function calls, so we treat them as IL.
+		default:
+			return p.parseIlInstruction()
+		}
+	}
+
+	// If it's not an IL instruction, parse as a standard ST statement.
 	switch p.curToken.Type {
 	case token.VAR:
 		return p.parseVarBlockStatement()
@@ -415,19 +455,14 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
-		if p.isIlInstruction() {
-			return p.parseIlInstructionStatement()
-		}
+		// isIlInstruction() was already checked and returned false, so this IDENT is not an IL mnemonic.
 		if p.peekTokenIs(token.ASSIGN) {
 			return p.parseAssignmentStatement()
 		}
 		return p.parseExpressionStatement()
 	default:
-		// Heuristic for IL: if it's an identifier that is a mnemonic, parse as IL.
-		// This helps catch IL instructions that are not explicitly handled above.
-		if p.isIlInstruction() {
-			return p.parseIlInstructionStatement()
-		}
+		// Any other token that can start an expression.
+		// isIlInstruction() was already checked and returned false.
 		return p.parseExpressionStatement()
 	}
 }
@@ -440,27 +475,6 @@ func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	}
 	// The expectPeek call already consumed the semicolon.
 	// The main loop will call nextToken() to move to the next statement.
-	return stmt
-}
-
-func (p *Parser) parseIlInstructionStatement() ast.Statement {
-	defer untrace(trace("parseIlInstructionStatement"))
-	stmt := &ast.IlInstructionStatement{Token: p.curToken, Operator: strings.ToUpper(p.curToken.Literal)}
-
-	// Heuristic to check for an operand. If the next token is an end-of-block
-	// or another statement keyword, we assume no operand.
-	switch p.peekToken.Type {
-	case token.END_PROGRAM, token.END_FUNCTION, token.END_FUNCTION_BLOCK, token.END_ACTION, token.END_STEP, token.END_TRANSITION, token.EOF:
-		return stmt
-	}
-	if isStatementStartKeyword(p.peekToken.Type) {
-		return stmt
-	}
-
-	// There is an operand.
-	p.nextToken() // consume operator
-	stmt.Operand = p.parseExpression(LOWEST)
-
 	return stmt
 }
 
@@ -619,6 +633,12 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	p.nextToken() // Consume VAR_GLOBAL
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+
+	// After parsing declarations, we should be on the END_VAR token.
+	// We consume it here so the caller doesn't have to.
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken() // Consume END_VAR
+	}
 	return stmt
 }
 
@@ -646,43 +666,40 @@ func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 	defer untrace(trace("parseAccessDeclarations"))
 	varDecls := []*ast.VarDeclStatement{}
-
 	for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
 		if isStatementStartKeyword(p.curToken.Type) {
 			p.peekError(token.END_VAR)
 			return varDecls
 		}
 
-		names := p.parseIdentifierList()
+		// VAR_ACCESS syntax is: LocalName : AccessPath [READ_ONLY | READ_WRITE];
+		if !p.curTokenIs(token.IDENT) {
+			p.currentError("expected identifier for local access variable name, got %s", p.curToken.Type)
+			p.synchronizeParser()
+			continue
+		}
+		localName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 		if !p.expectPeek(token.COLON) {
 			return nil
 		}
 
-		p.nextToken() // Consume ':', move to data type
-		dataType := p.parseTypeSpecifier()
-		if dataType == nil {
-			return nil
-		}
-		p.nextToken() // Consume data type
+		p.nextToken() // Consume ':', move to access path
+		accessPath := p.parseExpression(LOWEST)
 
 		// Check for optional READ_ONLY or READ_WRITE
 		var accessType string
-		if p.curTokenIs(token.READ_ONLY) || p.curTokenIs(token.READ_WRITE) {
+		if p.peekTokenIs(token.READ_ONLY) || p.peekTokenIs(token.READ_WRITE) {
+			p.nextToken()
 			accessType = p.curToken.Literal
-			p.nextToken() // Consume the access type keyword
 		}
 
-		for _, name := range names {
-			decl := &ast.VarDeclStatement{Token: name.Token, Name: name, DataType: dataType, AccessType: accessType}
-			varDecls = append(varDecls, decl)
-		}
+		// DataType is implicit and resolved by the compiler/linker.
+		decl := &ast.VarDeclStatement{Token: localName.Token, Name: localName, AccessPath: accessPath, DataType: nil, AccessType: accessType}
+		varDecls = append(varDecls, decl)
 
-		if !p.curTokenIs(token.SEMICOLON) {
-			p.errors = append(p.errors, fmt.Sprintf("expected semicolon, got %s instead at row %d, column %d", p.curToken.Type, p.curToken.Row, p.curToken.Column))
-			return nil
-		}
-		p.nextToken()
+		p.expectPeek(token.SEMICOLON)
+		p.nextToken() // Consume semicolon to move to the next declaration or END_VAR
 	}
 	return varDecls
 }
@@ -1831,6 +1848,29 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 	return decls
 }
 
+// parseVarTempBlock is a helper to parse a VAR_TEMP...END_VAR block and return the declarations.
+func (p *Parser) parseVarTempBlock(blockType token.TokenType) *ast.TempVarDeclaration {
+	defer untrace(trace(fmt.Sprintf("parseVarTempBlock (%s)", blockType)))
+	if !p.curTokenIs(blockType) {
+		return nil
+	}
+	// The current token is VAR_TEMP.
+	stmt := &ast.TempVarDeclaration{Token: p.curToken}
+
+	p.nextToken() // Consume the block type token (e.g., VAR_TEMP)
+
+	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+
+	// After parsing declarations, we should be on the END_VAR token.
+	// We consume it here so the caller doesn't have to.
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken() // Consume END_VAR
+	}
+
+	return stmt
+}
+
 func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStatement {
 	defer untrace(trace(fmt.Sprintf("parseBlockStatementUntil (until %v)", end)))
 	block := &ast.BlockStatement{Token: p.curToken}
@@ -1919,9 +1959,9 @@ func isBlockStatement(stmt ast.Statement) bool {
 	switch stmt.(type) {
 	case *ast.IfStatement, *ast.ForLoopStatement, *ast.WhileStatement,
 		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration,
-		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration,
-		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement,
-		*ast.ConfigVarDeclaration, *ast.ExternalVarDeclaration:
+		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration,
+		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement, *ast.AccessVarDeclaration,
+		*ast.ConfigVarDeclaration, *ast.ExternalVarDeclaration, *ast.TempVarDeclaration:
 		return true
 	default:
 		return false
@@ -2039,45 +2079,23 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	defer untrace(trace(fmt.Sprintf("parseExpressionList (until %s)", end)))
 	list := []ast.Expression{}
-	namedArgumentFound := false
 
+	// Handle empty list case: `()`
 	if p.peekTokenIs(end) {
-		p.nextToken()
+		p.nextToken() // consume ')'
 		return list
 	}
 
-	p.nextToken()                // Consume the opening parenthesis or bracket
-	arg := p.parseCallArgument() // Parse the first argument
-	if _, ok := arg.(*ast.NamedArgument); ok {
-		namedArgumentFound = true
-	} else if _, ok := arg.(*ast.OutputArgument); ok {
-		namedArgumentFound = true
-	}
-	list = append(list, arg)
+	p.nextToken() // Consume the opening token (e.g., '(' or '[')
 
+	// Parse a comma-separated list of arguments
+	list = append(list, p.parseCallArgument()) // Parse first argument
 	for p.peekTokenIs(token.COMMA) {
-		p.nextToken()
-		p.nextToken()
-		arg = p.parseCallArgument() // Parse the next argument
-		var isNamed bool
-		if _, ok := arg.(*ast.NamedArgument); ok {
-			isNamed = true
-		} else if _, ok := arg.(*ast.OutputArgument); ok {
-			isNamed = true
-		}
-
-		if namedArgumentFound && !isNamed {
-			p.specificError("positional argument follows named argument in function call")
-		} else if isNamed {
-			namedArgumentFound = true
-		}
-		list = append(list, arg)
+		p.nextToken() // consume previous argument's last token
+		p.nextToken() // consume comma
+		list = append(list, p.parseCallArgument())
 	}
-
-	if !p.expectPeek(end) {
-		return nil
-	}
-
+	p.expectPeek(end) // Consume the closing token
 	return list
 }
 

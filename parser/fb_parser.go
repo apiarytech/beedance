@@ -34,8 +34,15 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
 		case token.VAR_IN_OUT:
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		case token.VAR_TEMP:
+			stmt.VarTemp = append(stmt.VarTemp, p.parseVarTempBlock(token.VAR_TEMP))
+		case token.VAR_EXTERNAL:
+			stmt.VarExternal = append(stmt.VarExternal, p.parseExternalVarDeclStatement())
 		case token.VAR:
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		case token.VAR_GLOBAL, token.VAR_ACCESS:
+			p.currentError("%s declarations are not allowed in a FUNCTION_BLOCK; use PROGRAM for internal state", p.curToken.Type)
+			// Still parse it to allow for better error recovery on the rest of the file.
 		default:
 			// No more VAR blocks, break the loop to parse the body
 			goto end_var_parsing
@@ -45,7 +52,7 @@ end_var_parsing:
 
 	// After var blocks, we have the body. Check if it's IL or ST.
 	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if isIlOperator(p.curToken.Type) {
+	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
 		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)

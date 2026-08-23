@@ -53,6 +53,9 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
 		} else if p.curTokenIs(token.VAR_IN_OUT) {
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		} else if p.curTokenIs(token.VAR_EXTERNAL) || p.curTokenIs(token.VAR_GLOBAL) || p.curTokenIs(token.VAR_ACCESS) || p.curTokenIs(token.VAR_TEMP) {
+			p.currentError("%s declarations are not allowed in a FUNCTION; use FUNCTION_BLOCK for internal state", token.TYPE)
+			// Still parse it to allow for better error recovery on the rest of the file.
 		} else if p.curTokenIs(token.VAR) {
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
 		} else {
@@ -89,6 +92,24 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR:
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		case token.VAR_GLOBAL:
+			globalBlock := p.parseVarGlobalBlock(token.VAR_GLOBAL)
+			if globalBlock != nil {
+				stmt.VarGlobal = append(stmt.VarGlobal, globalBlock)
+			}
+		case token.VAR_EXTERNAL:
+			externalBlock := p.parseVarExternalBlock(token.VAR_EXTERNAL)
+			if externalBlock != nil {
+				stmt.VarExternal = append(stmt.VarExternal, externalBlock)
+			}
+		case token.VAR_ACCESS:
+			accessBlock := p.parseVarAccessBlock(token.VAR_ACCESS)
+			if accessBlock != nil {
+				stmt.VarAccess = append(stmt.VarAccess, accessBlock)
+			}
+		case token.VAR_TEMP:
+			stmt.VarTemp = append(stmt.VarTemp, p.parseVarTempBlock(token.VAR_TEMP))
+
 		default:
 			// No more VAR blocks, break the loop to parse the body
 			goto end_var_parsing
@@ -98,7 +119,7 @@ end_var_parsing:
 
 	// After var blocks, we have the body. Check if it's IL or ST.
 	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if isIlOperator(p.curToken.Type) {
+	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
 		stmt.Body = p.parseIlProgramBody(token.END_PROGRAM)
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_PROGRAM)
@@ -110,6 +131,57 @@ end_var_parsing:
 		p.currentError("expected next token to be %s, got %s instead", token.END_PROGRAM, p.curToken.Type)
 	}
 
+	return stmt
+}
+
+func (p *Parser) parseVarGlobalBlock(blockType token.TokenType) *ast.GlobalVarDeclaration {
+	defer untrace(trace("parseVarGlobalBlock"))
+	if !p.curTokenIs(blockType) {
+		return nil
+	}
+	stmt := &ast.GlobalVarDeclaration{Token: p.curToken}
+
+	p.nextToken() // Consume VAR_GLOBAL
+
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+func (p *Parser) parseVarExternalBlock(blockType token.TokenType) *ast.ExternalVarDeclaration {
+	defer untrace(trace("parseVarExternalBlock"))
+	if !p.curTokenIs(blockType) {
+		return nil
+	}
+	stmt := &ast.ExternalVarDeclaration{Token: p.curToken}
+
+	p.nextToken() // Consume VAR_EXTERNAL
+
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDeclaration {
+	defer untrace(trace("parseVarAccessBlock"))
+	if !p.curTokenIs(blockType) {
+		return nil
+	}
+	stmt := &ast.AccessVarDeclaration{Token: p.curToken}
+
+	p.nextToken() // consume VAR_ACCESS
+
+	stmt.Vars = p.parseAccessDeclarations()
+
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken()
+	}
 	return stmt
 }
 

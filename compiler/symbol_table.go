@@ -7,13 +7,15 @@ const (
 	GlobalScope   SymbolScope = "GLOBAL"
 	BuiltinScope  SymbolScope = "BUILTIN"
 	FreeScope     SymbolScope = "FREE"
+	ExternalScope SymbolScope = "EXTERNAL"
 	FunctionScope SymbolScope = "FUNCTION"
 )
 
 type Symbol struct {
-	Name  string
-	Scope SymbolScope
-	Index int
+	Name       string
+	Scope      SymbolScope
+	Index      int
+	IsReadOnly bool
 }
 
 type SymbolTable struct {
@@ -50,6 +52,14 @@ func (s *SymbolTable) Define(name string) Symbol {
 	return symbol
 }
 
+func (s *SymbolTable) DefineExternal(name string, index int) Symbol {
+	// For external variables, the "Index" refers to the index of the access
+	// path string in the constants table.
+	symbol := Symbol{Name: name, Scope: ExternalScope, Index: index}
+	s.store[name] = symbol
+	return symbol
+}
+
 func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 	obj, ok := s.store[name]
 	if !ok && s.Outer != nil {
@@ -58,7 +68,8 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 			return obj, ok
 		}
 
-		if obj.Scope == GlobalScope || obj.Scope == BuiltinScope {
+		// ExternalScope is also resolved from outer scopes without becoming "free"
+		if obj.Scope == GlobalScope || obj.Scope == BuiltinScope || obj.Scope == ExternalScope {
 			return obj, ok
 		}
 
@@ -66,6 +77,19 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 		return free, true
 	}
 	return obj, ok
+}
+
+func (s *SymbolTable) DefineVarInput(name string) Symbol {
+	symbol := Symbol{Name: name, Index: s.numDefinitions, IsReadOnly: true}
+	if s.Outer == nil {
+		// This case is unlikely for a VAR_INPUT but included for robustness.
+		symbol.Scope = GlobalScope
+	} else {
+		symbol.Scope = LocalScope
+	}
+	s.store[name] = symbol
+	s.numDefinitions++
+	return symbol
 }
 
 func (s *SymbolTable) DefineBuiltin(index int, name string) Symbol {

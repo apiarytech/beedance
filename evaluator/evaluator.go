@@ -80,6 +80,19 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		}
 		return evalBlockStatement(node, env)
 
+	case *ast.GlobalVarDeclaration:
+		return evalGenericVarBlock(node.Vars, env)
+	case *ast.ExternalVarDeclaration:
+		return evalGenericVarBlock(node.Vars, env)
+	case *ast.AccessVarDeclaration:
+		// For the evaluator, we'll treat this like a normal var block for now.
+		// A more complex implementation would handle the access path semantics.
+		return evalGenericVarBlock(node.Vars, env)
+	case *ast.TempVarDeclaration:
+		// For a single evaluation pass, VAR_TEMP is the same as VAR.
+		// The cyclical re-initialization would be handled by the scheduler.
+		return evalGenericVarBlock(node.Vars, env)
+
 	case *ast.VarBlockDeclaration:
 		return evalVarBlockStatement(node, env)
 
@@ -111,6 +124,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			VarOutputs: node.VarOutputs,
 			VarInOuts:  node.VarInOuts,
 			Vars:       node.Vars,
+			VarTemp:    node.VarTemp,
 			Body:       node.Body,
 			Env:        env, // The environment where the FB is declared
 		}
@@ -122,20 +136,40 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// and then evaluate its body. If the body is an SFC, this will
 		// return the *object.SFC that can be scheduled.
 		prog := &object.Program{
-			Name:       node.Name,
-			VarInputs:  node.VarInputs,
-			VarOutputs: node.VarOutputs,
-			VarInOuts:  node.VarInOuts,
-			Vars:       node.Vars,
-			Body:       node.Body,
-			Env:        env,
+			Name:        node.Name,
+			VarInputs:   node.VarInputs,
+			VarOutputs:  node.VarOutputs,
+			VarInOuts:   node.VarInOuts,
+			Vars:        node.Vars,
+			VarExternal: node.VarExternal,
+			VarGlobal:   node.VarGlobal,
+			VarAccess:   node.VarAccess,
+			VarTemp:     node.VarTemp,
+			Body:        node.Body,
+			Env:         env,
 		}
 		// Set the program definition in the environment.
 		env.Set(node.Name.Value, prog)
 
+		// Evaluate all GLOBAL VAR blocks to populate the environment.
+		for _, globalVarBlock := range node.VarGlobal {
+			Eval(globalVarBlock, env)
+		}
+		for _, externalVarBlock := range node.VarExternal {
+			Eval(externalVarBlock, env)
+		}
+		for _, accessVarBlock := range node.VarAccess {
+			Eval(accessVarBlock, env)
+		}
+
 		// Evaluate all VAR blocks to populate the environment.
-		for _, varBlock := range node.Vars {
-			Eval(varBlock, env)
+		for _, varDecl := range node.Vars {
+			Eval(varDecl, env)
+		}
+
+		// Evaluate all VAR_TEMP blocks. In the evaluator, they are treated like VAR.
+		for _, tempVarBlock := range node.VarTemp {
+			Eval(tempVarBlock, env)
 		}
 
 		// Now, evaluate the body within the program's context.
@@ -297,6 +331,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// Convert the simple identifiers from the function literal into
 		// VarDeclStatements to match the structure of a formal Function object.
 		varInputs := make([]*ast.VarDeclStatement, len(node.Parameters))
+
 		for i, p := range node.Parameters {
 			varInputs[i] = &ast.VarDeclStatement{
 				Name: p,
@@ -951,6 +986,15 @@ func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) obje
 
 func evalVarBlockStatement(block *ast.VarBlockDeclaration, env *object.Environment) object.Object {
 	for _, decl := range block.Declarations {
+		if err := Eval(decl, env); isError(err) {
+			return err
+		}
+	}
+	return NULL
+}
+
+func evalGenericVarBlock(decls []*ast.VarDeclStatement, env *object.Environment) object.Object {
+	for _, decl := range decls {
 		if err := Eval(decl, env); isError(err) {
 			return err
 		}
@@ -2319,6 +2363,14 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			return err
 		}
 
+		// Initialize VAR and VAR_TEMP variables for this specific call.
+		// This ensures statelessness for each function invocation.
+		for _, varDecl := range fn.Vars {
+			if err := evalVarDeclStatement(varDecl, extendedEnv); isError(err) {
+				return err
+			}
+		}
+
 		// Execute the function body in its new environment.
 		evaluated := Eval(fn.Body, extendedEnv)
 		if isError(evaluated) {
@@ -2396,6 +2448,15 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env)
 		if err != nil {
 			return err
+		}
+
+		// Re-initialize VAR_TEMP variables at the start of every scan cycle.
+		if fn.Definition != nil {
+			for _, tempVar := range fn.Definition.VarTemp {
+				if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+					return err
+				}
+			}
 		}
 
 		// Check for EN input from the now-populated environment. Defaults to TRUE.

@@ -21,7 +21,9 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"time"
 
+	"beedance/ast"
 	"beedance/compiler"
 	"beedance/evaluator"
 	"beedance/lexer"
@@ -132,16 +134,40 @@ func executeFile(filepath string, out io.Writer, engine string) {
 			return
 		}
 
-		machine := vm.NewWithGlobalsStore(comp.Bytecode(), globals)
-		err = machine.Run()
-		if err != nil {
-			fmt.Fprintf(out, "Woops! Executing bytecode failed:\n %s\n", err)
+		// Since we are executing a file, which is likely a full PROGRAM,
+		// we use the new CompileProgram function to get separated bytecode.
+		programDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
+		if !ok {
+			fmt.Fprintln(out, "Error: IEC file does not contain a valid PROGRAM declaration.")
 			return
 		}
 
-		lastPopped := machine.LastPoppedStackElem()
-		io.WriteString(out, lastPopped.Inspect())
-		io.WriteString(out, "\n")
+		compiledProg, err := compiler.CompileProgram(programDecl)
+		if err != nil {
+			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
+			return
+		}
+
+		// --- Basic Scheduler Loop ---
+		// 1. Run initialization code once.
+		initVM := vm.NewWithGlobalsStore(compiledProg.InitBytecode, globals)
+		if err := initVM.Run(); err != nil {
+			fmt.Fprintf(out, "Woops! Executing initialization bytecode failed:\n %s\n", err)
+			return
+		}
+
+		// 2. Run cyclic code in a loop (simulating a PLC scan).
+		// For this example, we'll just run it a few times.
+		fmt.Fprintln(out, "--- Starting simulated PLC scan (5 cycles) ---")
+		for i := 0; i < 5; i++ {
+			cyclicVM := vm.NewWithGlobalsStore(compiledProg.CyclicBytecode, globals)
+			if err := cyclicVM.Run(); err != nil {
+				fmt.Fprintf(out, "Woops! Executing cyclic bytecode failed on cycle %d:\n %s\n", i+1, err)
+				return
+			}
+			fmt.Fprintf(out, "Cycle %d complete. Last popped value: %s\n", i+1, cyclicVM.LastPoppedStackElem().Inspect())
+			time.Sleep(100 * time.Millisecond) // Simulate scan time
+		}
 	} else {
 		env := object.NewEnvironment()
 		evaluated := evaluator.Eval(program, env)

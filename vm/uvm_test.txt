@@ -1,0 +1,110 @@
+package vm
+
+import (
+	"beedance/compiler"
+	"testing"
+)
+
+// uvmTestCase is a copy of vmTestCase for clarity, though they are identical.
+type uvmTestCase struct {
+	input    string
+	expected interface{}
+}
+
+// runUvmTests is a helper function to run tests specifically for VM0.
+func runUvmTests(t *testing.T, tests []uvmTestCase) {
+	t.Helper()
+
+	for _, tt := range tests {
+		program := parse(tt.input) // Reuses parse from vm_test.go
+
+		comp := compiler.New()
+		err := comp.Compile(program)
+		if err != nil {
+			t.Fatalf("compiler error on input '%s': %s", tt.input, err)
+		}
+
+		vm := NewVM0(comp.Bytecode()) // Use NewVM0 for the uvm
+		err = vm.Run()
+		if err != nil {
+			t.Fatalf("vm error on input '%s': %s", tt.input, err)
+		}
+
+		stackElem := vm.LastPoppedStackElem()
+
+		testExpectedObject(t, tt.expected, stackElem) // Reuses test helper from vm_test.go
+	}
+}
+
+func TestUvmIntegerArithmetic(t *testing.T) {
+	tests := []uvmTestCase{
+		{"1", 1},
+		{"2", 2},
+		{"1 + 2", 3},
+		{"1 - 2", -1},
+		{"1 * 2", 2},
+		{"4 / 2", 2},
+		{"50 / 2 * 2 + 10 - 5", 55},
+		{"5 * (2 + 10)", 60},
+		{"-5", -5},
+		{"-10", -10},
+	}
+	runUvmTests(t, tests)
+}
+
+func TestUvmBooleanExpressions(t *testing.T) {
+	tests := []uvmTestCase{
+		{"true", true},
+		{"false", false},
+		{"1 < 2", true},
+		{"1 > 2", false},
+		{"1 <= 2", true},
+		{"1 >= 2", false},
+		{"1 == 1", true},
+		{"1 != 1", false},
+		{"1 = 1", true},
+		{"1 <> 1", false},
+		{"true == true", true},
+		{"false == false", true},
+		{"true != false", true},
+		{"!true", false},
+		{"!false", true},
+		{"!!true", true},
+	}
+	runUvmTests(t, tests)
+}
+
+func TestUvmConditionals(t *testing.T) {
+	tests := []uvmTestCase{
+		{"if (true) { 10 }", 10},
+		{"if (true) { 10 } else { 20 }", 10},
+		{"if (false) { 10 } else { 20 } ", 20},
+		{"if (1 < 2) { 10 }", 10},
+		{"if (1 > 2) { 10 } else { 20 }", 20},
+		{"if (false) { 10 }", Null},
+	}
+	runUvmTests(t, tests)
+}
+
+func TestUvmGlobalLetStatements(t *testing.T) {
+	tests := []uvmTestCase{
+		{"let one = 1; one", 1},
+		{"let one = 1; let two = 2; one + two", 3},
+		{"let one = 1; let two = one + one; one + two", 3},
+	}
+	runUvmTests(t, tests)
+}
+
+func TestUvmStringExpressions(t *testing.T) {
+	tests := []uvmTestCase{
+		{`"beedance"`, "beedance"},
+		{`"mon" + "key"`, "monkey"},
+		{`"mon" + "key" + "banana"`, "monkeybanana"},
+	}
+
+	// Note: The uvm.go implementation of string concatenation uses the slow path
+	// of decoding to objects, performing the operation, and re-encoding.
+	// This test verifies that this path works correctly.
+	// The string objects themselves are not yet supported by the fast path.
+	runUvmTests(t, tests)
+}

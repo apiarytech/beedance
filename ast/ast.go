@@ -81,6 +81,7 @@ type VarDeclStatement struct {
 	Token         token.Token // the 'VAR' token
 	Name          *Identifier
 	Location      *AtDeclaration
+	AccessPath    Expression
 	DataType      Expression
 	Value         Expression // Initial value
 	IsConstant    bool
@@ -107,15 +108,24 @@ func (vds *VarDeclStatement) String() string {
 		out.WriteString(" ")
 		out.WriteString(vds.Location.String())
 	}
-	out.WriteString(" : ")
+	if vds.AccessPath != nil {
+		out.WriteString(" : ")
+		out.WriteString(vds.AccessPath.String())
+	}
+
 	if vds.DataType != nil {
+		out.WriteString(" : ")
 		out.WriteString(vds.DataType.String())
 	}
 
+	if vds.DataType != nil {
+		out.WriteString(vds.DataType.String())
+	}
 	if vds.Value != nil {
 		out.WriteString(" := ")
 		out.WriteString(vds.Value.String())
 	}
+
 	out.WriteString(";")
 	return out.String()
 }
@@ -525,15 +535,7 @@ func (mae *MemberAccessExpression) expressionNode()      {}
 func (mae *MemberAccessExpression) Pos() (int, int)      { return mae.Token.Row, mae.Token.Column }
 func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Literal }
 func (mae *MemberAccessExpression) String() string {
-	var out bytes.Buffer
-
-	out.WriteString("(")
-	out.WriteString(mae.Struct.String())
-	out.WriteString(".")
-	out.WriteString(mae.Member.String())
-	out.WriteString(")")
-
-	return out.String()
+	return mae.Struct.String() + "." + mae.Member.String()
 }
 
 type IfStatement struct {
@@ -967,13 +969,15 @@ func (ml *MacroLiteral) String() string {
 }
 
 type FunctionBlockDeclaration struct {
-	Token      token.Token // The 'FUNCTION_BLOCK' token
-	Name       *Identifier
-	VarInputs  []*VarDeclStatement
-	VarOutputs []*VarDeclStatement
-	VarInOuts  []*VarDeclStatement
-	Vars       []*VarDeclStatement
-	Body       Statement
+	Token       token.Token // The 'FUNCTION_BLOCK' token
+	Name        *Identifier
+	VarInputs   []*VarDeclStatement
+	VarOutputs  []*VarDeclStatement
+	VarInOuts   []*VarDeclStatement
+	VarExternal []*ExternalVarDeclaration
+	Vars        []*VarDeclStatement
+	VarTemp     []*TempVarDeclaration
+	Body        Statement
 }
 
 func (fbd *FunctionBlockDeclaration) statementNode()       {}
@@ -995,13 +999,17 @@ func (fbd *FunctionBlockDeclaration) String() string {
 }
 
 type ProgramDeclaration struct {
-	Token      token.Token // The 'PROGRAM' token
-	Name       *Identifier
-	VarInputs  []*VarDeclStatement
-	VarOutputs []*VarDeclStatement
-	VarInOuts  []*VarDeclStatement
-	Vars       []*VarDeclStatement
-	Body       Statement
+	Token       token.Token // The 'PROGRAM' token
+	Name        *Identifier
+	VarInputs   []*VarDeclStatement
+	VarOutputs  []*VarDeclStatement
+	VarInOuts   []*VarDeclStatement
+	Vars        []*VarDeclStatement
+	VarExternal []*ExternalVarDeclaration
+	VarGlobal   []*GlobalVarDeclaration
+	VarAccess   []*AccessVarDeclaration
+	VarTemp     []*TempVarDeclaration
+	Body        Statement
 }
 
 func (pd *ProgramDeclaration) statementNode()       {}

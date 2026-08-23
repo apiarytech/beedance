@@ -57,8 +57,8 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	}
 
 	// 2. Parse the operator (e.g., LD, ST, ADD) and its modifiers.
-	if !p.curTokenIs(token.IDENT) && !isIlOperator(p.curToken.Type) {
-		p.currentError("expected IL operator (e.g., LD, ST), got %s", p.curToken.Type)
+	if !p.isIlMnemonic() {
+		p.currentError("expected IL instruction mnemonic (e.g., LD, ST, ADD), got %q", p.curToken.Literal)
 		return nil
 	}
 	operatorStr := p.curToken.Literal
@@ -83,10 +83,19 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 
 	// 4. Parse the optional operand for non-deferred operators.
 	// The operand is an expression that follows the operator.
-	// Not all operators have operands (e.g., RET).
-	// We can check if the next token could start an expression.
-	// An operand is present if the next token is not a statement terminator.
-	if !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.RPAREN) && !p.peekTokenIs(token.EOF) {
+	// Heuristic: An operand is present if the next token is not an end-of-block
+	// or another statement keyword.
+	switch p.peekToken.Type {
+	case token.END_PROGRAM, token.END_FUNCTION, token.END_FUNCTION_BLOCK, token.END_ACTION, token.END_STEP, token.END_TRANSITION, token.EOF, token.RPAREN, token.SEMICOLON:
+		return stmt
+	}
+	if isStatementStartKeyword(p.peekToken.Type) {
+		return stmt
+	}
+
+	// If we are here, an operand exists.
+	// We check for EOF again just in case.
+	if !p.peekTokenIs(token.EOF) {
 		p.nextToken() // Consume the operator, move to the operand
 		stmt.Operand = p.parseExpression(LOWEST)
 	}

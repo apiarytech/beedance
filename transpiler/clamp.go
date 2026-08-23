@@ -11,12 +11,8 @@
 
 package transpiler
 
-import (
-	. "beedance/token"
-)
-
 // ClampSINT returns v clamped to the range [min, max].
-func ClampSINT(v, min, max SINT) SINT {
+func ClampSINT(v, min, max int8) int8 {
 	if v < min {
 		return min
 	}
@@ -27,7 +23,7 @@ func ClampSINT(v, min, max SINT) SINT {
 }
 
 // ClampINT returns v clamped to the range [min, max].
-func ClampINT(v, min, max INT) INT {
+func ClampINT(v, min, max int16) int16 {
 	if v < min {
 		return min
 	}
@@ -38,7 +34,7 @@ func ClampINT(v, min, max INT) INT {
 }
 
 // ClampDINT returns v clamped to the range [min, max].
-func ClampDINT(v, min, max DINT) DINT {
+func ClampDINT(v, min, max int32) int32 {
 	if v < min {
 		return min
 	}
@@ -49,7 +45,7 @@ func ClampDINT(v, min, max DINT) DINT {
 }
 
 // ClampLINT returns v clamped to the range [min, max].
-func ClampLINT(v, min, max LINT) LINT {
+func ClampLINT(v, min, max int64) int64 {
 	if v < min {
 		return min
 	}

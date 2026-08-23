@@ -691,13 +691,15 @@ func (f *Function) Inspect() string {
 // FunctionBlock represents the definition of a function block.
 // It's like a class blueprint.
 type FunctionBlock struct {
-	Body       ast.Statement
-	Env        *Environment
-	Name       *ast.Identifier // The name of the function block
-	VarInputs  []*ast.VarDeclStatement
-	VarOutputs []*ast.VarDeclStatement
-	VarInOuts  []*ast.VarDeclStatement
-	Vars       []*ast.VarDeclStatement
+	Body        ast.Statement
+	Env         *Environment
+	Name        *ast.Identifier // The name of the function block
+	VarInputs   []*ast.VarDeclStatement
+	VarOutputs  []*ast.VarDeclStatement
+	VarInOuts   []*ast.VarDeclStatement
+	Vars        []*ast.VarDeclStatement
+	VarTemp     []*ast.TempVarDeclaration
+	VarExternal []*ast.ExternalVarDeclaration
 }
 
 func (fb *FunctionBlock) Type() ObjectType { return FUNCTION_BLOCK_OBJ }
@@ -730,7 +732,20 @@ func (fb *FunctionBlock) Inspect() string {
 		}
 		allParams = append(allParams, "VAR_IN_OUT "+strings.Join(params, "; ")+";")
 	}
-
+	if len(fb.VarTemp) > 0 {
+		params := []string{}
+		for i, p := range fb.VarTemp {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_TEMP "+strings.Join(params, "; ")+";")
+	}
+	if len(fb.VarExternal) > 0 {
+		params := []string{}
+		for i, p := range fb.VarExternal {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_EXTERNAL "+strings.Join(params, "; ")+";")
+	}
 	out.WriteString(strings.Join(allParams, " "))
 
 	out.WriteString(")")
@@ -752,21 +767,83 @@ func (fbi *FunctionBlockInstance) Inspect() string {
 // Program represents the definition of a PROGRAM POU.
 // It's a template for creating program instances.
 type Program struct {
-	Name       *ast.Identifier
-	VarInputs  []*ast.VarDeclStatement
-	VarOutputs []*ast.VarDeclStatement
-	VarInOuts  []*ast.VarDeclStatement
-	Vars       []*ast.VarDeclStatement
-	Body       ast.Statement
-	Env        *Environment
+	Name        *ast.Identifier
+	VarInputs   []*ast.VarDeclStatement
+	VarOutputs  []*ast.VarDeclStatement
+	VarInOuts   []*ast.VarDeclStatement
+	Vars        []*ast.VarDeclStatement
+	VarTemp     []*ast.TempVarDeclaration
+	VarExternal []*ast.ExternalVarDeclaration
+	VarGlobal   []*ast.GlobalVarDeclaration
+	VarAccess   []*ast.AccessVarDeclaration
+	Body        ast.Statement
+	Env         *Environment
 }
 
 func (p *Program) Type() ObjectType { return PROGRAM_OBJ }
 func (p *Program) Inspect() string {
-	if p.Name != nil {
-		return "PROGRAM " + p.Name.Value
+	var out bytes.Buffer
+
+	out.WriteString("PROGRAM ")
+	out.WriteString(p.Name.Value)
+	out.WriteString(" (")
+
+	var allParams []string
+	if len(p.VarInputs) > 0 {
+		params := []string{}
+		for _, p := range p.VarInputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_INPUT "+strings.Join(params, "; ")+";")
 	}
-	return "PROGRAM"
+	if len(p.VarOutputs) > 0 {
+		params := []string{}
+		for _, p := range p.VarOutputs {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_OUTPUT "+strings.Join(params, "; ")+";")
+	}
+	if len(p.VarInOuts) > 0 {
+		params := []string{}
+		for _, p := range p.VarInOuts {
+			params = append(params, p.Name.String()+" : "+p.DataType.String())
+		}
+		allParams = append(allParams, "VAR_IN_OUT "+strings.Join(params, "; ")+";")
+	}
+	if len(p.VarTemp) > 0 {
+		params := []string{}
+		for i, p := range p.VarTemp {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_TEMP "+strings.Join(params, "; ")+";")
+	}
+	if len(p.VarExternal) > 0 {
+		params := []string{}
+		for i, p := range p.VarExternal {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_EXTERNAL "+strings.Join(params, "; ")+";")
+	}
+	if len(p.VarGlobal) > 0 {
+		params := []string{}
+		for i, p := range p.VarGlobal {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_GLOBAL "+strings.Join(params, "; ")+";")
+	}
+	if len(p.VarAccess) > 0 {
+		params := []string{}
+		for i, p := range p.VarAccess {
+			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		}
+		allParams = append(allParams, "VAR_ACCESS "+strings.Join(params, "; ")+";")
+	}
+	out.WriteString(strings.Join(allParams, " "))
+
+	out.WriteString(")")
+
+	return out.String()
+
 }
 
 // OutputMapping stores the `=>` mapping for a program instance's output.
