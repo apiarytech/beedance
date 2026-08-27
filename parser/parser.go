@@ -1262,6 +1262,18 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	leftExp := prefix()
 
 	for !p.peekTokenIs(token.SEMICOLON) && precedence < p.peekPrecedence() {
+		// This is a workaround for a suspected lexer bug where '=' is tokenized
+		// as an IDENTIFIER instead of an operator token. We manually check for it
+		// and treat it as an infix operator.
+		if p.peekToken.Type == token.IDENT && p.peekToken.Literal == "=" {
+			if precedence < EQUALS { // Use the same precedence as '=='
+				p.nextToken() // Consume leftExp, curToken is now '='
+				// Manually construct the InfixExpression for '='
+				leftExp = p.parseInfixExpression(leftExp)
+				continue // Continue the loop to check for more operators
+			}
+		}
+
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
