@@ -203,7 +203,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Left.(*ast.Identifier).Value)
 		}
-		c.setSymbol(symbol)
 		err = c.setSymbol(symbol)
 		if err != nil {
 			return err

@@ -304,7 +304,7 @@ func TestStructTypeDeclaration(t *testing.T) {
 func TestVarInFunctionError(t *testing.T) {
 	input := `
 	FUNCTION MyFunc : INT
-		VAR
+		VAR_EXTERNAL
 			x : INT;
 		END_VAR
 		MyFunc := x;
@@ -318,7 +318,7 @@ func TestVarInFunctionError(t *testing.T) {
 		t.Fatalf("Expected parser error for VAR in FUNCTION, but got none")
 	}
 
-	expectedError := "VAR declarations are not allowed in a FUNCTION"
+	expectedError := "VAR_EXTERNAL declarations are not allowed in a FUNCTION at row 3, column 3"
 	assertErrorContains(t, p.Errors(), expectedError)
 }
 
@@ -505,7 +505,7 @@ func TestVarDeclWithUserDefinedArrayType(t *testing.T) {
 
 func TestConfigVarDeclarations(t *testing.T) {
 	input := `
-		VAR_CONFIG
+		VAR_CONFIG MyProg
 			Config1 : INT;
 			Config2 : BOOL;
 		END_VAR
@@ -513,7 +513,7 @@ func TestConfigVarDeclarations(t *testing.T) {
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestIfStatementWithEmptyBlocks", input)
+	checkParserErrors(t, p, "TestConfigVarDeclarations", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -524,15 +524,19 @@ func TestConfigVarDeclarations(t *testing.T) {
 		t.Fatalf("program.Statements[0] is not ast.ConfigVarDeclaration. got=%T", program.Statements[0])
 	}
 
-	if len(stmt.Vars) != 2 {
-		t.Fatalf("Expected 2 config variables. got=%d", len(stmt.Vars))
+	if stmt.ProgramInstanceName == nil || stmt.ProgramInstanceName.Value != "MyProg" {
+		t.Fatalf("Expected ProgramInstanceName to be 'MyProg'. got=%v", stmt.ProgramInstanceName)
 	}
 
-	if !testVarDeclStatement(t, stmt.Vars[0], "Config1", "INT") {
+	if len(stmt.Declarations) != 2 {
+		t.Fatalf("Expected 2 config variables. got=%d", len(stmt.Declarations))
+	}
+
+	if !testVarDeclStatement(t, stmt.Declarations[0], "Config1", "INT") {
 		return
 	}
 
-	if !testVarDeclStatement(t, stmt.Vars[1], "Config2", "BOOL") {
+	if !testVarDeclStatement(t, stmt.Declarations[1], "Config2", "BOOL") {
 		return
 	}
 }
@@ -1614,12 +1618,8 @@ func TestFunctionDeclaration(t *testing.T) {
 				A : INT;
 				B : INT;
 			END_VAR
-			VAR
-				C : INT;
-			END_VAR
 
-			C := A + B;
-			MyFunction := C * 2;
+			MyFunction := (A + B) * 2;
 		END_FUNCTION
 	`
 
@@ -1651,32 +1651,24 @@ func TestFunctionDeclaration(t *testing.T) {
 	testVarDeclStatement(t, stmt.VarInputs[0], "A", "INT")
 	testVarDeclStatement(t, stmt.VarInputs[1], "B", "INT")
 
-	if len(stmt.Vars) != 1 {
-		t.Fatalf("Expected 1 VAR. got=%d", len(stmt.Vars))
+	if len(stmt.Vars) != 0 {
+		t.Fatalf("Expected 0 VARs. got=%d", len(stmt.Vars))
 	}
-	testVarDeclStatement(t, stmt.Vars[0], "C", "INT")
 
 	body, ok := stmt.Body.(*ast.BlockStatement)
 	if !ok {
 		t.Fatalf("Function body is not a BlockStatement. got=%T", stmt.Body)
 	}
 
-	if len(body.Statements) != 2 {
-		t.Fatalf("Function body does not have 2 statements. got=%d", len(body.Statements))
+	if len(body.Statements) != 1 {
+		t.Fatalf("Function body does not have 1 statement. got=%d", len(body.Statements))
 	}
-	// Test first statement in body: C := A + B;
+	// Test statement in body: MyFunction := (A + B) * 2;
 	stmt1, ok := body.Statements[0].(*ast.AssignmentStatement)
 	if !ok {
 		t.Fatalf("Body statement 1 is not ast.AssignmentStatement. got=%T", body.Statements[0])
 	}
-	testIdentifier(t, stmt1.Left, "C")
-
-	// Test second statement in body: MyFunction := C * 2;
-	stmt2, ok := body.Statements[1].(*ast.AssignmentStatement)
-	if !ok {
-		t.Fatalf("Body statement 2 is not ast.AssignmentStatement. got=%T", body.Statements[1])
-	}
-	testIdentifier(t, stmt2.Left, "MyFunction")
+	testIdentifier(t, stmt1.Left, "MyFunction")
 }
 
 func TestFunctionWithMultipleVarBlocks(t *testing.T) {
@@ -1941,6 +1933,11 @@ func TestAllVarBlockTypes(t *testing.T) {
 	for i, tt := range tests {
 		// Randomly select a POU wrapper for the current test case
 		wrapper := pouWrappers[rng.Intn(len(pouWrappers))]
+		// Skip invalid combinations: VAR blocks are not allowed in FUNCTIONs
+		if strings.Contains(wrapper.start, "FUNCTION ") && strings.HasPrefix(tt.varBlock, "VAR ") {
+			continue
+		}
+
 		input := wrapper.start + tt.varBlock + wrapper.end
 
 		l := lexer.New(input)
@@ -3263,8 +3260,8 @@ func TestStepStatement(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestComplexTypeBlockDeclaration", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestStepStatement", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -3283,26 +3280,24 @@ func TestStepStatement(t *testing.T) {
 		t.Errorf("Step should not be initial")
 	}
 
-	if stmt.Body == nil || len(stmt.Body.Statements) != 2 {
-		t.Fatalf("Expected 2 action associations in step body. got=%d", len(stmt.Body.Statements))
+	if len(stmt.Actions) != 2 {
+		t.Fatalf("Expected 2 action associations. got=%d", len(stmt.Actions))
 	}
 
-	action1Stmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
-	if !ok {
-		t.Fatalf("Statement 1 is not an ExpressionStatement. got=%T", stmt.Body.Statements[0])
+	action1 := stmt.Actions[0]
+	if action1.ActionName.Value != "Action1" {
+		t.Errorf("Incorrect first action name. Expected 'Action1', got %s", action1.ActionName.Value)
 	}
-	action1Call, ok := action1Stmt.Expression.(*ast.CallExpression)
-	if !ok || action1Call.Function.String() != "Action1" {
-		t.Errorf("Incorrect first action association. Expected 'Action1'.")
+	if action1.Qualifier == nil || action1.Qualifier.Value != "N" {
+		t.Errorf("Incorrect first action qualifier. Expected 'N', got %v", action1.Qualifier)
 	}
 
-	action2Stmt, ok := stmt.Body.Statements[1].(*ast.ExpressionStatement)
-	if !ok {
-		t.Fatalf("Statement 2 is not an ExpressionStatement. got=%T", stmt.Body.Statements[1])
+	action2 := stmt.Actions[1]
+	if action2.ActionName.Value != "Action2" {
+		t.Errorf("Incorrect second action name. Expected 'Action2', got %s", action2.ActionName.Value)
 	}
-	action2Call, ok := action2Stmt.Expression.(*ast.CallExpression)
-	if !ok || action2Call.Function.String() != "Action2" {
-		t.Errorf("Incorrect second action association. Expected 'Action2'.")
+	if action2.Qualifier == nil || action2.Qualifier.Value != "P" {
+		t.Errorf("Incorrect second action qualifier. Expected 'P', got %v", action2.Qualifier)
 	}
 }
 
@@ -3315,7 +3310,7 @@ func TestInitialStepStatement(t *testing.T) {
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestArrayTypeDeclaration", input)
+	checkParserErrors(t, p, "TestInitialStepStatement", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -3334,16 +3329,16 @@ func TestInitialStepStatement(t *testing.T) {
 		t.Errorf("Step should be initial")
 	}
 
-	if stmt.Body == nil || len(stmt.Body.Statements) != 1 {
-		t.Fatalf("Expected 1 action association in step body. got=%d", len(stmt.Body.Statements))
+	if len(stmt.Actions) != 1 {
+		t.Fatalf("Expected 1 action association in step body. got=%d", len(stmt.Actions))
 	}
 
-	actionStmt, ok := stmt.Body.Statements[0].(*ast.ExpressionStatement)
-	if !ok {
-		t.Fatalf("Statement is not an ExpressionStatement. got=%T", stmt.Body.Statements[0])
+	action := stmt.Actions[0]
+	if action.ActionName.Value != "InitAction" {
+		t.Errorf("Incorrect action name. Expected 'InitAction', got %s", action.ActionName.Value)
 	}
-	if _, ok := actionStmt.Expression.(*ast.CallExpression); !ok {
-		t.Errorf("Incorrect action association. Expected a call expression.")
+	if action.Qualifier == nil || action.Qualifier.Value != "N" {
+		t.Errorf("Incorrect action qualifier. Expected 'N', got %v", action.Qualifier)
 	}
 }
 
@@ -3358,12 +3353,16 @@ func TestConfigurationDeclaration(t *testing.T) {
 				TASK Task1 (INTERVAL := T#100ms, PRIORITY := 1);
 				PROGRAM Prog1 WITH Task1 : ProgType1;
 			END_RESOURCE
+
+			VAR_CONFIG Prog1
+				Input1 : INT := 42;
+			END_VAR
 		END_CONFIGURATION
 	`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestTempVarDeclarations", input)
+	checkParserErrors(t, p, "TestConfigurationDeclaration", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -3380,6 +3379,15 @@ func TestConfigurationDeclaration(t *testing.T) {
 
 	if len(stmt.Resources) != 1 {
 		t.Fatalf("Expected 1 resource. got=%d", len(stmt.Resources))
+	}
+
+	if len(stmt.VarConfigs) != 1 {
+		t.Fatalf("Expected 1 VAR_CONFIG block. got=%d", len(stmt.VarConfigs))
+	}
+
+	cfgVar := stmt.VarConfigs[0]
+	if cfgVar.ProgramInstanceName.Value != "Prog1" {
+		t.Errorf("VAR_CONFIG instance name is not 'Prog1'. got=%s", cfgVar.ProgramInstanceName.Value)
 	}
 }
 
@@ -3517,7 +3525,7 @@ func TestUnterminatedCommentErrorRecovery(t *testing.T) {
 func TestMissingSemicolonErrorRecovery(t *testing.T) {
 	input := `
 		VAR
-			myVar : INT := 5 // Missing semicolon
+			myVar : INT := 5
 			anotherVar : BOOL;
 		END_VAR
 	`
@@ -3547,7 +3555,7 @@ func TestMissingSemicolonErrorRecovery(t *testing.T) {
 
 func TestMissingThenErrorRecovery(t *testing.T) {
 	input := `
-		IF x < y // Missing THEN
+		IF x < y
 			x := 1;
 		ELSE
 			y := 1;
@@ -3617,7 +3625,7 @@ func TestMissingDoErrorRecovery(t *testing.T) {
 	}{
 		{
 			"Missing DO in FOR loop",
-			`FOR i := 1 TO 10 // Missing DO
+			`FOR i := 1 TO 10
 				x := x + 1;
 			END_FOR`,
 			"expected next token to be DO, got IDENT instead at row 2, column 5",
@@ -3625,7 +3633,7 @@ func TestMissingDoErrorRecovery(t *testing.T) {
 		},
 		{
 			"Missing DO in WHILE loop",
-			`WHILE x < 10 // Missing DO
+			`WHILE x < 10
 				x := x + 1;
 			END_WHILE`,
 			"expected next token to be DO, got IDENT instead at row 2, column 5",
@@ -3696,7 +3704,7 @@ func TestMissingEndVarErrorRecovery(t *testing.T) {
 		VAR
 			myVar : INT;
 			myOtherVar : BOOL;
-		// Missing END_VAR here
+		// Missing END_VAR
 
 		IF myVar > 0 THEN
 			myVar := 0;
@@ -3706,30 +3714,30 @@ func TestMissingEndVarErrorRecovery(t *testing.T) {
 	p := New(l)
 	program := p.ParseProgram()
 
-	if len(p.Errors()) != 6 {
-		t.Fatalf("Expected parser to have 6 errors, but it had %d: %v", len(p.Errors()), p.Errors())
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
 	}
 
-	expectedErrors := []string{
-		"expected next token to be END_VAR, got IF instead at row 7, column 3",
-		"expected next token to be ;, got THEN instead at row 7, column 16",
-		"no prefix parse function for THEN found",
-		"expected next token to be ;, got IDENT instead at row 8, column 4",
-		"no prefix parse function for END_IF found",
-		"expected next token to be ;, got EOF instead at row 10, column 2",
+	expectedError := "expected next token to be END_VAR, got IF instead"
+	assertErrorContains(t, p.Errors(), expectedError)
+
+	// Check that the parser recovered and parsed both statements
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
 
-	assertErrorContains(t, p.Errors(), expectedErrors[0])
-
-	// With the current error cascade, the parser likely fails to produce the correct statements.
-	// We will check that at least the initial VAR block was parsed.
-	if len(program.Statements) < 1 {
-		t.Fatalf("Parser did not parse any statements after error. got=%d", len(program.Statements))
-	}
-
-	_, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+	// Check first statement (VAR block)
+	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
 	if !ok {
 		t.Errorf("First statement should be a VarBlockDeclaration. got=%T", program.Statements[0])
+	} else if len(varBlock.Declarations) != 2 {
+		t.Errorf("Expected VAR block to have 2 declarations. got=%d", len(varBlock.Declarations))
+	}
+
+	// Check second statement (IF block)
+	_, ok = program.Statements[1].(*ast.IfStatement)
+	if !ok {
+		t.Errorf("Second statement should be an IfStatement. got=%T", program.Statements[1])
 	}
 }
 

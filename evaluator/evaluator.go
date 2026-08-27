@@ -420,25 +420,27 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 			if elem.IsInitial {
 				sfc.InitialStepName = elem.Name.Value
 			}
-			step := &object.Step{Name: elem.Name, Body: elem.Body, IsActive: false}
+			// The parser puts action associations into elem.Actions. The evaluator's
+			// cycle logic expects them in the Body of the runtime object.Step.
+			// We create a synthetic BlockStatement to hold them.
+			body := &ast.BlockStatement{Statements: []ast.Statement{}}
+			for _, action := range elem.Actions {
+				body.Statements = append(body.Statements, action)
+			}
+
+			step := &object.Step{Name: elem.Name, Body: body, IsActive: false}
 			sfc.Steps[elem.Name.Value] = step
 
-			// Now, parse the action associations from the step's body
-			if elem.Body != nil {
-				for _, stmt := range elem.Body.Statements {
-					if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
-						if call, ok := exprStmt.Expression.(*ast.CallExpression); ok {
-							actionName := call.Function.String()
+			// Now, associate the step with its actions.
+			for _, actionAssoc := range elem.Actions {
+				actionName := actionAssoc.ActionName.Value
 
-							// Ensure the action object exists
-							if _, exists := sfc.Actions[actionName]; !exists {
-								sfc.Actions[actionName] = &object.Action{Name: &ast.Identifier{Value: actionName}}
-							}
-							// Associate this step with the action
-							sfc.Actions[actionName].AssociatedSteps = append(sfc.Actions[actionName].AssociatedSteps, step)
-						}
-					}
+				// Ensure the action object exists
+				if _, exists := sfc.Actions[actionName]; !exists {
+					sfc.Actions[actionName] = &object.Action{Name: &ast.Identifier{Value: actionName}}
 				}
+				// Associate this step with the action
+				sfc.Actions[actionName].AssociatedSteps = append(sfc.Actions[actionName].AssociatedSteps, step)
 			}
 
 		case *ast.TransitionStatement:
@@ -670,32 +672,25 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 			if step.Body == nil {
 				continue
 			}
-			for _, stmt := range step.Body.Statements {
-				exprStmt, ok := stmt.(*ast.ExpressionStatement)
-				if !ok {
-					continue
-				}
-				callExpr, ok := exprStmt.Expression.(*ast.CallExpression)
+			for _, stmt := range step.Body.Statements { // cspell:disable-line
+				actionAssoc, ok := stmt.(*ast.ActionBlockStatement)
 				if !ok {
 					continue
 				}
 
-				if callExpr.Function.String() == action.Name.Value {
+				if actionAssoc.ActionName.Value == action.Name.Value {
 					q := "N" // Default qualifier is Non-stored
-					if len(callExpr.Arguments) > 0 {
-						if qual, ok := callExpr.Arguments[0].(*ast.Identifier); ok {
-							q = qual.Value
-						}
-						// If it's a timed qualifier, parse the duration.
-						switch q {
-						case "D", "L", "SD", "DS", "SL":
-							if len(callExpr.Arguments) > 1 {
-								// The duration is the second argument. We need to evaluate it.
-								// Evaluate in the program's environment.
-								durationObj := Eval(callExpr.Arguments[1], env)
-								if timeObj, ok := durationObj.(*object.Time); ok {
-									action.Duration = timeObj.Value
-								}
+					if actionAssoc.Qualifier != nil {
+						q = actionAssoc.Qualifier.Value
+					}
+					// If it's a timed qualifier, parse the duration.
+					switch q {
+					case "D", "L", "SD", "DS", "SL":
+						if actionAssoc.Duration != nil {
+							// The duration is the second argument. We need to evaluate it.
+							durationObj := Eval(actionAssoc.Duration, env)
+							if timeObj, ok := durationObj.(*object.Time); ok {
+								action.Duration = timeObj.Value
 							}
 						}
 					}
@@ -2452,8 +2447,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Re-initialize VAR_TEMP variables at the start of every scan cycle.
 		if fn.Definition != nil {
-			for _, tempVar := range fn.Definition.VarTemp {
-				if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+			for i, tempVar := range fn.Definition.VarTemp {
+				if err := evalVarDeclStatement(tempVar.Vars[i], extendedEnv); isError(err) {
 					return err
 				}
 			}

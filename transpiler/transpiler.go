@@ -9,6 +9,104 @@ import (
 	"strings" // For type information if needed
 )
 
+// builtInFunctionReturnTypes maps standard IEC 61131-3 function names to their return type family.
+// This is used by the IL transpiler to select the correct accumulator.
+var builtInFunctionReturnTypes = map[string]string{
+	// Type Conversion Functions
+	"BOOL_TO_SINT":   "LINT",
+	"BOOL_TO_INT":    "LINT",
+	"BOOL_TO_DINT":   "LINT",
+	"BOOL_TO_LINT":   "LINT",
+	"BOOL_TO_USINT":  "LINT",
+	"BOOL_TO_UINT":   "LINT",
+	"BOOL_TO_UDINT":  "LINT",
+	"BOOL_TO_ULINT":  "LINT",
+	"BOOL_TO_REAL":   "LREAL",
+	"BOOL_TO_LREAL":  "LREAL",
+	"BOOL_TO_STRING": "STRING",
+	"SINT_TO_BOOL":   "BOOL",
+	"SINT_TO_INT":    "LINT",
+	"SINT_TO_DINT":   "LINT",
+	"SINT_TO_LINT":   "LINT",
+	"SINT_TO_USINT":  "LINT",
+	"SINT_TO_UINT":   "LINT",
+	"SINT_TO_UDINT":  "LINT",
+	"SINT_TO_ULINT":  "LINT",
+	"SINT_TO_REAL":   "LREAL",
+	"SINT_TO_LREAL":  "LREAL",
+	"SINT_TO_STRING": "STRING",
+	"INT_TO_BOOL":    "BOOL",
+	"INT_TO_SINT":    "LINT",
+	"INT_TO_DINT":    "LINT",
+	"INT_TO_LINT":    "LINT",
+	"INT_TO_USINT":   "LINT",
+	"INT_TO_UINT":    "LINT",
+	"INT_TO_UDINT":   "LINT",
+	"INT_TO_ULINT":   "LINT",
+	"INT_TO_REAL":    "LREAL",
+	"INT_TO_LREAL":   "LREAL",
+	"INT_TO_STRING":  "STRING",
+	"DINT_TO_BOOL":   "BOOL",
+	"DINT_TO_SINT":   "LINT",
+	"DINT_TO_INT":    "LINT",
+	"DINT_TO_LINT":   "LINT",
+	"DINT_TO_USINT":  "LINT",
+	"DINT_TO_UINT":   "LINT",
+	"DINT_TO_UDINT":  "LINT",
+	"DINT_TO_ULINT":  "LINT",
+	"DINT_TO_REAL":   "LREAL",
+	"DINT_TO_LREAL":  "LREAL",
+	"DINT_TO_STRING": "STRING",
+	"LINT_TO_BOOL":   "BOOL",
+	"LINT_TO_SINT":   "LINT",
+	"LINT_TO_INT":    "LINT",
+	"LINT_TO_DINT":   "LINT",
+	"LINT_TO_USINT":  "LINT",
+	"LINT_TO_UINT":   "LINT",
+	"LINT_TO_UDINT":  "LINT",
+	"LINT_TO_ULINT":  "LINT",
+	"LINT_TO_REAL":   "LREAL",
+	"LINT_TO_LREAL":  "LREAL",
+	"LINT_TO_STRING": "STRING",
+
+	// Numerical Functions
+	"ABS":  "LREAL", // Can be any numeric, but LREAL is a safe bet for accumulator
+	"SQRT": "LREAL",
+	"SIN":  "LREAL",
+	"COS":  "LREAL",
+	"TAN":  "LREAL",
+	"ASIN": "LREAL",
+	"ACOS": "LREAL",
+	"ATAN": "LREAL",
+	"MOD":  "LINT",
+
+	// String Functions
+	"LEN":    "LINT",
+	"LEFT":   "STRING",
+	"RIGHT":  "STRING",
+	"MID":    "STRING",
+	"CONCAT": "STRING",
+	"FIND":   "LINT",
+}
+
+// standardFBPrimaryOutputs maps standard IEC 61131-3 function block names to their primary output.
+// The primary output is the first VAR_OUTPUT parameter, which is loaded into the IL accumulator after a CAL instruction.
+var standardFBPrimaryOutputs = map[string]struct {
+	Name string // The name of the output parameter (e.g., "Q", "QU", "Q1")
+	Type string // The base type family for the accumulator (e.g., "BOOL", "LINT")
+}{
+	"TON":    {Name: "Q", Type: "BOOL"},
+	"TOF":    {Name: "Q", Type: "BOOL"},
+	"TP":     {Name: "Q", Type: "BOOL"},
+	"CTU":    {Name: "Q", Type: "BOOL"},
+	"CTD":    {Name: "Q", Type: "BOOL"},
+	"CTUD":   {Name: "QU", Type: "BOOL"}, // QU is the first output, QD is second
+	"R_TRIG": {Name: "Q", Type: "BOOL"},
+	"F_TRIG": {Name: "Q", Type: "BOOL"},
+	"SR":     {Name: "Q1", Type: "BOOL"},
+	"RS":     {Name: "Q1", Type: "BOOL"},
+}
+
 // Transpiler holds the state of the code generation process.
 type Transpiler struct {
 	w               io.Writer
@@ -93,7 +191,22 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 		return nil
 	case *ast.FunctionDeclaration:
 		return t.transpileFunctionDeclaration(node)
-
+	case *ast.VarBlockDeclaration:
+		// This handles VAR blocks that might appear as statements inside a body.
+		// We treat them as local variable declarations.
+		for _, decl := range node.Declarations {
+			t.write("\tvar %s %s", decl.Name.Value, t.mapIecTypeToGo(decl.DataType))
+			if decl.Value != nil {
+				t.write(" = ")
+				// Use a temporary transpiler to avoid carrying over receiver context.
+				valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
+				if err := valT.transpileExpression(decl.Value); err != nil {
+					return err
+				}
+			}
+			t.write("\n")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unhandled AST node type: %T", node)
 	}
@@ -168,6 +281,13 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 	}
 	t.mainGenerated = true
 
+	// Group VAR_CONFIG parameters by their program instance name, as they are now at the config level.
+	paramsByInstance := make(map[string][]*ast.VarDeclStatement)
+	for _, varConfig := range config.VarConfigs {
+		instanceName := varConfig.ProgramInstanceName.Value
+		paramsByInstance[instanceName] = varConfig.Declarations
+	}
+
 	t.write("// --- Generated Main Function from CONFIGURATION ---\n")
 	t.write("func main() {\n")
 
@@ -191,7 +311,7 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 	t.write("\t\tResources: []*config.Resource{\n")
 
 	for _, res := range config.Resources {
-		t.transpileResourceDeclaration(res)
+		t.transpileResourceDeclaration(res, paramsByInstance)
 	}
 
 	t.write("\t\t},\n")
@@ -207,14 +327,7 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 
 // transpileResourceDeclaration transpiles an IEC 61131-3 RESOURCE block within a CONFIGURATION.
 // It generates Go code to define tasks and program instances associated with that resource.
-func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration) {
-	// Group VAR_CONFIG parameters by their program instance name.
-	paramsByInstance := make(map[string][]*ast.VarDeclStatement)
-	for _, varConfig := range res.VarConfigs {
-		instanceName := varConfig.ProgramInstanceName.Value
-		paramsByInstance[instanceName] = varConfig.Declarations
-	}
-
+func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, paramsByInstance map[string][]*ast.VarDeclStatement) {
 	// Group program instances by their assigned task.
 	programsByTask := make(map[string][]*ast.ProgramConfiguration)
 	for _, progConfig := range res.Programs {
@@ -243,6 +356,31 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration) 
 
 	t.write("\t\t\t\t},\n")
 	t.write("\t\t\t},\n")
+}
+
+// transpileVarConfigParams transpiles the variable declarations from a VAR_CONFIG block
+// into key-value pairs for a Go map[string]string literal.
+func (t *Transpiler) transpileVarConfigParams(params []*ast.VarDeclStatement) {
+	if params == nil {
+		return
+	}
+	for _, p := range params {
+		if p.Value == nil {
+			continue
+		}
+		var valueStr string
+		// We need the raw string representation of the literal value.
+		switch v := p.Value.(type) {
+		case *ast.StringLiteral:
+			valueStr = v.Value // Value field holds the unquoted string
+		case *ast.WStringLiteral:
+			valueStr = v.Value // Value field holds the unquoted string
+		default:
+			// For other literals (INT, REAL, BOOL, TIME, etc.), the String() method gives a suitable representation.
+			valueStr = p.Value.String()
+		}
+		t.write("\t\t\t\t\t\t\t%q: %q,\n", p.Name.Value, valueStr)
+	}
 }
 
 // transpileTaskDeclaration transpiles an IEC 61131-3 TASK definition within a RESOURCE.
@@ -281,7 +419,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 
 	originalAccessVars := t.accessVars
 	t.accessVars = make(map[string]bool)
-	t.buildAccessVarInfo(prog.AccessVars)
+	t.buildAccessVarInfo(prog.VarAccess)
 
 	originalLocatedVars := t.locatedVars
 	t.locatedVars = make(map[string]bool)
@@ -304,17 +442,17 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		t.transpileVarDecl(varDecl)
 	}
 	t.write("}\n\n")
-	for _, accessDecl := range prog.AccessVars {
+	for _, accessDecl := range prog.VarAccess {
 		t.transpileVarAccess(accessDecl)
 	}
 
 	// --- 2. Generate the factory function for initialization ---
 	t.write("// New%sFactory creates a new instance of the %s program.\n", prog.Name.Value, prog.Name.Value)
 	t.write("func New%sFactory(params map[string]string) (func(time.Time), error) {\n", prog.Name.Value)
-	t.write("\tinstance := &%s{}\n\n", prog.Name.Value)
+	t.write("\tinstance := &%s{}\n", prog.Name.Value)
 
 	// Transpile initial values from VAR declarations
-	t.write("\t// Apply initial values from ST code\n")
+	//t.write("\t// Apply initial values from ST code\n")
 	for _, varDecl := range prog.Vars {
 		if varDecl.Value != nil {
 			t.write("\tinstance.%s = ", varDecl.Name.Value)
@@ -343,7 +481,6 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		}
 	}
 
-	t.write("\n\t// TODO: Add logic to override initial values from the 'params' map if needed.\n\n")
 	t.write("\treturn instance.Logic, nil\n")
 	t.write("}\n\n")
 
@@ -569,10 +706,24 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 	// 3. Identify the primary output (first VAR_OUTPUT) to load into the accumulator.
 	fbDef := t.getFunctionBlockDefinition(callExpr.Function)
 	if fbDef == nil {
-		// This could be a standard library FB like TON. We need a way to know their outputs.
-		// For now, we'll assume a common output like 'Q' if the definition isn't found in user code.
-		log.Printf("Warning: Could not find user definition for FB %s. Assuming primary output 'Q'.", callExpr.Function.String())
-		t.write("\tcr_BOOL = ") // Assume BOOL type for 'Q'
+		// This could be a standard library FB like TON. Check our lookup table.
+		fbName := ""
+		if ident, ok := callExpr.Function.(*ast.Identifier); ok {
+			fbName = strings.ToUpper(ident.Value)
+		}
+
+		if primaryOut, ok := standardFBPrimaryOutputs[fbName]; ok {
+			// It's a known standard FB.
+			t.write("\tcr_%s = ", primaryOut.Type)
+			t.transpileExpression(callExpr.Function)
+			t.write(".%s\n", primaryOut.Name)
+			t.ilCurrentCRType = primaryOut.Type
+			return nil
+		}
+
+		// If not found, fallback to the old warning and assumption.
+		log.Printf("Warning: Could not find user definition for FB %s. Assuming primary output 'Q' of type BOOL.", callExpr.Function.String())
+		t.write("\tcr_BOOL = ")
 		t.transpileExpression(callExpr.Function)
 		t.write(".Q\n")
 		t.ilCurrentCRType = "BOOL"
@@ -601,22 +752,33 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 // It determines the function's return type and loads the result into the appropriate IL accumulator.
 func (t *Transpiler) transpileIlFunctionCall(callExpr *ast.CallExpression) error {
 	// 1. Determine the return type of the function.
-	var returnType ast.Expression
 	var funcName string
 	if ident, ok := callExpr.Function.(*ast.Identifier); ok {
 		funcName = ident.Value
 	}
 
+	crType := "" // Start with unknown type
+
+	// Check user-defined functions first
 	if defNode, ok := t.typeInfo[funcName]; ok {
-		if funcDef, isFunc := defNode.(*ast.FunctionDeclaration); isFunc {
-			returnType = funcDef.ReturnType
+		if funcDef, isFunc := defNode.(*ast.FunctionDeclaration); isFunc && funcDef.ReturnType != nil {
+			crType = t.getBaseTypeFamily(funcDef.ReturnType)
 		}
 	}
 
-	crType := "LINT" // Default assumption for built-ins
-	if returnType != nil {
-		crType = t.getBaseTypeFamily(returnType)
+	// If not found, check built-in functions
+	if crType == "" {
+		if builtInReturnType, ok := builtInFunctionReturnTypes[strings.ToUpper(funcName)]; ok {
+			crType = builtInReturnType
+		}
 	}
+
+	// If still not found, default to LINT and log a warning.
+	if crType == "" {
+		crType = "LINT" // Default assumption for unknown functions
+		log.Printf("Warning: Could not determine return type for function '%s'. Assuming LINT.", funcName)
+	}
+
 	t.ilCurrentCRType = crType
 	t.write("\tcr_%s = ", crType)
 
@@ -792,12 +954,12 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 			t.write("\t// Actions for step %s\n", step.Name.Value)
 			t.write("\tif p.sfcActiveSteps[%q] {\n", step.Name.Value)
 			for _, actionBlock := range step.Actions {
-				t.transpileSFCAction(actionBlock, true)
+				t.transpileSFCAction(step, actionBlock, true)
 			}
 			t.write("\t} else {\n")
 			// Handle logic for when the step is NOT active (for stored/timed actions)
 			for _, actionBlock := range step.Actions {
-				t.transpileSFCAction(actionBlock, false)
+				t.transpileSFCAction(step, actionBlock, false)
 			}
 			t.write("\t}\n")
 		}
@@ -826,7 +988,7 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 // transpileSFCAction transpiles an SFC action block, generating Go code that implements
 // the logic for various action qualifiers (N, S, R, P, D, L, SD, DS, SL) based on whether
 // the associated step is active or not.
-func (t *Transpiler) transpileSFCAction(actionBlock *ast.ActionBlockStatement, isStepActive bool) {
+func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *ast.ActionBlockStatement, isStepActive bool) {
 	actionName := actionBlock.ActionName.Value
 	qualifier := "N"
 	if actionBlock.Qualifier != nil {
@@ -843,7 +1005,7 @@ func (t *Transpiler) transpileSFCAction(actionBlock *ast.ActionBlockStatement, i
 			t.write("\t\tp.%s_Q = false\n", actionName)
 		case "P":
 			// Action is active only if the step just became active (was not active in the previous scan).
-			t.write("\t\tp.%s_Q = p.%s_X && !p.%s_X_prev\n", actionName, actionBlock.StepName, actionBlock.StepName)
+			t.write("\t\tp.%s_Q = p.%s_X && !p.%s_X_prev\n", actionName, step.Name.Value, step.Name.Value)
 		case "D", "SD", "DS":
 			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now }\n", actionName, actionName)
 			t.write("\t\tif now.Sub(p.%s_Timer) >= ", actionName)
@@ -876,28 +1038,22 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	// 1. Generate the struct for the Function Block.
 	t.write("// %s is the transpiled struct for the FUNCTION_BLOCK of the same name.\n", fb.Name.Value)
 
+	t.write("type %s struct {\n", fb.Name.Value)
+
 	originalVarInfo := t.varInfo
 	t.varInfo = make(map[string]*ast.TypeDeclaration)
 	t.buildVarInfo(fb.VarInputs, fb.VarOutputs, fb.VarInOuts, fb.Vars)
-
-	originalAccessVars := t.accessVars
-	t.accessVars = make(map[string]bool)
-	t.buildAccessVarInfo(fb.AccessVars)
 
 	originalLocatedVars := t.locatedVars
 	t.locatedVars = make(map[string]bool)
 	t.buildLocatedVarInfo(fb.VarInputs, fb.VarOutputs, fb.Vars)
 	defer func() { t.locatedVars = originalLocatedVars }()
 
-	defer func() { t.accessVars = originalAccessVars }()
-
 	defer func() { t.varInfo = originalVarInfo }()
 
 	// --- Add implicit EN and ENO fields ---
 	t.write("\tEN  iec.BOOL\n")
 	t.write("\tENO iec.BOOL\n")
-
-	t.write("type %s struct {\n", fb.Name.Value)
 
 	// Transpile VAR_INPUT, VAR_OUTPUT, and VAR into struct fields.
 	for _, varDecl := range fb.VarInputs {
@@ -911,9 +1067,6 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	}
 	for _, varDecl := range fb.Vars {
 		t.transpileVarDecl(varDecl)
-	}
-	for _, accessDecl := range fb.AccessVars {
-		t.transpileVarAccess(accessDecl)
 	}
 
 	t.write("}\n\n")
@@ -989,7 +1142,9 @@ func (t *Transpiler) buildVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 					break
 				}
 			}
-			if typeIdent, ok := currentType.(*ast.Identifier); ok {
+			if typeSpec, ok := currentType.(*ast.TypeSpecifier); ok {
+				typeName = typeSpec.Token.Literal
+			} else if typeIdent, ok := currentType.(*ast.Identifier); ok {
 				typeName = typeIdent.Value
 			}
 			t.varInfo[varDecl.Name.Value] = t.getTypeDeclaration(typeName)
@@ -1011,13 +1166,11 @@ func (t *Transpiler) buildLocatedVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 
 // buildAccessVarInfo populates the `accessVars` map with names of variables declared in VAR_ACCESS blocks.
 // These variables represent external access paths.
-func (t *Transpiler) buildAccessVarInfo(accessBlocks []*ast.VarAccessDeclaration) {
+func (t *Transpiler) buildAccessVarInfo(accessBlocks []*ast.AccessVarDeclaration) {
 	for _, block := range accessBlocks {
-		// This is a simplified version. A real implementation would have a list of declarations inside the block.
-		// Assuming the parser provides a flat list for now.
-		// for _, decl := range block.Declarations {
-		// 	t.accessVars[decl.LocalName.Value] = true
-		// }
+		for _, decl := range block.Vars {
+			t.accessVars[decl.Name.Value] = true
+		}
 	}
 }
 
@@ -1056,7 +1209,7 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 		goType := t.mapIecTypeToGo(p.DataType)
 		params = append(params, fmt.Sprintf("%s *%s", p.Name.Value, goType))
 	}
-	t.write(strings.Join(params, ", "))
+	t.write("%s", strings.Join(params, ", "))
 	t.write(") ")
 
 	// Return values (primary return type + VAR_OUTPUT)
@@ -1070,7 +1223,7 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	if len(returns) > 1 {
 		t.write("(%s)", strings.Join(returns, ", "))
 	} else if len(returns) == 1 {
-		t.write(returns[0])
+		t.write("%s", returns[0])
 	}
 
 	t.write(" {\n")
@@ -1093,6 +1246,9 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 // transpileVarDecl transpiles a single variable declaration (VAR, VAR_INPUT, VAR_OUTPUT, VAR_TEMP)
 // into a Go struct field. It handles located variables by making them pointers.
 func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
+	// Transpile any leading comments associated with this variable declaration.
+	t.transpileLeadingComments(varDecl.LeadingComments)
+
 	// Get the variable name.
 	// If it's a located variable, transpile it as a pointer.
 	if varDecl.Location != nil {
@@ -1113,20 +1269,25 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 
 // transpileVarAccess transpiles a VAR_ACCESS declaration. It infers the type of the accessed variable
 // and declares a pointer field in the Go struct to represent the access path.
-func (t *Transpiler) transpileVarAccess(accessDecl *ast.VarAccessDeclaration) {
-	localName := accessDecl.LocalName.Value
+func (t *Transpiler) transpileVarAccess(accessDecl *ast.AccessVarDeclaration) {
+	for _, decl := range accessDecl.Vars {
+		// Transpile any leading comments associated with this variable declaration.
+		t.transpileLeadingComments(decl.LeadingComments)
 
-	// Infer the type of the target variable.
-	targetTypeDecl := t.resolveAssignmentTargetType(accessDecl.AccessPath)
-	if targetTypeDecl == nil {
-		log.Printf("Warning: Could not resolve type for VAR_ACCESS target: %s", accessDecl.AccessPath.String())
-		t.write("\t%s *any // Could not resolve type for %s\n", localName, accessDecl.AccessPath.String())
-		return
+		localName := decl.Name.Value
+
+		// Infer the type of the target variable.
+		targetTypeDecl := t.resolveAssignmentTargetType(decl.AccessPath)
+		if targetTypeDecl == nil {
+			log.Printf("Warning: Could not resolve type for VAR_ACCESS target: %s", decl.AccessPath.String())
+			t.write("\t%s *any // Could not resolve type for %s\n", localName, decl.AccessPath.String())
+			continue
+		}
+
+		// Get the Go type and declare the field as a pointer to that type.
+		goType := t.mapIecTypeToGo(targetTypeDecl.DataType)
+		t.write("\t%s *%s\n", localName, goType)
 	}
-
-	// Get the Go type and declare the field as a pointer to that type.
-	goType := t.mapIecTypeToGo(targetTypeDecl.DataType)
-	t.write("\t%s *%s\n", localName, goType)
 }
 
 // LinkMethodBody is a placeholder for the `Link` method's body in generated Go programs.
@@ -1148,14 +1309,14 @@ func (t *Transpiler) transpileVarDeclInOut(varDecl *ast.VarDeclStatement) {
 // transpileCaseStatement transpiles an IEC 61131-3 CASE statement into a Go `switch` statement.
 // transpileCaseStatement transpiles an IEC 61131-3 CASE statement to a Go switch statement.
 func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
-	t.write("switch ")
+	t.write("\tswitch ")
 	if err := t.transpileExpression(stmt.Expression); err != nil {
 		return err
 	}
 	t.write(" {\n")
 
 	for _, caseElem := range stmt.Cases {
-		t.write("case ")
+		t.write("\tcase ")
 		for i, expr := range caseElem.Values {
 			if i > 0 {
 				t.write(", ")
@@ -1165,18 +1326,24 @@ func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
 			}
 		}
 		t.write(":\n")
-		if err := t.transpileBlockStatement(caseElem.Consequence); err != nil {
-			return err
+		for _, s := range caseElem.Consequence.Statements {
+			t.write("\t")
+			if err := t.Transpile(s); err != nil {
+				return err
+			}
 		}
 	}
 
 	if stmt.Alternative != nil {
-		t.write("default:\n")
-		if err := t.transpileBlockStatement(stmt.Alternative); err != nil {
-			return err
+		t.write("\tdefault:\n")
+		for _, s := range stmt.Alternative.Statements {
+			t.write("\t")
+			if err := t.Transpile(s); err != nil {
+				return err
+			}
 		}
 	}
-	t.write("}\n")
+	t.write("\t}\n")
 	return nil
 }
 
@@ -1185,13 +1352,15 @@ func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
 func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement) error {
 	// Special case: Assignment to the function name is a return statement.
 	if ident, ok := stmt.Left.(*ast.Identifier); ok && t.currentFunc != nil && ident.Value == t.currentFunc.Name.Value {
-		t.write("return ")
+		t.write("\treturn ")
 		if err := t.transpileExpression(stmt.Value); err != nil {
 			return err
 		}
 		t.write("\n")
 		return nil
 	}
+
+	t.write("\t")
 
 	// Check if the left-hand side resolves to a subrange type.
 	if typeDecl := t.resolveAssignmentTargetType(stmt.Left); typeDecl != nil && typeDecl.Subrange != nil {
@@ -1232,8 +1401,11 @@ func (t *Transpiler) resolveAssignmentTargetType(expr ast.Expression) *ast.TypeD
 			return nil // Can't resolve the struct's type.
 		}
 
-		// The struct's type definition should be in the main typeInfo map.
-		structDefNode, ok := t.typeInfo[structVarType.Name.Value]
+		// Get the type name from the variable's type declaration (e.g., "MyStruct")
+		structTypeName := structVarType.DataType.String()
+
+		// Look up the actual struct definition using its type name.
+		structDefNode, ok := t.typeInfo[structTypeName]
 		if !ok {
 			return nil
 		}
@@ -1306,7 +1478,7 @@ func (t *Transpiler) transpileSubrangeAssignment(stmt *ast.AssignmentStatement, 
 // transpileForLoopStatement transpiles a FOR loop to a Go `for` loop.
 func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error {
 	// The control variable is an assignment statement itself.
-	t.write("for ")
+	t.write("\tfor ")
 	t.transpileExpression(stmt.ControlVar.Left)
 	t.write(" := ")
 	t.transpileExpression(stmt.ControlVar.Value)
@@ -1323,10 +1495,13 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 		t.write("++")
 	}
 	t.write(" {\n")
-	if err := t.transpileBlockStatement(stmt.Body); err != nil {
-		return err
+	for _, s := range stmt.Body.Statements {
+		t.write("\t")
+		if err := t.Transpile(s); err != nil {
+			return err
+		}
 	}
-	t.write("}\n")
+	t.write("\t}\n")
 	return nil
 }
 
@@ -1344,31 +1519,37 @@ func (t *Transpiler) transpileBlockStatement(bs *ast.BlockStatement) error {
 // transpileWhileStatement transpiles an IEC 61131-3 `WHILE` loop into a Go `for` loop.
 // transpileWhileStatement transpiles a WHILE loop to a Go `for` loop.
 func (t *Transpiler) transpileWhileStatement(stmt *ast.WhileStatement) error {
-	t.write("for ")
+	t.write("\tfor ")
 	if err := t.transpileExpression(stmt.Condition); err != nil {
 		return err
 	}
 	t.write(" {\n")
-	if err := t.transpileBlockStatement(stmt.Body); err != nil {
-		return err
+	for _, s := range stmt.Body.Statements {
+		t.write("\t")
+		if err := t.Transpile(s); err != nil {
+			return err
+		}
 	}
-	t.write("}\n")
+	t.write("\t}\n")
 	return nil
 }
 
 // transpileRepeatStatement transpiles an IEC 61131-3 `REPEAT...UNTIL` loop into a Go `for` loop with a `break` condition.
 // transpileRepeatStatement transpiles a REPEAT...UNTIL loop to a Go `for` loop.
 func (t *Transpiler) transpileRepeatStatement(stmt *ast.RepeatStatement) error {
-	t.write("for {\n")
-	if err := t.transpileBlockStatement(stmt.Body); err != nil {
-		return err
+	t.write("\tfor {\n")
+	for _, s := range stmt.Body.Statements {
+		t.write("\t")
+		if err := t.Transpile(s); err != nil {
+			return err
+		}
 	}
-	t.write("if ")
+	t.write("\t\tif ")
 	if err := t.transpileExpression(stmt.Condition); err != nil {
 		return err
 	}
 	t.write(" { break }\n")
-	t.write("}\n")
+	t.write("\t}\n")
 	return nil
 }
 
@@ -1389,7 +1570,7 @@ func (t *Transpiler) transpileReturnStatement(stmt *ast.ReturnStatement) error {
 // transpileExitStatement transpiles an IEC 61131-3 `EXIT` statement into a Go `break` statement.
 // transpileExitStatement transpiles an EXIT statement to a `break`.
 func (t *Transpiler) transpileExitStatement(stmt *ast.ExitStatement) error {
-	t.write("break\n")
+	t.write("\tbreak\n")
 	return nil
 }
 
@@ -1406,17 +1587,13 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
 		} else if t.globalVars[exp.Value] {
 			// If it's a global variable, write it without a prefix.
-			if t.accessVars[exp.Value] {
-				t.write("(*%s.%s)", t.programVarName, exp.Value)
-			} else if t.globalVars[exp.Value] {
-				// If it's a global variable, write it without a prefix.
-				t.write("%s", exp.Value)
-			} else if t.programVarName != "" {
-				// Otherwise, it's a local/member variable, so prefix it with the receiver.
-				t.write("%s.%s", t.programVarName, exp.Value)
-			} else {
-				t.write("%s", exp.Value)
-			}
+			t.write("%s", exp.Value)
+		} else if t.programVarName != "" {
+			// It's a local/member variable of a PROGRAM or FUNCTION_BLOCK, so prefix it with the receiver.
+			t.write("%s.%s", t.programVarName, exp.Value)
+		} else {
+			// It's a local variable inside a FUNCTION.
+			t.write("%s", exp.Value)
 		}
 	case *ast.IntegerLiteral:
 		t.write("%d", exp.Value)
@@ -1467,9 +1644,6 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 		return t.transpileHashLiteral(exp)
 	case *ast.ArrayLiteral:
 		return t.transpileArrayLiteral(exp)
-	case *ast.IlInstructionStatement, *ast.StepStatement, *ast.TransitionStatement, *ast.ActionStatement, *ast.ActionBlockStatement:
-		// These are handled by their parent SFC/IL transpilers, so we can ignore them here.
-		return nil
 
 	default:
 		log.Printf("Warning: Unhandled expression type in transpiler: %T", exp)
@@ -1483,6 +1657,9 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 // and Go `type` aliases for subrange types.
 func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration) error {
 	for _, decl := range tbd.Declarations {
+		// Transpile comments associated with each individual type declaration inside the block.
+		t.transpileLeadingComments(decl.LeadingComments)
+
 		// Check if the type declaration is for a STRUCT
 		if structDef, ok := decl.DataType.(*ast.StructDefinition); ok {
 			t.write("// %s is the transpiled struct for the user-defined type.\n", decl.Name.Value)
@@ -1511,8 +1688,9 @@ func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration
 // into the corresponding Go type string from the `iec` package.
 func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 	// The DataType is an expression, which for simple types is an Identifier.
-	if ident, ok := dataType.(*ast.Identifier); ok { // e.g., INT, or MyStruct
-		typeName := ident.Value
+	// The DataType is an expression. For simple types, it's an ast.TypeSpecifier.
+	if ts, ok := dataType.(*ast.TypeSpecifier); ok { // e.g., INT, or MyStruct
+		typeName := ts.Token.Literal
 		// Check if it's a user-defined type (STRUCT, ENUM, etc.) we've registered.
 		if _, isUserDefined := t.typeInfo[typeName]; isUserDefined {
 			// It's a type we've defined in this package, so just use its name.
@@ -1522,10 +1700,9 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		// Convert to uppercase to match standard IEC types (e.g., 'int' -> 'INT').
 		iecType := strings.ToUpper(typeName)
 		// It's a standard built-in type, so prefix with the 'iec' package.
-		// A more advanced implementation might have a lookup table.
 		return "iec." + iecType
 	}
-	if arrayDef, ok := dataType.(*ast.ArrayDefinition); ok {
+	if arrayDef, ok := dataType.(*ast.ArrayDefinition); ok { // cspell:disable-line
 		// Recursively call mapIecTypeToGo for the element type.
 		// This correctly handles multi-dimensional arrays (e.g., ARRAY OF ARRAY OF INT).
 		elemType := t.mapIecTypeToGo(arrayDef.DataType)
@@ -1567,11 +1744,17 @@ func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
 // transpileIfStatement transpiles an IEC 61131-3 `IF...THEN...ELSIF...ELSE...END_IF` statement
 // into a Go `if...else if...else` construct.
 func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
-	t.write("if ")
+	t.write("\tif ")                      // Add tab for the if statement itself
 	t.transpileExpression(stmt.Condition) // A function to convert expressions
 	t.write(" {\n")
-	t.transpileBlockStatement(stmt.Consequence)
-	t.write("}")
+	// Manually transpile block to add extra indentation
+	for _, s := range stmt.Consequence.Statements {
+		t.write("\t")
+		if err := t.Transpile(s); err != nil {
+			return err
+		}
+	}
+	t.write("\t}")
 
 	// Handle ELSIF and ELSE
 	alt := stmt.Alternative
@@ -1580,13 +1763,18 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 			t.write(" else if ")
 			t.transpileExpression(elseifStmt.Condition)
 			t.write(" {\n")
-			t.transpileBlockStatement(elseifStmt.Consequence)
-			t.write("}")
+			for _, s := range elseifStmt.Consequence.Statements {
+				t.write("\t")
+				if err := t.Transpile(s); err != nil {
+					return err
+				}
+			}
+			t.write("\t}")
 			alt = elseifStmt.Alternative
 		} else { // This is the final ELSE block
-			t.write(" else {\n")
+			t.write(" else {\n\t")
 			t.transpileBlockStatement(alt.(*ast.BlockStatement))
-			t.write("}")
+			t.write("\t}")
 			alt = nil
 		}
 	}
@@ -1625,7 +1813,7 @@ func (t *Transpiler) transpilePrefixExpression(exp *ast.PrefixExpression) error 
 	if strings.ToUpper(op) == "NOT" {
 		op = "!"
 	}
-	t.write(op)
+	t.write("%s", op)
 	if err := t.transpileExpression(exp.Right); err != nil {
 		return err
 	}

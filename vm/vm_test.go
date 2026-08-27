@@ -44,24 +44,24 @@ func TestBooleanExpressions(t *testing.T) {
 		{"1 > 1", false},
 		{"1 == 1", true},
 		{"1 != 1", false},
-		{"1 == 2", false},
+		{"1 = 2", false},
 		{"1 != 2", true},
-		{"true == true", true},
-		{"false == false", true},
-		{"true == false", false},
+		{"true = true", true},
+		{"false = false", true},
+		{"true = false", false},
 		{"true != false", true},
 		{"false != true", true},
-		{"(1 < 2) == true", true},
-		{"(1 < 2) == false", false},
-		{"(1 > 2) == true", false},
-		{"(1 > 2) == false", true},
+		{"(1 < 2) = true", true},
+		{"(1 < 2) = false", false},
+		{"(1 > 2) = true", false},
+		{"(1 > 2) = false", true},
 		{"!true", false},
 		{"!false", true},
 		{"!5", false},
 		{"!!true", true},
 		{"!!false", false},
 		{"!!5", true},
-		{"!(if (false) { 5; })", true},
+		{"!(if (false) then { 5; } end_if)", true},
 	}
 
 	runVmTests(t, tests)
@@ -69,26 +69,28 @@ func TestBooleanExpressions(t *testing.T) {
 
 func TestConditionals(t *testing.T) {
 	tests := []vmTestCase{
-		{"if (true) { 10 }", 10},
-		{"if (true) { 10 } else { 20 }", 10},
-		{"if (false) { 10 } else { 20 } ", 20},
-		{"if (1) { 10 }", 10},
-		{"if (1 < 2) { 10 }", 10},
-		{"if (1 < 2) { 10 } else { 20 }", 10},
-		{"if (1 > 2) { 10 } else { 20 }", 20},
-		{"if (1 > 2) { 10 }", Null},
-		{"if (false) { 10 }", Null},
-		{"if ((if (false) { 10 })) { 10 } else { 20 }", 20},
+		{"IF TRUE THEN 10; END_IF", 10},
+		{"IF TRUE THEN 10; ELSE 20; END_IF", 10},
+		{"IF FALSE THEN 10; ELSE 20; END_IF", 20},
+		{"IF 1 < 2 THEN 10; END_IF", 10},
+		{"IF 1 < 2 THEN 10; ELSE 20; END_IF", 10},
+		{"IF 1 > 2 THEN 10; ELSE 20; END_IF", 20},
+		{"IF 1 > 2 THEN 10; END_IF", Null},
+		{"IF FALSE THEN 10; END_IF", Null},
+		{"IF 1 > 2 THEN 99; ELSIF 1 = 1 THEN 42; ELSE 100; END_IF", 42},
+		{"IF 1 > 2 THEN 99; ELSIF 1 = 0 THEN 42; ELSE 100; END_IF", 100},
+		// Non-boolean conditions should evaluate to false.
+		{"IF 1 THEN 10; ELSE 20; END_IF", 20},
 	}
 
 	runVmTests(t, tests)
 }
 
-func TestGlobalLetStatements(t *testing.T) {
+func TestGlobalVarStatements(t *testing.T) {
 	tests := []vmTestCase{
-		{"let one = 1; one", 1},
-		{"let one = 1; let two = 2; one + two", 3},
-		{"let one = 1; let two = one + one; one + two", 3},
+		{"VAR one : INT; END_VAR one := 1; one;", 1},
+		{"VAR one, two : INT; END_VAR one := 1; two := 2; one + two;", 3},
+		{"VAR one, two : INT; END_VAR one := 1; two := one + one; one + two;", 3},
 	}
 
 	runVmTests(t, tests)
@@ -158,27 +160,21 @@ func TestIndexExpressions(t *testing.T) {
 func TestCallingFunctionsWithoutArguments(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let fivePlusTen = fn() { 5 + 10; };
-		fivePlusTen();
-		`,
+			input: `FUNCTION fivePlusTen : INT fivePlusTen := 5 + 10; END_FUNCTION
+					fivePlusTen();`,
 			expected: 15,
 		},
 		{
-			input: `
-		let one = fn() { 1; };
-		let two = fn() { 2; };
-		one() + two()
-		`,
+			input: `FUNCTION one : INT one := 1; END_FUNCTION
+					FUNCTION two : INT two := 2; END_FUNCTION
+					one() + two()`,
 			expected: 3,
 		},
 		{
-			input: `
-		let a = fn() { 1 };
-		let b = fn() { a() + 1 };
-		let c = fn() { b() + 1 };
-		c();
-		`,
+			input: `FUNCTION a : INT a := 1; END_FUNCTION
+					FUNCTION b : INT b := a() + 1; END_FUNCTION
+					FUNCTION c : INT c := b() + 1; END_FUNCTION
+					c();`,
 			expected: 3,
 		},
 	}
@@ -189,17 +185,13 @@ func TestCallingFunctionsWithoutArguments(t *testing.T) {
 func TestFunctionsWithReturnStatement(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let earlyExit = fn() { return 99; 100; };
-		earlyExit();
-		`,
+			input: `FUNCTION earlyExit : INT RETURN 99; END_FUNCTION
+					earlyExit();`,
 			expected: 99,
 		},
 		{
-			input: `
-		let earlyExit = fn() { return 99; return 100; };
-		earlyExit();
-		`,
+			input: `FUNCTION earlyExit : INT RETURN 99; RETURN 100; END_FUNCTION
+					earlyExit();`,
 			expected: 99,
 		},
 	}
@@ -210,19 +202,15 @@ func TestFunctionsWithReturnStatement(t *testing.T) {
 func TestFunctionsWithoutReturnValue(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let noReturn = fn() { };
-		noReturn();
-		`,
+			input: `FUNCTION noReturn : INT END_FUNCTION
+					noReturn();`,
 			expected: Null,
 		},
 		{
-			input: `
-		let noReturn = fn() { };
-		let noReturnTwo = fn() { noReturn(); };
-		noReturn();
-		noReturnTwo();
-		`,
+			input: `FUNCTION noReturn : INT END_FUNCTION
+					FUNCTION noReturnTwo : INT noReturnTwo := noReturn(); END_FUNCTION
+					noReturn();
+					noReturnTwo();`,
 			expected: Null,
 		},
 	}
@@ -258,48 +246,51 @@ func TestFirstClassFunctions(t *testing.T) {
 func TestCallingFunctionsWithBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let one = fn() { let one = 1; one };
-		one();
-		`,
+			input: `FUNCTION one : INT VAR one_local : INT := 1; END_VAR one := one_local; END_FUNCTION
+					one();`,
 			expected: 1,
 		},
 		{
 			input: `
-		let oneAndTwo = fn() { let one = 1; let two = 2; one + two; };
-		oneAndTwo();
-		`,
+			FUNCTION oneAndTwo : INT
+				VAR one: INT := 1; two: INT := 2; END_VAR
+				oneAndTwo := one + two;
+			END_FUNCTION
+			oneAndTwo();`,
 			expected: 3,
 		},
 		{
 			input: `
-		let oneAndTwo = fn() { let one = 1; let two = 2; one + two; };
-		let threeAndFour = fn() { let three = 3; let four = 4; three + four; };
-		oneAndTwo() + threeAndFour();
-		`,
+			FUNCTION oneAndTwo : INT VAR one:INT:=1; two:INT:=2; END_VAR oneAndTwo := one + two; END_FUNCTION
+			FUNCTION threeAndFour : INT VAR three:INT:=3; four:INT:=4; END_VAR threeAndFour := three + four; END_FUNCTION
+			oneAndTwo() + threeAndFour();`,
 			expected: 10,
 		},
 		{
 			input: `
-		let firstFoobar = fn() { let foobar = 50; foobar; };
-		let secondFoobar = fn() { let foobar = 100; foobar; };
-		firstFoobar() + secondFoobar();
-		`,
+			FUNCTION firstFoobar : INT
+				VAR foobar : INT := 50; END_VAR
+				firstFoobar := foobar;
+			END_FUNCTION
+			FUNCTION secondFoobar : INT
+				VAR foobar : INT := 100; END_VAR
+				secondFoobar := foobar;
+			END_FUNCTION
+			firstFoobar() + secondFoobar();`,
 			expected: 150,
 		},
 		{
 			input: `
-		let globalSeed = 50;
-		let minusOne = fn() {
-			let num = 1;
-			globalSeed - num;
-		}
-		let minusTwo = fn() {
-			let num = 2;
-			globalSeed - num;
-		}
-		minusOne() + minusTwo();
-		`,
+			VAR globalSeed : INT := 50; END_VAR
+			FUNCTION minusOne : INT
+				VAR num : INT := 1; END_VAR
+				minusOne := globalSeed - num;
+			END_FUNCTION
+			FUNCTION minusTwo : INT
+				VAR num : INT := 2; END_VAR
+				minusTwo := globalSeed - num;
+			END_FUNCTION
+			minusOne() + minusTwo();`,
 			expected: 97,
 		},
 	}
@@ -310,66 +301,44 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let identity = fn(a) { a; };
-		identity(4);
-		`,
+			input: `FUNCTION identity : INT VAR_INPUT a:INT; END_VAR identity := a; END_FUNCTION
+					identity(4);`,
 			expected: 4,
 		},
 		{
-			input: `
-		let sum = fn(a, b) { a + b; };
-		sum(1, 2);
-		`,
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR sum := a + b; END_FUNCTION
+					sum(1, 2);`,
 			expected: 3,
 		},
 		{
-			input: `
-		let sum = fn(a, b) {
-			let c = a + b;
-			c;
-		};
-		sum(1, 2);
-		`,
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
+					sum(1, 2);`,
 			expected: 3,
 		},
 		{
-			input: `
-		let sum = fn(a, b) {
-			let c = a + b;
-			c;
-		};
-		sum(1, 2) + sum(3, 4);`,
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
+					sum(1, 2) + sum(3, 4);`,
+			expected: 10,
+		},
+		{
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
+					FUNCTION outer : INT outer := sum(1, 2) + sum(3, 4); END_FUNCTION
+					outer();`,
 			expected: 10,
 		},
 		{
 			input: `
-		let sum = fn(a, b) {
-			let c = a + b;
-			c;
-		};
-		let outer = fn() {
-			sum(1, 2) + sum(3, 4);
-		};
-		outer();
-		`,
-			expected: 10,
-		},
-		{
-			input: `
-		let globalNum = 10;
-
-		let sum = fn(a, b) {
-			let c = a + b;
-			c + globalNum;
-		};
-
-		let outer = fn() {
-			sum(1, 2) + sum(3, 4) + globalNum;
-		};
-
-		outer() + globalNum;
-		`,
+			VAR globalNum : INT := 10; END_VAR
+			FUNCTION sum : INT
+				VAR_INPUT a:INT; b:INT; END_VAR
+				VAR c:INT; END_VAR
+				c := a + b;
+				sum := c + globalNum;
+			END_FUNCTION
+			FUNCTION outer : INT
+				outer := sum(1, 2) + sum(3, 4) + globalNum;
+			END_FUNCTION
+			outer() + globalNum;`,
 			expected: 50,
 		},
 	}
@@ -380,15 +349,15 @@ func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input:    `fn() { 1; }(1);`,
+			input:    `FUNCTION f:INT f:=1; END_FUNCTION f(1);`,
 			expected: `wrong number of arguments: want=0, got=1`,
 		},
 		{
-			input:    `fn(a) { a; }();`,
+			input:    `FUNCTION f:INT VAR_INPUT a:INT; END_VAR f:=a; END_FUNCTION f();`,
 			expected: `wrong number of arguments: want=1, got=0`,
 		},
 		{
-			input:    `fn(a, b) { a + b; }(1);`,
+			input:    `FUNCTION f:INT VAR_INPUT a:INT;b:INT; END_VAR f:=a+b; END_FUNCTION f(1);`,
 			expected: `wrong number of arguments: want=2, got=1`,
 		},
 	}
@@ -542,48 +511,32 @@ func TestClosures(t *testing.T) {
 func TestRecursiveFunctions(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let countDown = fn(x) {
-			if (x == 0) {
-				return 0;
-			} else {
-				countDown(x - 1);
-			}
-		};
-		countDown(1);
-		`,
+			input: `FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
+						IF x = 0 THEN
+							countDown := 0;
+						ELSE
+							countDown := countDown(x - 1);
+						END_IF
+					END_FUNCTION
+					countDown(1);`,
 			expected: 0,
 		},
 		{
-			input: `
-		let countDown = fn(x) {
-			if (x == 0) {
-				return 0;
-			} else {
-				countDown(x - 1);
-			}
-		};
-		let wrapper = fn() {
-			countDown(1);
-		};
-		wrapper();
-		`,
+			input: `FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
+						IF x = 0 THEN countDown := 0; ELSE countDown := countDown(x - 1); END_IF
+					END_FUNCTION
+					FUNCTION wrapper : INT wrapper := countDown(1); END_FUNCTION
+					wrapper();`,
 			expected: 0,
 		},
 		{
-			input: `
-		let wrapper = fn() {
-			let countDown = fn(x) {
-				if (x == 0) {
-					return 0;
-				} else {
-					countDown(x - 1);
-				}
-			};
-			countDown(1);
-		};
-		wrapper();
-		`,
+			input: `FUNCTION wrapper : INT
+						FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
+							IF x = 0 THEN countDown := 0; ELSE countDown := countDown(x - 1); END_IF
+						END_FUNCTION
+						wrapper := countDown(1);
+					END_FUNCTION
+					wrapper();`,
 			expected: 0,
 		},
 	}
@@ -594,20 +547,16 @@ func TestRecursiveFunctions(t *testing.T) {
 func TestRecursiveFibonacci(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `
-		let fibonacci = fn(x) {
-			if (x == 0) {
-				return 0;
-			} else {
-				if (x == 1) {
-					return 1;
-				} else {
-					fibonacci(x - 1) + fibonacci(x - 2);
-				}
-			}
-		};
-		fibonacci(15);
-		`,
+			input: `FUNCTION fibonacci : INT VAR_INPUT x:INT; END_VAR
+						IF x = 0 THEN
+							fibonacci := 0;
+						ELSIF x = 1 THEN
+							fibonacci := 1;
+						ELSE
+							fibonacci := fibonacci(x - 1) + fibonacci(x - 2);
+						END_IF
+					END_FUNCTION
+					fibonacci(15);`,
 			expected: 610,
 		},
 	}

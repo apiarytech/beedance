@@ -718,9 +718,8 @@ func TestFunctionCalls(t *testing.T) {
 		},
 		{
 			input: `
-			let noArg = fn() { 24 };
-			noArg();
-			`,
+			FUNCTION noArg : INT noArg := 24; END_FUNCTION
+			noArg();`,
 			expectedConstants: []interface{}{
 				24,
 				[]code.Instructions{
@@ -738,9 +737,8 @@ func TestFunctionCalls(t *testing.T) {
 		},
 		{
 			input: `
-			let oneArg = fn(a) { a };
-			oneArg(24);
-			`,
+			FUNCTION oneArg : INT VAR_INPUT a:INT; END_VAR oneArg := a; END_FUNCTION
+			oneArg(24);`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpGetLocal, 0),
@@ -759,9 +757,8 @@ func TestFunctionCalls(t *testing.T) {
 		},
 		{
 			input: `
-			let manyArg = fn(a, b, c) { a; b; c };
-			manyArg(24, 25, 26);
-			`,
+			FUNCTION manyArg : INT VAR_INPUT a:INT; b:INT; c:INT; END_VAR a; b; manyArg := c; END_FUNCTION
+			manyArg(24, 25, 26);`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpGetLocal, 0),
@@ -1040,9 +1037,8 @@ func TestRecursiveFunctions(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
-			let countDown = fn(x) { countDown(x - 1); };
-			countDown(1);
-			`,
+			FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR countDown := countDown(x - 1); END_FUNCTION
+			countDown(1);`,
 			expectedConstants: []interface{}{
 				1,
 				[]code.Instructions{
@@ -1066,12 +1062,11 @@ func TestRecursiveFunctions(t *testing.T) {
 		},
 		{
 			input: `
-			let wrapper = fn() {
-				let countDown = fn(x) { countDown(x - 1); };
+			FUNCTION wrapper : INT
+				FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR countDown := countDown(x-1); END_FUNCTION
 				countDown(1);
-			};
-			wrapper();
-			`,
+			END_FUNCTION
+			wrapper();`,
 			expectedConstants: []interface{}{
 				1,
 				[]code.Instructions{

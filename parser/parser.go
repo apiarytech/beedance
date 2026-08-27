@@ -84,9 +84,10 @@ type Parser struct {
 	l      *lexer.Lexer
 	errors []string
 
-	curToken   token.Token
-	peekToken  token.Token
-	peek2Token token.Token // Second lookahead token
+	curToken        token.Token
+	peekToken       token.Token
+	peek2Token      token.Token // Second lookahead token
+	leadingComments []string
 
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
@@ -332,6 +333,17 @@ func (p *Parser) synchronizeParser() {
 	}
 }
 
+// consumeLeadingComments consumes a sequence of comment tokens and stores their
+// literals in the parser's leadingComments slice. This is called before parsing
+// a statement to associate comments with the subsequent AST node.
+func (p *Parser) consumeLeadingComments() {
+	p.leadingComments = nil // Reset before consuming
+	for p.curTokenIs(token.COMMENT) {
+		p.leadingComments = append(p.leadingComments, p.curToken.Literal)
+		p.nextToken()
+	}
+}
+
 // specificError creates a formatted error message with line and column numbers.
 func (p *Parser) specificError(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
@@ -388,8 +400,10 @@ func (p *Parser) ParseProgram() *ast.Program {
 			}
 			// After a successful parse, advance to the next token.
 			// Block statements manage their own token consumption, so we only
-			// advance if it's not a block.
-			p.nextToken()
+			// advance if it's not a block statement.
+			if !isBlockStatement(stmt) {
+				p.nextToken()
+			}
 		}()
 	}
 
@@ -399,6 +413,9 @@ func (p *Parser) ParseProgram() *ast.Program {
 func (p *Parser) parseStatement() ast.Statement {
 	defer untrace(trace("parseStatement"))
 
+	// Consume any comments before the statement starts. They will be stored in p.leadingComments
+	// and attached to the AST node by the specific parsing function.
+	p.consumeLeadingComments()
 	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
 	if p.isIlInstruction() {
 		switch p.curToken.Type {
@@ -575,7 +592,7 @@ func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 
 func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	defer untrace(trace("parseVarBlockStatement"))
-	stmt := &ast.VarBlockDeclaration{Token: p.curToken}
+	stmt := &ast.VarBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // Consume VAR
 
@@ -586,7 +603,8 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 		// The error is already reported by parseVarDeclarations, so we don't need to report it again.
 		// Just ensure we don't advance past the token that should start the next statement.
 		return stmt
-	} // cspell:disable-line
+	}
+	p.nextToken() // Consume END_VAR
 
 	return stmt
 }
@@ -633,12 +651,10 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	p.nextToken() // Consume VAR_GLOBAL
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
-
-	// After parsing declarations, we should be on the END_VAR token.
-	// We consume it here so the caller doesn't have to.
 	if p.curTokenIs(token.END_VAR) {
-		p.nextToken() // Consume END_VAR
+		p.nextToken()
 	}
+
 	return stmt
 }
 
@@ -649,6 +665,9 @@ func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 	p.nextToken() // Consume VAR_EXTERNAL
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken()
+	}
 	return stmt
 }
 
@@ -658,6 +677,9 @@ func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 
 	p.nextToken() // consume VAR_ACCESS
 	stmt.Vars = p.parseAccessDeclarations()
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken() // Consume END_VAR
+	}
 	return stmt
 }
 
@@ -667,6 +689,9 @@ func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 	defer untrace(trace("parseAccessDeclarations"))
 	varDecls := []*ast.VarDeclStatement{}
 	for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
+		// Consume any comments before the next declaration line.
+		p.consumeLeadingComments()
+
 		if isStatementStartKeyword(p.curToken.Type) {
 			p.peekError(token.END_VAR)
 			return varDecls
@@ -695,7 +720,7 @@ func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 		}
 
 		// DataType is implicit and resolved by the compiler/linker.
-		decl := &ast.VarDeclStatement{Token: localName.Token, Name: localName, AccessPath: accessPath, DataType: nil, AccessType: accessType}
+		decl := &ast.VarDeclStatement{Token: localName.Token, Name: localName, AccessPath: accessPath, DataType: nil, AccessType: accessType, LeadingComments: p.leadingComments}
 		varDecls = append(varDecls, decl)
 
 		p.expectPeek(token.SEMICOLON)
@@ -711,27 +736,46 @@ func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 	p.nextToken() // consume VAR_TEMP
 
 	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken() // Consume END_VAR
+	}
 	return stmt
 }
 
 func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	defer untrace(trace("parseConfigVarDeclStatement"))
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
-
 	p.nextToken() // consume VAR_CONFIG
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	if !p.curTokenIs(token.IDENT) {
+		p.currentError("expected program instance name after VAR_CONFIG, got %s", p.curToken.Type)
+		// Attempt to recover by skipping to the end of the block.
+		for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
+			p.nextToken()
+		}
+		return nil
+	}
+	stmt.ProgramInstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken() // consume instance name
+
+	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
+	if p.curTokenIs(token.END_VAR) {
+		p.nextToken() // Consume END_VAR
+	}
 	return stmt
 }
 
 func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 	defer untrace(trace("parseTypeBlockDeclaration"))
-	block := &ast.TypeBlockDeclaration{Token: p.curToken}
+	block := &ast.TypeBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
 	block.Declarations = []*ast.TypeDeclaration{}
 
 	p.nextToken() // consume TYPE
 
 	for !p.curTokenIs(token.END_TYPE) && !p.curTokenIs(token.EOF) {
+		// Consume any comments before the next declaration.
+		p.consumeLeadingComments()
+
 		decl := p.parseTypeDeclaration()
 		if decl != nil {
 			block.Declarations = append(block.Declarations, decl)
@@ -740,12 +784,16 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 		p.nextToken()
 	}
 
+	if p.curTokenIs(token.END_TYPE) {
+		p.nextToken() // Consume END_TYPE
+	}
+
 	return block
 }
 
 func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	defer untrace(trace("parseTypeDeclaration"))
-	decl := &ast.TypeDeclaration{Token: p.curToken}
+	decl := &ast.TypeDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	if !p.curTokenIs(token.IDENT) {
 		p.errors = append(p.errors, fmt.Sprintf("expected identifier, got %s", p.curToken.Type))
@@ -864,6 +912,15 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 	}
 
 	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
+		// Skip any comments that might be between declarations.
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
+		// Consume any comments before the next declaration line.
+		p.consumeLeadingComments()
+
 		// Error Recovery: If we encounter a token that looks like the start of a new statement block,
 		// assume END_VAR was missing and stop parsing this var block.
 		if isStatementStartKeyword(p.curToken.Type) {
@@ -903,14 +960,15 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 
 		for _, name := range names {
 			decl := &ast.VarDeclStatement{
-				Token:       name.Token,
-				Name:        name,
-				Location:    atDecl,
-				DataType:    dataType,
-				Value:       initialValue,
-				IsConstant:  isConstant, // Apply the block-level qualifier
-				IsRetain:    isRetain,
-				IsNonRetain: isNonRetain,
+				Token:           name.Token,
+				Name:            name,
+				Location:        atDecl,
+				DataType:        dataType,
+				Value:           initialValue,
+				IsConstant:      isConstant, // Apply the block-level qualifier
+				IsRetain:        isRetain,
+				IsNonRetain:     isNonRetain,
+				LeadingComments: p.leadingComments,
 			}
 			varDecls = append(varDecls, decl)
 		}
@@ -984,8 +1042,10 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 			// Access variable declarations for communication.
 			stmt.AccessVars = append(stmt.AccessVars, p.parseAccessVarDeclStatement())
 		case token.VAR_CONFIG:
-			// Instance-specific initializations.
-			stmt.ConfigVars = append(stmt.ConfigVars, p.parseConfigVarDeclStatement())
+			cfgVar := p.parseConfigVarDeclStatement()
+			if cfgVar != nil {
+				stmt.VarConfigs = append(stmt.VarConfigs, cfgVar)
+			}
 		default:
 			// If we encounter a token we don't recognize at this level, we advance past it to avoid an infinite loop.
 			p.nextToken()
@@ -994,6 +1054,8 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 	if !p.curTokenIs(token.END_CONFIGURATION) {
 		p.specificError("missing 'END_CONFIGURATION' for configuration starting at row %d", stmt.Token.Row)
 		return nil
+	} else {
+		p.nextToken() // Consume END_CONFIGURATION
 	}
 	return stmt
 }
@@ -1436,7 +1498,7 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 
 func (p *Parser) parseIfStatement() *ast.IfStatement {
 	defer untrace(trace("parseIfStatement"))
-	ifStmt := &ast.IfStatement{Token: p.curToken}
+	ifStmt := &ast.IfStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken()
 	ifStmt.Condition = p.parseExpression(LOWEST)
@@ -1481,6 +1543,8 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	if !p.curTokenIs(token.END_IF) {
 		p.currentError("missing 'END_IF' for IF statement starting at row %d", ifStmt.Token.Row)
 		// Do not return nil. Return the partially parsed statement to allow recovery.
+	} else {
+		p.nextToken() // Consume END_IF
 	}
 
 	return ifStmt
@@ -1488,7 +1552,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 func (p *Parser) parseForStatement() ast.Statement {
 	defer untrace(trace("parseForStatement"))
-	stmt := &ast.ForLoopStatement{Token: p.curToken}
+	stmt := &ast.ForLoopStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	// The initialization part is an assignment statement, but without the trailing semicolon.
 	// We parse it manually here.
@@ -1524,29 +1588,38 @@ func (p *Parser) parseForStatement() ast.Statement {
 	}
 
 	// DO
-	if !p.expectPeek(token.DO) {
-		//return stmt // allow recovery
+	if p.peekTokenIs(token.DO) {
+		p.nextToken() // consume EndValue
+		p.nextToken() // consume DO
+	} else {
+		p.peekError(token.DO)
+		// Recovery: assume DO was missing and the next token starts the body.
+		p.nextToken() // consume EndValue to get to the start of the body
 	}
-	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
+	if p.curTokenIs(token.END_FOR) {
+		p.nextToken() // Consume END_FOR
+	}
 
 	return stmt
 }
 
 func (p *Parser) parseWhileStatement() ast.Statement {
 	defer untrace(trace("parseWhileStatement"))
-	stmt := &ast.WhileStatement{Token: p.curToken}
+	stmt := &ast.WhileStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // Consume WHILE
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	// Improved Error Recovery: Report missing DO but continue parsing the block.
-	if !p.expectPeek(token.DO) {
-		// Do not return, allow parsing of the body to continue.
-		// expectPeek has already logged the error.
+	if p.peekTokenIs(token.DO) {
+		p.nextToken() // consume condition
+		p.nextToken() // consume DO
+	} else {
+		p.peekError(token.DO)
+		// Recovery: assume DO was missing and the next token starts the body.
+		p.nextToken() // consume condition to get to the start of the body
 	}
-
-	p.nextToken() // Consume DO
 	stmt.Body = p.parseBlockStatementUntil(token.END_WHILE)
 
 	// parseBlockStatementWhileLoop leaves us on END_WHILE, so we just need to consume it.
@@ -1554,6 +1627,8 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 		p.specificError("missing 'END_WHILE' for WHILE statement starting at row %d", stmt.Token.Row)
 		// Return the partially parsed statement for better recovery
 		return stmt
+	} else {
+		p.nextToken() // Consume END_WHILE
 	}
 	return stmt
 }
@@ -1576,7 +1651,7 @@ func (p *Parser) parseStepList() []*ast.Identifier {
 
 func (p *Parser) parseRepeatStatement() ast.Statement {
 	defer untrace(trace("parseRepeatStatement"))
-	stmt := &ast.RepeatStatement{Token: p.curToken}
+	stmt := &ast.RepeatStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // consume REPEAT
 	stmt.Body = p.parseBlockStatementRepeatLoop()
@@ -1591,9 +1666,9 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 	// After parsing the expression, the current token is the last token of the expression.
 	// We need to advance to the END_REPEAT token.
 	if !p.expectPeek(token.END_REPEAT) {
-		return nil // Error already reported
+		return stmt // Error reported, return for recovery
 	}
-	// Consume the END_REPEAT token to finish parsing the statement.
+	// expectPeek leaves us on END_REPEAT. Consume it to advance to the next token.
 	p.nextToken()
 
 	return stmt
@@ -1601,7 +1676,7 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 
 func (p *Parser) parseCaseStatement() ast.Statement {
 	defer untrace(trace("parseCaseStatement"))
-	stmt := &ast.CaseStatement{Token: p.curToken}
+	stmt := &ast.CaseStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // Consume CASE
 	stmt.Expression = p.parseExpression(LOWEST)
@@ -1641,6 +1716,8 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 
 	if !p.curTokenIs(token.END_CASE) {
 		p.peekError(token.END_CASE)
+	} else {
+		p.nextToken() // Consume END_CASE
 	}
 
 	return stmt
@@ -1666,9 +1743,10 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 
 func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 	defer untrace(trace("parseAssignmentStatement"))
+	// This function is called for standalone assignments, so it should attach the leading comments.
 	stmt := &ast.AssignmentStatement{
-		Token: p.curToken,
-		Left:  &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+		Token: p.curToken, LeadingComments: p.leadingComments,
+		Left: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
 	}
 
 	if !p.expectPeek(token.ASSIGN) {
@@ -1816,7 +1894,7 @@ func (p *Parser) parseRealOrType() ast.Expression {
 
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	defer untrace(trace("parseExpressionStatement"))
-	stmt := &ast.ExpressionStatement{Token: p.curToken}
+	stmt := &ast.ExpressionStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	stmt.Expression = p.parseExpression(LOWEST)
 
@@ -1886,6 +1964,12 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 	}
 
 	for !isEndToken(p.curToken.Type) && !p.curTokenIs(token.EOF) {
+		// Skip any comments that might be inside the block.
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
 		// Heuristic for CASE statements: A new case label can start with any expression
 		// (e.g., an INT like `3`, an IDENT like `MyState`). If we see a token that
 		// could start an expression and is followed by a comma or colon, it's very
@@ -1898,10 +1982,9 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		if isStatementStartKeyword(p.curToken.Type) {
-			break
+		if !isBlockStatement(stmt) {
+			p.nextToken()
 		}
-		p.nextToken()
 	}
 	return block
 }
@@ -1931,7 +2014,9 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		p.nextToken()
+		if !isBlockStatement(stmt) {
+			p.nextToken()
+		}
 	}
 	if !p.curTokenIs(token.UNTIL) {
 		p.peekError(token.UNTIL)
@@ -1956,9 +2041,12 @@ func isStatementEndToken(tok token.TokenType) bool {
 // isBlockStatement checks if a statement is a block-level statement
 // that manages its own token consumption until its end token.
 func isBlockStatement(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
+	}
 	switch stmt.(type) {
 	case *ast.IfStatement, *ast.ForLoopStatement, *ast.WhileStatement,
-		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration,
+		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration, *ast.StepStatement, *ast.TransitionStatement,
 		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration,
 		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement, *ast.AccessVarDeclaration,
 		*ast.ConfigVarDeclaration, *ast.ExternalVarDeclaration, *ast.TempVarDeclaration:
@@ -2089,11 +2177,22 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	p.nextToken() // Consume the opening token (e.g., '(' or '[')
 
 	// Parse a comma-separated list of arguments
-	list = append(list, p.parseCallArgument()) // Parse first argument
-	for p.peekTokenIs(token.COMMA) {
-		p.nextToken() // consume previous argument's last token
-		p.nextToken() // consume comma
+	if !p.curTokenIs(end) {
 		list = append(list, p.parseCallArgument())
+		for {
+			if p.peekTokenIs(token.COMMA) {
+				p.nextToken()
+				p.nextToken() // consume comma
+				for p.curTokenIs(token.COMMENT) {
+					p.nextToken()
+				}
+				list = append(list, p.parseCallArgument())
+			} else if p.peekTokenIs(token.COMMENT) {
+				p.nextToken() // Skip comment and re-evaluate
+			} else {
+				break
+			}
+		}
 	}
 	p.expectPeek(end) // Consume the closing token
 	return list
@@ -2113,11 +2212,19 @@ func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expressio
 
 	p.nextToken() // Move to the first element
 	list = append(list, p.parseExpression(LOWEST))
-
-	for p.peekTokenIs(token.COMMA) {
-		p.nextToken() // Consume the expression
-		p.nextToken() // Consume the comma
-		list = append(list, p.parseExpression(LOWEST))
+	for {
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+			p.nextToken() // consume comma
+			for p.curTokenIs(token.COMMENT) {
+				p.nextToken()
+			}
+			list = append(list, p.parseExpression(LOWEST))
+		} else if p.peekTokenIs(token.COMMENT) {
+			p.nextToken() // Skip comment and re-evaluate
+		} else {
+			break
+		}
 	}
 
 	if !p.expectPeek(end) {

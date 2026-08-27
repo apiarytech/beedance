@@ -16,7 +16,7 @@ import (
 
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	defer untrace(trace("parseFunctionBlockDeclaration"))
-	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken}
+	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	if !p.expectPeek(token.IDENT) {
 		return nil // Expected function block name
@@ -40,9 +40,12 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 			stmt.VarExternal = append(stmt.VarExternal, p.parseExternalVarDeclStatement())
 		case token.VAR:
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
-		case token.VAR_GLOBAL, token.VAR_ACCESS:
-			p.currentError("%s declarations are not allowed in a FUNCTION_BLOCK; use PROGRAM for internal state", p.curToken.Type)
-			// Still parse it to allow for better error recovery on the rest of the file.
+		case token.VAR_ACCESS:
+			p.currentError("%s declarations are not allowed in a FUNCTION_BLOCK", p.curToken.Type)
+			p.parseAccessVarDeclStatement() // Parse to recover
+		case token.VAR_GLOBAL:
+			p.currentError("%s declarations are not allowed in a FUNCTION_BLOCK", p.curToken.Type)
+			p.parseGlobalVarDeclStatement() // Parse to recover
 		default:
 			// No more VAR blocks, break the loop to parse the body
 			goto end_var_parsing
@@ -62,6 +65,8 @@ end_var_parsing:
 
 	if !p.curTokenIs(token.END_FUNCTION_BLOCK) || (p.peekTokenIs(token.EOF) && p.curTokenIs(token.EOF)) {
 		p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_FUNCTION_BLOCK
 	}
 
 	return stmt

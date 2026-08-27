@@ -64,10 +64,8 @@ func (vm *VM) Run() error {
 	var ins code.Instructions
 	var err error
 
-	for err == nil && vm.currentFrame().ip < len(vm.currentFrame().Instructions())-1 {
-		vm.currentFrame().ip++
-
-		ip = vm.currentFrame().ip
+	for ip = vm.currentFrame().ip + 1; ip < len(vm.currentFrame().Instructions()); ip = vm.currentFrame().ip + 1 {
+		vm.currentFrame().ip = ip
 		ins = vm.currentFrame().Instructions()
 		op := code.Opcode(ins[ip])
 
@@ -198,10 +196,10 @@ func (vm *VM) Run() error {
 
 		case code.OpCurrentClosure:
 			currentClosure := vm.currentFrame().cl
-			err := vm.push(currentClosure)
-			if err != nil {
-				return err
-			}
+			err = vm.push(currentClosure)
+		}
+		if err != nil {
+			return err
 		}
 	}
 
@@ -557,7 +555,8 @@ func isTruthy(obj object.Object) bool {
 		return false
 
 	default:
-		return true
+		// IEC 61131-3 requires boolean conditions. Other types are not "truthy".
+		return false
 	}
 }
 

@@ -35,6 +35,7 @@ myVar <> 10;
 		{token.ASSIGN, ":=", 3, 14},
 		{token.INT, "5", 3, 17},
 		{token.SEMICOLON, ";", 3, 18},
+		{token.COMMENT, " A variable declaration ", 3, 20},
 		{token.IDENT, "anotherVar", 4, 2},
 		{token.COLON, ":", 4, 13},
 		{token.BOOL, "BOOL", 4, 15},
@@ -121,15 +122,19 @@ func TestSingleLineComments(t *testing.T) {
 		expectedLiteral string
 	}{
 		{token.VAR, "VAR"},
+		{token.COMMENT, " This is a variable block"},
 		{token.IDENT, "myVar"},
 		{token.COLON, ":"},
 		{token.INT, "INT"},
 		{token.SEMICOLON, ";"},
+		{token.COMMENT, " This is a variable declaration"},
 		{token.END_VAR, "END_VAR"},
+		{token.COMMENT, " This is a full line comment"},
 		{token.IDENT, "myVar"},
 		{token.ASSIGN, ":="},
 		{token.INT, "5"},
 		{token.SEMICOLON, ";"},
+		{token.COMMENT, " Trailing comment"},
 		{token.EOF, ""},
 	}
 

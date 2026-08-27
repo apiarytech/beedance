@@ -27,7 +27,18 @@ func transpileAndCheck(t *testing.T, name, input, expected string) {
 	var buf bytes.Buffer
 	// We need to mock the config package for the generated code to be valid.
 	// This is a simplified approach for testing the transpiler's output.
-	header := "package main\n\nimport (\n\t\"fmt\"\n\t\"time\"\n\n\t\"beedance/iec\"\n\t\"beedance/config\"\n)\n\n"
+	header := `// Beedance iec to go transpiler converter
+package main
+
+import (
+	"fmt"
+	"time"
+
+	.	"github.com/apiarytech/royaljelly/iec"
+	.	"github.com/apiarytech/royaljelly"
+)
+
+`
 	buf.WriteString(header)
 
 	transpiler := New(&buf)
@@ -50,26 +61,27 @@ func transpileAndCheck(t *testing.T, name, input, expected string) {
 	expectedNormalized := normalize(fullExpected)
 
 	if actualNormalized != expectedNormalized {
-		t.Errorf("[%s] transpiled output does not match expected.\n\n--- EXPECTED ---\n%s\n\n--- ACTUAL ---\n%s\n\n--- DIFF ---", name, fullExpected, buf.String())
-		// A simple diff-like output
+		t.Errorf("[%s] transpiled output does not match expected. See diff below:", name)
 		actualLines := strings.Split(buf.String(), "\n")
 		expectedLines := strings.Split(fullExpected, "\n")
 		maxLines := len(actualLines)
 		if len(expectedLines) > maxLines {
 			maxLines = len(expectedLines)
 		}
+
 		for i := 0; i < maxLines; i++ {
 			actualLine := ""
 			if i < len(actualLines) {
 				actualLine = actualLines[i]
 			}
+
 			expectedLine := ""
 			if i < len(expectedLines) {
 				expectedLine = expectedLines[i]
 			}
+
 			if normalize(actualLine) != normalize(expectedLine) {
-				t.Logf("line %d: expected |%s|", i+1, expectedLine)
-				t.Logf("line %d:   actual |%s|", i+1, actualLine)
+				t.Errorf("line %d:\n- expected: %q\n-   actual: %q", i+1, expectedLine, actualLine)
 			}
 		}
 	}
@@ -98,10 +110,7 @@ type MySimpleProgram struct {
 // NewMySimpleProgramFactory creates a new instance of the MySimpleProgram program.
 func NewMySimpleProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MySimpleProgram{}
-
-	// Apply initial values from ST code
 	instance.anotherVar = 3.140000
-
 	return instance.Logic, nil
 }
 
@@ -138,8 +147,8 @@ END_FUNCTION_BLOCK
 	expected := `
 // MyFB is the transpiled struct for the FUNCTION_BLOCK of the same name.
 type MyFB struct {
-	EN iec.BOOL
-	ENO iec.BOOL
+	EN  iec.BOOL
+	ENO iec.BOOL     
 	In1 iec.BOOL
 	Out1 iec.INT
 }
@@ -196,8 +205,8 @@ func MyFunc(A iec.INT, C *iec.REAL) iec.INT {
 }
 
 func TestTypeDeclarationTranspilation(t *testing.T) {
-	input := `
-TYPE
+	input := `// COLOR is an enumerated type
+TYPE 
     COLOR : (RED, GREEN, BLUE);
     POINT : STRUCT
         X : INT;
@@ -271,14 +280,14 @@ END_PROGRAM
 `
 	// Note: The transpiler has a known issue where `CASE 4..7` becomes `case (4 .. 7)`, which is invalid Go.
 	// The test reflects the current output. A correct implementation would expand the range or use if/else.
-	expected := `
-type ControlFlow struct {
+	expected := `type ControlFlow struct {
 	x iec.INT
 	y iec.INT
 	z iec.INT
 	color iec.INT
 }
 
+// NewControlFlowFactory creates a new instance of the ControlFlow program.
 func NewControlFlowFactory(params map[string]string) (func(time.Time), error) {
 	instance := &ControlFlow{}
 	instance.x = 0
@@ -286,6 +295,7 @@ func NewControlFlowFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
+// Link connects the program's located variables to the runtime's I/O manager.
 func (p *ControlFlow) Link(linker config.IOLinker) error {
 	return nil
 }
@@ -307,7 +317,7 @@ func (p *ControlFlow) Logic(now time.Time) {
 	case (4 .. 7):
 		p.z = 30
 	default:
-		p.z = -1
+		p.z = (-1)
 	}
 
 	for p.z := 1; p.z <= 5; p.z += 1 {
@@ -352,18 +362,20 @@ type SubrangeTest struct {
     inputVal iec.INT
 }
 
+// NewSubrangeTestFactory creates a new instance of the SubrangeTest program.
 func NewSubrangeTestFactory(params map[string]string) (func(time.Time), error) {
     instance := &SubrangeTest{}
     instance.inputVal = 200
     return instance.Logic, nil
 }
 
+// Link connects the program's located variables to the runtime's I/O manager.
 func (p *SubrangeTest) Link(linker config.IOLinker) error {
     return nil
 }
 
 func (p *SubrangeTest) Logic(now time.Time) {
-    p.mySmallInt = iec.ClampINT(p.inputVal, -100, 100)
+    p.mySmallInt = iec.ClampINT(p.inputVal, (-100), 100)
 }
 `
 	transpileAndCheck(t, "TestSubrangeAssignmentTranspilation", input, expected)

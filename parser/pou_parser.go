@@ -54,8 +54,18 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 		} else if p.curTokenIs(token.VAR_IN_OUT) {
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		} else if p.curTokenIs(token.VAR_EXTERNAL) || p.curTokenIs(token.VAR_GLOBAL) || p.curTokenIs(token.VAR_ACCESS) || p.curTokenIs(token.VAR_TEMP) {
-			p.currentError("%s declarations are not allowed in a FUNCTION; use FUNCTION_BLOCK for internal state", token.TYPE)
-			// Still parse it to allow for better error recovery on the rest of the file.
+			p.currentError("%s declarations are not allowed in a FUNCTION", p.curToken.Type)
+			// To prevent an infinite loop and to recover, we parse the invalid block and discard it.
+			switch p.curToken.Type {
+			case token.VAR_EXTERNAL:
+				p.parseExternalVarDeclStatement()
+			case token.VAR_GLOBAL:
+				p.parseGlobalVarDeclStatement()
+			case token.VAR_ACCESS:
+				p.parseAccessVarDeclStatement()
+			case token.VAR_TEMP:
+				p.parseTempVarDeclStatement()
+			}
 		} else if p.curTokenIs(token.VAR) {
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
 		} else {
@@ -66,6 +76,10 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 
 	// After var blocks, we have the body
 	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
+
+	if p.curTokenIs(token.END_FUNCTION) {
+		p.nextToken() // Consume END_FUNCTION
+	}
 
 	return stmt
 }
@@ -83,6 +97,10 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 
 	// Loop to parse all variable declaration blocks
 	for {
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
 			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
@@ -129,6 +147,8 @@ end_var_parsing:
 
 	if !p.curTokenIs(token.END_PROGRAM) || (p.peekTokenIs(token.EOF) && p.curTokenIs(token.EOF)) {
 		p.currentError("expected next token to be %s, got %s instead", token.END_PROGRAM, p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_PROGRAM
 	}
 
 	return stmt

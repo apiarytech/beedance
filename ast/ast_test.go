@@ -11,15 +11,14 @@ func TestProgramString(t *testing.T) {
 		Statements: []Statement{
 			&VarBlockDeclaration{
 				Token: token.Token{Type: token.VAR, Literal: "VAR"},
-				Declarations: []*VarDeclStatement{
-					{
-						Token:    token.Token{Type: token.IDENT, Literal: "myVar"},
-						Name:     &Identifier{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Value: "myVar"},
-						DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
-						Value:    &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "5"}, Value: 5},
-					},
-				},
-			},
+				Declarations: []*VarDeclStatement{{
+					Token:    token.Token{Type: token.IDENT, Literal: "myVar"},
+					Name:     &Identifier{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Value: "myVar"},
+					DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+					Value: &IntegerLiteral{
+						Token: token.Token{Type: token.INT, Literal: "5"}, Value: 5,
+					}},
+				}},
 		},
 	}
 	expected := "VAR\n\tmyVar : INT := 5;\nEND_VAR"
@@ -85,7 +84,7 @@ func TestStringMethods(t *testing.T) {
 
 		// Declarations
 		{&VarDeclStatement{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Name: &Identifier{Value: "myVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}, Value: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "5"}, Value: 5}}, "myVar : INT := 5;"},
-		{&VarDeclStatement{Token: token.Token{Type: token.VAR, Literal: "VAR"}, Name: &Identifier{Value: "myVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}, "VAR myVar : INT;"},
+		{&VarDeclStatement{Token: token.Token{Type: token.VAR, Literal: "VAR"}, Name: &Identifier{Value: "myVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}, "VAR myVar : INT;"}, // This will fail if the logic in String() is wrong
 		{&VarDeclStatement{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Name: &Identifier{Value: "myVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}}, Location: &AtDeclaration{Location: &DirectVariable{Address: "IX0.0"}}}, "myVar AT %IX0.0 : BOOL;"},
 		{&VarBlockDeclaration{Declarations: []*VarDeclStatement{{Name: &Identifier{Value: "x"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}}}, "VAR\n\tx : INT;\nEND_VAR"},
 		{&TypeDeclaration{Name: &Identifier{Value: "MyType"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}, "MyType : INT;"},
@@ -97,9 +96,9 @@ func TestStringMethods(t *testing.T) {
 		{&FunctionBlockDeclaration{Name: &Identifier{Value: "MyFB"}, Body: &BlockStatement{Statements: []Statement{}}}, "FUNCTION_BLOCK MyFB\n\nEND_FUNCTION_BLOCK"},
 		{&ProgramDeclaration{Name: &Identifier{Value: "MyProg"}, Body: &BlockStatement{Statements: []Statement{}}}, "PROGRAM MyProg\n\nEND_PROGRAM"},
 		{&ExternalVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "ExtVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}}}, "VAR_EXTERNAL\n\tExtVar : INT;\nEND_VAR"},
-		{&ConfigVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "CfgVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}}}}}, "VAR_CONFIG\n\tCfgVar : BOOL;\nEND_VAR"},
+		{&ConfigVarDeclaration{ProgramInstanceName: &Identifier{Value: "MyProg"}, Declarations: []*VarDeclStatement{{Name: &Identifier{Value: "CfgVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}}}}}, "VAR_CONFIG MyProg\n\tCfgVar : BOOL;\nEND_VAR"}, // This will fail if the logic in String() is wrong
 		{&TempVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "TmpVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.REAL, Literal: "REAL"}}}}}, "VAR_TEMP\n\tTmpVar : REAL;\nEND_VAR"},
-		{&AccessVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "AccVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.IDENT, Literal: "MyFB"}}}}}, "VAR_ACCESS\n\tAccVar : MyFB;\nEND_VAR"},
+		{&AccessVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "AccVar"}, AccessPath: &Identifier{Value: "MyFB"}}}}, "VAR_ACCESS\n\tAccVar : MyFB;\nEND_VAR"},
 		{&GlobalVarDeclaration{Vars: []*VarDeclStatement{{Name: &Identifier{Value: "GlbVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}}}, "VAR_GLOBAL\n\tGlbVar : INT;\nEND_VAR"},
 		{&ConfigurationDeclaration{Token: token.Token{Type: token.CONFIGURATION, Literal: "CONFIGURATION"}, Name: &Identifier{Value: "MyConfig"}}, "CONFIGURATION MyConfig\nEND_CONFIGURATION"},                  // Simplified
 		{&ResourceDeclaration{Token: token.Token{Type: token.RESOURCE, Literal: "RESOURCE"}, Name: &Identifier{Value: "Res1"}, ResourceType: &Identifier{Value: "PLC1"}}, "RESOURCE Res1 ON PLC1\nEND_RESOURCE"}, // Simplified

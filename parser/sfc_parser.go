@@ -33,14 +33,22 @@ func (p *Parser) parseSFCProgram(end token.TokenType) *ast.SFCProgram {
 	program.Elements = []ast.Statement{}
 
 	for !p.curTokenIs(end) && !p.curTokenIs(token.EOF) {
+		// Skip any comments that might be between SFC elements.
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Elements = append(program.Elements, stmt)
 		}
-		// After parsing a complete SFC element (like a STEP or TRANSITION block),
-		// we must advance the token to begin parsing the next element.
-		// The individual parsing functions consume up to their END_* token.
-		p.nextToken()
+		// SFC elements are block statements that consume their own end tokens.
+		// The parser is now positioned at the start of the next element, so we
+		// do not advance the token here. This aligns with the main ParseProgram loop.
+		if !isBlockStatement(stmt) {
+			p.nextToken()
+		}
 	}
 	return program
 }
@@ -81,6 +89,8 @@ func (p *Parser) parseActionStatement() ast.Statement {
 
 	if !p.curTokenIs(token.END_ACTION) {
 		p.peekError(token.END_ACTION)
+	} else {
+		p.nextToken() // Consume END_ACTION
 	}
 
 	return stmt
@@ -112,13 +122,13 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.SEMICOLON) {
-		return nil
+		return stmt // Allow recovery
 	}
 
-	if !p.expectPeek(token.END_TRANSITION) { // This should consume the END_TRANSITION token
-		return nil
+	if !p.expectPeek(token.END_TRANSITION) {
+		return stmt // Allow recovery
 	}
-
+	p.nextToken() // Consume END_TRANSITION
 	return stmt
 }
 
@@ -145,25 +155,39 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	}
 	p.nextToken() // consume COLON
 
-	// stmt.Actions = []*ast.ActionBlockStatement{}
-	// // Loop while the next token is not the end of the step block.
-	// for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
-	// 	assoc := p.parseActionBlockStatement()
-	// 	if assoc == nil {
-	// 		// If parsing an action fails, break to avoid an infinite loop.
-	// 		break
-	// 	}
-	// 	stmt.Actions = append(stmt.Actions, assoc)
-	// 	p.nextToken() // Advance to the next token for the next iteration or END_STEP
-	// }
+	// Heuristic to decide between action associations and ST body.
+	// If we see `IDENT (`, it's an action association list.
+	// Otherwise, it's an ST body.
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.LPAREN) {
+		stmt.Actions = []*ast.ActionBlockStatement{}
+		// Loop while the next token is not the end of the step block.
+		for !p.curTokenIs(token.END_STEP) && !p.curTokenIs(token.EOF) {
+			// Skip any comments that might be inside the step body.
+			if p.curTokenIs(token.COMMENT) {
+				p.nextToken()
+				continue
+			}
 
-	// // The loop terminates with curToken on END_STEP.
-	// if !p.curTokenIs(token.END_STEP) {
-	// 	p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
-	// }
+			assoc := p.parseActionBlockStatement()
+			if assoc == nil {
+				// If parsing an action fails, break to avoid an infinite loop.
+				break
+			}
+			stmt.Actions = append(stmt.Actions, assoc)
+			p.nextToken() // Advance to the next token for the next iteration or END_STEP
+		}
+	} else {
+		// It's not an action association list, so parse it as a block of ST statements.
+		stmt.Body = p.parseBlockStatementUntil(token.END_STEP)
+	}
 
-	// A step body can contain either action associations or a block of ST statements.
-	stmt.Body = p.parseBlockStatementUntil(token.END_STEP)
+	// The loop terminates with curToken on END_STEP.
+	if !p.curTokenIs(token.END_STEP) {
+		p.specificError("missing 'END_STEP' for step starting at row %d", stmt.Token.Row)
+	} else {
+		p.nextToken() // Consume END_STEP
+	}
+
 	return stmt
 }
 
@@ -174,29 +198,27 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 		ActionName: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
 	}
 
-	if !p.expectPeek(token.LPAREN) {
+	if !p.expectPeek(token.LPAREN) { // After this, curToken is '('
 		return nil
 	}
 
 	// Check if there are any arguments (qualifiers, duration)
 	if !p.peekTokenIs(token.RPAREN) {
-		p.nextToken() // consume '('
+		p.nextToken() // consume '(', move to first arg (qualifier)
 
 		// First argument is the qualifier
 		stmt.Qualifier = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken()
 
 		// Check for optional second argument (duration)
-		if p.curTokenIs(token.COMMA) {
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken() // consume qualifier
 			p.nextToken() // consume ','
 			stmt.Duration = p.parseExpression(LOWEST)
 		}
-
-	} else {
-		p.nextToken() // consume '(' to move to ')'
 	}
 
-	if !p.curTokenIs(token.RPAREN) {
+	// After parsing arguments, we must find the closing parenthesis.
+	if !p.expectPeek(token.RPAREN) {
 		p.peekError(token.RPAREN)
 		return nil
 	}

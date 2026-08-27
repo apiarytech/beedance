@@ -654,7 +654,7 @@ func TestExtendedObjectInspection(t *testing.T) {
 		{"Task", &Task{Name: "MyTask", Priority: 1, Interval: time.Second}, "TASK", "TASK(MyTask, Priority: 1, Interval: 1s)"},
 		{"Scheduler", &Scheduler{}, "SCHEDULER", "SCHEDULER()"},
 		{"FunctionBlock", fbDef, FUNCTION_BLOCK_OBJ, "FUNCTION_BLOCK MyFB ()"},
-		{"Program", progDef, PROGRAM_OBJ, "PROGRAM MyProg"},
+		{"Program", progDef, PROGRAM_OBJ, "PROGRAM MyProg ()"},
 		{"ProgramInstance", &ProgramInstance{Definition: progDef}, PROGRAM_INSTANCE_OBJ, "INSTANCE OF MyProg"},
 	}
 

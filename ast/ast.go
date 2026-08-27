@@ -78,23 +78,25 @@ func (p *Program) String() string {
 
 // Statements
 type VarDeclStatement struct {
-	Token         token.Token // the 'VAR' token
-	Name          *Identifier
-	Location      *AtDeclaration
-	AccessPath    Expression
-	DataType      Expression
-	Value         Expression // Initial value
-	IsConstant    bool
-	IsRetain      bool
-	IsNonRetain   bool
-	IsRisingEdge  bool
-	IsFallingEdge bool
-	AccessType    string // "READ_ONLY", "READ_WRITE", or ""
+	LeadingComments []string
+	Token           token.Token // the 'VAR' token
+	Name            *Identifier
+	Location        *AtDeclaration
+	AccessPath      Expression
+	DataType        Expression
+	Value           Expression // Initial value
+	IsConstant      bool
+	IsRetain        bool
+	IsNonRetain     bool
+	IsRisingEdge    bool
+	IsFallingEdge   bool
+	AccessType      string // "READ_ONLY", "READ_WRITE", or ""
 }
 
-func (vds *VarDeclStatement) statementNode()       {}
-func (vds *VarDeclStatement) Pos() (int, int)      { return vds.Token.Row, vds.Token.Column }
-func (vds *VarDeclStatement) TokenLiteral() string { return vds.Token.Literal }
+func (vds *VarDeclStatement) statementNode()               {}
+func (vds *VarDeclStatement) GetLeadingComments() []string { return vds.LeadingComments }
+func (vds *VarDeclStatement) Pos() (int, int)              { return vds.Token.Row, vds.Token.Column }
+func (vds *VarDeclStatement) TokenLiteral() string         { return vds.Token.Literal }
 func (vds *VarDeclStatement) String() string {
 	var out bytes.Buffer
 
@@ -115,10 +117,6 @@ func (vds *VarDeclStatement) String() string {
 
 	if vds.DataType != nil {
 		out.WriteString(" : ")
-		out.WriteString(vds.DataType.String())
-	}
-
-	if vds.DataType != nil {
 		out.WriteString(vds.DataType.String())
 	}
 	if vds.Value != nil {
@@ -163,7 +161,7 @@ type ConfigurationDeclaration struct {
 	GlobalVars []*GlobalVarDeclaration
 	Resources  []*ResourceDeclaration
 	AccessVars []*AccessVarDeclaration
-	ConfigVars []*ConfigVarDeclaration
+	VarConfigs []*ConfigVarDeclaration
 }
 
 func (cd *ConfigurationDeclaration) statementNode()       {}
@@ -172,7 +170,18 @@ func (cd *ConfigurationDeclaration) TokenLiteral() string { return cd.Token.Lite
 func (cd *ConfigurationDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("CONFIGURATION " + cd.Name.String() + "\n")
-	// ... string representations for children
+	for _, gv := range cd.GlobalVars {
+		out.WriteString(gv.String() + "\n")
+	}
+	for _, res := range cd.Resources {
+		out.WriteString(res.String() + "\n")
+	}
+	for _, acc := range cd.AccessVars {
+		out.WriteString(acc.String() + "\n")
+	}
+	for _, cfg := range cd.VarConfigs {
+		out.WriteString(cfg.String() + "\n")
+	}
 	out.WriteString("END_CONFIGURATION")
 	return out.String()
 }
@@ -252,13 +261,15 @@ func (pc *ProgramConfiguration) String() string {
 }
 
 type ExpressionStatement struct {
-	Token      token.Token // the first token of the expression
-	Expression Expression
+	Token           token.Token // the first token of the expression
+	Expression      Expression
+	LeadingComments []string
 }
 
-func (es *ExpressionStatement) statementNode()       {}
-func (es *ExpressionStatement) Pos() (int, int)      { return es.Token.Row, es.Token.Column }
-func (es *ExpressionStatement) TokenLiteral() string { return es.Token.Literal }
+func (es *ExpressionStatement) statementNode()               {}
+func (es *ExpressionStatement) GetLeadingComments() []string { return es.LeadingComments }
+func (es *ExpressionStatement) Pos() (int, int)              { return es.Token.Row, es.Token.Column }
+func (es *ExpressionStatement) TokenLiteral() string         { return es.Token.Literal }
 func (es *ExpressionStatement) String() string {
 	if es.Expression != nil {
 		return es.Expression.String() + ";"
@@ -267,14 +278,16 @@ func (es *ExpressionStatement) String() string {
 }
 
 type AssignmentStatement struct {
-	Token token.Token // The ':=' token
-	Left  Expression
-	Value Expression
+	Token           token.Token // The ':=' token
+	Left            Expression
+	Value           Expression
+	LeadingComments []string
 }
 
-func (as *AssignmentStatement) statementNode()       {}
-func (as *AssignmentStatement) Pos() (int, int)      { return as.Token.Row, as.Token.Column }
-func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
+func (as *AssignmentStatement) statementNode()               {}
+func (as *AssignmentStatement) GetLeadingComments() []string { return as.LeadingComments }
+func (as *AssignmentStatement) Pos() (int, int)              { return as.Token.Row, as.Token.Column }
+func (as *AssignmentStatement) TokenLiteral() string         { return as.Token.Literal }
 func (as *AssignmentStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(as.Left.String())
@@ -539,15 +552,17 @@ func (mae *MemberAccessExpression) String() string {
 }
 
 type IfStatement struct {
-	Token       token.Token // The 'if' token
-	Condition   Expression
-	Consequence *BlockStatement
-	Alternative Statement // Can be *IfStatement (for ELSIF) or *BlockStatement (for ELSE)
+	Token           token.Token // The 'if' token
+	Condition       Expression
+	Consequence     *BlockStatement
+	Alternative     Statement // Can be *IfStatement (for ELSIF) or *BlockStatement (for ELSE)
+	LeadingComments []string
 }
 
-func (is *IfStatement) statementNode()       {}
-func (is *IfStatement) Pos() (int, int)      { return is.Token.Row, is.Token.Column }
-func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
+func (is *IfStatement) statementNode()               {}
+func (is *IfStatement) GetLeadingComments() []string { return is.LeadingComments }
+func (is *IfStatement) Pos() (int, int)              { return is.Token.Row, is.Token.Column }
+func (is *IfStatement) TokenLiteral() string         { return is.Token.Literal }
 func (is *IfStatement) String() string {
 	var out bytes.Buffer
 
@@ -584,16 +599,18 @@ func (is *IfStatement) String() string {
 }
 
 type ForLoopStatement struct {
-	Token      token.Token // The 'FOR' token
-	ControlVar *AssignmentStatement
-	EndValue   Expression // The value to iterate TO
-	StepValue  Expression // Can be nil for default step of 1
-	Body       *BlockStatement
+	Token           token.Token // The 'FOR' token
+	ControlVar      *AssignmentStatement
+	EndValue        Expression // The value to iterate TO
+	StepValue       Expression // Can be nil for default step of 1
+	Body            *BlockStatement
+	LeadingComments []string
 }
 
-func (fls *ForLoopStatement) statementNode()       {}
-func (fls *ForLoopStatement) Pos() (int, int)      { return fls.Token.Row, fls.Token.Column }
-func (fls *ForLoopStatement) TokenLiteral() string { return fls.Token.Literal }
+func (fls *ForLoopStatement) statementNode()               {}
+func (fls *ForLoopStatement) GetLeadingComments() []string { return fls.LeadingComments }
+func (fls *ForLoopStatement) Pos() (int, int)              { return fls.Token.Row, fls.Token.Column }
+func (fls *ForLoopStatement) TokenLiteral() string         { return fls.Token.Literal }
 func (fls *ForLoopStatement) String() string {
 	// String representation for debugging
 	var out bytes.Buffer
@@ -614,14 +631,16 @@ func (fls *ForLoopStatement) String() string {
 }
 
 type WhileStatement struct {
-	Token     token.Token // The 'WHILE' token
-	Condition Expression
-	Body      *BlockStatement
+	Token           token.Token // The 'WHILE' token
+	Condition       Expression
+	Body            *BlockStatement
+	LeadingComments []string
 }
 
-func (ws *WhileStatement) statementNode()       {}
-func (ws *WhileStatement) Pos() (int, int)      { return ws.Token.Row, ws.Token.Column }
-func (ws *WhileStatement) TokenLiteral() string { return ws.Token.Literal }
+func (ws *WhileStatement) statementNode()               {}
+func (ws *WhileStatement) GetLeadingComments() []string { return ws.LeadingComments }
+func (ws *WhileStatement) Pos() (int, int)              { return ws.Token.Row, ws.Token.Column }
+func (ws *WhileStatement) TokenLiteral() string         { return ws.Token.Literal }
 func (ws *WhileStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("WHILE ")
@@ -633,14 +652,16 @@ func (ws *WhileStatement) String() string {
 }
 
 type RepeatStatement struct {
-	Token     token.Token // The 'REPEAT' token
-	Body      *BlockStatement
-	Condition Expression
+	Token           token.Token // The 'REPEAT' token
+	Body            *BlockStatement
+	Condition       Expression
+	LeadingComments []string
 }
 
-func (rs *RepeatStatement) statementNode()       {}
-func (rs *RepeatStatement) Pos() (int, int)      { return rs.Token.Row, rs.Token.Column }
-func (rs *RepeatStatement) TokenLiteral() string { return rs.Token.Literal }
+func (rs *RepeatStatement) statementNode()               {}
+func (rs *RepeatStatement) GetLeadingComments() []string { return rs.LeadingComments }
+func (rs *RepeatStatement) Pos() (int, int)              { return rs.Token.Row, rs.Token.Column }
+func (rs *RepeatStatement) TokenLiteral() string         { return rs.Token.Literal }
 func (rs *RepeatStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("REPEAT ")
@@ -673,15 +694,17 @@ func (cb *CaseBranch) String() string {
 }
 
 type CaseStatement struct {
-	Token       token.Token // The 'CASE' token
-	Expression  Expression
-	Cases       []*CaseBranch
-	Alternative *BlockStatement // The 'ELSE' block
+	Token           token.Token // The 'CASE' token
+	Expression      Expression
+	Cases           []*CaseBranch
+	Alternative     *BlockStatement // The 'ELSE' block
+	LeadingComments []string
 }
 
-func (cs *CaseStatement) statementNode()       {}
-func (cs *CaseStatement) Pos() (int, int)      { return cs.Token.Row, cs.Token.Column }
-func (cs *CaseStatement) TokenLiteral() string { return cs.Token.Literal }
+func (cs *CaseStatement) statementNode()               {}
+func (cs *CaseStatement) GetLeadingComments() []string { return cs.LeadingComments }
+func (cs *CaseStatement) Pos() (int, int)              { return cs.Token.Row, cs.Token.Column }
+func (cs *CaseStatement) TokenLiteral() string         { return cs.Token.Literal }
 func (cs *CaseStatement) String() string {
 	// String representation for debugging
 	var out bytes.Buffer
@@ -969,20 +992,22 @@ func (ml *MacroLiteral) String() string {
 }
 
 type FunctionBlockDeclaration struct {
-	Token       token.Token // The 'FUNCTION_BLOCK' token
-	Name        *Identifier
-	VarInputs   []*VarDeclStatement
-	VarOutputs  []*VarDeclStatement
-	VarInOuts   []*VarDeclStatement
-	VarExternal []*ExternalVarDeclaration
-	Vars        []*VarDeclStatement
-	VarTemp     []*TempVarDeclaration
-	Body        Statement
+	Token           token.Token // The 'FUNCTION_BLOCK' token
+	Name            *Identifier
+	VarInputs       []*VarDeclStatement
+	VarOutputs      []*VarDeclStatement
+	VarInOuts       []*VarDeclStatement
+	VarExternal     []*ExternalVarDeclaration
+	Vars            []*VarDeclStatement
+	VarTemp         []*TempVarDeclaration
+	Body            Statement
+	LeadingComments []string
 }
 
-func (fbd *FunctionBlockDeclaration) statementNode()       {}
-func (fbd *FunctionBlockDeclaration) Pos() (int, int)      { return fbd.Token.Row, fbd.Token.Column }
-func (fbd *FunctionBlockDeclaration) TokenLiteral() string { return fbd.Token.Literal }
+func (fbd *FunctionBlockDeclaration) statementNode()               {}
+func (fbd *FunctionBlockDeclaration) GetLeadingComments() []string { return fbd.LeadingComments }
+func (fbd *FunctionBlockDeclaration) Pos() (int, int)              { return fbd.Token.Row, fbd.Token.Column }
+func (fbd *FunctionBlockDeclaration) TokenLiteral() string         { return fbd.Token.Literal }
 func (fbd *FunctionBlockDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("FUNCTION_BLOCK ")
@@ -999,22 +1024,24 @@ func (fbd *FunctionBlockDeclaration) String() string {
 }
 
 type ProgramDeclaration struct {
-	Token       token.Token // The 'PROGRAM' token
-	Name        *Identifier
-	VarInputs   []*VarDeclStatement
-	VarOutputs  []*VarDeclStatement
-	VarInOuts   []*VarDeclStatement
-	Vars        []*VarDeclStatement
-	VarExternal []*ExternalVarDeclaration
-	VarGlobal   []*GlobalVarDeclaration
-	VarAccess   []*AccessVarDeclaration
-	VarTemp     []*TempVarDeclaration
-	Body        Statement
+	Token           token.Token // The 'PROGRAM' token
+	Name            *Identifier
+	VarInputs       []*VarDeclStatement
+	VarOutputs      []*VarDeclStatement
+	VarInOuts       []*VarDeclStatement
+	Vars            []*VarDeclStatement
+	VarExternal     []*ExternalVarDeclaration
+	VarGlobal       []*GlobalVarDeclaration
+	VarAccess       []*AccessVarDeclaration
+	VarTemp         []*TempVarDeclaration
+	Body            Statement
+	LeadingComments []string
 }
 
-func (pd *ProgramDeclaration) statementNode()       {}
-func (pd *ProgramDeclaration) Pos() (int, int)      { return pd.Token.Row, pd.Token.Column }
-func (pd *ProgramDeclaration) TokenLiteral() string { return pd.Token.Literal }
+func (pd *ProgramDeclaration) statementNode()               {}
+func (pd *ProgramDeclaration) GetLeadingComments() []string { return pd.LeadingComments }
+func (pd *ProgramDeclaration) Pos() (int, int)              { return pd.Token.Row, pd.Token.Column }
+func (pd *ProgramDeclaration) TokenLiteral() string         { return pd.Token.Literal }
 func (pd *ProgramDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("PROGRAM ")
@@ -1048,8 +1075,9 @@ func (evd *ExternalVarDeclaration) String() string {
 }
 
 type ConfigVarDeclaration struct {
-	Token token.Token // The 'VAR_CONFIG' token
-	Vars  []*VarDeclStatement
+	Token               token.Token // The 'VAR_CONFIG' token
+	ProgramInstanceName *Identifier
+	Declarations        []*VarDeclStatement
 }
 
 func (cvd *ConfigVarDeclaration) statementNode()       {}
@@ -1058,8 +1086,12 @@ func (cvd *ConfigVarDeclaration) TokenLiteral() string { return cvd.Token.Litera
 func (cvd *ConfigVarDeclaration) String() string {
 	var out bytes.Buffer
 	cvd.Pos() // Ensure Pos() is called
-	out.WriteString("VAR_CONFIG\n")
-	for _, v := range cvd.Vars {
+	out.WriteString("VAR_CONFIG")
+	if cvd.ProgramInstanceName != nil {
+		out.WriteString(" " + cvd.ProgramInstanceName.String())
+	}
+	out.WriteString("\n")
+	for _, v := range cvd.Declarations {
 		out.WriteString("\t" + v.String() + "\n")
 	}
 	out.WriteString("END_VAR")
@@ -1124,13 +1156,15 @@ func (gvd *GlobalVarDeclaration) String() string {
 }
 
 type VarBlockDeclaration struct {
-	Token        token.Token // The 'VAR' token
-	Declarations []*VarDeclStatement
+	Token           token.Token // The 'VAR' token
+	Declarations    []*VarDeclStatement
+	LeadingComments []string
 }
 
-func (vbd *VarBlockDeclaration) statementNode()       {}
-func (vbd *VarBlockDeclaration) Pos() (int, int)      { return vbd.Token.Row, vbd.Token.Column }
-func (vbd *VarBlockDeclaration) TokenLiteral() string { return vbd.Token.Literal }
+func (vbd *VarBlockDeclaration) statementNode()               {}
+func (vbd *VarBlockDeclaration) GetLeadingComments() []string { return vbd.LeadingComments }
+func (vbd *VarBlockDeclaration) Pos() (int, int)              { return vbd.Token.Row, vbd.Token.Column }
+func (vbd *VarBlockDeclaration) TokenLiteral() string         { return vbd.Token.Literal }
 func (vbd *VarBlockDeclaration) String() string {
 	var out bytes.Buffer
 	vbd.Pos() // Ensure Pos() is called
@@ -1143,16 +1177,18 @@ func (vbd *VarBlockDeclaration) String() string {
 }
 
 type TypeDeclaration struct {
-	Token        token.Token // The identifier token (the name of the new type)
-	Name         *Identifier
-	DataType     Expression
-	Subrange     Expression // For subrange types, e.g., (0..100)
-	InitialValue Expression // For initialized types, e.g., := 10
+	LeadingComments []string
+	Token           token.Token // The identifier token (the name of the new type)
+	Name            *Identifier
+	DataType        Expression
+	Subrange        Expression // For subrange types, e.g., (0..100)
+	InitialValue    Expression // For initialized types, e.g., := 10
 }
 
-func (td *TypeDeclaration) statementNode()       {}
-func (td *TypeDeclaration) Pos() (int, int)      { return td.Token.Row, td.Token.Column }
-func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
+func (td *TypeDeclaration) statementNode()               {}
+func (td *TypeDeclaration) GetLeadingComments() []string { return td.LeadingComments }
+func (td *TypeDeclaration) Pos() (int, int)              { return td.Token.Row, td.Token.Column }
+func (td *TypeDeclaration) TokenLiteral() string         { return td.Token.Literal }
 func (td *TypeDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString(td.Name.String())
@@ -1171,13 +1207,15 @@ func (td *TypeDeclaration) String() string {
 }
 
 type TypeBlockDeclaration struct {
-	Token        token.Token // The 'TYPE' token
-	Declarations []*TypeDeclaration
+	Token           token.Token // The 'TYPE' token
+	Declarations    []*TypeDeclaration
+	LeadingComments []string
 }
 
-func (tbd *TypeBlockDeclaration) statementNode()       {}
-func (tbd *TypeBlockDeclaration) Pos() (int, int)      { return tbd.Token.Row, tbd.Token.Column }
-func (tbd *TypeBlockDeclaration) TokenLiteral() string { return tbd.Token.Literal }
+func (tbd *TypeBlockDeclaration) statementNode()               {}
+func (tbd *TypeBlockDeclaration) GetLeadingComments() []string { return tbd.LeadingComments }
+func (tbd *TypeBlockDeclaration) Pos() (int, int)              { return tbd.Token.Row, tbd.Token.Column }
+func (tbd *TypeBlockDeclaration) TokenLiteral() string         { return tbd.Token.Literal }
 func (tbd *TypeBlockDeclaration) String() string {
 	var out bytes.Buffer
 	tbd.Pos() // Ensure Pos() is called
@@ -1206,6 +1244,29 @@ func (sd *StructDefinition) String() string {
 	}
 	out.WriteString("END_STRUCT")
 	return out.String()
+}
+
+// GetMemberType finds a member by name and returns its data type name as a string.
+// This is a helper for analysis tools like the transpiler. It handles simple types
+// and drills down through arrays to find the base type name.
+func (sd *StructDefinition) GetMemberType(memberName string) string {
+	for _, member := range sd.Members {
+		if member.Name.Value == memberName {
+			if member.DataType != nil {
+				currentType := member.DataType
+				// For arrays, we need to get the base element type.
+				for {
+					if arrayDef, ok := currentType.(*ArrayDefinition); ok {
+						currentType = arrayDef.DataType
+					} else {
+						break
+					}
+				}
+				return currentType.String()
+			}
+		}
+	}
+	return "" // Member not found or has no type
 }
 
 type EnumDefinition struct {
@@ -1281,19 +1342,21 @@ func (as *ActionStatement) String() string {
 }
 
 type FunctionDeclaration struct {
-	Token      token.Token // The 'FUNCTION' token
-	Name       *Identifier
-	ReturnType *TypeSpecifier
-	VarInputs  []*VarDeclStatement
-	VarOutputs []*VarDeclStatement
-	VarInOuts  []*VarDeclStatement
-	Vars       []*VarDeclStatement
-	Body       Statement
+	Token           token.Token // The 'FUNCTION' token
+	Name            *Identifier
+	ReturnType      *TypeSpecifier
+	VarInputs       []*VarDeclStatement
+	VarOutputs      []*VarDeclStatement
+	VarInOuts       []*VarDeclStatement
+	Vars            []*VarDeclStatement
+	Body            Statement
+	LeadingComments []string
 }
 
-func (fd *FunctionDeclaration) statementNode()       {}
-func (fd *FunctionDeclaration) Pos() (int, int)      { return fd.Token.Row, fd.Token.Column }
-func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
+func (fd *FunctionDeclaration) statementNode()               {}
+func (fd *FunctionDeclaration) GetLeadingComments() []string { return fd.LeadingComments }
+func (fd *FunctionDeclaration) Pos() (int, int)              { return fd.Token.Row, fd.Token.Column }
+func (fd *FunctionDeclaration) TokenLiteral() string         { return fd.Token.Literal }
 func (fd *FunctionDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("FUNCTION ")

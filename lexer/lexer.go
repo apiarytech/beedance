@@ -69,9 +69,12 @@ func (l *Lexer) NextToken() token.Token {
 		tok = newToken(token.MINUS, l.ch, startLine, startCol, startPos)
 	case '/':
 		if l.peekChar() == '/' {
-			// This is a single-line comment, skip to the end of the line
-			l.skipSingleLineComment()
-			return l.NextToken()
+			tok.Type = token.COMMENT
+			tok.Literal = l.readSingleLineComment()
+			tok.Row = startLine
+			tok.Column = startCol
+			tok.Pos = startPos
+			return tok
 		}
 		tok = newToken(token.SLASH, l.ch, startLine, startCol, startPos)
 	case '*':
@@ -128,14 +131,19 @@ func (l *Lexer) NextToken() token.Token {
 	case '(':
 		if l.peekChar() == '*' {
 			// This is the start of a comment, skip it and get the next token
-			terminated, nested := l.skipComment()
+			comment, terminated, nested := l.readBlockComment()
 			if !terminated {
 				return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol, Pos: startPos}
 			}
 			if nested {
 				return token.Token{Type: token.ILLEGAL, Literal: "nested comment", Row: startLine, Column: startCol, Pos: startPos}
 			}
-			return l.NextToken() // Get the token after the comment
+			tok.Type = token.COMMENT
+			tok.Literal = comment
+			tok.Row = startLine
+			tok.Column = startCol
+			tok.Pos = startPos
+			return tok
 		}
 		tok = newToken(token.LPAREN, l.ch, startLine, startCol, startPos)
 	case ')':
@@ -213,11 +221,13 @@ func (l *Lexer) NextToken() token.Token {
 	return tok
 }
 
-// skipComment scans through the input until it finds the comment termination characters '*)'.
-func (l *Lexer) skipComment() (terminated bool, nested bool) {
+// readBlockComment scans through the input until it finds the comment termination characters '*)'.
+// It returns the comment content, and booleans indicating if it was terminated and if it was nested.
+func (l *Lexer) readBlockComment() (string, bool, bool) {
 	isNested := false
 	l.readChar() // consume '('
 	l.readChar() // consume '*'
+	position := l.position
 
 	for l.ch != 0 {
 		// Check for nested comment start
@@ -228,21 +238,26 @@ func (l *Lexer) skipComment() (terminated bool, nested bool) {
 		}
 
 		if l.ch == '*' && l.peekChar() == ')' {
+			comment := l.input[position:l.position]
 			l.readChar()
 			l.readChar()
-			return true, isNested // Terminated successfully. Report if nesting was found.
+			return comment, true, isNested // Terminated successfully. Report if nesting was found.
 		}
 		l.readChar()
 	}
 
 	// If we reach here, it means l.ch is 0 (EOF) but we haven't found '*)'
-	return false, isNested
+	return l.input[position:l.position], false, isNested
 }
 
-func (l *Lexer) skipSingleLineComment() {
+func (l *Lexer) readSingleLineComment() string {
+	l.readChar() // consume first /
+	l.readChar() // consume second /
+	position := l.position
 	for l.ch != '\n' && l.ch != 0 {
 		l.readChar()
 	}
+	return l.input[position:l.position]
 }
 
 func (l *Lexer) skipWhitespace() {
