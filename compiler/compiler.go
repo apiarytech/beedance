@@ -395,6 +395,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 		afterAlternativePos := len(c.currentInstructions())
 		c.changeOperand(jumpPos, afterAlternativePos)
 
+		// This is a workaround. The parser should wrap an if-expression used as a
+		// statement in an ExpressionStatement, which would emit this OpPop.
+		// It seems to do so for if-else, but not for if-without-else.
+		if node.Alternative == nil {
+			c.emit(code.OpPop)
+		}
+
 	case *ast.BlockStatement:
 		for _, s := range node.Statements {
 			err := c.Compile(s)

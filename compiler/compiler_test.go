@@ -255,7 +255,6 @@ func TestConditionals(t *testing.T) {
 				code.Make(code.OpConstant, 0),       // 0004
 				code.Make(code.OpJump, 13),          // 0007
 				code.Make(code.OpConstant, 1),       // 0010
-				code.Make(code.OpPop),               // 0013
 			},
 		},
 	}
@@ -286,38 +285,39 @@ func TestGlobalVarStatements(t *testing.T) {
 				code.Make(code.OpPop),
 			},
 		},
-		// {
-		// 	input: `
-		// 	VAR_GLOBAL
-		// 		one: INT := 1;
-		// 	END_VAR
-		// 	one;
-		// 	`,
-		// 	expectedConstants: []interface{}{1},
-		// 	expectedInstructions: []code.Instructions{
-		// 		code.Make(code.OpConstant, 0),
-		// 		code.Make(code.OpSetGlobal, 0),
-		// 		code.Make(code.OpPop),
-		// 	},
-		// },
-		// {
-		// 	input: `
-		// 	VAR_GLOBAL
-		// 		one: INT := 1;
-		// 		two: one;
-		// 	END_VAR
-		// 	two;
-		// 	`,
-		// 	expectedConstants: []interface{}{1},
-		// 	expectedInstructions: []code.Instructions{
-		// 		code.Make(code.OpConstant, 0),
-		// 		code.Make(code.OpSetGlobal, 0),
-		// 		code.Make(code.OpGetGlobal, 0),
-		// 		code.Make(code.OpSetGlobal, 1),
-		// 		code.Make(code.OpGetGlobal, 1),
-		// 		code.Make(code.OpPop),
-		// 	},
-		// },
+		{
+			input: `
+			VAR_GLOBAL
+				one: INT := 1;
+			END_VAR
+			one;
+			`,
+			expectedConstants: []interface{}{1},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input: `
+			VAR_GLOBAL
+				one: INT := 1;
+				two: one;
+			END_VAR
+			two;
+			`,
+			expectedConstants: []interface{}{1},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpPop),
+			},
+		},
 	}
 
 	runCompilerTests(t, tests)
@@ -340,7 +340,7 @@ func TestFunctions(t *testing.T) {
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 0, 0),
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},

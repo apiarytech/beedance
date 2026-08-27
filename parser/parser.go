@@ -416,6 +416,12 @@ func (p *Parser) parseStatement() ast.Statement {
 	// Consume any comments before the statement starts. They will be stored in p.leadingComments
 	// and attached to the AST node by the specific parsing function.
 	p.consumeLeadingComments()
+
+	// Handle empty statements (just a semicolon).
+	if p.curTokenIs(token.SEMICOLON) {
+		return nil // The main parsing loop will advance the token.
+	}
+
 	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
 	if p.isIlInstruction() {
 		switch p.curToken.Type {
@@ -933,6 +939,8 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 		// e.g., Var1, Var2 : INT;
 		names := p.parseIdentifierList()
 
+		// The AT clause can appear before or after the data type.
+		// We'll check for it in both places.
 		var atDecl *ast.AtDeclaration
 		if p.peekTokenIs(token.AT) {
 			p.nextToken() // consume name, move to AT
@@ -947,6 +955,12 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 		dataType := p.parseTypeSpecifier()
 		if dataType == nil {
 			return nil
+		}
+
+		// Check for AT clause *after* the data type.
+		if atDecl == nil && p.peekTokenIs(token.AT) {
+			p.nextToken() // consume data type, move to AT
+			atDecl = p.parseAtDeclaration()
 		}
 		// After parsing the type, we should be on the type token.
 		// Now we advance to check for initialization or semicolon.

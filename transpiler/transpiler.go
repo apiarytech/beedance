@@ -5,7 +5,8 @@ import (
 	"beedance/ast"
 	"fmt"
 	"io"
-	"log"     // Added for time.Time and time.Duration
+	"log" // Added for time.Time and time.Duration
+	"sort"
 	"strings" // For type information if needed
 )
 
@@ -114,6 +115,7 @@ type Transpiler struct {
 	currentFunc     *ast.FunctionDeclaration
 	varInfo         map[string]*ast.TypeDeclaration // Maps var names in current scope to their type declaration
 	accessVars      map[string]bool                 // Set of VAR_ACCESS variable names in the current scope
+	tempVars        map[string]bool                 // Set of VAR_TEMP variable names in the current scope
 	ilCurrentCRType string                          // The data type of the IL Current Result
 	locatedVars     map[string]bool                 // Set of VARs with an AT % location
 	mainGenerated   bool                            // Flag to ensure main is only generated once
@@ -128,6 +130,7 @@ func New(w io.Writer) *Transpiler {
 		locatedVars:   make(map[string]bool),
 		mainGenerated: false,
 		accessVars:    make(map[string]bool),
+		tempVars:      make(map[string]bool),
 		globalVars:    make(map[string]bool),
 		varInfo:       make(map[string]*ast.TypeDeclaration),
 		typeInfo:      make(map[string]ast.Node),
@@ -178,6 +181,20 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 	case *ast.ExitStatement:
 		return t.transpileExitStatement(node)
 	case *ast.ExpressionStatement:
+		// The parser can misinterpret assignments to complex l-values (like array elements)
+		// as an InfixExpression with operator `:=`. We detect this here and handle it
+		// as a proper assignment statement. This is a workaround for a parser limitation.
+		if infix, ok := node.Expression.(*ast.InfixExpression); ok && infix.Operator == ":=" {
+			// Create a synthetic AssignmentStatement to be processed by the correct transpiler function.
+			assignment := &ast.AssignmentStatement{
+				Token: infix.Token,
+				Left:  infix.Left,
+				Value: infix.Right,
+			}
+			return t.transpileAssignmentStatement(assignment)
+		}
+		// For other expression statements (like function block calls), they are expected
+		// to handle their own formatting (indentation and newlines).
 		return t.transpileExpression(node.Expression)
 	case *ast.FunctionBlockDeclaration:
 		return t.transpileFunctionBlockDeclaration(node)
@@ -188,6 +205,9 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 	case *ast.SFCProgram:
 		// This is handled within transpileProgram/transpileFunctionBlockDeclaration
 		// but we add a case to prevent "unhandled type" errors if it appears elsewhere.
+		return nil
+	case *ast.GlobalVarDeclaration:
+		t.transpileGlobalVarBlocks([]*ast.GlobalVarDeclaration{node})
 		return nil
 	case *ast.FunctionDeclaration:
 		return t.transpileFunctionDeclaration(node)
@@ -227,9 +247,20 @@ func (t *Transpiler) transpileLeadingComments(comments []string) {
 // buildGlobalVarInfo performs a pass to collect all VAR_GLOBAL names.
 func (t *Transpiler) buildGlobalVarInfo(program *ast.Program) {
 	for _, stmt := range program.Statements {
-		if prog, ok := stmt.(*ast.ProgramDeclaration); ok {
-			for _, globalBlock := range prog.VarGlobal {
+		switch node := stmt.(type) {
+		case *ast.GlobalVarDeclaration:
+			for _, decl := range node.Vars {
+				t.globalVars[decl.Name.Value] = true
+			}
+		case *ast.ProgramDeclaration:
+			for _, globalBlock := range node.VarGlobal {
 				for _, decl := range globalBlock.Vars {
+					t.globalVars[decl.Name.Value] = true
+				}
+			}
+			// Also treat VAR_EXTERNAL as globals for name resolution purposes.
+			for _, externalBlock := range node.VarExternal {
+				for _, decl := range externalBlock.Vars {
 					t.globalVars[decl.Name.Value] = true
 				}
 			}
@@ -421,6 +452,11 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	t.accessVars = make(map[string]bool)
 	t.buildAccessVarInfo(prog.VarAccess)
 
+	originalTempVars := t.tempVars
+	t.tempVars = make(map[string]bool)
+	t.buildTempVarInfo(prog.VarTemp)
+	defer func() { t.tempVars = originalTempVars }()
+
 	originalLocatedVars := t.locatedVars
 	t.locatedVars = make(map[string]bool)
 	t.buildLocatedVarInfo(prog.Vars)
@@ -430,21 +466,20 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 
 	defer func() { t.varInfo = originalVarInfo }() // Restore previous scope
 
+	t.write("type %s struct {\n", prog.Name.Value)
+	for _, varDecl := range prog.Vars {
+		t.transpileVarDecl(varDecl)
+	}
+	for _, accessDecl := range prog.VarAccess {
+		t.transpileVarAccess(accessDecl)
+	}
 	// If the body is an SFC program, we need to add state fields to the struct.
 	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
 		t.write("\tsfcActiveSteps map[string]bool\n")
 		t.transpileSFCStateFields(sfc)
 		t.transpileSFCActionStateFields(sfc)
 	}
-
-	t.write("type %s struct {\n", prog.Name.Value)
-	for _, varDecl := range prog.Vars {
-		t.transpileVarDecl(varDecl)
-	}
 	t.write("}\n\n")
-	for _, accessDecl := range prog.VarAccess {
-		t.transpileVarAccess(accessDecl)
-	}
 
 	// --- 2. Generate the factory function for initialization ---
 	t.write("// New%sFactory creates a new instance of the %s program.\n", prog.Name.Value, prog.Name.Value)
@@ -457,7 +492,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		if varDecl.Value != nil {
 			t.write("\tinstance.%s = ", varDecl.Name.Value)
 			// Use a temporary transpiler with the receiver unset to transpile the value expression
-			valT := &Transpiler{w: t.w}
+			valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
 			if err := valT.transpileExpression(varDecl.Value); err != nil {
 				return err
 			}
@@ -489,14 +524,27 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	t.write("func (p *%s) Link(linker config.IOLinker) error {\n", prog.Name.Value)
 	for _, varDecl := range prog.Vars {
 		if varDecl.Location != nil {
-			t.write("\tif err := linker.LinkIO(&p.%s, %q); err != nil {\n", varDecl.Name.Value, varDecl.Location.String())
+			t.write("\tif err := linker.LinkIO(&p.%s, %q); err != nil {\n", varDecl.Name.Value, varDecl.Location.Location.String())
 			t.write("\t\treturn err\n")
 			t.write("\t}\n")
+		}
+	}
+	for _, accessBlock := range prog.VarAccess {
+		for _, decl := range accessBlock.Vars {
+			t.write("\tif err := linker.LinkVar(&p.%s, %q); err != nil {\n", decl.Name.Value, decl.AccessPath.String())
+			t.write("\t\treturn err\n\t}\n")
 		}
 	}
 	t.write("\treturn nil\n}\n\n")
 
 	t.write("func (%s *%s) Logic(now time.Time) {\n", t.programVarName, prog.Name.Value)
+	// Transpile VAR_TEMP as local variables inside the Logic method.
+	for _, tempBlock := range prog.VarTemp {
+		for _, decl := range tempBlock.Vars {
+			t.transpileVarDeclAsLocal(decl)
+		}
+	}
+
 	// If the body is an SFC program, transpile it as a state machine.
 	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
 		if err := t.transpileSFCProgram(sfc); err != nil {
@@ -557,13 +605,13 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 	}
 
 	// Handle conditional execution (C modifier)
-	isConditional := strings.Contains(stmt.Modifier, "C")
+	op := strings.ToUpper(stmt.Operator)
+	isConditional := strings.Contains(stmt.Modifier, "C") && op != "JMP"
 	if isConditional {
 		// Conditional operations in IL are always based on a BOOL accumulator.
-		t.write("\tif cr_BOOL {\n")
+		t.write("\tif cr_BOOL { ")
 	}
 
-	op := strings.ToUpper(stmt.Operator)
 	switch op {
 	case "LD":
 		// Check for a parenthesized IL sub-program, e.g., LD (LD A ADD B)
@@ -577,20 +625,20 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 			t.ilCurrentCRType = "LINT"
 		} else {
 			// Standard operand (variable or ST expression)
-			targetTypeDecl := t.resolveAssignmentTargetType(stmt.Operand)
-			if targetTypeDecl == nil {
-				// Fallback for literals or unresolved types
-				t.ilCurrentCRType = "LINT" // Assume LINT for literals or ST expressions
-				t.write("\tcr_LINT = ")
-				t.transpileExpression(stmt.Operand)
-				t.write("\n")
+			var baseType string
+			if targetTypeDecl := t.resolveAssignmentTargetType(stmt.Operand); targetTypeDecl != nil {
+				baseType = t.getBaseTypeFamily(targetTypeDecl.DataType)
 			} else {
-				baseType := t.getBaseTypeFamily(targetTypeDecl.DataType)
-				t.ilCurrentCRType = baseType
-				t.write("\tcr_%s = %s(", baseType, baseType) // Cast the expression to the target CR type
-				t.transpileExpression(stmt.Operand)
-				t.write(")\n")
+				if _, isBool := stmt.Operand.(*ast.Boolean); isBool {
+					baseType = "BOOL"
+				} else {
+					baseType = "LINT" // Assume LINT for other literals or ST expressions
+				}
 			}
+			t.ilCurrentCRType = baseType
+			t.write("\tcr_%s = iec.%s(", baseType, baseType)
+			t.transpileExpression(stmt.Operand)
+			t.write(")\n")
 		}
 	case "ST":
 		targetTypeDecl := t.resolveAssignmentTargetType(stmt.Operand)
@@ -600,6 +648,7 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 		targetType := t.mapIecTypeToGo(targetTypeDecl.DataType)
 		crType := t.ilCurrentCRType
 
+		t.write("\t")
 		t.transpileExpression(stmt.Operand)
 		t.write(" = %s(cr_%s)\n", targetType, crType) // e.g., p.MyInt = iec.INT(cr_LINT)
 
@@ -628,7 +677,13 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 		t.ilCurrentCRType = "BOOL"
 
 	case "JMP":
-		t.write("\tgoto %s\n", stmt.Operand.String())
+		if strings.Contains(stmt.Modifier, "N") {
+			t.write("\tif !cr_BOOL { goto %s; }\n", stmt.Operand.String())
+		} else if strings.Contains(stmt.Modifier, "C") {
+			t.write("\tif cr_BOOL { goto %s; }\n", stmt.Operand.String())
+		} else {
+			t.write("\tgoto %s\n", stmt.Operand.String())
+		}
 
 	case "CAL":
 		return t.transpileIlCalInstruction(stmt)
@@ -654,7 +709,7 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 	}
 
 	if isConditional {
-		t.write("\t}\n")
+		t.write(" }\n")
 	}
 
 	return nil
@@ -697,9 +752,27 @@ func (t *Transpiler) transpileIlCalInstruction(stmt *ast.IlInstructionStatement)
 // It handles input assignments, calls the FB's `Logic` method, and loads the primary output into the IL accumulator.
 func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) error {
 	// 1. Transpile the input assignments for the function block call.
-	t.transpileFBInputAssignments(callExpr)
+	for _, arg := range callExpr.Arguments {
+		if namedArg, ok := arg.(*ast.NamedArgument); ok {
+			isInOut := t.isInOutArgument(callExpr.Function, namedArg.Name.Value)
+			if isInOut {
+				t.write("\t")
+				t.transpileExpression(callExpr.Function)
+				t.write(".%s = &", namedArg.Name.Value)
+				t.transpileExpression(namedArg.Value)
+				t.write("\n")
+			} else {
+				t.write("\t")
+				t.transpileExpression(callExpr.Function)
+				t.write(".%s = ", namedArg.Name.Value)
+				t.transpileExpression(namedArg.Value)
+				t.write("\n")
+			}
+		}
+	}
 
 	// 2. Transpile the call to the Logic() method.
+	t.write("\t")
 	t.transpileExpression(callExpr.Function)
 	t.write(".Logic(now)\n")
 
@@ -826,6 +899,20 @@ func (t *Transpiler) mapIlOperatorToGo(op string) string {
 	// Maps IL operators to their Go equivalents.
 	upperOp := strings.ToUpper(op)
 	switch upperOp {
+	case "ADD":
+		return "+"
+	case "SUB":
+		return "-"
+	case "MUL":
+		return "*"
+	case "DIV":
+		return "/"
+	case "AND":
+		return "&"
+	case "OR":
+		return "|"
+	case "XOR":
+		return "^"
 	case "GT":
 		return ">"
 	case "LT":
@@ -839,7 +926,7 @@ func (t *Transpiler) mapIlOperatorToGo(op string) string {
 	case "LE":
 		return "<="
 	}
-	return op // For ADD, MUL, DIV, AND, OR, XOR, the Go operator is the same.
+	return op // Default case for operators that don't need mapping (though most do).
 }
 
 // transpileSFCStateFields generates Go struct fields for managing SFC step states,
@@ -868,7 +955,14 @@ func (t *Transpiler) transpileSFCActionStateFields(sfc *ast.SFCProgram) {
 		}
 	}
 
+	// To ensure deterministic output, we sort the action names.
+	sortedActions := make([]string, 0, len(uniqueActions))
 	for actionName := range uniqueActions {
+		sortedActions = append(sortedActions, actionName)
+	}
+	sort.Strings(sortedActions)
+
+	for _, actionName := range sortedActions {
 		t.write("\t%s_Q iec.BOOL\n", actionName)
 		// Check if any usage of this action is timed, if so, add a timer field.
 		t.write("\t%s_Timer time.Time\n", actionName)
@@ -901,39 +995,54 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 	}
 	t.write("\n")
 
-	t.write("\t// --- SFC Phase 1: Evaluate Transitions ---\n")
-	t.write("\tfiredTransitions := []*ast.TransitionStatement{}\n")
-
-	for _, element := range sfc.Elements {
+	t.write("\t// --- SFC Phase 1: Evaluate Transitions and collect fired transitions ---\n")
+	t.write("\tfiredTransitions := make(map[string]bool)\n\n")
+	for i, element := range sfc.Elements {
 		if trans, ok := element.(*ast.TransitionStatement); ok {
-			// Check if all source steps for this transition are active.
-			t.write("\t// Check transition from %v\n", trans.From)
+			transKey := fmt.Sprintf("t%d", i)
+			t.write("\t// Check transition %s from %v to %v\n", transKey, trans.From, trans.To)
 			t.write("\tif ")
-			for i, fromStep := range trans.From {
-				if i > 0 {
-					t.write(" && ")
+			if len(trans.From) == 0 {
+				t.write("false") // A transition must have at least one source step.
+			} else {
+				for i, fromStep := range trans.From {
+					if i > 0 {
+						t.write(" && ")
+					}
+					t.write("p.sfcActiveSteps[%q]", fromStep.Value)
 				}
-				t.write("p.sfcActiveSteps[%q]", fromStep.Value)
 			}
 			t.write(" {\n")
 			t.write("\t\tif ")
 			t.transpileExpression(trans.Condition)
 			t.write(" {\n")
-			// This is a hack. In a real scenario, we'd pass the AST node itself.
-			t.write("\t\t\t// Fired transition from %s to %s\n", trans.From[0].Value, trans.To[0].Value)
+			t.write("\t\t\tfiredTransitions[%q] = true\n", transKey)
 			t.write("\t\t}\n")
 			t.write("\t}\n")
 		}
 	}
 	t.write("\n")
 
-	t.write("\t// --- SFC Phase 2: Update Step States ---\n")
-	t.write("\t// In a real implementation, you would iterate over firedTransitions.\n")
-	t.write("\t// For this example, we'll manually code the logic based on the previous switch.\n")
+	t.write("\t// --- SFC Phase 2: Update Step States based on fired transitions ---\n")
 	t.write("\tnextActiveSteps := make(map[string]bool)\n")
+	t.write("\t// Copy current active steps; they will be deactivated if they are a source of a fired transition.\n")
 	t.write("\tfor step, active := range p.sfcActiveSteps {\n")
 	t.write("\t\tif active { nextActiveSteps[step] = true }\n")
 	t.write("\t}\n\n")
+	for i, element := range sfc.Elements {
+		if trans, ok := element.(*ast.TransitionStatement); ok {
+			transKey := fmt.Sprintf("t%d", i)
+			t.write("\tif firedTransitions[%q] {\n", transKey)
+			for _, fromStep := range trans.From {
+				t.write("\t\tdelete(nextActiveSteps, %q)\n", fromStep.Value)
+			}
+			for _, toStep := range trans.To {
+				t.write("\t\tnextActiveSteps[%q] = true\n", toStep.Value)
+			}
+			t.write("\t}\n")
+		}
+	}
+	t.write("\n")
 
 	t.write("\t// --- SFC Phase 3: Update Step and Action States ---\n")
 	t.write("\tp.sfcActiveSteps = nextActiveSteps\n")
@@ -951,15 +1060,38 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 	t.write("\t// Process actions for active steps\n")
 	for _, element := range sfc.Elements {
 		if step, ok := element.(*ast.StepStatement); ok {
+			// Group action associations by name to resolve qualifier priorities (R > S > others).
+			actionsInStep := make(map[string][]*ast.ActionBlockStatement)
+			for _, actionAssoc := range step.Actions {
+				actionName := actionAssoc.ActionName.Value
+				actionsInStep[actionName] = append(actionsInStep[actionName], actionAssoc)
+			}
+
+			// To ensure deterministic output, sort the action names.
+			sortedActionNames := make([]string, 0, len(actionsInStep))
+			for name := range actionsInStep {
+				sortedActionNames = append(sortedActionNames, name)
+			}
+			sort.Strings(sortedActionNames)
+
 			t.write("\t// Actions for step %s\n", step.Name.Value)
 			t.write("\tif p.sfcActiveSteps[%q] {\n", step.Name.Value)
-			for _, actionBlock := range step.Actions {
-				t.transpileSFCAction(step, actionBlock, true)
+			// Transpile logic for when the step is ACTIVE.
+			for _, actionName := range sortedActionNames {
+				associations := actionsInStep[actionName]
+				effectiveAssoc := findHighestPriorityAction(associations)
+				if effectiveAssoc != nil {
+					t.transpileSFCAction(step, effectiveAssoc, true)
+				}
 			}
 			t.write("\t} else {\n")
-			// Handle logic for when the step is NOT active (for stored/timed actions)
-			for _, actionBlock := range step.Actions {
-				t.transpileSFCAction(step, actionBlock, false)
+			// Transpile logic for when the step is NOT ACTIVE (for stored/timed actions).
+			for _, actionName := range sortedActionNames {
+				associations := actionsInStep[actionName]
+				effectiveAssoc := findHighestPriorityAction(associations)
+				if effectiveAssoc != nil {
+					t.transpileSFCAction(step, effectiveAssoc, false)
+				}
 			}
 			t.write("\t}\n")
 		}
@@ -968,17 +1100,43 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 
 	// Finally, execute the bodies of all actions that are currently active.
 	t.write("\t// --- SFC Phase 4: Execute Action Bodies ---\n")
-	uniqueActions := make(map[string]*ast.ActionBlockStatement)
+	actionDefinitions := make(map[string]*ast.ActionStatement)
+	for _, element := range sfc.Elements {
+		if action, ok := element.(*ast.ActionStatement); ok {
+			actionDefinitions[action.Name.Value] = action
+		}
+	}
+
+	// Get a unique list of all action names that are actually used in steps.
+	usedActions := make(map[string]bool)
 	for _, element := range sfc.Elements {
 		if step, ok := element.(*ast.StepStatement); ok {
-			for _, actionBlock := range step.Actions {
-				uniqueActions[actionBlock.ActionName.Value] = actionBlock
+			for _, actionAssoc := range step.Actions {
+				usedActions[actionAssoc.ActionName.Value] = true
 			}
 		}
 	}
-	for name, actionBlock := range uniqueActions {
+
+	// To ensure deterministic output, we sort the action names.
+	sortedActions := make([]string, 0, len(usedActions))
+	for name := range usedActions {
+		sortedActions = append(sortedActions, name)
+	}
+	sort.Strings(sortedActions)
+
+	for _, name := range sortedActions {
 		t.write("\tif p.%s_Q {\n", name)
-		t.transpileBlockStatement(actionBlock.Body)
+		if def, ok := actionDefinitions[name]; ok {
+			if block, isBlock := def.Body.(*ast.BlockStatement); isBlock {
+				// Manually iterate and indent statements within the action body.
+				for _, s := range block.Statements {
+					t.write("\t")
+					if err := t.Transpile(s); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		t.write("\t}\n")
 	}
 
@@ -1006,27 +1164,45 @@ func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *as
 		case "P":
 			// Action is active only if the step just became active (was not active in the previous scan).
 			t.write("\t\tp.%s_Q = p.%s_X && !p.%s_X_prev\n", actionName, step.Name.Value, step.Name.Value)
-		case "D", "SD", "DS":
-			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now }\n", actionName, actionName)
+		case "D": // Non-stored delayed
+			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; }\n", actionName, actionName)
+			t.write("\t\tp.%s_Q = now.Sub(p.%s_Timer) >= ", actionName, actionName)
+			t.transpileExpression(actionBlock.Duration)
+			t.write("\n")
+		case "L": // Non-stored limited
+			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; }\n", actionName, actionName)
+			t.write("\t\tp.%s_Q = now.Sub(p.%s_Timer) < ", actionName, actionName)
+			t.transpileExpression(actionBlock.Duration)
+			t.write("\n")
+		case "SD", "DS": // Stored delayed
+			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; }\n", actionName, actionName)
+			// Only set Q to true, never to false. It must be reset by 'R'.
+			t.write("\t\tif !p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName)
+			t.transpileExpression(actionBlock.Duration)
+			t.write(" { p.%s_Q = true; }\n", actionName)
+		case "SL": // Stored limited
+			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; p.%s_Q = true; }\n", actionName, actionName, actionName) // Set Q true immediately
+			// Only set Q to false, never back to true.
 			t.write("\t\tif now.Sub(p.%s_Timer) >= ", actionName)
 			t.transpileExpression(actionBlock.Duration)
-			t.write(" { p.%s_Q = true }\n", actionName)
-		case "L", "SL":
-			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now }\n", actionName, actionName)
-			t.write("\t\tif now.Sub(p.%s_Timer) < ", actionName)
-			t.transpileExpression(actionBlock.Duration)
-			t.write(" { p.%s_Q = true } else { p.%s_Q = false }\n", actionName, actionName)
+			t.write(" { p.%s_Q = false; }\n", actionName)
 		}
 	} else { // Step is not active
 		switch qualifier {
-		case "N", "L", "D", "P": // Non-stored qualifiers, including Pulse
+		case "N", "R", "P", "D", "L": // For all non-stored qualifiers, deactivate the action and reset its timer.
 			t.write("\t\tp.%s_Q = false\n", actionName)
 			t.write("\t\tp.%s_Timer = time.Time{}\n", actionName) // Reset timer
-		case "SL": // Stored-Limited also deactivates and stays off
-			t.write("\t\tif !p.%s_Timer.IsZero() && now.Sub(p.%s_Timer) >= ", actionName, actionName)
+		case "SD", "DS":
+			// Stored delayed. If timer is running, check if it has elapsed to set Q to true.
+			t.write("\t\tif !p.%s_Timer.IsZero() && !p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName, actionName)
 			t.transpileExpression(actionBlock.Duration)
-			t.write(" { p.%s_Q = false }\n", actionName)
-			// For S and SD/DS, the state is maintained, so we do nothing here.
+			t.write(" { p.%s_Q = true; }\n", actionName)
+		case "SL": // Stored-Limited
+			// If timer is running, check if it has elapsed to set Q to false.
+			t.write("\t\tif !p.%s_Timer.IsZero() && p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName, actionName)
+			t.transpileExpression(actionBlock.Duration)
+			t.write(" { p.%s_Q = false; }\n", actionName)
+			// For S, the state is maintained, so we do nothing here.
 		}
 	}
 }
@@ -1043,6 +1219,11 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	originalVarInfo := t.varInfo
 	t.varInfo = make(map[string]*ast.TypeDeclaration)
 	t.buildVarInfo(fb.VarInputs, fb.VarOutputs, fb.VarInOuts, fb.Vars)
+
+	originalTempVars := t.tempVars
+	t.tempVars = make(map[string]bool)
+	t.buildTempVarInfo(fb.VarTemp)
+	defer func() { t.tempVars = originalTempVars }()
 
 	originalLocatedVars := t.locatedVars
 	t.locatedVars = make(map[string]bool)
@@ -1068,7 +1249,8 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	for _, varDecl := range fb.Vars {
 		t.transpileVarDecl(varDecl)
 	}
-
+	// VAR_EXTERNAL variables are not part of the struct; they are global.
+	// VAR_TEMP variables are local to the Logic() call, not fields of the struct.
 	t.write("}\n\n")
 
 	// 2. Generate the Logic method for the Function Block.
@@ -1087,6 +1269,13 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	t.write("\t}\n")
 	t.write("\t%s.ENO = true\n\n", receiverName)
 
+	// Transpile VAR_TEMP as local variables inside the Logic method.
+	for _, tempBlock := range fb.VarTemp {
+		for _, decl := range tempBlock.Vars {
+			t.transpileVarDeclAsLocal(decl)
+		}
+	}
+
 	if err := t.Transpile(fb.Body); err != nil {
 		t.programVarName = originalProgramVarName // Restore context on error
 		return err
@@ -1096,6 +1285,22 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	t.programVarName = originalProgramVarName // Restore context
 	return nil
+}
+
+// transpileVarDeclAsLocal transpiles a variable declaration as a local `var` statement
+// inside a function body, used for VAR_TEMP.
+func (t *Transpiler) transpileVarDeclAsLocal(varDecl *ast.VarDeclStatement) {
+	t.write("\tvar %s %s", varDecl.Name.Value, t.mapIecTypeToGo(varDecl.DataType))
+	if varDecl.Value != nil {
+		t.write(" = ")
+		// Use a temporary transpiler to avoid carrying over receiver context.
+		valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
+		if err := valT.transpileExpression(varDecl.Value); err != nil {
+			// This is not ideal as we can't return an error here. Log it.
+			log.Printf("Error transpiling initial value for temp var: %v", err)
+		}
+	}
+	t.write("\n")
 }
 
 // isTransitionFromStep checks if a given transition statement originates from a specific step.
@@ -1131,10 +1336,8 @@ func (t *Transpiler) transpileSFCTransition(trans *ast.TransitionStatement) {
 func (t *Transpiler) buildVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 	for _, block := range varBlocks {
 		for _, varDecl := range block {
-			// We need to resolve the type declaration for this variable.
 			var typeName string
 			currentType := varDecl.DataType
-			// For arrays, we need to get the base element type.
 			for {
 				if arrayDef, ok := currentType.(*ast.ArrayDefinition); ok {
 					currentType = arrayDef.DataType
@@ -1142,12 +1345,18 @@ func (t *Transpiler) buildVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 					break
 				}
 			}
+
 			if typeSpec, ok := currentType.(*ast.TypeSpecifier); ok {
 				typeName = typeSpec.Token.Literal
 			} else if typeIdent, ok := currentType.(*ast.Identifier); ok {
 				typeName = typeIdent.Value
 			}
-			t.varInfo[varDecl.Name.Value] = t.getTypeDeclaration(typeName)
+
+			typeDecl := t.getTypeDeclaration(typeName)
+			if typeDecl == nil {
+				typeDecl = &ast.TypeDeclaration{Name: &ast.Identifier{Value: typeName}, DataType: varDecl.DataType}
+			}
+			t.varInfo[varDecl.Name.Value] = typeDecl
 		}
 	}
 }
@@ -1174,11 +1383,27 @@ func (t *Transpiler) buildAccessVarInfo(accessBlocks []*ast.AccessVarDeclaration
 	}
 }
 
+// buildTempVarInfo populates the `tempVars` map with names of variables declared in VAR_TEMP blocks.
+func (t *Transpiler) buildTempVarInfo(tempBlocks []*ast.TempVarDeclaration) {
+	for _, block := range tempBlocks {
+		for _, decl := range block.Vars {
+			t.tempVars[decl.Name.Value] = true
+		}
+	}
+}
+
 // isFunctionBlockType checks if a given AST expression representing a data type
 // refers to a user-defined FUNCTION_BLOCK type.
 func (t *Transpiler) isFunctionBlockType(dataType ast.Expression) bool {
+	var typeName string
 	if typeIdent, ok := dataType.(*ast.Identifier); ok {
-		if typeDef, ok := t.typeInfo[typeIdent.Value]; ok {
+		typeName = typeIdent.Value
+	} else if typeSpec, ok := dataType.(*ast.TypeSpecifier); ok {
+		typeName = typeSpec.TokenLiteral()
+	}
+
+	if typeName != "" {
+		if typeDef, ok := t.typeInfo[typeName]; ok {
 			if _, isFB := typeDef.(*ast.FunctionBlockDeclaration); isFB {
 				return true
 			}
@@ -1253,7 +1478,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	// If it's a located variable, transpile it as a pointer.
 	if varDecl.Location != nil {
 		goType := t.mapIecTypeToGo(varDecl.DataType)
-		t.write("\t%s *%s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.String())
+		t.write("\t%s *%s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.Location.String())
 		return
 	}
 
@@ -1508,6 +1733,9 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 // transpileBlockStatement iterates through the statements within an AST block and transpiles each one.
 // transpileBlockStatement iterates over statements in a block and transpiles them.
 func (t *Transpiler) transpileBlockStatement(bs *ast.BlockStatement) error {
+	if bs == nil {
+		return nil
+	}
 	for _, stmt := range bs.Statements {
 		if err := t.Transpile(stmt); err != nil {
 			return err
@@ -1585,6 +1813,9 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
 		} else if t.accessVars[exp.Value] {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
+		} else if t.tempVars[exp.Value] {
+			// It's a temporary variable, local to the Logic function.
+			t.write("%s", exp.Value)
 		} else if t.globalVars[exp.Value] {
 			// If it's a global variable, write it without a prefix.
 			t.write("%s", exp.Value)
@@ -1642,6 +1873,12 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 		return t.transpileFunctionLiteral(exp)
 	case *ast.HashLiteral:
 		return t.transpileHashLiteral(exp)
+	case *ast.ArrayRepetition:
+		// This is handled by transpileArrayLiteral, but we add a case to be safe.
+		return t.transpileArrayRepetition(exp)
+	case *ast.MacroLiteral:
+		t.write("/* macro literal not yet supported for transpilation */")
+		return nil
 	case *ast.ArrayLiteral:
 		return t.transpileArrayLiteral(exp)
 
@@ -1772,8 +2009,15 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 			t.write("\t}")
 			alt = elseifStmt.Alternative
 		} else { // This is the final ELSE block
-			t.write(" else {\n\t")
-			t.transpileBlockStatement(alt.(*ast.BlockStatement))
+			t.write(" else {\n")
+			if elseBlock, ok := alt.(*ast.BlockStatement); ok {
+				for _, s := range elseBlock.Statements {
+					t.write("\t")
+					if err := t.Transpile(s); err != nil {
+						return err
+					}
+				}
+			}
 			t.write("\t}")
 			alt = nil
 		}
@@ -1847,6 +2091,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 
 			if isInOut {
 				// Pass by reference for VAR_IN_OUT
+				t.write("\t")
 				// Transpiles to: p.MyFB.InOutVar = &p.MyProgramVar
 				t.transpileExpression(exp.Function)
 				t.write(".%s = &", namedArg.Name.Value)
@@ -1854,6 +2099,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 				t.write("\n")
 			} else {
 				// Pass by value for VAR_INPUT
+				t.write("\t")
 				// Transpiles to: p.MyTimer.IN = ...
 				t.transpileExpression(exp.Function)
 				t.write(".%s = ", namedArg.Name.Value)
@@ -1864,12 +2110,14 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 	}
 
 	// 2. Call the Logic() method.
+	t.write("\t")
 	t.transpileExpression(exp.Function) // e.g., p.MyTimer
 	t.write(".Logic(now)\n")            // Pass the 'now' timestamp
 
 	// 3. Handle output arguments (e.g., Q => MyVar)
 	for _, arg := range exp.Arguments {
 		if outArg, ok := arg.(*ast.OutputArgument); ok {
+			t.write("\t")
 			// Transpile `p.MyVar = p.MyTimer.Q`
 			t.transpileExpression(outArg.Target)
 			t.write(" = ")
@@ -1963,7 +2211,14 @@ func (t *Transpiler) transpileArrayLiteral(al *ast.ArrayLiteral) error {
 	// We'll inspect the first element. This is a simplification.
 	elemType := ""
 	if len(al.Elements) > 0 {
-		firstElem := al.Elements[0]
+		var firstElem ast.Expression
+		firstElem = al.Elements[0]
+
+		// If the first element is a repetition, look at the type of the element being repeated.
+		if rep, ok := firstElem.(*ast.ArrayRepetition); ok && len(rep.Elements) > 0 {
+			firstElem = rep.Elements[0]
+		}
+
 		// If the first element is another array, it's a multi-dimensional array.
 		// In this case, we don't specify the inner type, letting it be inferred recursively.
 		if _, isArray := firstElem.(*ast.ArrayLiteral); isArray {
@@ -1971,8 +2226,12 @@ func (t *Transpiler) transpileArrayLiteral(al *ast.ArrayLiteral) error {
 			elemType = ""
 		} else if typedLit, ok := firstElem.(*ast.TypedLiteral); ok {
 			elemType = "iec." + strings.ToUpper(typedLit.TypeName)
-			// For other literals, we let Go infer the type during assignment.
+		} else if _, isInt := firstElem.(*ast.IntegerLiteral); isInt {
+			// Heuristic: if we see an integer literal, assume the array type is INT.
+			// This is not perfect but covers many common cases.
+			elemType = "iec.INT"
 		}
+		// For other literal types (REAL, BOOL, STRING), Go can often infer the type,
 	}
 
 	t.write("[]%s{", elemType)
@@ -1980,14 +2239,50 @@ func (t *Transpiler) transpileArrayLiteral(al *ast.ArrayLiteral) error {
 		if i > 0 {
 			t.write(", ")
 		}
-		// Handle ArrayRepetition here
-		t.transpileExpression(el)
-		if i < len(al.Elements)-1 {
-			t.write(", ")
+		// The expression transpiler will handle ArrayRepetition now.
+		if err := t.transpileExpression(el); err != nil {
+			// Cannot return error from here easily, log it.
+			log.Printf("Error transpiling array element: %v", err)
 		}
 	}
 	t.write("}")
 	return nil
+}
+
+// findHighestPriorityAction determines the effective action association for an action
+// within a step, based on qualifier priority (R > S > others).
+func findHighestPriorityAction(associations []*ast.ActionBlockStatement) *ast.ActionBlockStatement {
+	if len(associations) == 0 {
+		return nil
+	}
+
+	var rAssoc, sAssoc, otherAssoc *ast.ActionBlockStatement
+
+	for _, assoc := range associations {
+		qualifier := "N"
+		if assoc.Qualifier != nil {
+			qualifier = assoc.Qualifier.Value
+		}
+
+		switch qualifier {
+		case "R":
+			rAssoc = assoc
+		case "S":
+			sAssoc = assoc
+		default:
+			if otherAssoc == nil {
+				otherAssoc = assoc
+			}
+		}
+	}
+
+	if rAssoc != nil {
+		return rAssoc // R has highest priority
+	}
+	if sAssoc != nil {
+		return sAssoc // S has second highest
+	}
+	return otherAssoc // Return any other qualifier, or nil if none
 }
 
 // transpileArrayRepetition transpiles an array repetition factor (e.g., `3(0)`)
@@ -2035,30 +2330,6 @@ func (t *Transpiler) transpileIndexExpression(exp *ast.IndexExpression) error {
 	}
 	t.write("]")
 	return nil
-}
-
-// transpileFBInputAssignments transpiles the input assignments for a function block invocation.
-// It handles both value and reference passing for VAR_INPUT and VAR_IN_OUT parameters, respectively.
-func (t *Transpiler) transpileFBInputAssignments(exp *ast.CallExpression) {
-	for _, arg := range exp.Arguments {
-		if namedArg, ok := arg.(*ast.NamedArgument); ok {
-			isInOut := t.isInOutArgument(exp.Function, namedArg.Name.Value)
-
-			if isInOut {
-				// Pass by reference for VAR_IN_OUT
-				t.transpileExpression(exp.Function)
-				t.write(".%s = &", namedArg.Name.Value)
-				t.transpileExpression(namedArg.Value)
-				t.write("\n")
-			} else {
-				// Pass by value for VAR_INPUT
-				t.transpileExpression(exp.Function)
-				t.write(".%s = ", namedArg.Name.Value)
-				t.transpileExpression(namedArg.Value)
-				t.write("\n")
-			}
-		}
-	}
 }
 
 // getFunctionBlockDefinition retrieves the `FunctionBlockDeclaration` AST node
