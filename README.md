@@ -1,6 +1,6 @@
 # beedance
 
-`beedance` is an interpreter and toolkit for the IEC 61131-3 industrial automation programming languages. It provides a robust, standards-compliant parser and an evaluator capable of executing Structured Text (ST), Instruction List (IL), and Sequential Function Chart (SFC). It serves as a powerful foundation for building compilers, analysis tools, and virtual controllers for PLCs. **AMERICAN MADE**
+`beedance` is an interpreter and toolkit for the IEC 61131-3 industrial automation programming languages. It provides a robust, standards-compliant parser and an evaluator capable of executing Structured Text (ST), Instruction List (IL), and Sequential Function Chart (SFC). It serves as a powerful foundation for building compilers, analysis tools, and virtual controllers for PLCs.
 
 ## Implemented Features
 
@@ -38,17 +38,22 @@ The design of `beedance` is centered around creating a high-quality, maintainabl
 ### Advanced Parser Design
 The project is built upon a **Pratt (Top-Down Operator Precedence) parser**. This modern parsing technique is exceptionally well-suited for handling the complexities of computer language grammars. It allows for a clean, efficient, and easily extensible implementation that can gracefully handle operator precedence, prefix operators, and infix expressions.
 
-### Clean & Maintainable Architecture
+### Clean & Modular Architecture
 
-A core principle of the `beedance` parser is a clean separation of concerns:
+A core principle of `beedance` is a clean, modular architecture with a clear separation of concerns. This makes the codebase easy to understand, maintain, and extend. The key packages include:
 
-*   **Simple Lexer:** The lexical analyzer (lexer) is intentionally kept "dumb." Its only job is to scan the source text and convert it into a stream of tokens based on simple patterns. It has no knowledge of the language's context or semantics.
 
-*   **Intelligent Parser:** The parser consumes the token stream and is responsible for understanding the context. It determines whether an identifier is a variable name, a data type, or a function name based on its position in the grammar.
+*   **`stdlib`:** The standard library, containing the Go implementations for all stateless built-in functions (e.g., `SIN`, `LEN`, `CONCAT`). It acts as a "plugin" that registers its functions with the `object` package at startup.
 
-*   **Stateful Tree-Walking Evaluator:** The evaluator directly traverses the Abstract Syntax Tree (AST) produced by the parser. It manages state through a system of enclosed environments, which provides a clean and robust way to handle variable scopes, function calls, and instances of function blocks. Each function block instance maintains its own separate environment, naturally encapsulating its state.
+*   **`parser`:** A powerful and efficient **Pratt (Top-Down Operator Precedence) parser** that consumes tokens from the lexer and produces a clean Abstract Syntax Tree (AST).
 
-This three-tiered separation makes the codebase significantly easier to read, debug, and extend compared to more traditional approaches where these components are tightly coupled.
+*   **`evaluator`:** A tree-walking interpreter that directly executes the AST. It is responsible for managing stateful logic, such as variable environments and the execution of standard function blocks (`TON`, `CTU`, etc.).
+
+*   **`compiler` & `vm`:** A bytecode compiler and virtual machine that provide a faster alternative to the evaluator. These components are fully decoupled from the evaluator and can be used independently.
+
+*   **`transpiler`:** A source-to-source compiler that translates the iec61131 AST into human-readable and efficient Go code. This enables integration with Go-native runtimes and compilation to native binaries or WebAssembly.
+
+This modular design allows components like the compiler and VM to operate without any dependency on the evaluator, enabling the creation of lightweight, high-performance tools.
 ### Standards Compliance
 ### Extensible Backend Architecture
 
@@ -193,3 +198,23 @@ This project is dual-licensed under the terms of the **GNU General Public Licens
 *   **Commercial Usage:** If you wish to use this software in a proprietary, closed-source application, you must purchase a commercial license.
 
 Please see the `LICENSE.md` and `gpl-2.0.md` files for more details.
+
+## Code of Conduct
+
+This project and everyone participating in it is governed by the
+`beedance` Code of Conduct. By participating, you are
+expected to uphold this code.
+
+## Contributing
+
+Contributions are welcome and greatly appreciated! `beedance` aims to be a high-quality, standards-compliant toolkit, and community contributions are vital to achieving that goal.
+
+If you'd like to contribute, please follow these general steps:
+
+1.  **Open an Issue:** Before starting significant work, please open an issue on GitHub to discuss your proposed changes. This could be a bug report, a feature request, or a suggestion for improvement. This helps ensure your contribution aligns with the project's direction and avoids duplicate effort.
+2.  **Fork the Repository:** Create your own fork of the `beedance` repository.
+3.  **Create a Branch:** Work on a separate feature branch for your changes (`git checkout -b feature/my-new-feature`).
+4.  **Commit Your Changes:** Make your changes and commit them with clear, descriptive messages.
+5.  **Submit a Pull Request:** Push your branch to your fork and open a pull request against the main `beedance` repository. Please link the pull request to the issue you opened.
+
+We appreciate your help in making `beedance` a better tool for the industrial automation community!

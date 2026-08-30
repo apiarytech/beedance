@@ -2264,7 +2264,7 @@ func findHighestPriorityAction(associations []*ast.ActionBlockStatement) *ast.Ac
 			qualifier = assoc.Qualifier.Value
 		}
 
-		switch qualifier {
+		switch strings.ToUpper(qualifier) {
 		case "R":
 			rAssoc = assoc
 		case "S":

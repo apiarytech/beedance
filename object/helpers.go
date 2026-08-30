@@ -15,6 +15,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // IsNumeric is a helper function that returns true if an object is one of the
@@ -241,7 +242,8 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			rounded := int64(math.Round(val.Value))
 			return checkAndCreateIntegerObject(ObjectType(toType), rounded, uint64(rounded), false)
 		case *String:
-			i, err := strconv.ParseInt(val.Value, 10, 64)
+			// Trim whitespace before parsing, as per IEC standard for STRING_TO_*
+			i, err := strconv.ParseInt(strings.TrimSpace(val.Value), 10, 64)
 			if err != nil {
 				return NewBuiltinError("could not parse string to integer: %s", val.Value)
 			}
@@ -289,6 +291,9 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		case *LInt, *SInt, *Int, *DInt, *USInt, *UInt, *UDInt, *ULInt:
 			iVal, _, _ := GetIntegerObjectValue(input)
 			return nativeBoolToBooleanObject(iVal != 0)
+		case *Real, *LReal:
+			fVal, _ := GetFloat64Value(input)
+			return nativeBoolToBooleanObject(fVal != 0.0)
 		}
 		return NewBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 	}
@@ -399,27 +404,73 @@ func EvalInfix(left Object, operator string, right Object) Object {
 	case left.Type() == BOOLEAN_OBJ && right.Type() == BOOLEAN_OBJ:
 		leftVal := left.(*Boolean).Value
 		rightVal := right.(*Boolean).Value
-		if operator == "=" {
+		switch operator {
+		case "=", "EQ":
 			return nativeBoolToBooleanObject(leftVal == rightVal)
+		case "!=", "<>", "NE":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		case "<", "LT":
+			return nativeBoolToBooleanObject(!leftVal && rightVal) // FALSE < TRUE
+		case ">", "GT":
+			return nativeBoolToBooleanObject(leftVal && !rightVal) // TRUE > FALSE
+		case "<=", "LE":
+			return nativeBoolToBooleanObject(leftVal == rightVal || !leftVal)
+		case ">=", "GE":
+			return nativeBoolToBooleanObject(leftVal == rightVal || leftVal)
+		default:
+			return NewBuiltinError("unknown operator for BOOLEAN: %s", operator)
 		}
 	case left.Type() == STRING_OBJ && right.Type() == STRING_OBJ:
 		leftVal := left.(*String).Value
 		rightVal := right.(*String).Value
-		if operator == "=" {
-			return nativeBoolToBooleanObject(leftVal == rightVal)
-		}
+		return evalGenericComparison(operator, leftVal, rightVal)
 	case left.Type() == WSTRING_OBJ && right.Type() == WSTRING_OBJ:
 		leftVal := left.(*WString).Value
 		rightVal := right.(*WString).Value
-		if operator == "=" {
-			return nativeBoolToBooleanObject(leftVal == rightVal)
-		}
+		return evalGenericComparison(operator, leftVal, rightVal)
+	case left.Type() == TIME_OBJ && right.Type() == TIME_OBJ:
+		leftVal := left.(*Time).Value
+		rightVal := right.(*Time).Value
+		return evalGenericComparison(operator, int64(leftVal), int64(rightVal))
+	case left.Type() == DATE_OBJ && right.Type() == DATE_OBJ:
+		leftVal := left.(*Date).Value
+		rightVal := right.(*Date).Value
+		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
+	case left.Type() == TIME_OF_DAY_OBJ && right.Type() == TIME_OF_DAY_OBJ:
+		leftVal := left.(*TimeOfDay).Value
+		rightVal := right.(*TimeOfDay).Value
+		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
+		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
+		return evalGenericComparison(operator, leftNs, rightNs)
+	case left.Type() == DATE_AND_TIME_OBJ && right.Type() == DATE_AND_TIME_OBJ:
+		leftVal := left.(*DateAndTime).Value
+		rightVal := right.(*DateAndTime).Value
+		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
 	case left.Type() == NULL_OBJ || right.Type() == NULL_OBJ:
 		if operator == "=" {
 			return nativeBoolToBooleanObject(left.Type() == right.Type())
 		}
 	}
 	return NewBuiltinError("unsupported types for comparison: %s %s %s", left.Type(), operator, right.Type())
+}
+
+func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) Object {
+	switch op {
+	case "=", "EQ":
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=", "<>", "NE":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<", "LT":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
+	case "<=", "LE":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=", "GE":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	default:
+		return NewBuiltinError("unknown operator '%s' for generic comparison", op)
+	}
 }
 
 func EvalNumericInfix(left, right Object, operator string) Object {

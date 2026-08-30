@@ -207,7 +207,7 @@ func init() {
 		switch in1 := args[0].(type) {
 		case *object.Array:
 			arrLen := int64(len(in1.Elements))
-			if l <= 0 || p < 1 || p > arrLen {
+			if l <= 0 || p < 1 || p > arrLen || p+l > arrLen+1 {
 				return in1
 			}
 			start := p - 1
@@ -219,7 +219,7 @@ func init() {
 			return &object.Array{Elements: newElements}
 		case *object.String:
 			strLen := int64(len(in1.Value))
-			if l <= 0 || p < 1 || p > strLen {
+			if l <= 0 || p < 1 || p > strLen || p+l > strLen+1 {
 				return in1
 			}
 			start := p - 1
@@ -230,7 +230,7 @@ func init() {
 			return &object.String{Value: in1.Value[:start] + in1.Value[end:]}
 		case *object.WString:
 			strLen := int64(len(in1.Value))
-			if l <= 0 || p < 1 || p > strLen {
+			if l <= 0 || p < 1 || p > strLen || p+l > strLen+1 {
 				return in1
 			}
 			start := p - 1
@@ -357,11 +357,11 @@ func init() {
 		if len(args) != 3 {
 			return object.NewBuiltinError("wrong number of arguments for MID. got=%d, want=3", len(args))
 		}
-		l, _, okL := object.GetIntegerObjectValue(args[1])
+		l, _, okL := object.GetIntegerObjectValue(args[2]) // L is the 3rd argument
 		if !okL {
-			return object.NewBuiltinError("argument 2 to `MID` must be INTEGER, got %s", args[1].Type())
+			return object.NewBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
 		}
-		p, _, okP := object.GetIntegerObjectValue(args[2])
+		p, _, okP := object.GetIntegerObjectValue(args[1]) // P is the 2nd argument
 		if !okP {
 			return object.NewBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
 		}
@@ -429,11 +429,11 @@ func init() {
 		if len(args) != 4 {
 			return object.NewBuiltinError("wrong number of arguments for REPLACE. got=%d, want=4", len(args))
 		}
-		l, _, okL := object.GetIntegerObjectValue(args[2])
+		l, _, okL := object.GetIntegerObjectValue(args[3]) // L is the 4th argument
 		if !okL {
-			return object.NewBuiltinError("argument 3 to `REPLACE` must be INTEGER, got %s", args[2].Type())
+			return object.NewBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
 		}
-		p, _, okP := object.GetIntegerObjectValue(args[3])
+		p, _, okP := object.GetIntegerObjectValue(args[2]) // P is the 3rd argument
 		if !okP {
 			return object.NewBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
 		}
@@ -1157,44 +1157,52 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 		return object.NewBuiltinError("wrong number of arguments for %s. got=0, want>=1", op)
 	}
 
-	hasReal := false
-	for _, arg := range args {
-		if !object.IsNumeric(arg) {
-			return object.NewBuiltinError("all arguments to `%s` must be INTEGER or REAL, got %s", op, arg.Type())
-		}
-		if arg.Type() == object.REAL_OBJ || arg.Type() == object.LREAL_OBJ {
-			hasReal = true
-		}
+	result := args[0]
+	firstType := result.Type()
+
+	// Check if the type is orderable by the logic in EvalInfix.
+	switch firstType {
+	case object.SINT_OBJ, object.INT_OBJ, object.DINT_OBJ, object.LINT_OBJ,
+		object.USINT_OBJ, object.UINT_OBJ, object.UDINT_OBJ, object.ULINT_OBJ,
+		object.REAL_OBJ, object.LREAL_OBJ, object.STRING_OBJ, object.WSTRING_OBJ,
+		object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ,
+		object.BOOLEAN_OBJ:
+		// These types are orderable.
+	default:
+		return object.NewBuiltinError("arguments to `%s` must be of an orderable elementary type, got %s", op, firstType)
 	}
 
-	if hasReal {
-		result, _ := object.GetFloat64Value(args[0])
-		for i := 1; i < len(args); i++ {
-			val, _ := object.GetFloat64Value(args[i])
-			if op == "MIN" {
-				result = math.Min(result, val)
-			} else { // MAX
-				result = math.Max(result, val)
-			}
-		}
-		return &object.Real{Value: result}
-	}
-
-	// All arguments are integers
-	result, _, _ := object.GetIntegerObjectValue(args[0])
 	for i := 1; i < len(args); i++ {
-		val, _, _ := object.GetIntegerObjectValue(args[i])
+		nextArg := args[i]
+
+		// Check for type compatibility. Numeric types can be mixed.
+		// Non-numeric types must be identical. Mixing numeric and non-numeric is an error.
+		isFirstNumeric := object.IsNumeric(result)
+		isNextNumeric := object.IsNumeric(nextArg)
+
+		if (isFirstNumeric != isNextNumeric) || (!isFirstNumeric && nextArg.Type() != firstType) {
+			return object.NewBuiltinError("all arguments to `%s` must be of the same type, got %s and %s", op, firstType, nextArg.Type())
+		}
+
+		var comparisonOp string
 		if op == "MIN" {
-			if val < result {
-				result = val
-			}
+			comparisonOp = "<" // If nextArg < result, we'll update result
 		} else { // MAX
-			if val > result {
-				result = val
-			}
+			comparisonOp = ">" // If nextArg > result, we'll update result
+		}
+
+		isCompareTrue := object.EvalInfix(nextArg, comparisonOp, result)
+
+		if err, ok := isCompareTrue.(*object.Error); ok {
+			return err
+		}
+
+		if boolResult, ok := isCompareTrue.(*object.Boolean); ok && boolResult.Value {
+			result = nextArg
 		}
 	}
-	return &object.LInt{Value: result}
+
+	return result
 }
 
 func moveBuiltin(args ...object.Object) object.Object {
