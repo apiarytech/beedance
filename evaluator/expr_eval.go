@@ -16,14 +16,22 @@ import (
 	"fmt"
 )
 
+// quote is the entry point for handling the `EXPR` built-in. It takes an AST
+// node, processes any nested `EVAL` calls within it, and returns the resulting
+// node wrapped in a `Quote` object. This prevents the evaluator from executing
+// the code, treating it as a data structure instead.
 func quote(node ast.Node, env *object.Environment) object.Object {
 	node = evalUnquoteCalls(node, env)
 	return &object.Quote{Node: node}
 }
 
+// evalUnquoteCalls traverses a given AST node (`quoted`) and searches for `EVAL`
+// calls. When an `EVAL` call is found, it evaluates the argument of the call and
+// replaces the `EVAL` call site with the resulting AST node. This is the mechanism
+// that allows for injecting computed values into a quoted AST.
 func evalUnquoteCalls(quoted ast.Node, env *object.Environment) ast.Node {
 	return ast.Modify(quoted, func(node ast.Node) ast.Node {
-		if !isUnquoteCall(node) {
+		if !isEvalCall(node) {
 			return node
 		}
 
@@ -41,15 +49,21 @@ func evalUnquoteCalls(quoted ast.Node, env *object.Environment) ast.Node {
 	})
 }
 
-func isUnquoteCall(node ast.Node) bool {
+// isEvalCall is a helper function that checks if a given AST node is a
+// `CallExpression` to the `EVAL` function.
+func isEvalCall(node ast.Node) bool {
 	callExpression, ok := node.(*ast.CallExpression)
 	if !ok {
 		return false
 	}
 
-	return callExpression.Function.TokenLiteral() == "unquote"
+	return callExpression.Function.TokenLiteral() == "EVAL"
 }
 
+// convertObjectToASTNode converts a runtime `object.Object` back into its
+// `ast.Node` representation. This is a critical part of the `EVAL` mechanism,
+// as it allows the result of an evaluated expression to be re-inserted into the
+// AST. It handles various object types like integers, booleans, and even other quotes.
 func convertObjectToASTNode(obj object.Object) ast.Node {
 	switch obj := obj.(type) {
 	case *object.LInt:
@@ -126,6 +140,10 @@ func convertObjectToASTNode(obj object.Object) ast.Node {
 		return obj.Node
 
 	default:
+		// If an object type cannot be converted back to an AST node (e.g., a function object),
+		// return nil. This will likely cause an error further up the call stack, which is the desired behavior.
+		// It's better to return an error node or nil than to panic.
+		// Returning nil will likely cause an error further up the call stack, which is acceptable.
 		return nil
 	}
 }

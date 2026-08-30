@@ -30,6 +30,7 @@ import (
 	"beedance/object"
 	"beedance/parser"
 	"beedance/repl"
+	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"beedance/transpiler"
 	"beedance/vm"
 )
@@ -37,6 +38,9 @@ import (
 const version = "0.1.0"
 
 func main() {
+	// Finalize the list of built-in functions after all packages have been initialized.
+	object.FinalizeBuiltins()
+
 	trace := flag.Bool("trace", false, "Enable parser tracing")
 	versionFlag := flag.Bool("version", false, "Print the application version")
 	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
@@ -128,11 +132,6 @@ func executeFile(filepath string, out io.Writer, engine string) {
 		globals := make([]object.Object, vm.GlobalsSize)
 
 		comp := compiler.NewWithState(symbolTable, nil)
-		err := comp.Compile(program)
-		if err != nil {
-			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
-			return
-		}
 
 		// Since we are executing a file, which is likely a full PROGRAM,
 		// we use the new CompileProgram function to get separated bytecode.
@@ -142,7 +141,7 @@ func executeFile(filepath string, out io.Writer, engine string) {
 			return
 		}
 
-		compiledProg, err := compiler.CompileProgram(programDecl)
+		compiledProg, err := comp.CompiledProgram(programDecl)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
 			return
@@ -165,6 +164,7 @@ func executeFile(filepath string, out io.Writer, engine string) {
 				fmt.Fprintf(out, "Woops! Executing cyclic bytecode failed on cycle %d:\n %s\n", i+1, err)
 				return
 			}
+			globals = cyclicVM.Globals() // Update globals with the state from the completed cycle
 			fmt.Fprintf(out, "Cycle %d complete. Last popped value: %s\n", i+1, cyclicVM.LastPoppedStackElem().Inspect())
 			time.Sleep(100 * time.Millisecond) // Simulate scan time
 		}

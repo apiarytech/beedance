@@ -6,25 +6,25 @@ import (
 	"beedance/object"
 )
 
-func TestQuote(t *testing.T) {
+func TestEXPR(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
 	}{
 		{
-			`quote(5);`,
+			`EXPR(5);`,
 			`5`,
 		},
 		{
-			`quote(5 + 8);`,
+			`EXPR(5 + 8);`,
 			`(5 + 8)`,
 		},
 		{
-			`quote(foobar);`,
+			`EXPR(foobar);`,
 			`foobar`,
 		},
 		{
-			`quote(foobar + barfoo);`,
+			`EXPR(foobar + barfoo);`,
 			`(foobar + barfoo)`,
 		},
 	}
@@ -48,20 +48,20 @@ func TestQuote(t *testing.T) {
 	}
 }
 
-func TestQuoteUnquote(t *testing.T) {
+func TestEXPREVAL(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
 	}{
-		{`quote(unquote(4));`, `4`},
-		{`quote(unquote(4 + 4));`, `8`},
-		{`quote(8 + unquote(4 + 4));`, `(8 + 8)`},
-		{`quote(unquote(4 + 4) + 8);`, `(8 + 8)`},
-		{`VAR foobar : INT := 8; END_VAR quote(unquote(foobar));`, `8`},
-		{`quote(unquote(TRUE));`, `TRUE`},
-		{`quote(unquote(TRUE = FALSE));`, `FALSE`},
-		{`quote(unquote(quote(4 + 4)));`, `(4 + 4)`},
-		{`VAR quotedInfixExpression : INT := quote(4 + 4); END_VAR quote(unquote(4 + 4) + unquote(quotedInfixExpression));`, `(8 + (4 + 4))`},
+		{`EXPR(EVAL(4));`, `4`},
+		{`EXPR(EVAL(4 + 4));`, `8`},
+		{`EXPR(8 + EVAL(4 + 4));`, `(8 + 8)`},
+		{`EXPR(EVAL(4 + 4) + 8);`, `(8 + 8)`},
+		{`VAR foobar : INT := 8; END_VAR EXPR(EVAL(foobar));`, `8`},
+		{`EXPR(EVAL(TRUE));`, `TRUE`},
+		{`EXPR(EVAL(TRUE = FALSE));`, `FALSE`},
+		{`EXPR(EVAL(EXPR(4 + 4)));`, `(4 + 4)`},
+		{`VAR quotedInfixExpression : MACRO := EXPR(4 + 4); END_VAR EXPR(EVAL(4 + 4) + EVAL(quotedInfixExpression));`, `(8 + (4 + 4))`},
 	}
 
 	for _, tt := range tests {

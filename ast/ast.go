@@ -19,34 +19,41 @@ import (
 	"beedance/token"
 )
 
-// The base Node interface
+// Node is the base interface for all nodes in the abstract syntax tree.
 type Node interface {
 	TokenLiteral() string
 	Pos() (int, int) // Returns (line, column)
 	String() string
 }
 
-// All statement nodes implement this
+// Statement is an interface for all statement nodes.
 type Statement interface {
 	Node
 	statementNode()
 }
 
-// All expression nodes implement this
+// Expression is an interface for all expression nodes.
 type Expression interface {
 	Node
 	expressionNode()
 }
 
-// A TypeSpecifier represents a data type in the language, e.g., INT, BOOL.
+// TypeSpecifier represents a data type in the language, e.g., INT, BOOL.
 type TypeSpecifier struct {
 	Token token.Token // The type token, e.g., token.INT
 }
 
-func (ts *TypeSpecifier) expressionNode()      {}
-func (ts *TypeSpecifier) Pos() (int, int)      { return ts.Token.Row, ts.Token.Column }
+// expressionNode marks TypeSpecifier as an expression node.
+func (ts *TypeSpecifier) expressionNode() {}
+
+// Pos returns the position of the type specifier's token.
+func (ts *TypeSpecifier) Pos() (int, int) { return ts.Token.Row, ts.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ts *TypeSpecifier) TokenLiteral() string { return ts.Token.Literal }
-func (ts *TypeSpecifier) String() string       { return ts.Token.Literal }
+
+// String returns the string representation of the type specifier.
+func (ts *TypeSpecifier) String() string { return ts.Token.Literal }
 
 type Program struct {
 	Statements []Statement
@@ -66,6 +73,7 @@ func (p *Program) Pos() (int, int) {
 	return 0, 0 // Default or error position
 }
 
+// String returns the string representation of the entire program.
 func (p *Program) String() string {
 	var out bytes.Buffer
 
@@ -76,7 +84,7 @@ func (p *Program) String() string {
 	return out.String()
 }
 
-// Statements
+// VarDeclStatement represents a variable declaration statement.
 type VarDeclStatement struct {
 	LeadingComments []string
 	Token           token.Token // the 'VAR' token
@@ -93,10 +101,19 @@ type VarDeclStatement struct {
 	AccessType      string // "READ_ONLY", "READ_WRITE", or ""
 }
 
-func (vds *VarDeclStatement) statementNode()               {}
+// statementNode marks VarDeclStatement as a statement node.
+func (vds *VarDeclStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (vds *VarDeclStatement) GetLeadingComments() []string { return vds.LeadingComments }
-func (vds *VarDeclStatement) Pos() (int, int)              { return vds.Token.Row, vds.Token.Column }
-func (vds *VarDeclStatement) TokenLiteral() string         { return vds.Token.Literal }
+
+// Pos returns the position of the statement's token.
+func (vds *VarDeclStatement) Pos() (int, int) { return vds.Token.Row, vds.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (vds *VarDeclStatement) TokenLiteral() string { return vds.Token.Literal }
+
+// String returns the string representation of the variable declaration statement.
 func (vds *VarDeclStatement) String() string {
 	var out bytes.Buffer
 
@@ -128,14 +145,22 @@ func (vds *VarDeclStatement) String() string {
 	return out.String()
 }
 
+// AtDeclaration represents an AT clause for direct variable mapping.
 type AtDeclaration struct {
 	Token    token.Token // The 'AT' token
 	Location *DirectVariable
 }
 
-func (ad *AtDeclaration) expressionNode()      {}
-func (ad *AtDeclaration) Pos() (int, int)      { return ad.Token.Row, ad.Token.Column }
+// expressionNode marks AtDeclaration as an expression node.
+func (ad *AtDeclaration) expressionNode() {}
+
+// Pos returns the position of the AT token.
+func (ad *AtDeclaration) Pos() (int, int) { return ad.Token.Row, ad.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ad *AtDeclaration) TokenLiteral() string { return ad.Token.Literal }
+
+// String returns the string representation of the AT declaration.
 func (ad *AtDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("AT ")
@@ -143,18 +168,24 @@ func (ad *AtDeclaration) String() string {
 	return out.String()
 }
 
+// DirectVariable represents a directly addressed variable (e.g., %IX0.0).
 type DirectVariable struct {
 	Token   token.Token // The '%' token
 	Address string
 }
 
-func (dv *DirectVariable) expressionNode()      {}
-func (dv *DirectVariable) Pos() (int, int)      { return dv.Token.Row, dv.Token.Column }
+func (dv *DirectVariable) expressionNode() {}
+func (dv *DirectVariable) Pos() (int, int) { return dv.Token.Row, dv.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (dv *DirectVariable) TokenLiteral() string { return dv.Token.Literal }
+
+// String returns the string representation of the direct variable.
 func (dv *DirectVariable) String() string {
 	return "%" + dv.Address
 }
 
+// ConfigurationDeclaration represents a CONFIGURATION block.
 type ConfigurationDeclaration struct {
 	Token      token.Token // The 'CONFIGURATION' token
 	Name       *Identifier
@@ -164,9 +195,16 @@ type ConfigurationDeclaration struct {
 	VarConfigs []*ConfigVarDeclaration
 }
 
-func (cd *ConfigurationDeclaration) statementNode()       {}
-func (cd *ConfigurationDeclaration) Pos() (int, int)      { return cd.Token.Row, cd.Token.Column }
+// statementNode marks ConfigurationDeclaration as a statement node.
+func (cd *ConfigurationDeclaration) statementNode() {}
+
+// Pos returns the position of the configuration token.
+func (cd *ConfigurationDeclaration) Pos() (int, int) { return cd.Token.Row, cd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (cd *ConfigurationDeclaration) TokenLiteral() string { return cd.Token.Literal }
+
+// String returns the string representation of the configuration declaration.
 func (cd *ConfigurationDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("CONFIGURATION " + cd.Name.String() + "\n")
@@ -186,6 +224,7 @@ func (cd *ConfigurationDeclaration) String() string {
 	return out.String()
 }
 
+// ResourceDeclaration represents a RESOURCE block within a CONFIGURATION.
 type ResourceDeclaration struct {
 	Token        token.Token // The 'RESOURCE' token
 	Name         *Identifier
@@ -195,9 +234,16 @@ type ResourceDeclaration struct {
 	Programs     []*ProgramConfiguration
 }
 
-func (rd *ResourceDeclaration) statementNode()       {}
-func (rd *ResourceDeclaration) Pos() (int, int)      { return rd.Token.Row, rd.Token.Column }
+// statementNode marks ResourceDeclaration as a statement node.
+func (rd *ResourceDeclaration) statementNode() {}
+
+// Pos returns the position of the resource token.
+func (rd *ResourceDeclaration) Pos() (int, int) { return rd.Token.Row, rd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (rd *ResourceDeclaration) TokenLiteral() string { return rd.Token.Literal }
+
+// String returns the string representation of the resource declaration.
 func (rd *ResourceDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("RESOURCE " + rd.Name.String() + " ON " + rd.ResourceType.String() + "\n")
@@ -206,6 +252,7 @@ func (rd *ResourceDeclaration) String() string {
 	return out.String()
 }
 
+// TaskDeclaration represents a TASK definition within a RESOURCE.
 type TaskDeclaration struct {
 	Token    token.Token // The 'TASK' token
 	Name     *Identifier
@@ -214,9 +261,16 @@ type TaskDeclaration struct {
 	Priority Expression
 }
 
-func (td *TaskDeclaration) statementNode()       {}
-func (td *TaskDeclaration) Pos() (int, int)      { return td.Token.Row, td.Token.Column }
+// statementNode marks TaskDeclaration as a statement node.
+func (td *TaskDeclaration) statementNode() {}
+
+// Pos returns the position of the task token.
+func (td *TaskDeclaration) Pos() (int, int) { return td.Token.Row, td.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (td *TaskDeclaration) TokenLiteral() string { return td.Token.Literal }
+
+// String returns the string representation of the task declaration.
 func (td *TaskDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("TASK " + td.Name.String())
@@ -235,6 +289,7 @@ func (td *TaskDeclaration) String() string {
 	return out.String()
 }
 
+// ProgramConfiguration represents a program instance within a RESOURCE.
 type ProgramConfiguration struct {
 	Token        token.Token // The 'PROGRAM' token
 	InstanceName *Identifier
@@ -243,9 +298,16 @@ type ProgramConfiguration struct {
 	Parameters   []Expression // <-- Add this line
 }
 
-func (pc *ProgramConfiguration) statementNode()       {}
-func (pc *ProgramConfiguration) Pos() (int, int)      { return pc.Token.Row, pc.Token.Column }
+// statementNode marks ProgramConfiguration as a statement node.
+func (pc *ProgramConfiguration) statementNode() {}
+
+// Pos returns the position of the program token.
+func (pc *ProgramConfiguration) Pos() (int, int) { return pc.Token.Row, pc.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (pc *ProgramConfiguration) TokenLiteral() string { return pc.Token.Literal }
+
+// String returns the string representation of the program configuration.
 func (pc *ProgramConfiguration) String() string {
 	var out bytes.Buffer
 	out.WriteString("PROGRAM ")
@@ -260,16 +322,26 @@ func (pc *ProgramConfiguration) String() string {
 	return out.String()
 }
 
+// ExpressionStatement represents a statement that consists of a single expression.
 type ExpressionStatement struct {
 	Token           token.Token // the first token of the expression
 	Expression      Expression
 	LeadingComments []string
 }
 
-func (es *ExpressionStatement) statementNode()               {}
+// statementNode marks ExpressionStatement as a statement node.
+func (es *ExpressionStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (es *ExpressionStatement) GetLeadingComments() []string { return es.LeadingComments }
-func (es *ExpressionStatement) Pos() (int, int)              { return es.Token.Row, es.Token.Column }
-func (es *ExpressionStatement) TokenLiteral() string         { return es.Token.Literal }
+
+// Pos returns the position of the statement's token.
+func (es *ExpressionStatement) Pos() (int, int) { return es.Token.Row, es.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (es *ExpressionStatement) TokenLiteral() string { return es.Token.Literal }
+
+// String returns the string representation of the expression statement.
 func (es *ExpressionStatement) String() string {
 	if es.Expression != nil {
 		return es.Expression.String() + ";"
@@ -277,6 +349,7 @@ func (es *ExpressionStatement) String() string {
 	return ""
 }
 
+// AssignmentStatement represents an assignment statement (:=).
 type AssignmentStatement struct {
 	Token           token.Token // The ':=' token
 	Left            Expression
@@ -284,10 +357,19 @@ type AssignmentStatement struct {
 	LeadingComments []string
 }
 
-func (as *AssignmentStatement) statementNode()               {}
+// statementNode marks AssignmentStatement as a statement node.
+func (as *AssignmentStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (as *AssignmentStatement) GetLeadingComments() []string { return as.LeadingComments }
-func (as *AssignmentStatement) Pos() (int, int)              { return as.Token.Row, as.Token.Column }
-func (as *AssignmentStatement) TokenLiteral() string         { return as.Token.Literal }
+
+// Pos returns the position of the assignment token.
+func (as *AssignmentStatement) Pos() (int, int) { return as.Token.Row, as.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
+
+// String returns the string representation of the assignment statement.
 func (as *AssignmentStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(as.Left.String())
@@ -299,14 +381,22 @@ func (as *AssignmentStatement) String() string {
 	return out.String()
 }
 
+// ReturnStatement represents a RETURN statement.
 type ReturnStatement struct {
 	Token       token.Token // the 'return' token
 	ReturnValue Expression
 }
 
-func (rs *ReturnStatement) statementNode()       {}
-func (rs *ReturnStatement) Pos() (int, int)      { return rs.Token.Row, rs.Token.Column }
+// statementNode marks ReturnStatement as a statement node.
+func (rs *ReturnStatement) statementNode() {}
+
+// Pos returns the position of the return token.
+func (rs *ReturnStatement) Pos() (int, int) { return rs.Token.Row, rs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
+
+// String returns the string representation of the return statement.
 func (rs *ReturnStatement) String() string {
 	var out bytes.Buffer
 
@@ -321,27 +411,42 @@ func (rs *ReturnStatement) String() string {
 	return out.String()
 }
 
+// ExitStatement represents an EXIT statement used to terminate a loop.
 type ExitStatement struct {
 	Token token.Token // the 'EXIT' token
 }
 
-func (es *ExitStatement) statementNode()       {}
-func (es *ExitStatement) Pos() (int, int)      { return es.Token.Row, es.Token.Column }
+// statementNode marks ExitStatement as a statement node.
+func (es *ExitStatement) statementNode() {}
+
+// Pos returns the position of the exit token.
+func (es *ExitStatement) Pos() (int, int) { return es.Token.Row, es.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (es *ExitStatement) TokenLiteral() string { return es.Token.Literal }
+
+// String returns the string representation of the exit statement.
 func (es *ExitStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(es.TokenLiteral() + ";")
 	return out.String()
 }
 
+// BlockStatement represents a block of statements.
 type BlockStatement struct {
 	Token      token.Token // the { token
 	Statements []Statement
 }
 
-func (bs *BlockStatement) statementNode()       {}
-func (bs *BlockStatement) expressionNode()      {} // Allow blocks to be treated as expressions (e.g., in IL)
-func (bs *BlockStatement) Pos() (int, int)      { return bs.Token.Row, bs.Token.Column }
+// statementNode marks BlockStatement as a statement node.
+func (bs *BlockStatement) statementNode() {}
+
+// expressionNode allows blocks to be treated as expressions (e.g., in IL).
+func (bs *BlockStatement) expressionNode() {} // Allow blocks to be treated as expressions (e.g., in IL)
+// Pos returns the position of the block's starting token.
+func (bs *BlockStatement) Pos() (int, int) { return bs.Token.Row, bs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
 func (bs *BlockStatement) String() string {
 	var out bytes.Buffer
@@ -353,22 +458,31 @@ func (bs *BlockStatement) String() string {
 	return out.String()
 }
 
-// Expressions
+// Identifier represents an identifier in the code.
 type Identifier struct {
 	Token token.Token // the token.IDENT token
 	Value string
 }
 
-func (i *Identifier) expressionNode()      {}
-func (i *Identifier) Pos() (int, int)      { return i.Token.Row, i.Token.Column }
-func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
-func (i *Identifier) String() string       { return i.Value }
+// expressionNode marks Identifier as an expression node.
+func (i *Identifier) expressionNode() {}
 
+// Pos returns the position of the identifier's token.
+func (i *Identifier) Pos() (int, int) { return i.Token.Row, i.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
+
+// String returns the value of the identifier.
+func (i *Identifier) String() string { return i.Value }
+
+// Boolean represents a boolean literal (TRUE or FALSE).
 type Boolean struct {
 	Token token.Token
 	Value bool
 }
 
+// expressionNode marks Boolean as an expression node.
 func (b *Boolean) expressionNode()      {}
 func (b *Boolean) Pos() (int, int)      { return b.Token.Row, b.Token.Column }
 func (b *Boolean) TokenLiteral() string { return b.Token.Literal }
@@ -380,9 +494,16 @@ type IntegerLiteral struct {
 	Type  token.TokenType
 }
 
-func (il *IntegerLiteral) expressionNode()      {}
-func (il *IntegerLiteral) Pos() (int, int)      { return il.Token.Row, il.Token.Column }
+// expressionNode marks IntegerLiteral as an expression node.
+func (il *IntegerLiteral) expressionNode() {}
+
+// Pos returns the position of the integer literal's token.
+func (il *IntegerLiteral) Pos() (int, int) { return il.Token.Row, il.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
+
+// String returns the string representation of the integer literal.
 func (il *IntegerLiteral) String() string {
 	if il.Token.Literal != "" {
 		return il.Token.Literal
@@ -396,9 +517,16 @@ type UnsignedIntegerLiteral struct {
 	Value uint64
 }
 
-func (ul *UnsignedIntegerLiteral) expressionNode()      {}
-func (ul *UnsignedIntegerLiteral) Pos() (int, int)      { return ul.Token.Row, ul.Token.Column }
+// expressionNode marks UnsignedIntegerLiteral as an expression node.
+func (ul *UnsignedIntegerLiteral) expressionNode() {}
+
+// Pos returns the position of the unsigned integer literal's token.
+func (ul *UnsignedIntegerLiteral) Pos() (int, int) { return ul.Token.Row, ul.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ul *UnsignedIntegerLiteral) TokenLiteral() string { return ul.Token.Literal }
+
+// String returns the string representation of the unsigned integer literal.
 func (ul *UnsignedIntegerLiteral) String() string {
 	return ul.Token.Literal
 }
@@ -409,9 +537,16 @@ type RealLiteral struct {
 	Precision int // 32 for REAL, 64 for LREAL
 }
 
-func (rl *RealLiteral) expressionNode()      {}
-func (rl *RealLiteral) Pos() (int, int)      { return rl.Token.Row, rl.Token.Column }
+// expressionNode marks RealLiteral as an expression node.
+func (rl *RealLiteral) expressionNode() {}
+
+// Pos returns the position of the real literal's token.
+func (rl *RealLiteral) Pos() (int, int) { return rl.Token.Row, rl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (rl *RealLiteral) TokenLiteral() string { return rl.Token.Literal }
+
+// String returns the string representation of the real literal.
 func (rl *RealLiteral) String() string {
 	return rl.Token.Literal
 }
@@ -422,10 +557,17 @@ type LRealLiteral struct {
 	Value float64
 }
 
-func (lrl *LRealLiteral) expressionNode()      {}
-func (lrl *LRealLiteral) Pos() (int, int)      { return lrl.Token.Row, lrl.Token.Column }
+// expressionNode marks LRealLiteral as an expression node.
+func (lrl *LRealLiteral) expressionNode() {}
+
+// Pos returns the position of the LREAL literal's token.
+func (lrl *LRealLiteral) Pos() (int, int) { return lrl.Token.Row, lrl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (lrl *LRealLiteral) TokenLiteral() string { return lrl.Token.Literal }
-func (lrl *LRealLiteral) String() string       { return lrl.Token.Literal }
+
+// String returns the string representation of the LREAL literal.
+func (lrl *LRealLiteral) String() string { return lrl.Token.Literal }
 
 // WStringLiteral represents a literal WSTRING value.
 type WStringLiteral struct {
@@ -433,10 +575,17 @@ type WStringLiteral struct {
 	Value string
 }
 
-func (wsl *WStringLiteral) expressionNode()      {}
-func (wsl *WStringLiteral) Pos() (int, int)      { return wsl.Token.Row, wsl.Token.Column }
+// expressionNode marks WStringLiteral as an expression node.
+func (wsl *WStringLiteral) expressionNode() {}
+
+// Pos returns the position of the WSTRING literal's token.
+func (wsl *WStringLiteral) Pos() (int, int) { return wsl.Token.Row, wsl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (wsl *WStringLiteral) TokenLiteral() string { return wsl.Token.Literal }
-func (wsl *WStringLiteral) String() string       { return wsl.Token.Literal }
+
+// String returns the string representation of the WSTRING literal.
+func (wsl *WStringLiteral) String() string { return wsl.Token.Literal }
 
 // EnumeratedValueLiteral represents a qualified enumerated value, e.g., COLOR#RED.
 type EnumeratedValueLiteral struct {
@@ -445,22 +594,36 @@ type EnumeratedValueLiteral struct {
 	Value    *Identifier
 }
 
-func (evl *EnumeratedValueLiteral) expressionNode()      {}
-func (evl *EnumeratedValueLiteral) Pos() (int, int)      { return evl.Token.Row, evl.Token.Column }
+// expressionNode marks EnumeratedValueLiteral as an expression node.
+func (evl *EnumeratedValueLiteral) expressionNode() {}
+
+// Pos returns the position of the enumerated value's token.
+func (evl *EnumeratedValueLiteral) Pos() (int, int) { return evl.Token.Row, evl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (evl *EnumeratedValueLiteral) TokenLiteral() string { return evl.Token.Literal }
+
+// String returns the string representation of the enumerated value literal.
 func (evl *EnumeratedValueLiteral) String() string {
 	return evl.TypeName.String() + "#" + evl.Value.String()
 }
 
+// BitStringLiteral represents a bit-string literal (e.g., BYTE, WORD).
 type BitStringLiteral struct {
 	Token token.Token // The token for the literal (e.g., BYTE, WORD, DWORD, LWORD)
 	Value uint64
 	Width int // 8, 16, 32, 64
 }
 
-func (bsl *BitStringLiteral) expressionNode()      {}
-func (bsl *BitStringLiteral) Pos() (int, int)      { return bsl.Token.Row, bsl.Token.Column }
+func (bsl *BitStringLiteral) expressionNode() {}
+
+// Pos returns the position of the bit-string literal's token.
+func (bsl *BitStringLiteral) Pos() (int, int) { return bsl.Token.Row, bsl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (bsl *BitStringLiteral) TokenLiteral() string { return bsl.Token.Literal }
+
+// String returns the string representation of the bit-string literal.
 func (bsl *BitStringLiteral) String() string {
 	switch bsl.Width {
 	case 8:
@@ -483,8 +646,13 @@ type TypedLiteral struct {
 	Value    Expression
 }
 
-func (tl *TypedLiteral) expressionNode()      {}
+// expressionNode marks TypedLiteral as an expression node.
+func (tl *TypedLiteral) expressionNode() {}
+
+// TokenLiteral returns the literal value of the token.
 func (tl *TypedLiteral) TokenLiteral() string { return tl.Token.Literal }
+
+// String returns the string representation of the typed literal.
 func (tl *TypedLiteral) String() string {
 	var out bytes.Buffer
 	out.WriteString(tl.TypeName)
@@ -492,16 +660,20 @@ func (tl *TypedLiteral) String() string {
 	out.WriteString(tl.Value.String())
 	return out.String()
 }
+
+// Pos returns the position of the typed literal's token.
 func (tl *TypedLiteral) Pos() (int, int) {
 	return tl.Token.Row, tl.Token.Column
 }
 
+// PrefixExpression represents a prefix operator expression (e.g., -5, NOT flag).
 type PrefixExpression struct {
 	Token    token.Token // The prefix token, e.g. !
 	Operator string
 	Right    Expression
 }
 
+// expressionNode marks PrefixExpression as an expression node.
 func (pe *PrefixExpression) expressionNode()      {}
 func (pe *PrefixExpression) Pos() (int, int)      { return pe.Token.Row, pe.Token.Column }
 func (pe *PrefixExpression) TokenLiteral() string { return pe.Token.Literal }
@@ -516,6 +688,7 @@ func (pe *PrefixExpression) String() string {
 	return out.String()
 }
 
+// InfixExpression represents an infix operator expression (e.g., 5 + 5).
 type InfixExpression struct {
 	Token    token.Token // The operator token, e.g. +
 	Left     Expression
@@ -523,9 +696,16 @@ type InfixExpression struct {
 	Right    Expression
 }
 
-func (ie *InfixExpression) expressionNode()      {}
-func (ie *InfixExpression) Pos() (int, int)      { return ie.Token.Row, ie.Token.Column }
+// expressionNode marks InfixExpression as an expression node.
+func (ie *InfixExpression) expressionNode() {}
+
+// Pos returns the position of the infix operator's token.
+func (ie *InfixExpression) Pos() (int, int) { return ie.Token.Row, ie.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ie *InfixExpression) TokenLiteral() string { return ie.Token.Literal }
+
+// String returns the string representation of the infix expression.
 func (ie *InfixExpression) String() string {
 	var out bytes.Buffer
 
@@ -538,19 +718,27 @@ func (ie *InfixExpression) String() string {
 	return out.String()
 }
 
+// MemberAccessExpression represents accessing a member of a struct (e.g., myStruct.field).
 type MemberAccessExpression struct {
 	Token  token.Token // The '.' token
 	Struct Expression  // The expression on the left of the dot
 	Member *Identifier // The identifier on the right of the dot
 }
 
-func (mae *MemberAccessExpression) expressionNode()      {}
-func (mae *MemberAccessExpression) Pos() (int, int)      { return mae.Token.Row, mae.Token.Column }
+func (mae *MemberAccessExpression) expressionNode() {}
+
+// Pos returns the position of the '.' token.
+func (mae *MemberAccessExpression) Pos() (int, int) { return mae.Token.Row, mae.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Literal }
+
+// String returns the string representation of the member access expression.
 func (mae *MemberAccessExpression) String() string {
 	return mae.Struct.String() + "." + mae.Member.String()
 }
 
+// IfStatement represents an IF...THEN...ELSIF...ELSE...END_IF statement.
 type IfStatement struct {
 	Token           token.Token // The 'if' token
 	Condition       Expression
@@ -559,10 +747,19 @@ type IfStatement struct {
 	LeadingComments []string
 }
 
-func (is *IfStatement) statementNode()               {}
+// statementNode marks IfStatement as a statement node.
+func (is *IfStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (is *IfStatement) GetLeadingComments() []string { return is.LeadingComments }
-func (is *IfStatement) Pos() (int, int)              { return is.Token.Row, is.Token.Column }
-func (is *IfStatement) TokenLiteral() string         { return is.Token.Literal }
+
+// Pos returns the position of the IF token.
+func (is *IfStatement) Pos() (int, int) { return is.Token.Row, is.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
+
+// String returns the string representation of the IF statement.
 func (is *IfStatement) String() string {
 	var out bytes.Buffer
 
@@ -598,6 +795,7 @@ func (is *IfStatement) String() string {
 	return out.String()
 }
 
+// ForLoopStatement represents a FOR loop.
 type ForLoopStatement struct {
 	Token           token.Token // The 'FOR' token
 	ControlVar      *AssignmentStatement
@@ -607,10 +805,19 @@ type ForLoopStatement struct {
 	LeadingComments []string
 }
 
-func (fls *ForLoopStatement) statementNode()               {}
+// statementNode marks ForLoopStatement as a statement node.
+func (fls *ForLoopStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (fls *ForLoopStatement) GetLeadingComments() []string { return fls.LeadingComments }
-func (fls *ForLoopStatement) Pos() (int, int)              { return fls.Token.Row, fls.Token.Column }
-func (fls *ForLoopStatement) TokenLiteral() string         { return fls.Token.Literal }
+
+// Pos returns the position of the FOR token.
+func (fls *ForLoopStatement) Pos() (int, int) { return fls.Token.Row, fls.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (fls *ForLoopStatement) TokenLiteral() string { return fls.Token.Literal }
+
+// String returns the string representation of the FOR loop.
 func (fls *ForLoopStatement) String() string {
 	// String representation for debugging
 	var out bytes.Buffer
@@ -630,6 +837,7 @@ func (fls *ForLoopStatement) String() string {
 	return out.String()
 }
 
+// WhileStatement represents a WHILE loop.
 type WhileStatement struct {
 	Token           token.Token // The 'WHILE' token
 	Condition       Expression
@@ -637,10 +845,19 @@ type WhileStatement struct {
 	LeadingComments []string
 }
 
-func (ws *WhileStatement) statementNode()               {}
+// statementNode marks WhileStatement as a statement node.
+func (ws *WhileStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (ws *WhileStatement) GetLeadingComments() []string { return ws.LeadingComments }
-func (ws *WhileStatement) Pos() (int, int)              { return ws.Token.Row, ws.Token.Column }
-func (ws *WhileStatement) TokenLiteral() string         { return ws.Token.Literal }
+
+// Pos returns the position of the WHILE token.
+func (ws *WhileStatement) Pos() (int, int) { return ws.Token.Row, ws.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (ws *WhileStatement) TokenLiteral() string { return ws.Token.Literal }
+
+// String returns the string representation of the WHILE loop.
 func (ws *WhileStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("WHILE ")
@@ -651,6 +868,7 @@ func (ws *WhileStatement) String() string {
 	return out.String()
 }
 
+// RepeatStatement represents a REPEAT...UNTIL loop.
 type RepeatStatement struct {
 	Token           token.Token // The 'REPEAT' token
 	Body            *BlockStatement
@@ -658,10 +876,19 @@ type RepeatStatement struct {
 	LeadingComments []string
 }
 
-func (rs *RepeatStatement) statementNode()               {}
+// statementNode marks RepeatStatement as a statement node.
+func (rs *RepeatStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (rs *RepeatStatement) GetLeadingComments() []string { return rs.LeadingComments }
-func (rs *RepeatStatement) Pos() (int, int)              { return rs.Token.Row, rs.Token.Column }
-func (rs *RepeatStatement) TokenLiteral() string         { return rs.Token.Literal }
+
+// Pos returns the position of the REPEAT token.
+func (rs *RepeatStatement) Pos() (int, int) { return rs.Token.Row, rs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (rs *RepeatStatement) TokenLiteral() string { return rs.Token.Literal }
+
+// String returns the string representation of the REPEAT loop.
 func (rs *RepeatStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("REPEAT ")
@@ -672,15 +899,23 @@ func (rs *RepeatStatement) String() string {
 	return out.String()
 }
 
+// CaseBranch represents a single branch within a CASE statement.
 type CaseBranch struct {
 	Token       token.Token // The first token of the value list
 	Values      []Expression
 	Consequence *BlockStatement
 }
 
-func (cb *CaseBranch) statementNode()       {}
-func (cb *CaseBranch) Pos() (int, int)      { return cb.Token.Row, cb.Token.Column }
+// statementNode marks CaseBranch as a statement node.
+func (cb *CaseBranch) statementNode() {}
+
+// Pos returns the position of the case branch's token.
+func (cb *CaseBranch) Pos() (int, int) { return cb.Token.Row, cb.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (cb *CaseBranch) TokenLiteral() string { return cb.Token.Literal }
+
+// String returns the string representation of the case branch.
 func (cb *CaseBranch) String() string {
 	var out bytes.Buffer
 	vals := []string{}
@@ -693,6 +928,7 @@ func (cb *CaseBranch) String() string {
 	return out.String()
 }
 
+// CaseStatement represents a CASE statement.
 type CaseStatement struct {
 	Token           token.Token // The 'CASE' token
 	Expression      Expression
@@ -701,10 +937,19 @@ type CaseStatement struct {
 	LeadingComments []string
 }
 
-func (cs *CaseStatement) statementNode()               {}
+// statementNode marks CaseStatement as a statement node.
+func (cs *CaseStatement) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (cs *CaseStatement) GetLeadingComments() []string { return cs.LeadingComments }
-func (cs *CaseStatement) Pos() (int, int)              { return cs.Token.Row, cs.Token.Column }
-func (cs *CaseStatement) TokenLiteral() string         { return cs.Token.Literal }
+
+// Pos returns the position of the CASE token.
+func (cs *CaseStatement) Pos() (int, int) { return cs.Token.Row, cs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (cs *CaseStatement) TokenLiteral() string { return cs.Token.Literal }
+
+// String returns the string representation of the CASE statement.
 func (cs *CaseStatement) String() string {
 	// String representation for debugging
 	var out bytes.Buffer
@@ -713,6 +958,7 @@ func (cs *CaseStatement) String() string {
 	return out.String()
 }
 
+// FunctionLiteral represents an anonymous function expression.
 type FunctionLiteral struct {
 	Token      token.Token // The 'fn' token
 	Parameters []*Identifier
@@ -720,9 +966,16 @@ type FunctionLiteral struct {
 	Name       string
 }
 
-func (fl *FunctionLiteral) expressionNode()      {}
-func (fl *FunctionLiteral) Pos() (int, int)      { return fl.Token.Row, fl.Token.Column }
+// expressionNode marks FunctionLiteral as an expression node.
+func (fl *FunctionLiteral) expressionNode() {}
+
+// Pos returns the position of the function literal's token.
+func (fl *FunctionLiteral) Pos() (int, int) { return fl.Token.Row, fl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
+
+// String returns the string representation of the function literal.
 func (fl *FunctionLiteral) String() string {
 	var out bytes.Buffer
 
@@ -743,15 +996,23 @@ func (fl *FunctionLiteral) String() string {
 	return out.String()
 }
 
+// CallExpression represents a function or function block call.
 type CallExpression struct {
 	Token     token.Token // The '(' token
 	Function  Expression  // Identifier or FunctionLiteral
 	Arguments []Expression
 }
 
-func (ce *CallExpression) expressionNode()      {}
-func (ce *CallExpression) Pos() (int, int)      { return ce.Token.Row, ce.Token.Column }
+// expressionNode marks CallExpression as an expression node.
+func (ce *CallExpression) expressionNode() {}
+
+// Pos returns the position of the opening parenthesis token.
+func (ce *CallExpression) Pos() (int, int) { return ce.Token.Row, ce.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
+
+// String returns the string representation of the call expression.
 func (ce *CallExpression) String() string {
 	var out bytes.Buffer
 
@@ -768,15 +1029,23 @@ func (ce *CallExpression) String() string {
 	return out.String()
 }
 
+// NamedArgument represents a named input argument in a function call (e.g., In1 := 10).
 type NamedArgument struct {
 	Token token.Token // The identifier token for the argument name
 	Name  *Identifier
 	Value Expression
 }
 
-func (na *NamedArgument) expressionNode()      {}
-func (na *NamedArgument) Pos() (int, int)      { return na.Token.Row, na.Token.Column }
+// expressionNode marks NamedArgument as an expression node.
+func (na *NamedArgument) expressionNode() {}
+
+// Pos returns the position of the argument's name token.
+func (na *NamedArgument) Pos() (int, int) { return na.Token.Row, na.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (na *NamedArgument) TokenLiteral() string { return na.Token.Literal }
+
+// String returns the string representation of the named argument.
 func (na *NamedArgument) String() string {
 	var out bytes.Buffer
 	out.WriteString(na.Name.String())
@@ -785,15 +1054,23 @@ func (na *NamedArgument) String() string {
 	return out.String()
 }
 
+// OutputArgument represents an output argument mapping in a function call (e.g., Out1 => Res1).
 type OutputArgument struct {
 	Token  token.Token // The '=>' token
 	Source *Identifier
 	Target Expression // Should be a variable
 }
 
-func (oa *OutputArgument) expressionNode()      {}
-func (oa *OutputArgument) Pos() (int, int)      { return oa.Token.Row, oa.Token.Column }
+// expressionNode marks OutputArgument as an expression node.
+func (oa *OutputArgument) expressionNode() {}
+
+// Pos returns the position of the '=>' token.
+func (oa *OutputArgument) Pos() (int, int) { return oa.Token.Row, oa.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (oa *OutputArgument) TokenLiteral() string { return oa.Token.Literal }
+
+// String returns the string representation of the output argument.
 func (oa *OutputArgument) String() string {
 	var out bytes.Buffer
 	if oa.Source != nil {
@@ -806,47 +1083,77 @@ func (oa *OutputArgument) String() string {
 	return out.String()
 }
 
+// StringLiteral represents a single-byte string literal.
 type StringLiteral struct {
 	Token token.Token
 	Value string
 }
 
-func (sl *StringLiteral) expressionNode()      {}
-func (sl *StringLiteral) Pos() (int, int)      { return sl.Token.Row, sl.Token.Column }
-func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
-func (sl *StringLiteral) String() string       { return sl.Token.Literal }
+// expressionNode marks StringLiteral as an expression node.
+func (sl *StringLiteral) expressionNode() {}
 
+// Pos returns the position of the string literal's token.
+func (sl *StringLiteral) Pos() (int, int) { return sl.Token.Row, sl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
+
+// String returns the string representation of the string literal.
+func (sl *StringLiteral) String() string { return sl.Token.Literal }
+
+// TimeLiteral represents a TIME literal (e.g., T#5s).
 type TimeLiteral struct {
 	Token token.Token // The token.TIME token
 	Value string      // The raw string value, e.g., "T#5s"
 }
 
-func (tl *TimeLiteral) expressionNode()      {}
-func (tl *TimeLiteral) Pos() (int, int)      { return tl.Token.Row, tl.Token.Column }
+// expressionNode marks TimeLiteral as an expression node.
+func (tl *TimeLiteral) expressionNode() {}
+
+// Pos returns the position of the TIME literal's token.
+func (tl *TimeLiteral) Pos() (int, int) { return tl.Token.Row, tl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
+
+// String returns the string representation of the TIME literal.
 func (tl *TimeLiteral) String() string {
 	return tl.Value
 }
 
+// DateLiteral represents a DATE literal (e.g., D#2026-05-21).
 type DateLiteral struct {
 	Token token.Token // The token.DATE token
 	Value string
 }
 
-func (dl *DateLiteral) expressionNode()      {}
-func (dl *DateLiteral) Pos() (int, int)      { return dl.Token.Row, dl.Token.Column }
+// expressionNode marks DateLiteral as an expression node.
+func (dl *DateLiteral) expressionNode() {}
+
+// Pos returns the position of the DATE literal's token.
+func (dl *DateLiteral) Pos() (int, int) { return dl.Token.Row, dl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
+
+// String returns the string representation of the DATE literal.
 func (dl *DateLiteral) String() string {
 	return dl.Value
 }
 
+// TimeOfDayLiteral represents a TIME_OF_DAY literal (e.g., TOD#14:30:00).
 type TimeOfDayLiteral struct {
 	Token token.Token // The token.TIME_OF_DAY token
 	Value string
 }
 
-func (todl *TimeOfDayLiteral) expressionNode()      {}
-func (todl *TimeOfDayLiteral) Pos() (int, int)      { return todl.Token.Row, todl.Token.Column }
+// expressionNode marks TimeOfDayLiteral as an expression node.
+func (todl *TimeOfDayLiteral) expressionNode() {}
+
+// Pos returns the position of the TIME_OF_DAY literal's token.
+func (todl *TimeOfDayLiteral) Pos() (int, int) { return todl.Token.Row, todl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (todl *TimeOfDayLiteral) TokenLiteral() string { return todl.Token.Literal }
 func (todl *TimeOfDayLiteral) String() string {
 	return todl.Value
@@ -857,21 +1164,36 @@ type DateAndTimeLiteral struct {
 	Value string
 }
 
-func (dtl *DateAndTimeLiteral) expressionNode()      {}
-func (dtl *DateAndTimeLiteral) Pos() (int, int)      { return dtl.Token.Row, dtl.Token.Column }
+// expressionNode marks DateAndTimeLiteral as an expression node.
+func (dtl *DateAndTimeLiteral) expressionNode() {}
+
+// Pos returns the position of the DATE_AND_TIME literal's token.
+func (dtl *DateAndTimeLiteral) Pos() (int, int) { return dtl.Token.Row, dtl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (dtl *DateAndTimeLiteral) TokenLiteral() string { return dtl.Token.Literal }
+
+// String returns the string representation of the DATE_AND_TIME literal.
 func (dtl *DateAndTimeLiteral) String() string {
 	return dtl.Value
 }
 
+// ArrayLiteral represents an array literal expression (e.g., [1, 2, 3]).
 type ArrayLiteral struct {
 	Token    token.Token // the '[' token
 	Elements []Expression
 }
 
-func (al *ArrayLiteral) expressionNode()      {}
-func (na *ArrayLiteral) Pos() (int, int)      { return na.Token.Row, na.Token.Column }
+// expressionNode marks ArrayLiteral as an expression node.
+func (al *ArrayLiteral) expressionNode() {}
+
+// Pos returns the position of the opening bracket token.
+func (na *ArrayLiteral) Pos() (int, int) { return na.Token.Row, na.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (al *ArrayLiteral) TokenLiteral() string { return al.Token.Literal }
+
+// String returns the string representation of the array literal.
 func (al *ArrayLiteral) String() string {
 	var out bytes.Buffer
 
@@ -894,9 +1216,16 @@ type ArrayRepetition struct {
 	Elements []Expression // The elements to repeat (e.g., [0] for 3(0))
 }
 
-func (ar *ArrayRepetition) expressionNode()      {}
-func (ar *ArrayRepetition) Pos() (int, int)      { return ar.Token.Row, ar.Token.Column }
+// expressionNode marks ArrayRepetition as an expression node.
+func (ar *ArrayRepetition) expressionNode() {}
+
+// Pos returns the position of the repetition factor's token.
+func (ar *ArrayRepetition) Pos() (int, int) { return ar.Token.Row, ar.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ar *ArrayRepetition) TokenLiteral() string { return ar.Token.Literal }
+
+// String returns the string representation of the array repetition.
 func (ar *ArrayRepetition) String() string {
 	var out bytes.Buffer
 	out.WriteString(ar.Factor.String())
@@ -910,15 +1239,23 @@ func (ar *ArrayRepetition) String() string {
 	return out.String()
 }
 
+// IndexExpression represents an array or string indexing expression (e.g., myArray[i]).
 type IndexExpression struct {
 	Token token.Token // The [ token
 	Left  Expression
 	Index Expression
 }
 
-func (ie *IndexExpression) expressionNode()      {}
-func (ie *IndexExpression) Pos() (int, int)      { return ie.Token.Row, ie.Token.Column }
+// expressionNode marks IndexExpression as an expression node.
+func (ie *IndexExpression) expressionNode() {}
+
+// Pos returns the position of the opening bracket token.
+func (ie *IndexExpression) Pos() (int, int) { return ie.Token.Row, ie.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
+
+// String returns the string representation of the index expression.
 func (ie *IndexExpression) String() string {
 	var out bytes.Buffer
 
@@ -931,14 +1268,22 @@ func (ie *IndexExpression) String() string {
 	return out.String()
 }
 
+// HashLiteral represents a hash or map literal (e.g., { 'key': 'value' }).
 type HashLiteral struct {
 	Token token.Token // the '{' token
 	Pairs map[Expression]Expression
 }
 
-func (hl *HashLiteral) expressionNode()      {}
-func (hl *HashLiteral) Pos() (int, int)      { return hl.Token.Row, hl.Token.Column }
+// expressionNode marks HashLiteral as an expression node.
+func (hl *HashLiteral) expressionNode() {}
+
+// Pos returns the position of the opening brace token.
+func (hl *HashLiteral) Pos() (int, int) { return hl.Token.Row, hl.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (hl *HashLiteral) TokenLiteral() string { return hl.Token.Literal }
+
+// String returns the string representation of the hash literal.
 func (hl *HashLiteral) String() string {
 	var out bytes.Buffer
 
@@ -965,15 +1310,23 @@ func (hl *HashLiteral) String() string {
 	return out.String()
 }
 
+// MacroLiteral represents a macro definition.
 type MacroLiteral struct {
 	Token      token.Token // The 'macro' token
 	Parameters []*Identifier
 	Body       *BlockStatement
 }
 
-func (ml *MacroLiteral) expressionNode()      {}
-func (ml *MacroLiteral) Pos() (int, int)      { return ml.Token.Row, ml.Token.Column }
+// expressionNode marks MacroLiteral as an expression node.
+func (ml *MacroLiteral) expressionNode() {}
+
+// Pos returns the position of the macro token.
+func (ml *MacroLiteral) Pos() (int, int) { return ml.Token.Row, ml.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ml *MacroLiteral) TokenLiteral() string { return ml.Token.Literal }
+
+// String returns the string representation of the macro literal.
 func (ml *MacroLiteral) String() string {
 	var out bytes.Buffer
 
@@ -991,6 +1344,7 @@ func (ml *MacroLiteral) String() string {
 	return out.String()
 }
 
+// FunctionBlockDeclaration represents a FUNCTION_BLOCK declaration.
 type FunctionBlockDeclaration struct {
 	Token           token.Token // The 'FUNCTION_BLOCK' token
 	Name            *Identifier
@@ -1004,10 +1358,19 @@ type FunctionBlockDeclaration struct {
 	LeadingComments []string
 }
 
-func (fbd *FunctionBlockDeclaration) statementNode()               {}
+// statementNode marks FunctionBlockDeclaration as a statement node.
+func (fbd *FunctionBlockDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (fbd *FunctionBlockDeclaration) GetLeadingComments() []string { return fbd.LeadingComments }
-func (fbd *FunctionBlockDeclaration) Pos() (int, int)              { return fbd.Token.Row, fbd.Token.Column }
-func (fbd *FunctionBlockDeclaration) TokenLiteral() string         { return fbd.Token.Literal }
+
+// Pos returns the position of the FUNCTION_BLOCK token.
+func (fbd *FunctionBlockDeclaration) Pos() (int, int) { return fbd.Token.Row, fbd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (fbd *FunctionBlockDeclaration) TokenLiteral() string { return fbd.Token.Literal }
+
+// String returns the string representation of the function block declaration.
 func (fbd *FunctionBlockDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("FUNCTION_BLOCK ")
@@ -1023,6 +1386,7 @@ func (fbd *FunctionBlockDeclaration) String() string {
 	return out.String()
 }
 
+// ProgramDeclaration represents a PROGRAM declaration.
 type ProgramDeclaration struct {
 	Token           token.Token // The 'PROGRAM' token
 	Name            *Identifier
@@ -1038,10 +1402,19 @@ type ProgramDeclaration struct {
 	LeadingComments []string
 }
 
-func (pd *ProgramDeclaration) statementNode()               {}
+// statementNode marks ProgramDeclaration as a statement node.
+func (pd *ProgramDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (pd *ProgramDeclaration) GetLeadingComments() []string { return pd.LeadingComments }
-func (pd *ProgramDeclaration) Pos() (int, int)              { return pd.Token.Row, pd.Token.Column }
-func (pd *ProgramDeclaration) TokenLiteral() string         { return pd.Token.Literal }
+
+// Pos returns the position of the PROGRAM token.
+func (pd *ProgramDeclaration) Pos() (int, int) { return pd.Token.Row, pd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (pd *ProgramDeclaration) TokenLiteral() string { return pd.Token.Literal }
+
+// String returns the string representation of the program declaration.
 func (pd *ProgramDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("PROGRAM ")
@@ -1056,14 +1429,22 @@ func (pd *ProgramDeclaration) String() string {
 	return out.String()
 }
 
+// ExternalVarDeclaration represents a VAR_EXTERNAL block.
 type ExternalVarDeclaration struct {
 	Token token.Token // The 'VAR_EXTERNAL' token
 	Vars  []*VarDeclStatement
 }
 
-func (evd *ExternalVarDeclaration) statementNode()       {}
-func (evd *ExternalVarDeclaration) Pos() (int, int)      { return evd.Token.Row, evd.Token.Column }
+// statementNode marks ExternalVarDeclaration as a statement node.
+func (evd *ExternalVarDeclaration) statementNode() {}
+
+// Pos returns the position of the VAR_EXTERNAL token.
+func (evd *ExternalVarDeclaration) Pos() (int, int) { return evd.Token.Row, evd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (evd *ExternalVarDeclaration) TokenLiteral() string { return evd.Token.Literal }
+
+// String returns the string representation of the external variable declaration block.
 func (evd *ExternalVarDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("VAR_EXTERNAL\n")
@@ -1074,15 +1455,23 @@ func (evd *ExternalVarDeclaration) String() string {
 	return out.String()
 }
 
+// ConfigVarDeclaration represents a VAR_CONFIG block.
 type ConfigVarDeclaration struct {
 	Token               token.Token // The 'VAR_CONFIG' token
 	ProgramInstanceName *Identifier
 	Declarations        []*VarDeclStatement
 }
 
-func (cvd *ConfigVarDeclaration) statementNode()       {}
-func (cvd *ConfigVarDeclaration) Pos() (int, int)      { return cvd.Token.Row, cvd.Token.Column }
+// statementNode marks ConfigVarDeclaration as a statement node.
+func (cvd *ConfigVarDeclaration) statementNode() {}
+
+// Pos returns the position of the VAR_CONFIG token.
+func (cvd *ConfigVarDeclaration) Pos() (int, int) { return cvd.Token.Row, cvd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (cvd *ConfigVarDeclaration) TokenLiteral() string { return cvd.Token.Literal }
+
+// String returns the string representation of the config variable declaration block.
 func (cvd *ConfigVarDeclaration) String() string {
 	var out bytes.Buffer
 	cvd.Pos() // Ensure Pos() is called
@@ -1098,14 +1487,22 @@ func (cvd *ConfigVarDeclaration) String() string {
 	return out.String()
 }
 
+// TempVarDeclaration represents a VAR_TEMP block.
 type TempVarDeclaration struct {
 	Token token.Token // The 'VAR_TEMP' token
 	Vars  []*VarDeclStatement
 }
 
-func (tvd *TempVarDeclaration) statementNode()       {}
-func (tvd *TempVarDeclaration) Pos() (int, int)      { return tvd.Token.Row, tvd.Token.Column }
+// statementNode marks TempVarDeclaration as a statement node.
+func (tvd *TempVarDeclaration) statementNode() {}
+
+// Pos returns the position of the VAR_TEMP token.
+func (tvd *TempVarDeclaration) Pos() (int, int) { return tvd.Token.Row, tvd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (tvd *TempVarDeclaration) TokenLiteral() string { return tvd.Token.Literal }
+
+// String returns the string representation of the temporary variable declaration block.
 func (tvd *TempVarDeclaration) String() string {
 	var out bytes.Buffer
 	tvd.Pos() // Ensure Pos() is called
@@ -1117,14 +1514,22 @@ func (tvd *TempVarDeclaration) String() string {
 	return out.String()
 }
 
+// AccessVarDeclaration represents a VAR_ACCESS block.
 type AccessVarDeclaration struct {
 	Token token.Token // The 'VAR_ACCESS' token
 	Vars  []*VarDeclStatement
 }
 
-func (avd *AccessVarDeclaration) statementNode()       {}
-func (avd *AccessVarDeclaration) Pos() (int, int)      { return avd.Token.Row, avd.Token.Column }
+// statementNode marks AccessVarDeclaration as a statement node.
+func (avd *AccessVarDeclaration) statementNode() {}
+
+// Pos returns the position of the VAR_ACCESS token.
+func (avd *AccessVarDeclaration) Pos() (int, int) { return avd.Token.Row, avd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (avd *AccessVarDeclaration) TokenLiteral() string { return avd.Token.Literal }
+
+// String returns the string representation of the access variable declaration block.
 func (avd *AccessVarDeclaration) String() string {
 	var out bytes.Buffer
 	avd.Pos() // Ensure Pos() is called
@@ -1136,14 +1541,22 @@ func (avd *AccessVarDeclaration) String() string {
 	return out.String()
 }
 
+// GlobalVarDeclaration represents a VAR_GLOBAL block.
 type GlobalVarDeclaration struct {
 	Token token.Token // The 'VAR_GLOBAL' token
 	Vars  []*VarDeclStatement
 }
 
-func (gvd *GlobalVarDeclaration) statementNode()       {}
-func (gvd *GlobalVarDeclaration) Pos() (int, int)      { return gvd.Token.Row, gvd.Token.Column }
+// statementNode marks GlobalVarDeclaration as a statement node.
+func (gvd *GlobalVarDeclaration) statementNode() {}
+
+// Pos returns the position of the VAR_GLOBAL token.
+func (gvd *GlobalVarDeclaration) Pos() (int, int) { return gvd.Token.Row, gvd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (gvd *GlobalVarDeclaration) TokenLiteral() string { return gvd.Token.Literal }
+
+// String returns the string representation of the global variable declaration block.
 func (gvd *GlobalVarDeclaration) String() string {
 	var out bytes.Buffer
 	gvd.Pos() // Ensure Pos() is called
@@ -1155,16 +1568,26 @@ func (gvd *GlobalVarDeclaration) String() string {
 	return out.String()
 }
 
+// VarBlockDeclaration represents a VAR block.
 type VarBlockDeclaration struct {
 	Token           token.Token // The 'VAR' token
 	Declarations    []*VarDeclStatement
 	LeadingComments []string
 }
 
-func (vbd *VarBlockDeclaration) statementNode()               {}
+// statementNode marks VarBlockDeclaration as a statement node.
+func (vbd *VarBlockDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (vbd *VarBlockDeclaration) GetLeadingComments() []string { return vbd.LeadingComments }
-func (vbd *VarBlockDeclaration) Pos() (int, int)              { return vbd.Token.Row, vbd.Token.Column }
-func (vbd *VarBlockDeclaration) TokenLiteral() string         { return vbd.Token.Literal }
+
+// Pos returns the position of the VAR token.
+func (vbd *VarBlockDeclaration) Pos() (int, int) { return vbd.Token.Row, vbd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (vbd *VarBlockDeclaration) TokenLiteral() string { return vbd.Token.Literal }
+
+// String returns the string representation of the variable declaration block.
 func (vbd *VarBlockDeclaration) String() string {
 	var out bytes.Buffer
 	vbd.Pos() // Ensure Pos() is called
@@ -1176,6 +1599,7 @@ func (vbd *VarBlockDeclaration) String() string {
 	return out.String()
 }
 
+// TypeDeclaration represents a single declaration within a TYPE block.
 type TypeDeclaration struct {
 	LeadingComments []string
 	Token           token.Token // The identifier token (the name of the new type)
@@ -1185,10 +1609,19 @@ type TypeDeclaration struct {
 	InitialValue    Expression // For initialized types, e.g., := 10
 }
 
-func (td *TypeDeclaration) statementNode()               {}
+// statementNode marks TypeDeclaration as a statement node.
+func (td *TypeDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (td *TypeDeclaration) GetLeadingComments() []string { return td.LeadingComments }
-func (td *TypeDeclaration) Pos() (int, int)              { return td.Token.Row, td.Token.Column }
-func (td *TypeDeclaration) TokenLiteral() string         { return td.Token.Literal }
+
+// Pos returns the position of the type declaration's token.
+func (td *TypeDeclaration) Pos() (int, int) { return td.Token.Row, td.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (td *TypeDeclaration) TokenLiteral() string { return td.Token.Literal }
+
+// String returns the string representation of the type declaration.
 func (td *TypeDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString(td.Name.String())
@@ -1206,16 +1639,26 @@ func (td *TypeDeclaration) String() string {
 	return out.String()
 }
 
+// TypeBlockDeclaration represents a TYPE...END_TYPE block.
 type TypeBlockDeclaration struct {
 	Token           token.Token // The 'TYPE' token
 	Declarations    []*TypeDeclaration
 	LeadingComments []string
 }
 
-func (tbd *TypeBlockDeclaration) statementNode()               {}
+// statementNode marks TypeBlockDeclaration as a statement node.
+func (tbd *TypeBlockDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (tbd *TypeBlockDeclaration) GetLeadingComments() []string { return tbd.LeadingComments }
-func (tbd *TypeBlockDeclaration) Pos() (int, int)              { return tbd.Token.Row, tbd.Token.Column }
-func (tbd *TypeBlockDeclaration) TokenLiteral() string         { return tbd.Token.Literal }
+
+// Pos returns the position of the TYPE token.
+func (tbd *TypeBlockDeclaration) Pos() (int, int) { return tbd.Token.Row, tbd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (tbd *TypeBlockDeclaration) TokenLiteral() string { return tbd.Token.Literal }
+
+// String returns the string representation of the type declaration block.
 func (tbd *TypeBlockDeclaration) String() string {
 	var out bytes.Buffer
 	tbd.Pos() // Ensure Pos() is called
@@ -1227,14 +1670,22 @@ func (tbd *TypeBlockDeclaration) String() string {
 	return out.String()
 }
 
+// StructDefinition represents a STRUCT definition.
 type StructDefinition struct {
 	Token   token.Token // The 'STRUCT' token
 	Members []*VarDeclStatement
 }
 
-func (sd *StructDefinition) expressionNode()      {}
-func (sd *StructDefinition) Pos() (int, int)      { return sd.Token.Row, sd.Token.Column }
+// expressionNode marks StructDefinition as an expression node.
+func (sd *StructDefinition) expressionNode() {}
+
+// Pos returns the position of the STRUCT token.
+func (sd *StructDefinition) Pos() (int, int) { return sd.Token.Row, sd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (sd *StructDefinition) TokenLiteral() string { return sd.Token.Literal }
+
+// String returns the string representation of the struct definition.
 func (sd *StructDefinition) String() string {
 	var out bytes.Buffer
 	sd.Pos() // Ensure Pos() is called
@@ -1269,14 +1720,22 @@ func (sd *StructDefinition) GetMemberType(memberName string) string {
 	return "" // Member not found or has no type
 }
 
+// EnumDefinition represents an enumerated type definition.
 type EnumDefinition struct {
 	Token  token.Token // The '(' token
 	Values []*Identifier
 }
 
-func (ed *EnumDefinition) expressionNode()      {}
-func (ed *EnumDefinition) Pos() (int, int)      { return ed.Token.Row, ed.Token.Column }
+// expressionNode marks EnumDefinition as an expression node.
+func (ed *EnumDefinition) expressionNode() {}
+
+// Pos returns the position of the opening parenthesis token.
+func (ed *EnumDefinition) Pos() (int, int) { return ed.Token.Row, ed.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ed *EnumDefinition) TokenLiteral() string { return ed.Token.Literal }
+
+// String returns the string representation of the enum definition.
 func (ed *EnumDefinition) String() string {
 	var out bytes.Buffer
 	ed.Pos() // Ensure Pos() is called
@@ -1290,15 +1749,23 @@ func (ed *EnumDefinition) String() string {
 	return out.String()
 }
 
+// ArrayDefinition represents an ARRAY type definition.
 type ArrayDefinition struct {
 	Token    token.Token // The 'ARRAY' token
 	Ranges   []Expression
 	DataType *TypeSpecifier
 }
 
-func (ad *ArrayDefinition) expressionNode()      {}
-func (ad *ArrayDefinition) Pos() (int, int)      { return ad.Token.Row, ad.Token.Column }
+// expressionNode marks ArrayDefinition as an expression node.
+func (ad *ArrayDefinition) expressionNode() {}
+
+// Pos returns the position of the ARRAY token.
+func (ad *ArrayDefinition) Pos() (int, int) { return ad.Token.Row, ad.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ad *ArrayDefinition) TokenLiteral() string { return ad.Token.Literal }
+
+// String returns the string representation of the array definition.
 func (ad *ArrayDefinition) String() string {
 	var out bytes.Buffer
 	ad.Pos() // Ensure Pos() is called
@@ -1321,15 +1788,23 @@ func (ad *ArrayDefinition) String() string {
 	return out.String()
 }
 
+// ActionStatement represents an ACTION block in an SFC.
 type ActionStatement struct {
 	Token token.Token // The 'ACTION' token
 	Name  *Identifier
 	Body  Statement
 }
 
-func (as *ActionStatement) statementNode()       {}
-func (as *ActionStatement) Pos() (int, int)      { return as.Token.Row, as.Token.Column }
+// statementNode marks ActionStatement as a statement node.
+func (as *ActionStatement) statementNode() {}
+
+// Pos returns the position of the ACTION token.
+func (as *ActionStatement) Pos() (int, int) { return as.Token.Row, as.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (as *ActionStatement) TokenLiteral() string { return as.Token.Literal }
+
+// String returns the string representation of the action statement.
 func (as *ActionStatement) String() string {
 	var out bytes.Buffer
 	as.Pos() // Ensure Pos() is called
@@ -1341,6 +1816,7 @@ func (as *ActionStatement) String() string {
 	return out.String()
 }
 
+// FunctionDeclaration represents a FUNCTION declaration.
 type FunctionDeclaration struct {
 	Token           token.Token // The 'FUNCTION' token
 	Name            *Identifier
@@ -1353,10 +1829,19 @@ type FunctionDeclaration struct {
 	LeadingComments []string
 }
 
-func (fd *FunctionDeclaration) statementNode()               {}
+// statementNode marks FunctionDeclaration as a statement node.
+func (fd *FunctionDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
 func (fd *FunctionDeclaration) GetLeadingComments() []string { return fd.LeadingComments }
-func (fd *FunctionDeclaration) Pos() (int, int)              { return fd.Token.Row, fd.Token.Column }
-func (fd *FunctionDeclaration) TokenLiteral() string         { return fd.Token.Literal }
+
+// Pos returns the position of the FUNCTION token.
+func (fd *FunctionDeclaration) Pos() (int, int) { return fd.Token.Row, fd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
+
+// String returns the string representation of the function declaration.
 func (fd *FunctionDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("FUNCTION ")
@@ -1386,9 +1871,16 @@ type IlInstructionStatement struct {
 	Modifier string      // Optional modifier (e.g., "N", "C")
 }
 
-func (ils *IlInstructionStatement) statementNode()       {}
-func (ils *IlInstructionStatement) Pos() (int, int)      { return ils.Token.Row, ils.Token.Column }
+// statementNode marks IlInstructionStatement as a statement node.
+func (ils *IlInstructionStatement) statementNode() {}
+
+// Pos returns the position of the instruction's token.
+func (ils *IlInstructionStatement) Pos() (int, int) { return ils.Token.Row, ils.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ils *IlInstructionStatement) TokenLiteral() string { return ils.Token.Literal }
+
+// String returns the string representation of the IL instruction.
 func (ils *IlInstructionStatement) String() string {
 	var out bytes.Buffer
 
@@ -1403,6 +1895,7 @@ func (ils *IlInstructionStatement) String() string {
 	return out.String()
 }
 
+// StepStatement represents a STEP in an SFC.
 type StepStatement struct {
 	Token       token.Token // The 'STEP' or 'INITIAL_STEP' token
 	Name        *Identifier
@@ -1412,9 +1905,16 @@ type StepStatement struct {
 	Body        *BlockStatement // For textual step bodies
 }
 
-func (ss *StepStatement) statementNode()       {}
-func (ss *StepStatement) Pos() (int, int)      { return ss.Token.Row, ss.Token.Column }
+// statementNode marks StepStatement as a statement node.
+func (ss *StepStatement) statementNode() {}
+
+// Pos returns the position of the STEP token.
+func (ss *StepStatement) Pos() (int, int) { return ss.Token.Row, ss.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ss *StepStatement) TokenLiteral() string { return ss.Token.Literal }
+
+// String returns the string representation of the step statement.
 func (ss *StepStatement) String() string {
 	var out bytes.Buffer
 	for _, a := range ss.Actions {
@@ -1430,6 +1930,7 @@ func (ss *StepStatement) String() string {
 	return out.String()
 }
 
+// TransitionStatement represents a TRANSITION in an SFC.
 type TransitionStatement struct {
 	Token     token.Token // The 'TRANSITION' token
 	From      []*Identifier
@@ -1437,10 +1938,17 @@ type TransitionStatement struct {
 	Condition Expression
 }
 
-func (ts *TransitionStatement) statementNode()       {}
-func (ts *TransitionStatement) Pos() (int, int)      { return ts.Token.Row, ts.Token.Column }
+// statementNode marks TransitionStatement as a statement node.
+func (ts *TransitionStatement) statementNode() {}
+
+// Pos returns the position of the TRANSITION token.
+func (ts *TransitionStatement) Pos() (int, int) { return ts.Token.Row, ts.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (ts *TransitionStatement) TokenLiteral() string { return ts.Token.Literal }
-func (ts *TransitionStatement) String() string       { return "TRANSITION" }
+
+// String returns the string "TRANSITION".
+func (ts *TransitionStatement) String() string { return "TRANSITION" }
 
 // SFCProgram represents a Sequential Function Chart program.
 type SFCProgram struct {
@@ -1448,8 +1956,13 @@ type SFCProgram struct {
 	Elements []Statement
 }
 
-func (sp *SFCProgram) statementNode()       {}
+// statementNode marks SFCProgram as a statement node.
+func (sp *SFCProgram) statementNode() {}
+
+// TokenLiteral returns the literal value of the token.
 func (sp *SFCProgram) TokenLiteral() string { return sp.Token.Literal }
+
+// String returns the string representation of the SFC program.
 func (sp *SFCProgram) String() string {
 	var out bytes.Buffer
 	for _, s := range sp.Elements {
@@ -1457,6 +1970,8 @@ func (sp *SFCProgram) String() string {
 	}
 	return out.String()
 }
+
+// Pos returns the position of the first element in the SFC program.
 func (sp *SFCProgram) Pos() (int, int) {
 	if len(sp.Elements) > 0 {
 		return sp.Elements[0].Pos()
@@ -1473,9 +1988,16 @@ type ActionBlockStatement struct {
 	Body       *BlockStatement
 }
 
-func (abs *ActionBlockStatement) statementNode()       {}
-func (abs *ActionBlockStatement) Pos() (int, int)      { return abs.Token.Row, abs.Token.Column }
+// statementNode marks ActionBlockStatement as a statement node.
+func (abs *ActionBlockStatement) statementNode() {}
+
+// Pos returns the position of the action block's token.
+func (abs *ActionBlockStatement) Pos() (int, int) { return abs.Token.Row, abs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
 func (abs *ActionBlockStatement) TokenLiteral() string { return abs.Token.Literal }
+
+// String returns the string representation of the action block statement.
 func (abs *ActionBlockStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(abs.ActionName.String())

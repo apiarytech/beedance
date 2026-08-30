@@ -70,14 +70,14 @@ func TestExpandMacros(t *testing.T) {
 	}{
 		{
 			`VAR 
-				infixExpression : MACRO := macro() { quote(1 + 2); }; 
+				infixExpression : MACRO := macro() { EXPR(1 + 2); }; 
 			END_VAR 
 			infixExpression();`,
 			`(1 + 2);`,
 		},
 		{
 			`VAR 
-				reverse : MACRO := macro(a, b) { quote(unquote(b) - unquote(a)); }; 
+				reverse : MACRO := macro(a, b) { EXPR(EVAL(b) - EVAL(a)); }; 
 			END_VAR 
 			reverse(2 + 2, 10 - 5);`,
 			`((10 - 5) - (2 + 2));`,

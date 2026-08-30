@@ -15,12 +15,16 @@ import (
 )
 
 var (
-	traceLevel    int  = 0
-	enableTracing bool = false // New flag to control tracing
+	// traceLevel tracks the current indentation level for nested function calls.
+	traceLevel int = 0
+	// enableTracing is a global flag that turns parser tracing on or off.
+	enableTracing bool = false
 )
 
+// traceIdentPlaceholder is the character used for a single level of indentation.
 const traceIdentPlaceholder string = "\t"
 
+// identLevel returns a string of indentation characters corresponding to the current traceLevel.
 func identLevel() string {
 	if !enableTracing {
 		return ""
@@ -28,6 +32,7 @@ func identLevel() string {
 	return strings.Repeat(traceIdentPlaceholder, traceLevel-1)
 }
 
+// tracePrint prints a formatted string with the correct indentation level if tracing is enabled.
 func tracePrint(fs string) {
 	if !enableTracing {
 		return
@@ -35,23 +40,30 @@ func tracePrint(fs string) {
 	fmt.Printf("%s%s\n", identLevel(), fs)
 }
 
+// incIdent increments the indentation level for tracing.
 func incIdent() {
 	if enableTracing {
 		traceLevel = traceLevel + 1
 	}
 }
+
+// decIdent decrements the indentation level for tracing.
 func decIdent() {
 	if enableTracing {
 		traceLevel = traceLevel - 1
 	}
 }
 
+// trace is called at the beginning of a function to print a "BEGIN" message
+// and increase the indentation level. It's designed to be used with `defer untrace()`.
 func trace(msg string) string {
 	incIdent()
 	tracePrint("BEGIN " + msg)
 	return msg
 }
 
+// untrace is called via `defer` at the end of a traced function to print an "END"
+// message and decrease the indentation level.
 func untrace(msg string) {
 	tracePrint("END " + msg)
 	decIdent()

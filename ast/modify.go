@@ -10,8 +10,12 @@
 
 package ast
 
+// ModifierFunc defines the signature for a function that can be used to modify an AST node.
 type ModifierFunc func(Node) Node
 
+// Modify traverses an AST node and its children, applying the modifier function to each node in a depth-first manner.
+// It returns the potentially modified node. This function is the core of the AST rewriting capabilities,
+// allowing for transformations of the tree.
 func Modify(node Node, modifier ModifierFunc) Node {
 	switch node := node.(type) {
 

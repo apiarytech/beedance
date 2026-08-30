@@ -14,6 +14,10 @@ import (
 	"beedance/object"
 )
 
+// DefineMacros finds all macro definitions within a program's AST, adds them
+// to the given macro environment, and then removes them from the AST. This
+// prevents macros from being evaluated as regular variables and prepares them
+// for the expansion phase.
 func DefineMacros(program *ast.Program, env *object.Environment) {
 	var newStmts []ast.Statement
 
@@ -43,6 +47,8 @@ func DefineMacros(program *ast.Program, env *object.Environment) {
 	program.Statements = newStmts
 }
 
+// isMacroDefinition checks if a given AST statement is a variable declaration
+// that defines a macro (i.e., its value is a MacroLiteral).
 func isMacroDefinition(node ast.Statement) bool {
 	varDecl, ok := node.(*ast.VarDeclStatement)
 	if !ok {
@@ -53,6 +59,8 @@ func isMacroDefinition(node ast.Statement) bool {
 	return ok
 }
 
+// addMacro creates a new Macro object from a macro definition statement
+// and adds it to the specified environment.
 func addMacro(stmt ast.Statement, env *object.Environment) {
 	varDecl, _ := stmt.(*ast.VarDeclStatement)
 	macroLiteral, _ := varDecl.Value.(*ast.MacroLiteral)
@@ -66,6 +74,10 @@ func addMacro(stmt ast.Statement, env *object.Environment) {
 	env.Set(varDecl.Name.Value, macro)
 }
 
+// ExpandMacros traverses the AST and replaces any macro call expressions with
+// their expanded AST nodes. It uses a modifier function that identifies macro
+// calls, evaluates the macro's body with the provided arguments, and substitutes
+// the call site with the resulting quoted AST node.
 func ExpandMacros(program ast.Node, env *object.Environment) ast.Node {
 	return ast.Modify(program, func(node ast.Node) ast.Node {
 		callExpression, ok := node.(*ast.CallExpression)
@@ -99,6 +111,8 @@ func ExpandMacros(program ast.Node, env *object.Environment) ast.Node {
 	})
 }
 
+// isMacroCall checks if a given call expression is an invocation of a macro
+// defined in the environment. It returns the macro object if found.
 func isMacroCall(
 	exp *ast.CallExpression,
 	env *object.Environment,
@@ -121,6 +135,9 @@ func isMacroCall(
 	return macro, true
 }
 
+// quoteArgs takes the arguments of a macro call expression and wraps each one
+// in a Quote object. This prevents the arguments from being evaluated before
+// they are passed into the macro's expansion environment.
 func quoteArgs(exp *ast.CallExpression) []*object.Quote {
 	args := []*object.Quote{}
 
@@ -131,6 +148,9 @@ func quoteArgs(exp *ast.CallExpression) []*object.Quote {
 	return args
 }
 
+// extendMacroEnv creates a new, enclosed environment for a macro's execution.
+// It binds the macro's parameters to the quoted arguments from the call site,
+// making them available within the macro's body.
 func extendMacroEnv(
 	macro *object.Macro,
 	args []*object.Quote,

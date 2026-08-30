@@ -14,6 +14,8 @@ import (
 	"beedance/token"
 )
 
+// parsePoulDeclaration dispatches to the correct parsing function based on the POU type
+// (Program Organization Unit), which can be a FUNCTION, FUNCTION_BLOCK, or PROGRAM.
 func (p *Parser) parsePoulDeclaration() ast.Statement {
 	defer untrace(trace("parsePoulDeclaration"))
 	switch p.curToken.Type {
@@ -27,6 +29,10 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 	return nil // Should not be reached
 }
 
+// parseFunctionDeclaration parses a FUNCTION ... END_FUNCTION declaration.
+// It handles the function's name, return type, its variable declaration blocks
+// (VAR_INPUT, VAR_OUTPUT, VAR), and its body. It explicitly disallows
+// VAR_GLOBAL, VAR_EXTERNAL, etc., as per the IEC 61131-3 standard.
 func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	defer untrace(trace("parseFunctionDeclaration"))
 	stmt := &ast.FunctionDeclaration{Token: p.curToken}
@@ -45,6 +51,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 
 	p.nextToken() // Consume return type
 
+	// Loop to parse all variable declaration blocks allowed within a FUNCTION.
 	// Loop to parse all variable declaration blocks
 	for !p.curTokenIs(token.END_FUNCTION) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.VAR_INPUT) {
@@ -56,6 +63,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 		} else if p.curTokenIs(token.VAR_EXTERNAL) || p.curTokenIs(token.VAR_GLOBAL) || p.curTokenIs(token.VAR_ACCESS) || p.curTokenIs(token.VAR_TEMP) {
 			p.currentError("%s declarations are not allowed in a FUNCTION", p.curToken.Type)
 			// To prevent an infinite loop and to recover, we parse the invalid block and discard it.
+			// This switch handles parsing different invalid block types for recovery.
 			switch p.curToken.Type {
 			case token.VAR_EXTERNAL:
 				p.parseExternalVarDeclStatement()
@@ -84,6 +92,10 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	return stmt
 }
 
+// parseProgramDeclaration parses a PROGRAM ... END_PROGRAM declaration.
+// It handles the program's name, its various variable declaration blocks
+// (VAR_INPUT, VAR_OUTPUT, VAR, VAR_GLOBAL, etc.), and its body, which can be
+// written in ST, IL, or SFC.
 func (p *Parser) parseProgramDeclaration() ast.Statement {
 	defer untrace(trace("parseProgramDeclaration"))
 	stmt := &ast.ProgramDeclaration{Token: p.curToken}
@@ -95,12 +107,14 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 
 	p.nextToken()
 
+	// Loop to parse all variable declaration blocks.
 	// Loop to parse all variable declaration blocks
 	for {
 		if p.curTokenIs(token.COMMENT) {
 			p.nextToken()
 			continue
 		}
+		// This switch handles the various types of variable blocks that can appear at the start of a program declaration.
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
 			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
@@ -154,6 +168,8 @@ end_var_parsing:
 	return stmt
 }
 
+// parseVarGlobalBlock parses a VAR_GLOBAL ... END_VAR block and returns it as a
+// GlobalVarDeclaration node.
 func (p *Parser) parseVarGlobalBlock(blockType token.TokenType) *ast.GlobalVarDeclaration {
 	defer untrace(trace("parseVarGlobalBlock"))
 	if !p.curTokenIs(blockType) {
@@ -171,6 +187,8 @@ func (p *Parser) parseVarGlobalBlock(blockType token.TokenType) *ast.GlobalVarDe
 	return stmt
 }
 
+// parseVarExternalBlock parses a VAR_EXTERNAL ... END_VAR block and returns it as an
+// ExternalVarDeclaration node.
 func (p *Parser) parseVarExternalBlock(blockType token.TokenType) *ast.ExternalVarDeclaration {
 	defer untrace(trace("parseVarExternalBlock"))
 	if !p.curTokenIs(blockType) {
@@ -188,6 +206,8 @@ func (p *Parser) parseVarExternalBlock(blockType token.TokenType) *ast.ExternalV
 	return stmt
 }
 
+// parseVarAccessBlock parses a VAR_ACCESS ... END_VAR block and returns it as an
+// AccessVarDeclaration node.
 func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDeclaration {
 	defer untrace(trace("parseVarAccessBlock"))
 	if !p.curTokenIs(blockType) {
@@ -205,6 +225,9 @@ func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDe
 	return stmt
 }
 
+// parseProgramConfiguration parses a program instance declaration within a RESOURCE block.
+// This includes the instance name, the program type, an optional task assignment
+// (WITH clause), and optional parameter assignments.
 func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
 	defer untrace(trace("parseProgramConfiguration"))
 	stmt := &ast.ProgramConfiguration{Token: p.curToken}

@@ -14,6 +14,9 @@ import (
 	"beedance/token"
 )
 
+// parseFunctionBlockDeclaration parses a FUNCTION_BLOCK ... END_FUNCTION_BLOCK declaration.
+// It handles the FB's name, its various variable declaration blocks (VAR_INPUT, VAR_OUTPUT, etc.),
+// and its body, which can be written in ST, IL, or SFC.
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	defer untrace(trace("parseFunctionBlockDeclaration"))
 	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -27,6 +30,8 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 
 	// Loop to parse all variable declaration blocks
 	for {
+		// This switch handles the various types of variable blocks that can appear
+		// at the start of a function block declaration.
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
 			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)

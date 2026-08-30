@@ -32,29 +32,7 @@ func testEvalWithEnv(t *testing.T, input string, env *object.Environment) object
 
 func testIntegerObject(t *testing.T, obj object.Object, name string, expected int64) bool {
 	t.Helper()
-	var val int64
-	var ok bool
-
-	switch o := obj.(type) {
-	case *object.SInt:
-		val, ok = int64(o.Value), true
-	case *object.Int:
-		val, ok = int64(o.Value), true
-	case *object.DInt:
-		val, ok = int64(o.Value), true
-	case *object.LInt:
-		val, ok = o.Value, true
-	case *object.USInt:
-		val, ok = int64(o.Value), true
-	case *object.UInt:
-		val, ok = int64(o.Value), true
-	case *object.UDInt:
-		val, ok = int64(o.Value), true
-	case *object.ULInt:
-		val, ok = int64(o.Value), true
-	default:
-		ok = false
-	}
+	val, _, ok := object.GetIntegerObjectValue(obj)
 
 	if !ok {
 		t.Errorf("object is not a supported Integer type. got=%T (%+v)", obj, obj)
@@ -158,7 +136,7 @@ func mustGet(env *object.Environment, name string) object.Object {
 
 func testRealObject(t *testing.T, obj object.Object, name string, expected float64) bool {
 	t.Helper()
-	val, ok := getFloat64Value(obj)
+	val, ok := object.GetFloat64Value(obj)
 	if !ok {
 		t.Errorf("object is not a REAL type. got=%T (%+v)", obj, obj)
 		return false

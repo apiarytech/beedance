@@ -8,19 +8,31 @@ import (
 	"math"
 )
 
+// StackSize defines the maximum number of objects that can be on the stack.
 const StackSize = 2048
+
+// GlobalsSize defines the maximum number of global variables.
 const GlobalsSize = 65536
+
+// MaxFrames defines the maximum number of frames (call stack depth).
 const MaxFrames = 1024
 
+// True is a singleton object representing the boolean true value.
 var True = &object.Boolean{Value: true}
+
+// False is a singleton object representing the boolean false value.
 var False = &object.Boolean{Value: false}
+
+// Null is a singleton object representing the null value.
 var Null = &object.Null{}
 
+// VM represents the virtual machine that executes beedance bytecode.
 type VM struct {
 	constants []object.Object
 
 	stack []object.Object
-	sp    int // Always points to the next value. Top of stack is stack[sp-1]
+	// sp always points to the next available slot on the stack. The top of the stack is stack[sp-1].
+	sp int
 
 	globals []object.Object
 
@@ -28,6 +40,7 @@ type VM struct {
 	framesIndex int
 }
 
+// New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
 	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
 	mainClosure := &object.Closure{Fn: mainFn}
@@ -49,32 +62,42 @@ func New(bytecode *compiler.Bytecode) *VM {
 	}
 }
 
+// NewWithGlobalsStore creates a new VM with a pre-populated global variable store.
 func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object) *VM {
 	vm := New(bytecode)
 	vm.globals = s
 	return vm
 }
 
+// Globals returns the global variable store of the VM.
+func (vm *VM) Globals() []object.Object {
+	return vm.globals
+}
+
+// LastPoppedStackElem returns the object at the top of the stack without removing it.
 func (vm *VM) LastPoppedStackElem() object.Object {
 	return vm.stack[vm.sp]
 }
 
+// Run is the main execution loop of the VM. It fetches, decodes, and executes instructions.
 func (vm *VM) Run() error {
-	var ip int
 	var ins code.Instructions
 	var err error
 
-	for ip = vm.currentFrame().ip + 1; ip < len(vm.currentFrame().Instructions()); ip = vm.currentFrame().ip + 1 {
-		vm.currentFrame().ip = ip
+	for vm.currentFrame().ip < len(vm.currentFrame().Instructions())-1 {
+		vm.currentFrame().ip++ // Advance instruction pointer to the next opcode
+		ip := vm.currentFrame().ip
 		ins = vm.currentFrame().Instructions()
 		op := code.Opcode(ins[ip])
 
 		switch op {
+		// OpConstant pushes a constant from the constant pool onto the stack.
 		case code.OpConstant:
 			constIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2
+			vm.currentFrame().ip += 2 // Advance past operand
 			err = vm.push(vm.constants[constIndex])
 
+		// OpPop removes the top element from the stack.
 		case code.OpPop:
 			vm.pop()
 
@@ -83,12 +106,15 @@ func (vm *VM) Run() error {
 			err = vm.executeBinaryOperation(op)
 
 		case code.OpTrue:
+			// OpTrue pushes the singleton True object onto the stack.
 			err = vm.push(True)
 
 		case code.OpFalse:
+			// OpFalse pushes the singleton False object onto the stack.
 			err = vm.push(False)
 
 		case code.OpEqual, code.OpNotEqual, code.OpGreaterThan, code.OpLessThan,
+			// Comparison operators pop two values, compare them, and push a boolean result.
 			code.OpGreaterThanOrEqual, code.OpLessThanOrEqual:
 			err = vm.executeComparison(op)
 
@@ -99,30 +125,36 @@ func (vm *VM) Run() error {
 			err = vm.executeMinusOperator()
 
 		case code.OpJump:
+			// OpJump unconditionally sets the instruction pointer to a new location.
 			pos := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip = pos - 1
+			vm.currentFrame().ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
 
 		case code.OpJumpNotTruthy:
+			// OpJumpNotTruthy pops a value from the stack and jumps if it's not truthy.
 			pos := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2
+			vm.currentFrame().ip += 2 // Advance past operand
 			condition := vm.pop()
-			if !isTruthy(condition) {
-				vm.currentFrame().ip = pos - 1
+			if !object.IsTruthy(condition) {
+				vm.currentFrame().ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
 			}
 
 		case code.OpNull:
+			// OpNull pushes the singleton Null object onto the stack.
 			err = vm.push(Null)
 
 		case code.OpSetGlobal:
+			// OpSetGlobal pops a value from the stack and stores it in the globals slice.
 			globalIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2
+			vm.currentFrame().ip += 2 // Advance past operand
 			vm.globals[globalIndex] = vm.pop()
 
 		case code.OpGetGlobal:
+			// OpGetGlobal retrieves a value from the globals slice and pushes it onto the stack.
 			globalIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2
+			vm.currentFrame().ip += 2 // Advance past operand
 			err = vm.push(vm.globals[globalIndex])
 
+		// OpArray creates an array object from a number of elements on the stack.
 		case code.OpArray:
 			numElements := int(code.ReadUint16(ins[ip+1:]))
 			vm.currentFrame().ip += 2
@@ -131,6 +163,7 @@ func (vm *VM) Run() error {
 			err = vm.push(array)
 
 		case code.OpHash:
+			// OpHash creates a hash object from key-value pairs on the stack.
 			numElements := int(code.ReadUint16(ins[ip+1:]))
 			vm.currentFrame().ip += 2
 			var hash object.Object
@@ -141,16 +174,19 @@ func (vm *VM) Run() error {
 			}
 
 		case code.OpIndex:
+			// OpIndex retrieves an element from an array or hash.
 			index := vm.pop()
 			left := vm.pop()
 			err = vm.executeIndexExpression(left, index)
 
 		case code.OpCall:
+			// OpCall executes a function or closure call.
 			numArgs := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
+			vm.currentFrame().ip += 1 // Advance past operand
 			err = vm.executeCall(int(numArgs))
 
 		case code.OpReturnValue:
+			// OpReturnValue returns a value from a function.
 			returnValue := vm.pop()
 
 			frame := vm.popFrame()
@@ -159,44 +195,58 @@ func (vm *VM) Run() error {
 			err = vm.push(returnValue)
 
 		case code.OpReturn:
+			// OpReturn returns Null from a function.
 			frame := vm.popFrame()
 			vm.sp = frame.basePointer - 1
 
 			err = vm.push(Null)
 
 		case code.OpSetLocal:
+			// OpSetLocal pops a value and sets it as a local variable in the current frame.
 			localIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
 			frame := vm.currentFrame()
 			vm.stack[frame.basePointer+int(localIndex)] = vm.pop()
 
 		case code.OpGetLocal:
+			// OpGetLocal retrieves a local variable from the current frame and pushes it onto the stack.
 			localIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
 			frame := vm.currentFrame()
 			err = vm.push(vm.stack[frame.basePointer+int(localIndex)])
 
 		case code.OpGetBuiltin:
+			// OpGetBuiltin retrieves a built-in function and pushes it onto the stack.
 			builtinIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
 			definition := object.Builtins[builtinIndex]
 			err = vm.push(definition.Builtin)
 
 		case code.OpClosure:
+			// OpClosure creates a closure from a compiled function and free variables.
 			constIndex := code.ReadUint16(ins[ip+1:])
 			numFree := code.ReadUint8(ins[ip+3:])
-			vm.currentFrame().ip += 3
+			vm.currentFrame().ip += 3 // Advance past operands
 			err = vm.pushClosure(int(constIndex), int(numFree))
 
 		case code.OpGetFree:
+			// OpGetFree retrieves a free variable from the current closure.
 			freeIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
 			currentClosure := vm.currentFrame().cl
 			err = vm.push(currentClosure.Free[freeIndex])
 
 		case code.OpCurrentClosure:
+			// OpCurrentClosure pushes the current closure onto the stack, for recursion.
 			currentClosure := vm.currentFrame().cl
 			err = vm.push(currentClosure)
+
+		case code.OpDup:
+			// OpDup duplicates the top element of the stack.
+			err = vm.push(vm.stack[vm.sp-1])
+		case code.OpSwap:
+			// OpSwap swaps the top two elements of the stack.
+			vm.stack[vm.sp-1], vm.stack[vm.sp-2] = vm.stack[vm.sp-2], vm.stack[vm.sp-1]
 		}
 		if err != nil {
 			return err
@@ -206,6 +256,7 @@ func (vm *VM) Run() error {
 	return err
 }
 
+// push adds an object to the top of the stack.
 func (vm *VM) push(o object.Object) error {
 	if vm.sp >= StackSize {
 		return fmt.Errorf("stack overflow")
@@ -217,12 +268,14 @@ func (vm *VM) push(o object.Object) error {
 	return nil
 }
 
+// pop removes and returns the object from the top of the stack.
 func (vm *VM) pop() object.Object {
 	o := vm.stack[vm.sp-1]
 	vm.sp--
 	return o
 }
 
+// executeBinaryBooleanOperation performs a binary operation on two boolean objects.
 func (vm *VM) executeBinaryBooleanOperation(
 	op code.Opcode,
 	left, right object.Object,
@@ -248,6 +301,7 @@ func (vm *VM) executeBinaryBooleanOperation(
 	return vm.push(nativeBoolToBooleanObject(result))
 }
 
+// executeBinaryOperation dispatches to the correct binary operation based on operand types.
 func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
@@ -268,6 +322,7 @@ func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	}
 }
 
+// executeBinaryIntegerOperation performs a binary operation on two integer objects.
 func (vm *VM) executeBinaryIntegerOperation(
 	op code.Opcode,
 	left, right object.Object,
@@ -313,6 +368,7 @@ func (vm *VM) executeBinaryIntegerOperation(
 	return vm.push(&object.LInt{Value: result})
 }
 
+// executeComparison dispatches to the correct comparison operation based on operand types.
 func (vm *VM) executeComparison(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
@@ -332,6 +388,7 @@ func (vm *VM) executeComparison(op code.Opcode) error {
 	}
 }
 
+// executeIntegerComparison performs a comparison operation on two integer objects.
 func (vm *VM) executeIntegerComparison(
 	op code.Opcode,
 	left, right object.Object,
@@ -357,6 +414,7 @@ func (vm *VM) executeIntegerComparison(
 	}
 }
 
+// executeBangOperator performs a logical NOT operation on the top of the stack.
 func (vm *VM) executeBangOperator() error {
 	operand := vm.pop()
 
@@ -372,6 +430,7 @@ func (vm *VM) executeBangOperator() error {
 	}
 }
 
+// executeMinusOperator performs a negation operation on the top of the stack.
 func (vm *VM) executeMinusOperator() error {
 	operand := vm.pop()
 
@@ -383,6 +442,7 @@ func (vm *VM) executeMinusOperator() error {
 	return vm.push(&object.LInt{Value: -value})
 }
 
+// executeBinaryStringOperation performs a binary operation on two string objects.
 func (vm *VM) executeBinaryStringOperation(
 	op code.Opcode,
 	left, right object.Object,
@@ -397,6 +457,7 @@ func (vm *VM) executeBinaryStringOperation(
 	return vm.push(&object.String{Value: leftValue + rightValue})
 }
 
+// buildArray creates an array object from elements on the stack.
 func (vm *VM) buildArray(startIndex, endIndex int) object.Object {
 	elements := make([]object.Object, endIndex-startIndex)
 
@@ -407,6 +468,7 @@ func (vm *VM) buildArray(startIndex, endIndex int) object.Object {
 	return &object.Array{Elements: elements}
 }
 
+// buildHash creates a hash object from key-value pairs on the stack.
 func (vm *VM) buildHash(startIndex, endIndex int) (object.Object, error) {
 	hashedPairs := make(map[object.HashKey]object.HashPair)
 
@@ -427,6 +489,7 @@ func (vm *VM) buildHash(startIndex, endIndex int) (object.Object, error) {
 	return &object.Hash{Pairs: hashedPairs}, nil
 }
 
+// executeIndexExpression executes an index operation on an array or hash.
 func (vm *VM) executeIndexExpression(left, index object.Object) error {
 	switch {
 	case left.Type() == object.ARRAY_OBJ && isInteger(index):
@@ -438,6 +501,7 @@ func (vm *VM) executeIndexExpression(left, index object.Object) error {
 	}
 }
 
+// executeArrayIndex executes an index operation on an array.
 func (vm *VM) executeArrayIndex(array, index object.Object) error {
 	arrayObject := array.(*object.Array)
 	i := index.(*object.LInt).Value
@@ -450,6 +514,7 @@ func (vm *VM) executeArrayIndex(array, index object.Object) error {
 	return vm.push(arrayObject.Elements[i])
 }
 
+// executeHashIndex executes an index operation on a hash.
 func (vm *VM) executeHashIndex(hash, index object.Object) error {
 	hashObject := hash.(*object.Hash)
 
@@ -466,20 +531,24 @@ func (vm *VM) executeHashIndex(hash, index object.Object) error {
 	return vm.push(pair.Value)
 }
 
+// currentFrame returns the currently executing frame.
 func (vm *VM) currentFrame() *Frame {
 	return vm.frames[vm.framesIndex-1]
 }
 
+// pushFrame pushes a new frame onto the frame stack.
 func (vm *VM) pushFrame(f *Frame) {
 	vm.frames[vm.framesIndex] = f
 	vm.framesIndex++
 }
 
+// popFrame pops the current frame from the frame stack.
 func (vm *VM) popFrame() *Frame {
 	vm.framesIndex--
 	return vm.frames[vm.framesIndex]
 }
 
+// executeCall executes a function call.
 func (vm *VM) executeCall(numArgs int) error {
 	callee := vm.stack[vm.sp-1-numArgs]
 	switch callee := callee.(type) {
@@ -492,6 +561,7 @@ func (vm *VM) executeCall(numArgs int) error {
 	}
 }
 
+// callClosure handles the logic for calling a closure.
 func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 	if numArgs != cl.Fn.NumParameters {
 		return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
@@ -506,21 +576,21 @@ func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 	return nil
 }
 
+// callBuiltin handles the logic for calling a built-in function.
 func (vm *VM) callBuiltin(builtin *object.Builtin, numArgs int) error {
 	args := vm.stack[vm.sp-numArgs : vm.sp]
 
 	result := builtin.Fn(args...)
 	vm.sp = vm.sp - numArgs - 1
 
-	if result != nil {
-		vm.push(result)
-	} else {
-		vm.push(Null)
-	}
+	// All built-in functions are now guaranteed to return a non-nil object.
+	// Functions that would have returned nil now return the Null singleton.
+	vm.push(result)
 
 	return nil
 }
 
+// pushClosure creates a new closure and pushes it onto the stack.
 func (vm *VM) pushClosure(constIndex, numFree int) error {
 	constant := vm.constants[constIndex]
 	function, ok := constant.(*object.CompiledFunction)
@@ -538,6 +608,7 @@ func (vm *VM) pushClosure(constIndex, numFree int) error {
 	return vm.push(closure)
 }
 
+// nativeBoolToBooleanObject returns a singleton boolean object for a given native boolean value.
 func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	if input {
 		return True
@@ -545,21 +616,7 @@ func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	return False
 }
 
-func isTruthy(obj object.Object) bool {
-	switch obj := obj.(type) {
-
-	case *object.Boolean:
-		return obj.Value
-
-	case *object.Null:
-		return false
-
-	default:
-		// IEC 61131-3 requires boolean conditions. Other types are not "truthy".
-		return false
-	}
-}
-
+// isInteger checks if an object is one of the integer types.
 func isInteger(obj object.Object) bool {
 	switch obj.Type() {
 	case object.SINT_OBJ, object.INT_OBJ, object.DINT_OBJ, object.LINT_OBJ,

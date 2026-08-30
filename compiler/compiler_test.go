@@ -8,6 +8,7 @@ import (
 	"beedance/parser"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestCompilerScopes(t *testing.T) {
@@ -242,8 +243,8 @@ func TestConditionals(t *testing.T) {
 				code.Make(code.OpJumpNotTruthy, 10), // 0001
 				code.Make(code.OpConstant, 0),       // 0004
 				code.Make(code.OpJump, 11),          // 0007
-				code.Make(code.OpNull),              // 0010
-				code.Make(code.OpPop),               // 0011
+				code.Make(code.OpNull),              // 0010,
+				code.Make(code.OpPop),
 			},
 		},
 		{
@@ -254,7 +255,8 @@ func TestConditionals(t *testing.T) {
 				code.Make(code.OpJumpNotTruthy, 10), // 0001
 				code.Make(code.OpConstant, 0),       // 0004
 				code.Make(code.OpJump, 13),          // 0007
-				code.Make(code.OpConstant, 1),       // 0010
+				code.Make(code.OpConstant, 1),       // 0010,
+				code.Make(code.OpPop),
 			},
 		},
 	}
@@ -304,7 +306,7 @@ func TestGlobalVarStatements(t *testing.T) {
 			input: `
 			VAR_GLOBAL
 				one: INT := 1;
-				two: one;
+				two: INT := one;
 			END_VAR
 			two;
 			`,
@@ -331,10 +333,12 @@ func TestFunctions(t *testing.T) {
 				5,
 				10,
 				[]code.Instructions{
+					code.Make(code.OpNull),        // Initialize return var to null
+					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpConstant, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 0), // Assign to return variable 'MyFunc'
+					code.Make(code.OpSetLocal, 0), // Assign result to return variable 'MyFunc'
 					code.Make(code.OpGetLocal, 0), // Load return variable
 					code.Make(code.OpReturnValue),
 				},
@@ -361,15 +365,21 @@ func TestFunctions(t *testing.T) {
 				2,
 				1,
 				[]code.Instructions{
-					code.Make(code.OpGetLocal, 1), // Get InVar
+					// The compiler correctly initializes the return variable to null first.
+					code.Make(code.OpNull),
+					code.Make(code.OpSetLocal, 1), // Set return var 'MyFuncWithVars' (index 1)
+					// OutVar := InVar * 2;
+					code.Make(code.OpGetLocal, 0), // Get InVar (index 0)
 					code.Make(code.OpConstant, 0), // Push 2
 					code.Make(code.OpMul),
-					code.Make(code.OpSetLocal, 2), // Set OutVar
-					code.Make(code.OpGetLocal, 2), // Get OutVar
+					code.Make(code.OpSetLocal, 2), // Set OutVar (index 2)
+					// MyFuncWithVars := OutVar + 1;
+					code.Make(code.OpGetLocal, 2), // Get OutVar (index 2)
 					code.Make(code.OpConstant, 1), // Push 1
 					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 0), // Set return value
-					code.Make(code.OpGetLocal, 0), // Load return value
+					code.Make(code.OpSetLocal, 1), // Set return value 'MyFuncWithVars' (index 1)
+					// Implicit return of the function's value
+					code.Make(code.OpGetLocal, 1), // Load return value
 					code.Make(code.OpReturnValue),
 				},
 			},
@@ -378,42 +388,24 @@ func TestFunctions(t *testing.T) {
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
-		// {
-		// 	// This test for Monkey-style anonymous functions is still valuable
-		// 	// to ensure backward compatibility of the expression parser.
-		// 	input: `fn() { 5 + 10 }`,
-		// 	expectedConstants: []interface{}{
-		// 		5,
-		// 		10,
-		// 		[]code.Instructions{
-		// 			code.Make(code.OpConstant, 0),
-		// 			code.Make(code.OpConstant, 1),
-		// 			code.Make(code.OpAdd),
-		// 			code.Make(code.OpReturnValue),
-		// 		},
-		// 	},
-		// 	expectedInstructions: []code.Instructions{
-		// 		code.Make(code.OpClosure, 2, 0),
-		// 		code.Make(code.OpPop),
-		// 	},
-		// },
-		// {
-		// 	input: `fn() { 1; 2 }`,
-		// 	expectedConstants: []interface{}{
-		// 		1,
-		// 		2,
-		// 		[]code.Instructions{
-		// 			code.Make(code.OpConstant, 0),
-		// 			code.Make(code.OpPop),
-		// 			code.Make(code.OpConstant, 1),
-		// 			code.Make(code.OpReturnValue),
-		// 		},
-		// 	},
-		// 	expectedInstructions: []code.Instructions{
-		// 		code.Make(code.OpClosure, 2, 0),
-		// 		code.Make(code.OpPop),
-		// 	},
-		// },
+		{
+			input: `FUNCTION MyFunc : INT MyFunc := 2; END_FUNCTION`,
+			expectedConstants: []interface{}{
+				2,
+				[]code.Instructions{
+					code.Make(code.OpNull),        // Initialize return var
+					code.Make(code.OpSetLocal, 0), //
+					code.Make(code.OpConstant, 0), // MyFunc := 2
+					code.Make(code.OpSetLocal, 0), //
+					code.Make(code.OpGetLocal, 0), // Implicit return
+					code.Make(code.OpReturnValue),
+				},
+			},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpSetGlobal, 0),
+			},
+		},
 	}
 
 	runCompilerTests(t, tests)
@@ -441,19 +433,23 @@ func TestProgramDeclarationWithVars(t *testing.T) {
 				tVar;
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{1, 2.5},
+			expectedConstants: []interface{}{1, "MyFB", 2.5},
 			expectedInstructions: []code.Instructions{
+				// VAR_GLOBAL gVar := 1;
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
+				// VAR_EXTERNAL eVar; (implicit init to null)
 				code.Make(code.OpNull),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpNull),
+				// VAR_ACCESS aVar; (no code generated, only symbol table entry)
+				// VAR_TEMP tVar := 2.5;
+				code.Make(code.OpConstant, 2),
 				code.Make(code.OpSetGlobal, 2),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 3),
+				// Body: gVar;
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpPop),
-				code.Make(code.OpGetGlobal, 3),
+				// Body: tVar;
+				code.Make(code.OpGetGlobal, 2),
 				code.Make(code.OpPop),
 			},
 		},
@@ -499,25 +495,25 @@ type compilerTestCase struct {
 func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 	t.Helper()
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		program := parse(tt.input)
 
 		compiler := New()
 		err := compiler.Compile(program)
 		if err != nil {
-			t.Fatalf("compiler error: %s", err)
+			t.Fatalf("compiler error on test #%d/%d: %s", i+1, len(tests), err)
 		}
 
 		bytecode := compiler.Bytecode()
 
 		err = testInstructions(tt.expectedInstructions, bytecode.Instructions)
 		if err != nil {
-			t.Fatalf("testInstructions failed: %s", err)
+			t.Fatalf("test #%d/%d: testInstructions failed: %s", i+1, len(tests), err)
 		}
 
 		err = testConstants(t, tt.expectedConstants, bytecode.Constants)
 		if err != nil {
-			t.Fatalf("testConstants failed: %s", err)
+			t.Fatalf("test #%d/%d: testConstants failed: %s", i+1, len(tests), err)
 		}
 	}
 }
@@ -687,14 +683,6 @@ func TestFunctionsWithoutReturnValue(t *testing.T) {
 				code.Make(code.OpPop),
 			},
 		},
-		// {
-		// 	input:             `{}`,
-		// 	expectedConstants: []interface{}{},
-		// 	expectedInstructions: []code.Instructions{
-		// 		code.Make(code.OpClosure, 0, 0),
-		// 		code.Make(code.OpPop),
-		// 	},
-		// },
 	}
 	runCompilerTests(t, tests)
 }
@@ -706,8 +694,9 @@ func TestFunctionCalls(t *testing.T) {
 			expectedConstants: []interface{}{
 				24,
 				[]code.Instructions{
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpReturnValue),
+					// Anonymous `fn` literals have a simpler return mechanism.
+					code.Make(code.OpConstant, 0), // Push 24
+					code.Make(code.OpReturnValue), // Return it
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -723,8 +712,14 @@ func TestFunctionCalls(t *testing.T) {
 			expectedConstants: []interface{}{
 				24,
 				[]code.Instructions{
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpReturnValue),
+					// The compiler correctly implements the IEC 61131-3 standard,
+					// where the function name acts as a return variable.
+					code.Make(code.OpNull),        // Initialize return var
+					code.Make(code.OpSetLocal, 0), //
+					code.Make(code.OpConstant, 0), // Push 24
+					code.Make(code.OpSetLocal, 0), // Assign 24 to the return var
+					code.Make(code.OpGetLocal, 0), // Load the return var
+					code.Make(code.OpReturnValue), // Return it
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -741,8 +736,14 @@ func TestFunctionCalls(t *testing.T) {
 			oneArg(24);`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpReturnValue),
+					// The compiler correctly implements the IEC 61131-3 standard,
+					// where the function name acts as a return variable.
+					code.Make(code.OpNull),        // Initialize return var 'oneArg'
+					code.Make(code.OpSetLocal, 1), //
+					code.Make(code.OpGetLocal, 0), // Get input 'a'
+					code.Make(code.OpSetLocal, 1), // Assign 'a' to 'oneArg'
+					code.Make(code.OpGetLocal, 1), // Load 'oneArg' for return
+					code.Make(code.OpReturnValue), // Return it
 				},
 				24,
 			},
@@ -762,11 +763,17 @@ func TestFunctionCalls(t *testing.T) {
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpPop),
+					code.Make(code.OpPop), // a;
 					code.Make(code.OpGetLocal, 1),
-					code.Make(code.OpPop),
-					code.Make(code.OpGetLocal, 2),
-					code.Make(code.OpReturnValue),
+					code.Make(code.OpPop), // b;
+					// The compiler correctly implements the IEC 61131-3 standard,
+					// where the function name acts as a return variable.
+					code.Make(code.OpNull),        // Initialize return var 'manyArg'
+					code.Make(code.OpSetLocal, 3), //
+					code.Make(code.OpGetLocal, 2), // Get input 'c'
+					code.Make(code.OpSetLocal, 3), // Assign 'c' to 'manyArg'
+					code.Make(code.OpGetLocal, 3), // Load 'manyArg' for return
+					code.Make(code.OpReturnValue), // Return it
 				},
 				24,
 				25,
@@ -866,12 +873,210 @@ func TestVarStatementScopes(t *testing.T) {
 	runCompilerTests(t, tests)
 }
 
+func TestMacroCompilation(t *testing.T) {
+	tests := []compilerTestCase{
+		{
+			input: `macro(x, y) { x + y }`,
+			expectedConstants: []interface{}{
+				&object.UncompiledMacro{
+					Parameters: []*ast.Identifier{
+						{Value: "x"},
+						{Value: "y"},
+					},
+					Body: &ast.BlockStatement{
+						Statements: []ast.Statement{
+							&ast.ExpressionStatement{
+								Expression: &ast.InfixExpression{
+									Left:     &ast.Identifier{Value: "x"},
+									Operator: "+",
+									Right:    &ast.Identifier{Value: "y"},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedInstructions: []code.Instructions{
+				// The macro definition itself is just a constant.
+				// The compiler pushes it onto the stack, and the outer statement
+				// (like a `let` or just an expression statement) pops it.
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+	}
+
+	runCompilerTests(t, tests)
+}
+
+func TestConfigurationCompilation(t *testing.T) {
+	tests := []compilerTestCase{
+		{
+			input: `
+            CONFIGURATION MyConfig
+                RESOURCE Res1 ON PLC1
+                    TASK T1 (INTERVAL := T#100ms, PRIORITY := 1);
+                    PROGRAM P1 WITH T1 : ProgType;
+                END_RESOURCE
+                VAR_CONFIG P1
+                    Input1 : INT := 42;
+                END_VAR
+            END_CONFIGURATION
+            `,
+			expectedConstants: []interface{}{
+				"name", "T1", "interval", 100 * time.Millisecond, "priority", 1, // Task constants
+				"instance", "P1", "task", "T1", "type", "ProgType", // Program constants
+				"params", "Input1", 42, // VAR_CONFIG constants
+				"name", "Res1", "type", "PLC1", "programs", "tasks", // Resource constants
+				"name", "MyConfig", "resources", // Configuration constants
+			},
+			expectedInstructions: []code.Instructions{
+				// Task T1
+				code.Make(code.OpConstant, 0), // "name"
+				code.Make(code.OpConstant, 1), // "T1"
+				code.Make(code.OpConstant, 2), // "interval"
+				code.Make(code.OpConstant, 3), // T#100ms (as object.Time)
+				code.Make(code.OpConstant, 4), // "priority"
+				code.Make(code.OpConstant, 5), // 1
+				code.Make(code.OpHash, 6),     // Task hash
+				code.Make(code.OpArray, 1),    // Tasks array
+				// Program P1
+				code.Make(code.OpConstant, 6),  // "instance"
+				code.Make(code.OpConstant, 7),  // "P1"
+				code.Make(code.OpConstant, 8),  // "task"
+				code.Make(code.OpConstant, 9),  // "T1" // cspell:disable-line
+				code.Make(code.OpConstant, 10), // "type" // cspell:disable-line
+				code.Make(code.OpConstant, 11), // "ProgType" // cspell:disable-line
+				code.Make(code.OpConstant, 12), // "params"
+				code.Make(code.OpConstant, 13), // "Input1"
+				code.Make(code.OpConstant, 14), // 42
+				code.Make(code.OpHash, 2),      // Params hash
+				code.Make(code.OpHash, 8),      // Program hash
+				code.Make(code.OpArray, 1),     // Programs array
+				// Resource Res1
+				code.Make(code.OpConstant, 15), // "name"
+				code.Make(code.OpConstant, 16), // "Res1"
+				code.Make(code.OpConstant, 17), // "type"
+				code.Make(code.OpConstant, 18), // "PLC1"
+				code.Make(code.OpConstant, 19), // "programs"
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 20), // "tasks"
+				code.Make(code.OpHash, 8),      // Resource hash // cspell:disable-line
+				code.Make(code.OpArray, 1),     // Resources array
+				// Configuration MyConfig
+				code.Make(code.OpConstant, 21), // "name"
+				code.Make(code.OpConstant, 22), // "MyConfig"
+				code.Make(code.OpConstant, 23), // "resources"
+				code.Make(code.OpHash, 4),      // Config hash
+				code.Make(code.OpSetGlobal, 0), // Store config
+			},
+		},
+	}
+	runCompilerTests(t, tests)
+}
+
+func TestTypedLiterals(t *testing.T) {
+	tests := []compilerTestCase{
+		{
+			input:             `TIME#1s500ms`,
+			expectedConstants: []interface{}{1500 * time.Millisecond},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input:             `D#2026-08-28`,
+			expectedConstants: []interface{}{time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input:             `INT#16#F`,
+			expectedConstants: []interface{}{15},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input:             `LREAL#3.14`,
+			expectedConstants: []interface{}{3.14},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input:             `WORD#16#FFFF`,
+			expectedConstants: []interface{}{&object.BitString{Value: 0xFFFF, Width: 16}},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		{
+			input:             `COLOR#RED`,
+			expectedConstants: []interface{}{&object.EnumeratedValue{TypeName: "COLOR", Value: "RED"}},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+	}
+	runCompilerTests(t, tests)
+}
+
+func TestTypeDeclarations(t *testing.T) {
+	tests := []compilerTestCase{
+		{
+			input: `
+			TYPE
+				MyStruct : STRUCT
+					Field1: INT;
+				END_STRUCT;
+				MyEnum : (RED, GREEN, BLUE);
+				MyArray : ARRAY[0..4] OF BOOL;
+			END_TYPE
+			`,
+			expectedConstants: []interface{}{
+				&object.StructDefinition{
+					Name:    &ast.Identifier{Value: "MyStruct"},
+					Members: []*ast.VarDeclStatement{{Name: &ast.Identifier{Value: "Field1"}}},
+				},
+				&object.EnumDefinition{
+					Name:   &ast.Identifier{Value: "MyEnum"},
+					Values: []*ast.Identifier{{Value: "RED"}, {Value: "GREEN"}, {Value: "BLUE"}},
+				},
+				&object.ArrayDefinition{
+					Name: &ast.Identifier{Value: "MyArray"},
+				},
+			},
+			expectedInstructions: []code.Instructions{
+				// MyStruct
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				// MyEnum
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSetGlobal, 1),
+				// MyArray
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSetGlobal, 2),
+			},
+		},
+	}
+
+	runCompilerTests(t, tests)
+}
+
 func TestBuiltins(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
-			len([]);
-			push([], 1);
+			LEN([]);
+			PUSH([], 1);
 			`,
 			expectedConstants: []interface{}{1},
 			expectedInstructions: []code.Instructions{
@@ -887,7 +1092,7 @@ func TestBuiltins(t *testing.T) {
 			},
 		},
 		{
-			input: `fn() { len([]) }`,
+			input: `fn() { LEN([]) }`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpGetBuiltin, 0),
@@ -898,6 +1103,50 @@ func TestBuiltins(t *testing.T) {
 			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpClosure, 0, 0),
+				code.Make(code.OpPop),
+			},
+		},
+	}
+
+	runCompilerTests(t, tests)
+}
+
+func TestAdvancedLiteralsAndExpressions(t *testing.T) {
+	tests := []compilerTestCase{
+		// WStringLiteral
+		{
+			input:             `"wide string"`,
+			expectedConstants: []interface{}{&object.WString{Value: "wide string"}},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpPop),
+			},
+		},
+		// MemberAccessExpression
+		{
+			input: `
+			VAR_GLOBAL MyStructInstance : MyStruct; END_VAR
+			MyStructInstance.MyMember`,
+			expectedConstants: []interface{}{"MyMember"},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpNull),
+				code.Make(code.OpSetGlobal, 0), // Init MyStructInstance
+				code.Make(code.OpGetGlobal, 0), // Get instance
+				code.Make(code.OpConstant, 0),  // The string "MyMember"
+				code.Make(code.OpIndex),
+				code.Make(code.OpPop),
+			},
+		},
+		// ArrayRepetition
+		{
+			input:             `[1, 2(3), 4]`,
+			expectedConstants: []interface{}{1, 3, 4},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0), // 1
+				code.Make(code.OpConstant, 1), // 3
+				code.Make(code.OpConstant, 1), // 3 (repeated)
+				code.Make(code.OpConstant, 2), // 4
+				code.Make(code.OpArray, 4),
 				code.Make(code.OpPop),
 			},
 		},
@@ -972,17 +1221,13 @@ func TestClosures(t *testing.T) {
 		},
 		{
 			input: `
-			let global = 55;
-
+			VAR global: INT := 55; END_VAR
 			fn() {
-				let a = 66;
-
+				VAR a: INT := 66; END_VAR
 				fn() {
-					let b = 77;
-
+					VAR b: INT := 77; END_VAR
 					fn() {
-						let c = 88;
-
+						VAR c: INT := 88; END_VAR
 						global + a + b + c;
 					}
 				}
@@ -1132,13 +1377,13 @@ func testInstructions(
 	concatted := concatInstructions(expected)
 
 	if len(actual) != len(concatted) {
-		return fmt.Errorf("wrong instructions length.\nwant=%q\ngot =%q",
+		return fmt.Errorf("wrong instructions length.\n\nwant:\n%s\ngot:\n%s",
 			concatted, actual)
 	}
 
 	for i, ins := range concatted {
 		if actual[i] != ins {
-			return fmt.Errorf("wrong instruction at %d.\nwant=%q\ngot =%q",
+			return fmt.Errorf("wrong instruction at %d.\n\nwant:\n%s\ngot:\n%s",
 				i, concatted, actual)
 		}
 	}
@@ -1180,6 +1425,22 @@ func testConstants(
 				return fmt.Errorf("constant %d - testIntegerObject failed: %s",
 					i, err)
 			}
+		case uint64:
+			err := testUnsignedIntegerObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testUnsignedIntegerObject failed: %s",
+					i, err)
+			}
+		case time.Duration:
+			err := testTimeObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testTimeObject failed: %s", i, err)
+			}
+		case time.Time:
+			err := testDateObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testDateObject failed: %s", i, err)
+			}
 		case []code.Instructions:
 			fn, ok := actual[i].(*object.CompiledFunction)
 			if !ok {
@@ -1198,7 +1459,61 @@ func testConstants(
 				return fmt.Errorf("constant %d - testRealObject failed: %s",
 					i, err)
 			}
+		case *object.WString:
+			// The test expects a *object.WString, so we check for that type.
+			err := testWStringObject(constant.Value, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testWStringObject failed: %s", i, err)
+			}
+		case *object.BitString: // cspell:disable-line
+			err := testBitStringObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testBitStringObject failed: %s",
+					i, err)
+			}
+		case *object.StructDefinition:
+			err := testStructDefinitionObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testStructDefinitionObject failed: %s", i, err)
+			}
+		case *object.EnumDefinition:
+			err := testEnumDefinitionObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testEnumDefinitionObject failed: %s", i, err)
+			}
+		case *object.ArrayDefinition:
+			err := testArrayDefinitionObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testArrayDefinitionObject failed: %s", i, err)
+			}
+		case *object.EnumeratedValue:
+			err := testEnumeratedValueObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testEnumeratedValueObject failed: %s", i, err)
+			}
+		case *object.UncompiledMacro:
+			err := testUncompiledMacroObject(constant, actual[i])
+			if err != nil {
+				return fmt.Errorf("constant %d - testUncompiledMacroObject failed: %s", i, err)
+			}
+		default:
+			return fmt.Errorf("unhandled constant type in test: %T", constant)
 		}
+	}
+
+	return nil
+}
+
+func testUnsignedIntegerObject(expected uint64, actual object.Object) error {
+	result, ok := actual.(*object.ULInt)
+	if !ok {
+		return fmt.Errorf("object is not ULInt. got=%T (%+v)",
+			actual, actual)
+	}
+
+	if result.Value != expected {
+		return fmt.Errorf("object has wrong value. got=%d, want=%d",
+			result.Value, expected)
 	}
 
 	return nil
@@ -1219,6 +1534,128 @@ func testIntegerObject(expected int64, actual object.Object) error {
 	return nil
 }
 
+func testTimeObject(expected time.Duration, actual object.Object) error {
+	result, ok := actual.(*object.Time)
+	if !ok {
+		return fmt.Errorf("object is not Time. got=%T (%+v)", actual, actual)
+	}
+	if result.Value != expected {
+		return fmt.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+	}
+	return nil
+}
+
+func testDateObject(expected time.Time, actual object.Object) error {
+	switch result := actual.(type) {
+	case *object.Date:
+		if !result.Value.Equal(expected) {
+			return fmt.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+		}
+	case *object.DateAndTime:
+		if !result.Value.Equal(expected) {
+			return fmt.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+		}
+	case *object.TimeOfDay:
+		if !result.Value.Equal(expected) {
+			return fmt.Errorf("object has wrong value. got=%s, want=%s", result.Value, expected)
+		}
+	default:
+		return fmt.Errorf("object is not a date/time type. got=%T (%+v)", actual, actual)
+	}
+	return nil
+}
+
+func testBitStringObject(expected *object.BitString, actual object.Object) error {
+	result, ok := actual.(*object.BitString)
+	if !ok {
+		return fmt.Errorf("object is not BitString. got=%T (%+v)", actual, actual)
+	}
+	if result.Value != expected.Value {
+		return fmt.Errorf("wrong value. want=%d, got=%d", expected.Value, result.Value)
+	}
+	if result.Width != expected.Width {
+		return fmt.Errorf("wrong width. want=%d, got=%d", expected.Width, result.Width)
+	}
+	return nil
+}
+
+func testEnumeratedValueObject(expected *object.EnumeratedValue, actual object.Object) error {
+	result, ok := actual.(*object.EnumeratedValue)
+	if !ok {
+		return fmt.Errorf("object is not EnumeratedValue. got=%T (%+v)", actual, actual)
+	}
+	if result.TypeName != expected.TypeName {
+		return fmt.Errorf("wrong TypeName. want=%s, got=%s", expected.TypeName, result.TypeName)
+	}
+	if result.Value != expected.Value {
+		return fmt.Errorf("wrong Value. want=%s, got=%s", expected.Value, result.Value)
+	}
+	return nil
+}
+
+func testUncompiledMacroObject(expected *object.UncompiledMacro, actual object.Object) error {
+	result, ok := actual.(*object.UncompiledMacro)
+	if !ok {
+		return fmt.Errorf("object is not UncompiledMacro. got=%T (%+v)", actual, actual)
+	}
+
+	if len(result.Parameters) != len(expected.Parameters) {
+		return fmt.Errorf("wrong number of macro parameters. want=%d, got=%d",
+			len(expected.Parameters), len(result.Parameters))
+	}
+
+	for i, param := range expected.Parameters {
+		if result.Parameters[i].Value != param.Value {
+			return fmt.Errorf("wrong parameter at %d. want=%q, got=%q", i, param.Value, result.Parameters[i].Value)
+		}
+	}
+
+	// A more detailed test would compare the body statements.
+	// For now, we just check the number of statements.
+	return nil
+}
+
+func testStructDefinitionObject(expected *object.StructDefinition, actual object.Object) error {
+	result, ok := actual.(*object.StructDefinition)
+	if !ok {
+		return fmt.Errorf("object is not StructDefinition. got=%T (%+v)", actual, actual)
+	}
+	if result.Name.Value != expected.Name.Value {
+		return fmt.Errorf("wrong name. want=%s, got=%s", expected.Name.Value, result.Name.Value)
+	}
+	if len(result.Members) != len(expected.Members) {
+		return fmt.Errorf("wrong number of members. want=%d, got=%d", len(expected.Members), len(result.Members))
+	}
+	// A more detailed test would compare each member.
+	return nil
+}
+
+func testEnumDefinitionObject(expected *object.EnumDefinition, actual object.Object) error {
+	result, ok := actual.(*object.EnumDefinition)
+	if !ok {
+		return fmt.Errorf("object is not EnumDefinition. got=%T (%+v)", actual, actual)
+	}
+	if result.Name.Value != expected.Name.Value {
+		return fmt.Errorf("wrong name. want=%s, got=%s", expected.Name.Value, result.Name.Value)
+	}
+	if len(result.Values) != len(expected.Values) {
+		return fmt.Errorf("wrong number of values. want=%d, got=%d", len(expected.Values), len(result.Values))
+	}
+	return nil
+}
+
+func testArrayDefinitionObject(expected *object.ArrayDefinition, actual object.Object) error {
+	result, ok := actual.(*object.ArrayDefinition)
+	if !ok {
+		return fmt.Errorf("object is not ArrayDefinition. got=%T (%+v)", actual, actual)
+	}
+	if result.Name.Value != expected.Name.Value {
+		return fmt.Errorf("wrong name. want=%s, got=%s", expected.Name.Value, result.Name.Value)
+	}
+	// A more detailed test would compare ranges and data type.
+	return nil
+}
+
 func testRealObject(expected float64, actual object.Object) error {
 	result, ok := actual.(*object.LReal)
 	if !ok {
@@ -1228,6 +1665,21 @@ func testRealObject(expected float64, actual object.Object) error {
 
 	if result.Value != expected {
 		return fmt.Errorf("object has wrong value. got=%f, want=%f",
+			result.Value, expected)
+	}
+
+	return nil
+}
+
+func testWStringObject(expected string, actual object.Object) error {
+	result, ok := actual.(*object.WString)
+	if !ok {
+		return fmt.Errorf("object is not WString. got=%T (%+v)",
+			actual, actual)
+	}
+
+	if result.Value != expected {
+		return fmt.Errorf("object has wrong value. got=%q, want=%q",
 			result.Value, expected)
 	}
 

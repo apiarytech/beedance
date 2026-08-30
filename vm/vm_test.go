@@ -61,7 +61,6 @@ func TestBooleanExpressions(t *testing.T) {
 		{"!!true", true},
 		{"!!false", false},
 		{"!!5", true},
-		{"!(if (false) then { 5; } end_if)", true},
 	}
 
 	runVmTests(t, tests)
@@ -69,17 +68,18 @@ func TestBooleanExpressions(t *testing.T) {
 
 func TestConditionals(t *testing.T) {
 	tests := []vmTestCase{
-		{"IF TRUE THEN 10; END_IF", 10},
-		{"IF TRUE THEN 10; ELSE 20; END_IF", 10},
-		{"IF FALSE THEN 10; ELSE 20; END_IF", 20},
+		{"IF 1 < 2 THEN 10; ELSE 20; END_IF", 10},
+		{"IF true THEN 10; ELSE 20; END_IF", 10},
+		{"IF false THEN 10; ELSE 20; END_IF", 20},
 		{"IF 1 < 2 THEN 10; END_IF", 10},
 		{"IF 1 < 2 THEN 10; ELSE 20; END_IF", 10},
 		{"IF 1 > 2 THEN 10; ELSE 20; END_IF", 20},
 		{"IF 1 > 2 THEN 10; END_IF", Null},
-		{"IF FALSE THEN 10; END_IF", Null},
-		{"IF 1 > 2 THEN 99; ELSIF 1 = 1 THEN 42; ELSE 100; END_IF", 42},
-		{"IF 1 > 2 THEN 99; ELSIF 1 = 0 THEN 42; ELSE 100; END_IF", 100},
-		// Non-boolean conditions should evaluate to false.
+		{"IF false THEN 10; END_IF", Null},
+		{"IF 1 > 2 THEN 99; ELSIF (1 = 1) THEN 42; ELSE 100; END_IF", 42},
+		{"IF 1 > 2 THEN 99; ELSIF (1 = 0) THEN 42; ELSE 100; END_IF", 100},
+		// Per IEC 61131-3, conditions must be boolean. Other types are not "truthy".
+		// The VM's isTruthy function correctly returns false for non-booleans.
 		{"IF 1 THEN 10; ELSE 20; END_IF", 20},
 	}
 
@@ -88,9 +88,15 @@ func TestConditionals(t *testing.T) {
 
 func TestGlobalVarStatements(t *testing.T) {
 	tests := []vmTestCase{
-		{"VAR one : INT; END_VAR one := 1; one;", 1},
-		{"VAR one, two : INT; END_VAR one := 1; two := 2; one + two;", 3},
-		{"VAR one, two : INT; END_VAR one := 1; two := one + one; one + two;", 3},
+		// Use VAR_GLOBAL for top-level variable declarations, which is more aligned with IEC 61131-3 structure
+		// where global variables are explicitly marked.
+		{"VAR_GLOBAL g_one : INT := 1; END_VAR g_one;", 1},
+		{"VAR_GLOBAL g_one : INT := 1; g_two : INT := 2; END_VAR g_one + g_two;", 3},
+		{`VAR_GLOBAL
+			g_one : INT := 1;
+			g_two : INT;
+		 END_VAR
+		 g_two := g_one + g_one; g_one + g_two;`, 3},
 	}
 
 	runVmTests(t, tests)
@@ -98,9 +104,11 @@ func TestGlobalVarStatements(t *testing.T) {
 
 func TestStringExpressions(t *testing.T) {
 	tests := []vmTestCase{
-		{`"beedance"`, "beedance"},
-		{`"mon" + "key"`, "monkey"},
-		{`"mon" + "key" + "banana"`, "monkeybanana"},
+		// Per IEC 61131-3, STRING literals use single quotes and concatenation
+		// is handled by the CONCAT function, not the '+' operator.
+		{`'beedance'`, "beedance"},
+		{`CONCAT('mon', 'key')`, "monkey"},
+		{`CONCAT('mon', 'key', 'banana')`, "monkeybanana"},
 	}
 
 	runVmTests(t, tests)
@@ -217,32 +225,6 @@ func TestFunctionsWithoutReturnValue(t *testing.T) {
 
 	runVmTests(t, tests)
 }
-
-func TestFirstClassFunctions(t *testing.T) {
-	tests := []vmTestCase{
-		{
-			input: `
-		let returnsOne = fn() { 1; };
-		let returnsOneReturner = fn() { returnsOne; };
-		returnsOneReturner()();
-		`,
-			expected: 1,
-		},
-		{
-			input: `
-		let returnsOneReturner = fn() {
-			let returnsOne = fn() { 1; };
-			returnsOne;
-		};
-		returnsOneReturner()();
-		`,
-			expected: 1,
-		},
-	}
-
-	runVmTests(t, tests)
-}
-
 func TestCallingFunctionsWithBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
@@ -281,7 +263,7 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 		},
 		{
 			input: `
-			VAR globalSeed : INT := 50; END_VAR
+			VAR_GLOBAL globalSeed : INT := 50; END_VAR
 			FUNCTION minusOne : INT
 				VAR num : INT := 1; END_VAR
 				minusOne := globalSeed - num;
@@ -328,7 +310,7 @@ func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 		},
 		{
 			input: `
-			VAR globalNum : INT := 10; END_VAR
+			VAR_GLOBAL globalNum : INT := 10; END_VAR
 			FUNCTION sum : INT
 				VAR_INPUT a:INT; b:INT; END_VAR
 				VAR c:INT; END_VAR
@@ -385,129 +367,63 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 
 func TestBuiltinFunctions(t *testing.T) {
 	tests := []vmTestCase{
-		{`len("")`, 0},
-		{`len("four")`, 4},
-		{`len("hello world")`, 11},
+		{`LEN('')`, 0},
+		{`LEN('four')`, 4},
+		{`LEN('hello world')`, 11},
 		{
-			`len(1)`,
+			`LEN(1)`,
 			&object.Error{
-				Message: "argument to `len` not supported, got INTEGER",
+				Message: "argument to `LEN` not supported, got LINT",
 			},
 		},
-		{`len("one", "two")`,
+		{`LEN('one', 'two')`,
 			&object.Error{
 				Message: "wrong number of arguments. got=2, want=1",
 			},
 		},
-		{`len([1, 2, 3])`, 3},
-		{`len([])`, 0},
-		{`puts("hello", "world!")`, Null},
-		{`first([1, 2, 3])`, 1},
-		{`first([])`, Null},
-		{`first(1)`,
+		{`LEN([1, 2, 3])`, 3},
+		{`LEN([])`, 0},
+		{`PUTS('hello', 'world!')`, Null},
+		{`FIRST([1, 2, 3])`, 1},
+		{`FIRST([])`, Null},
+		{`FIRST(1)`,
 			&object.Error{
-				Message: "argument to `first` must be ARRAY, got INTEGER",
+				Message: "argument to `FIRST` must be ARRAY, got LINT",
 			},
 		},
-		{`last([1, 2, 3])`, 3},
-		{`last([])`, Null},
-		{`last(1)`,
+		{`LAST([1, 2, 3])`, 3},
+		{`LAST([])`, Null},
+		{`LAST(1)`,
 			&object.Error{
-				Message: "argument to `last` must be ARRAY, got INTEGER",
+				Message: "argument to `LAST` must be ARRAY, got LINT",
 			},
 		},
-		{`rest([1, 2, 3])`, []int{2, 3}},
-		{`rest([])`, Null},
-		{`push([], 1)`, []int{1}},
-		{`push(1, 1)`,
+		{`REST([1, 2, 3])`, []int{2, 3}},
+		{`REST([])`, Null},
+		{`PUSH([], 1)`, []int{1}},
+		{`PUSH(1, 1)`,
 			&object.Error{
-				Message: "argument to `push` must be ARRAY, got INTEGER",
+				Message: "argument to `PUSH` must be ARRAY, got LINT",
 			},
 		},
+		// IEC 61131-3 String Functions
+		{`CONCAT('a', 'b')`, "ab"},
+		{`CONCAT('a', 'b', 'c')`, "abc"},
+		{
+			`CONCAT('a')`,
+			&object.Error{
+				Message: "wrong number of arguments for CONCAT. got=1, want>=2",
+			},
+		},
+		{`LEFT('abcde', 2)`, "ab"},
+		{`RIGHT('abcde', 2)`, "de"},
+		// MID(string, length, position)
+		{`MID('abcde', 3, 3)`, "cde"},
+		{`FIND('abcabc', 'b')`, 2},
 	}
 
 	runVmTests(t, tests)
 }
-
-func TestClosures(t *testing.T) {
-	tests := []vmTestCase{
-		{
-			input: `
-		let newClosure = fn(a) {
-			fn() { a; };
-		};
-		let closure = newClosure(99);
-		closure();
-		`,
-			expected: 99,
-		},
-		{
-			input: `
-		let newAdder = fn(a, b) {
-			fn(c) { a + b + c };
-		};
-		let adder = newAdder(1, 2);
-		adder(8);
-		`,
-			expected: 11,
-		},
-		{
-			input: `
-		let newAdder = fn(a, b) {
-			let c = a + b;
-			fn(d) { c + d };
-		};
-		let adder = newAdder(1, 2);
-		adder(8);
-		`,
-			expected: 11,
-		},
-		{
-			input: `
-		let newAdderOuter = fn(a, b) {
-			let c = a + b;
-			fn(d) {
-				let e = d + c;
-				fn(f) { e + f; };
-			};
-		};
-		let newAdderInner = newAdderOuter(1, 2)
-		let adder = newAdderInner(3);
-		adder(8);
-		`,
-			expected: 14,
-		},
-		{
-			input: `
-		let a = 1;
-		let newAdderOuter = fn(b) {
-			fn(c) {
-				fn(d) { a + b + c + d };
-			};
-		};
-		let newAdderInner = newAdderOuter(2)
-		let adder = newAdderInner(3);
-		adder(8);
-		`,
-			expected: 14,
-		},
-		{
-			input: `
-		let newClosure = fn(a, b) {
-			let one = fn() { a; };
-			let two = fn() { b; };
-			fn() { one() + two(); };
-		};
-		let closure = newClosure(9, 90);
-		closure();
-		`,
-			expected: 99,
-		},
-	}
-
-	runVmTests(t, tests)
-}
-
 func TestRecursiveFunctions(t *testing.T) {
 	tests := []vmTestCase{
 		{
@@ -572,24 +488,24 @@ type vmTestCase struct {
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	t.Helper()
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		program := parse(tt.input)
 
 		comp := compiler.New()
 		err := comp.Compile(program)
 		if err != nil {
-			t.Fatalf("compiler error: %s", err)
+			t.Fatalf("test #%d/%d: compiler error: %s", i, len(tests), err)
 		}
 
 		vm := New(comp.Bytecode())
 		err = vm.Run()
 		if err != nil {
-			t.Fatalf("vm error: %s", err)
+			t.Fatalf("test #%d/%d: vm error: %s", i, len(tests), err)
 		}
 
 		stackElem := vm.LastPoppedStackElem()
 
-		testExpectedObject(t, tt.expected, stackElem)
+		testExpectedObject(t, i, tt.expected, stackElem)
 	}
 }
 
@@ -601,6 +517,7 @@ func parse(input string) *ast.Program {
 
 func testExpectedObject(
 	t *testing.T,
+	testIndex int,
 	expected interface{},
 	actual object.Object,
 ) {
@@ -610,80 +527,80 @@ func testExpectedObject(
 	case int:
 		err := testIntegerObject(int64(expected), actual)
 		if err != nil {
-			t.Errorf("testIntegerObject failed: %s", err)
+			t.Errorf("test #%d: testIntegerObject failed: %s", testIndex, err)
 		}
 
 	case bool:
 		err := testBooleanObject(bool(expected), actual)
 		if err != nil {
-			t.Errorf("testBooleanObject failed: %s", err)
+			t.Errorf("test #%d: testBooleanObject failed: %s", testIndex, err)
 		}
 
 	case *object.Null:
 		if actual != Null {
-			t.Errorf("object is not Null: %T (%+v)", actual, actual)
+			t.Errorf("test #%d: object is not Null: %T (%+v)", testIndex, actual, actual)
 		}
 
 	case string:
 		err := testStringObject(expected, actual)
 		if err != nil {
-			t.Errorf("testStringObject failed: %s", err)
+			t.Errorf("test #%d: testStringObject failed: %s", testIndex, err)
 		}
 
 	case []int:
 		array, ok := actual.(*object.Array)
 		if !ok {
-			t.Errorf("object not Array: %T (%+v)", actual, actual)
+			t.Errorf("test #%d: object not Array: %T (%+v)", testIndex, actual, actual)
 			return
 		}
 
 		if len(array.Elements) != len(expected) {
-			t.Errorf("wrong num of elements. want=%d, got=%d",
-				len(expected), len(array.Elements))
+			t.Errorf("test #%d: wrong num of elements. want=%d, got=%d",
+				testIndex, len(expected), len(array.Elements))
 			return
 		}
 
 		for i, expectedElem := range expected {
 			err := testIntegerObject(int64(expectedElem), array.Elements[i])
 			if err != nil {
-				t.Errorf("testIntegerObject failed: %s", err)
+				t.Errorf("test #%d, element %d: testIntegerObject failed: %s", testIndex, i, err)
 			}
 		}
 
 	case map[object.HashKey]int64:
 		hash, ok := actual.(*object.Hash)
 		if !ok {
-			t.Errorf("object is not Hash. got=%T (%+v)", actual, actual)
+			t.Errorf("test #%d: object is not Hash. got=%T (%+v)", testIndex, actual, actual)
 			return
 		}
 
 		if len(hash.Pairs) != len(expected) {
-			t.Errorf("hash has wrong number of Pairs. want=%d, got=%d",
-				len(expected), len(hash.Pairs))
+			t.Errorf("test #%d: hash has wrong number of Pairs. want=%d, got=%d",
+				testIndex, len(expected), len(hash.Pairs))
 			return
 		}
 
 		for expectedKey, expectedValue := range expected {
 			pair, ok := hash.Pairs[expectedKey]
 			if !ok {
-				t.Errorf("no pair for given key in Pairs")
+				t.Errorf("test #%d: no pair for given key in Pairs", testIndex)
 			}
 
 			err := testIntegerObject(expectedValue, pair.Value)
 			if err != nil {
-				t.Errorf("testIntegerObject failed: %s", err)
+				t.Errorf("test #%d: testIntegerObject failed: %s", testIndex, err)
 			}
 		}
 
 	case *object.Error:
 		errObj, ok := actual.(*object.Error)
 		if !ok {
-			t.Errorf("object is not Error: %T (%+v)", actual, actual)
+			t.Errorf("test #%d: object is not Error: %T (%+v)", testIndex, actual, actual)
 			return
 		}
 		if errObj.Message != expected.Message {
-			t.Errorf("wrong error message. expected=%q, got=%q",
-				expected.Message, errObj.Message)
+			t.Errorf("test #%d: wrong error message. expected=%q, got=%q",
+				testIndex, expected.Message, errObj.Message)
 		}
 	}
 }

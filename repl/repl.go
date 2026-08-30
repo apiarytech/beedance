@@ -24,8 +24,11 @@ import (
 	"beedance/vm"
 )
 
+// PROMPT defines the string that is displayed to the user for input.
 const PROMPT = ">> "
 
+// Start initializes and runs the Read-Eval-Print Loop. It reads user input,
+// sends it to the selected execution engine (evaluator or VM), and prints the result.
 func Start(in io.Reader, out io.Writer, engine string) {
 	if flag.Lookup("go").Value.String() != "" {
 		io.WriteString(out, "Transpilation to Go (-go) is not supported in REPL mode.\n")
@@ -94,6 +97,7 @@ func Start(in io.Reader, out io.Writer, engine string) {
 	}
 }
 
+// beedance_FACE is an ASCII art representation of the Beedance mascot.
 const beedance_FACE = `
               \   /
                [ ]
@@ -111,6 +115,8 @@ const beedance_FACE = `
                [|]
 `
 
+// printParserErrors displays a friendly error message along with any syntax
+// errors found by the parser.
 func printParserErrors(out io.Writer, errors []string) {
 	io.WriteString(out, beedance_FACE)
 	io.WriteString(out, " Beedance! parser errors:\n")

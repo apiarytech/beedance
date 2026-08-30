@@ -15,9 +15,10 @@ import (
 	"strings"
 )
 
-// parseIlProgramBody parses the body of a POU written in Instruction List.
-// It expects to be called when the parser is at the beginning of the IL body
-// and will parse until it encounters the specified endToken.
+// parseIlProgramBody parses a sequence of Instruction List (IL) statements,
+// typically forming the body of a Program Organization Unit (POU) or a
+// parenthesized expression. It continues parsing until it encounters a specified
+// end token (e.g., `END_PROGRAM`, `RPAREN`).
 func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatement {
 	// The body of an IL program is a block of IL instructions.
 	body := &ast.BlockStatement{Token: p.curToken}
@@ -43,8 +44,10 @@ func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatemen
 	return body
 }
 
-// parseIlInstruction parses a single instruction line in an IL program.
-// An IL instruction has the general form: [label:] operator [operand] [(modifier)]
+// parseIlInstruction parses a single line of an Instruction List (IL) program.
+// An IL instruction can have an optional label, an operator (like `LD` or `ADD`),
+// an optional operand (a variable or literal), and optional modifiers (like `N` for
+// negation or `C` for conditional execution).
 func (p *Parser) parseIlInstruction() ast.Statement {
 	stmt := &ast.IlInstructionStatement{Token: p.curToken}
 
@@ -84,7 +87,7 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	// 4. Parse the optional operand for non-deferred operators.
 	// The operand is an expression that follows the operator.
 	// Heuristic: An operand is present if the next token is not an end-of-block
-	// or another statement keyword.
+	// or another statement keyword. This switch determines if an operand should be parsed.
 	switch p.peekToken.Type {
 	case token.END_PROGRAM, token.END_FUNCTION, token.END_FUNCTION_BLOCK, token.END_ACTION, token.END_STEP, token.END_TRANSITION, token.EOF, token.RPAREN, token.SEMICOLON:
 		return stmt
@@ -103,7 +106,9 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	return stmt
 }
 
-// extractIlModifiers splits an operator string like "JMPC" into its base ("JMP") and modifier ("C").
+// extractIlModifiers takes a raw operator string from the lexer (e.g., "JMPC", "LDN")
+// and splits it into its base operator ("JMP", "LD") and any associated modifiers
+// ("C", "N"). This allows the parser to handle complex instructions correctly.
 func (p *Parser) extractIlModifiers(op string) (baseOp string, modifier string) {
 	opUpper := strings.ToUpper(op)
 	mod := ""
@@ -124,8 +129,9 @@ func (p *Parser) extractIlModifiers(op string) (baseOp string, modifier string) 
 	return baseOp, mod
 }
 
-// isIlOperator checks if a token type is a common IL operator.
-// This is used as a heuristic to decide whether to parse a POU body as IL or ST.
+// isIlOperator provides a heuristic check to see if a token corresponds to a
+// common Instruction List operator. This helps the parser decide whether to
+// interpret a POU body as IL or as another language like Structured Text (ST).
 func isIlOperator(tok token.TokenType) bool {
 	switch tok { // cspell:disable-line
 	case token.LD, token.ST, token.S, token.R, token.CAL, token.JMP, token.RET,

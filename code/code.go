@@ -1,3 +1,13 @@
+/*
+ * Copyright (C) 2026 Franklin D. Amador
+ *
+ * This software is dual-licensed under the terms of the GPL v2.0 and
+ * a commercial license. You may choose to use this software under either
+ * license.
+ *
+ * See the LICENSE files in the project root for full license text.
+ */
+
 package code
 
 import (
@@ -6,8 +16,10 @@ import (
 	"fmt"
 )
 
+// Instructions represents a slice of bytes that make up the bytecode of a program.
 type Instructions []byte
 
+// String provides a human-readable representation of the bytecode instructions.
 func (ins Instructions) String() string {
 	var out bytes.Buffer
 
@@ -29,6 +41,7 @@ func (ins Instructions) String() string {
 	return out.String()
 }
 
+// fmtInstruction formats a single instruction, including its name and operands, into a string.
 func (ins Instructions) fmtInstruction(def *Definition, operands []int) string {
 	operandCount := len(def.OperandWidths)
 
@@ -38,10 +51,13 @@ func (ins Instructions) fmtInstruction(def *Definition, operands []int) string {
 	}
 
 	switch operandCount {
+	// Handles instructions with no operands.
 	case 0:
 		return def.Name
+	// Handles instructions with one operand.
 	case 1:
 		return fmt.Sprintf("%s %d", def.Name, operands[0])
+	// Handles instructions with two operands.
 	case 2:
 		return fmt.Sprintf("%s %d %d", def.Name, operands[0], operands[1])
 	}
@@ -49,8 +65,10 @@ func (ins Instructions) fmtInstruction(def *Definition, operands []int) string {
 	return fmt.Sprintf("ERROR: unhandled operandCount for %s\n", def.Name)
 }
 
+// Opcode is a single byte that represents a virtual machine instruction.
 type Opcode byte
 
+// The full set of opcodes supported by the virtual machine.
 const (
 	OpConstant Opcode = iota
 
@@ -115,14 +133,20 @@ const (
 
 	OpGetExternal
 	OpSetExternal
+
+	OpDup
+	OpSwap
 )
 
+// Definition describes an opcode, including its name and the width (in bytes) of its operands.
 type Definition struct {
 	Name          string
 	OperandWidths []int
 }
 
+// definitions maps each Opcode to its corresponding Definition.
 var definitions = map[Opcode]*Definition{
+	// OpConstant pushes a constant from the constant pool onto the stack. Operand: constant index (2 bytes).
 	OpConstant: {"OpConstant", []int{2}},
 
 	OpAdd: {"OpAdd", []int{}},
@@ -186,8 +210,12 @@ var definitions = map[Opcode]*Definition{
 
 	OpGetExternal: {"OpGetExternal", []int{2}},
 	OpSetExternal: {"OpSetExternal", []int{2}},
+
+	OpDup:  {"OpDup", []int{}},
+	OpSwap: {"OpSwap", []int{}},
 }
 
+// Lookup retrieves the Definition for a given opcode byte.
 func Lookup(op byte) (*Definition, error) {
 	def, ok := definitions[Opcode(op)]
 	if !ok {
@@ -197,6 +225,7 @@ func Lookup(op byte) (*Definition, error) {
 	return def, nil
 }
 
+// Make creates a bytecode instruction from an opcode and its operands.
 func Make(op Opcode, operands ...int) []byte {
 	def, ok := definitions[op]
 	if !ok {
@@ -215,17 +244,19 @@ func Make(op Opcode, operands ...int) []byte {
 	for i, o := range operands {
 		width := def.OperandWidths[i]
 		switch width {
+		// Handles 2-byte operands (e.g., for OpConstant).
 		case 2:
 			binary.BigEndian.PutUint16(instruction[offset:], uint16(o))
+		// Handles 1-byte operands (e.g., for OpGetLocal).
 		case 1:
 			instruction[offset] = byte(o)
 		}
 		offset += width
 	}
-
 	return instruction
 }
 
+// ReadOperands decodes the operands from a bytecode instruction stream based on an opcode's definition.
 func ReadOperands(def *Definition, ins Instructions) ([]int, int) {
 	operands := make([]int, len(def.OperandWidths))
 	offset := 0
@@ -233,8 +264,10 @@ func ReadOperands(def *Definition, ins Instructions) ([]int, int) {
 	for i, width := range def.OperandWidths {
 		switch width {
 		case 2:
+			// Reads a 2-byte operand.
 			operands[i] = int(ReadUint16(ins[offset:]))
 		case 1:
+			// Reads a 1-byte operand.
 			operands[i] = int(ReadUint8(ins[offset:]))
 		}
 
@@ -244,8 +277,10 @@ func ReadOperands(def *Definition, ins Instructions) ([]int, int) {
 	return operands, offset
 }
 
+// ReadUint8 reads a single byte from an instruction stream as a uint8.
 func ReadUint8(ins Instructions) uint8 { return uint8(ins[0]) }
 
+// ReadUint16 reads two bytes from an instruction stream as a uint16 in big-endian format.
 func ReadUint16(ins Instructions) uint16 {
 	return binary.BigEndian.Uint16(ins)
 }

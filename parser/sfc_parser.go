@@ -14,7 +14,9 @@ import (
 	"beedance/token"
 )
 
-// isSFC is a heuristic to determine if the upcoming code is an SFC body.
+// isSFC provides a heuristic check to determine if the current token indicates the
+// start of a Sequential Function Chart (SFC) body. It looks for keywords that are
+// unique to SFC, such as STEP, TRANSITION, or ACTION.
 func (p *Parser) isSFC() bool {
 	// SFC bodies are composed of STEP, INITIAL_STEP, TRANSITION, and ACTION statements.
 	// If the current token is one of these, it's a strong indicator of an SFC program.
@@ -26,7 +28,9 @@ func (p *Parser) isSFC() bool {
 	}
 }
 
-// parseSFCProgram parses an SFC body until a given end token.
+// parseSFCProgram parses the body of a Program Organization Unit (POU) written in
+// Sequential Function Chart (SFC). It consumes SFC elements like steps, actions,
+// and transitions until it reaches a specified end token (e.g., `END_PROGRAM`).
 func (p *Parser) parseSFCProgram(end token.TokenType) *ast.SFCProgram {
 	defer untrace(trace("parseSFCProgram"))
 	program := &ast.SFCProgram{Token: p.curToken}
@@ -53,6 +57,8 @@ func (p *Parser) parseSFCProgram(end token.TokenType) *ast.SFCProgram {
 	return program
 }
 
+// parseActionStatement parses an `ACTION...END_ACTION` block, which defines a named
+// set of instructions that can be associated with an SFC step.
 func (p *Parser) parseActionStatement() ast.Statement {
 	defer untrace(trace("parseActionStatement"))
 	stmt := &ast.ActionStatement{Token: p.curToken}
@@ -96,6 +102,9 @@ func (p *Parser) parseActionStatement() ast.Statement {
 	return stmt
 }
 
+// parseTransitionStatement parses a `TRANSITION...END_TRANSITION` block. This defines
+// the condition that must be met for the SFC to move from one or more source steps
+// to one or more destination steps.
 func (p *Parser) parseTransitionStatement() ast.Statement {
 	defer untrace(trace("parseTransitionStatement"))
 	stmt := &ast.TransitionStatement{Token: p.curToken}
@@ -132,16 +141,22 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	return stmt
 }
 
+// parseStepStatement is a convenience function that calls `parseStep` to parse a
+// standard `STEP` block.
 func (p *Parser) parseStepStatement() ast.Statement {
 	defer untrace(trace("parseStepStatement"))
 	return p.parseStep(false)
 }
 
+// parseInitialStepStatement is a convenience function that calls `parseStep` to parse
+// an `INITIAL_STEP` block, marking it as the starting point of the SFC.
 func (p *Parser) parseInitialStepStatement() ast.Statement {
 	defer untrace(trace("parseInitialStepStatement"))
 	return p.parseStep(true)
 }
 
+// parseStep parses a `STEP` or `INITIAL_STEP` block. It captures the step's name
+// and its body, which can either be a list of action associations or a block of ST code.
 func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	stmt := &ast.StepStatement{Token: p.curToken, IsInitial: isInitial}
 
@@ -191,6 +206,9 @@ func (p *Parser) parseStep(isInitial bool) *ast.StepStatement {
 	return stmt
 }
 
+// parseActionBlockStatement parses an action association within a `STEP` body,
+// such as `MyAction(N);`. This links a defined `ACTION` to the step and specifies
+// its execution behavior with an optional qualifier (e.g., N, S, R, P, L, D).
 func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 	defer untrace(trace("parseActionBlockStatement"))
 	stmt := &ast.ActionBlockStatement{

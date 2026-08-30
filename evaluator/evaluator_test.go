@@ -2198,73 +2198,6 @@ func TestBuiltinMove(t *testing.T) {
 	}
 }
 
-func TestBuiltinMinMaxFunctions(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected interface{}
-	}{
-		// MIN function tests
-		{"MIN(10, 20);", int64(10)},
-		{"MIN(20, 10);", int64(10)},
-		{"MIN(10, 20, 5, 30);", int64(5)},
-		{"MIN(-10, -20);", int64(-20)},
-		{"MIN(10.5, 10.6);", 10.5},
-		{"MIN(10, 20.5);", 10.0}, // Type promotion to REAL
-		{"MIN(1, 2.5, -3.0, 4);", -3.0},
-		{"MIN(10);", int64(10)},
-		{"MIN();", "BUILTIN ERROR: wrong number of arguments for MIN. got=0, want>=1"},
-		{"MIN(1, TRUE);", "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got BOOLEAN"},
-
-		// MAX function tests
-		{"MAX(10, 20);", int64(20)},
-		{"MAX(20, 10);", int64(20)},
-		{"MAX(10, 20, 5, 30);", int64(30)},
-		{"MAX(-10, -20);", int64(-10)},
-		{"MAX(10.5, 10.6);", 10.6},
-		{"MAX(10, 20.5);", 20.5}, // Type promotion to REAL
-		{"MAX(1, 2.5, -3.0, 4);", 4.0},
-		{"MAX(10);", int64(10)},
-		{"MAX();", "BUILTIN ERROR: wrong number of arguments for MAX. got=0, want>=1"},
-		{"MAX(1, TRUE);", "BUILTIN ERROR: all arguments to `MAX` must be INTEGER or REAL, got BOOLEAN"},
-	}
-
-	// Register MIN and MAX in builtins for testing if they aren't already
-	if _, ok := builtins["MIN"]; !ok { // cspell:disable-line
-		builtins["MIN"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-			return minMaxBuiltin("MIN", args...)
-		}}
-	}
-	if _, ok := builtins["MAX"]; !ok {
-		builtins["MAX"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-			return minMaxBuiltin("MAX", args...)
-		}}
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			evaluated := testEval(t, tt.input)
-
-			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, evaluated, tt.input, expected)
-			case float64:
-				testRealObject(t, evaluated, tt.input, expected)
-			case string:
-				// Can be a string result or an error message
-				if err, ok := evaluated.(*object.Error); ok {
-					if !strings.Contains(err.Message, expected) {
-						t.Errorf("wrong error message. expected to contain %q, got %q", expected, err.Message)
-					}
-				} else {
-					testStringObject(t, evaluated, tt.input, expected)
-				}
-			default:
-				t.Fatalf("unhandled expected type: %T", tt.expected)
-			}
-		})
-	}
-}
-
 func TestBuiltinBitwiseFunctions(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -2614,18 +2547,6 @@ func TestBuiltinMinMax(t *testing.T) {
 		{"MAX(1, 2.5, -3.0, 4);", 4.0},
 		{"MAX();", "BUILTIN ERROR: wrong number of arguments for MAX. got=0, want>=1"},
 		{"MAX(1, TRUE);", "BUILTIN ERROR: all arguments to `MAX` must be INTEGER or REAL, got BOOLEAN"},
-	}
-
-	// Register MIN and MAX in builtins for testing
-	if _, ok := builtins["MIN"]; !ok { // cspell:disable-line
-		builtins["MIN"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-			return minMaxBuiltin("MIN", args...)
-		}}
-	}
-	if _, ok := builtins["MAX"]; !ok {
-		builtins["MAX"] = &object.Builtin{Fn: func(args ...object.Object) object.Object {
-			return minMaxBuiltin("MAX", args...)
-		}}
 	}
 
 	for _, tt := range tests {

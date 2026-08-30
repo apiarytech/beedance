@@ -20,6 +20,7 @@ import (
 	"regexp"
 )
 
+// Constants for operator precedence levels, used by the Pratt parser.
 const (
 	_ int = iota
 	LOWEST
@@ -38,6 +39,7 @@ const (
 	MEMBER      // struct.member
 )
 
+// precedences maps token types to their precedence level.
 var precedences = map[token.TokenType]int{
 	token.ASSIGN:    ASSIGN,
 	token.OR:        LOGICAL_OR,
@@ -66,6 +68,7 @@ var precedences = map[token.TokenType]int{
 	token.HASH:      MEMBER, // Typed literals have similar precedence to member access.
 }
 
+// ilMnemonics is a set of all valid Instruction List mnemonics.
 var ilMnemonics = map[string]bool{
 	"LD": true, "LDN": true, "ST": true, "STN": true, "S": true, "R": true,
 	"ADD": true, "SUB": true, "MUL": true, "DIV": true, "GT": true, "GE": true,
@@ -75,11 +78,15 @@ var ilMnemonics = map[string]bool{
 	"ORN": true, "XOR": true, "XORN": true, "NOT": true, "ABS": true,
 }
 
+// prefixParseFn is a function type for parsing prefix expressions (e.g., -5, NOT flag).
 type (
 	prefixParseFn func() ast.Expression
-	infixParseFn  func(ast.Expression) ast.Expression
+	// infixParseFn is a function type for parsing infix expressions (e.g., 5 + 5).
+	infixParseFn func(ast.Expression) ast.Expression
 )
 
+// Parser holds the state of the parsing process, including the lexer, tokens,
+// errors, and registered parsing functions for the Pratt parser.
 type Parser struct {
 	l      *lexer.Lexer
 	errors []string
@@ -100,6 +107,7 @@ type parseError struct {
 	msg string
 }
 
+// Error returns the error message for a parseError.
 func (e *parseError) Error() string { return e.msg }
 
 func New(l *lexer.Lexer) *Parser {
@@ -224,6 +232,8 @@ func New(l *lexer.Lexer) *Parser {
 	return p
 }
 
+// nextToken advances the parser's tokens (curToken, peekToken, peek2Token)
+// and checks for lexer errors, converting them into parser errors.
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.peek2Token
@@ -249,18 +259,22 @@ func (p *Parser) nextToken() {
 	}
 }
 
+// curTokenIs checks if the current token has the given type.
 func (p *Parser) curTokenIs(t token.TokenType) bool {
 	return p.curToken.Type == t
 }
 
+// peekTokenIs checks if the next token has the given type.
 func (p *Parser) peekTokenIs(t token.TokenType) bool {
 	return p.peekToken.Type == t
 }
 
+// peek2TokenIs checks if the token after the next one has the given type.
 func (p *Parser) peek2TokenIs(t token.TokenType) bool {
 	return p.peek2Token.Type == t
 }
 
+// expectPeek checks if the next token is of the expected type. If it is, it advances the parser and returns true. If not, it logs an error and returns false.
 func (p *Parser) expectPeek(t token.TokenType) bool {
 	if p.peekTokenIs(t) {
 		p.nextToken()
@@ -282,14 +296,17 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 	}
 }
 
+// Errors returns the list of errors encountered during parsing.
 func (p *Parser) Errors() []string {
 	return p.errors
 }
 
+// peekError logs an error indicating that the next token was not of the expected type.
 func (p *Parser) peekError(t token.TokenType) {
 	p.specificError("expected next token to be %s, got %s instead", t, p.peekToken.Type)
 }
 
+// isIlInstruction provides a heuristic check to determine if the current token sequence represents an Instruction List (IL) instruction rather than a Structured Text (ST) expression.
 func (p *Parser) isIlInstruction() bool {
 	if !p.isIlMnemonic() {
 		return false
@@ -315,6 +332,7 @@ func (p *Parser) isIlInstruction() bool {
 	return true
 }
 
+// isIlMnemonic checks if the current token's literal is a known IL mnemonic.
 func (p *Parser) isIlMnemonic() bool {
 	// Check if the literal (e.g., "LD", "ADD") is a known mnemonic.
 	_, isMnemonic := ilMnemonics[strings.ToUpper(p.curToken.Literal)]
@@ -359,12 +377,15 @@ func (p *Parser) currentError(format string, a ...interface{}) {
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
+	// noPrefixParseFnError logs an error when no prefix parsing function is found for the current token type.
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
 	p.errors = append(p.errors, msg)
 }
 
+// ParseProgram is the main entry point for the parser. It parses the entire input
+// from the lexer and returns the root `ast.Program` node of the Abstract Syntax Tree.
 func (p *Parser) ParseProgram() *ast.Program {
-	defer untrace(trace("ParseProgram"))
+	defer untrace(trace("ParseProgram")) // cspell:disable-line
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
 	lastPosition := -1 // Track the last token position to detect infinite loops
@@ -410,6 +431,8 @@ func (p *Parser) ParseProgram() *ast.Program {
 	return program
 }
 
+// parseStatement is the central dispatch function for parsing a single statement.
+// It determines the statement type based on the current token and calls the appropriate parsing function.
 func (p *Parser) parseStatement() ast.Statement {
 	defer untrace(trace("parseStatement"))
 
@@ -424,6 +447,8 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
 	if p.isIlInstruction() {
+		// This switch resolves ambiguity for tokens that are both IL mnemonics and ST operators.
+		// For example, `AND` can be an infix operator in ST or an instruction in IL.
 		switch p.curToken.Type {
 		// These mnemonics are also ST operators. In an ST context, they should be parsed as expressions.
 		case token.AND, token.OR, token.XOR, token.NOT, token.MOD:
@@ -489,6 +514,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseExpressionStatement()
 	}
 }
+
+// parseExitStatement parses an EXIT statement, which is used to terminate a loop.
 func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	stmt := &ast.ExitStatement{Token: p.curToken}
 
@@ -501,6 +528,7 @@ func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	return stmt
 }
 
+// parseSingleVarDecl parses a single variable declaration line, typically used inside a VAR block.
 func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 	defer untrace(trace("parseSingleVarDecl"))
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
@@ -554,6 +582,7 @@ func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
 	return stmt
 }
 
+// parseVarDeclStatement parses a variable declaration, including its name, data type, and optional initial value.
 func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 	defer untrace(trace("parseVarDeclStatement"))
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
@@ -596,6 +625,7 @@ func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
 	return stmt
 }
 
+// parseVarBlockStatement parses a `VAR ... END_VAR` block, containing one or more variable declarations.
 func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	defer untrace(trace("parseVarBlockStatement"))
 	stmt := &ast.VarBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -615,6 +645,7 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	return stmt
 }
 
+// parseStructMember parses a single member declaration within a STRUCT definition.
 func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	defer untrace(trace("parseStructMember"))
 	// cspell:disable-next-line
@@ -650,6 +681,7 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	return stmt
 }
 
+// parseGlobalVarDeclStatement parses a `VAR_GLOBAL ... END_VAR` block.
 func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	defer untrace(trace("parseGlobalVarDeclStatement"))
 	stmt := &ast.GlobalVarDeclaration{Token: p.curToken}
@@ -664,6 +696,7 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 	return stmt
 }
 
+// parseExternalVarDeclStatement parses a `VAR_EXTERNAL ... END_VAR` block.
 func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 	defer untrace(trace("parseExternalVarDeclStatement"))
 	stmt := &ast.ExternalVarDeclaration{Token: p.curToken}
@@ -677,6 +710,7 @@ func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 	return stmt
 }
 
+// parseAccessVarDeclStatement parses a `VAR_ACCESS ... END_VAR` block.
 func (p *Parser) parseAccessVarDeclStatement() *ast.AccessVarDeclaration {
 	defer untrace(trace("parseAccessVarDeclStatement"))
 	stmt := &ast.AccessVarDeclaration{Token: p.curToken}
@@ -735,6 +769,7 @@ func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 	return varDecls
 }
 
+// parseTempVarDeclStatement parses a `VAR_TEMP ... END_VAR` block.
 func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 	defer untrace(trace("parseTempVarDeclStatement"))
 	stmt := &ast.TempVarDeclaration{Token: p.curToken}
@@ -748,6 +783,7 @@ func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 	return stmt
 }
 
+// parseConfigVarDeclStatement parses a `VAR_CONFIG ... END_VAR` block, which is used to configure program instances.
 func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	defer untrace(trace("parseConfigVarDeclStatement"))
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
@@ -771,6 +807,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	return stmt
 }
 
+// parseTypeBlockDeclaration parses a `TYPE ... END_TYPE` block, containing one or more user-defined type declarations.
 func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 	defer untrace(trace("parseTypeBlockDeclaration"))
 	block := &ast.TypeBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -797,6 +834,7 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 	return block
 }
 
+// parseTypeDeclaration parses a single user-defined type declaration (e.g., a STRUCT, ENUM, or simple alias).
 func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	defer untrace(trace("parseTypeDeclaration"))
 	decl := &ast.TypeDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -839,6 +877,7 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	return decl
 }
 
+// parseStructDefinition parses a `STRUCT ... END_STRUCT` definition.
 func (p *Parser) parseStructDefinition() ast.Expression {
 	defer untrace(trace("parseStructDefinition"))
 	structDef := &ast.StructDefinition{Token: p.curToken}
@@ -862,6 +901,7 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 	return structDef
 }
 
+// parseEnumDefinition parses an enumerated type definition, which is a parenthesized list of identifiers.
 func (p *Parser) parseEnumDefinition() ast.Expression {
 	defer untrace(trace("parseEnumDefinition"))
 	enumDef := &ast.EnumDefinition{Token: p.curToken}
@@ -893,6 +933,7 @@ func (p *Parser) parseEnumDefinition() ast.Expression {
 	return enumDef
 }
 
+// parseVarDeclarations parses a list of variable declarations within a block, until a specified end token is found.
 func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
 	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
@@ -1003,6 +1044,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 	return varDecls
 }
 
+// parseAtDeclaration parses an `AT` clause, which maps a variable to a direct physical address.
 func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
 	defer untrace(trace("parseAtDeclaration"))
 	// This function is called when p.curToken is AT.
@@ -1023,6 +1065,7 @@ func (p *Parser) parseAtDeclaration() *ast.AtDeclaration {
 	return decl
 }
 
+// parseDirectVariable parses a directly addressed variable (e.g., %IX0.1).
 func (p *Parser) parseDirectVariable() ast.Expression {
 	defer untrace(trace("parseDirectVariable"))
 	dv := &ast.DirectVariable{Token: p.curToken}
@@ -1032,6 +1075,7 @@ func (p *Parser) parseDirectVariable() ast.Expression {
 	return dv
 }
 
+// parseConfigurationDeclaration parses a `CONFIGURATION ... END_CONFIGURATION` block.
 func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 	defer untrace(trace("parseConfigurationDeclaration"))
 	stmt := &ast.ConfigurationDeclaration{Token: p.curToken}
@@ -1074,6 +1118,7 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 	return stmt
 }
 
+// parseResourceDeclaration parses a `RESOURCE ... END_RESOURCE` block within a configuration.
 func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 	defer untrace(trace("parseResourceDeclaration"))
 	stmt := &ast.ResourceDeclaration{Token: p.curToken}
@@ -1113,6 +1158,7 @@ func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 	return stmt
 }
 
+// parseTaskDeclaration parses a `TASK` definition within a resource.
 func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 	defer untrace(trace("parseTaskDeclaration"))
 	stmt := &ast.TaskDeclaration{Token: p.curToken}
@@ -1163,6 +1209,7 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 	return stmt
 }
 
+// parseIdentifierList parses a comma-separated list of identifiers.
 func (p *Parser) parseIdentifierList() []*ast.Identifier {
 	defer untrace(trace("parseIdentifierList"))
 	list := []*ast.Identifier{}
@@ -1177,6 +1224,7 @@ func (p *Parser) parseIdentifierList() []*ast.Identifier {
 	return list
 }
 
+// parseTypeSpecifier parses a data type specifier, which can be a simple type or a complex one like an ARRAY.
 func (p *Parser) parseTypeSpecifier() ast.Expression {
 	defer untrace(trace("parseTypeSpecifier"))
 	if p.curTokenIs(token.ARRAY) {
@@ -1190,6 +1238,7 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 	return nil
 }
 
+// parseArrayDefinition parses an `ARRAY [...] OF ...` type definition.
 func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 	defer untrace(trace("parseArrayDefinition"))
 	def := &ast.ArrayDefinition{Token: p.curToken}
@@ -1225,6 +1274,7 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 	return def
 }
 
+// isDataTypeToken checks if a token represents a valid data type keyword.
 func (p *Parser) isDataTypeToken(tok token.Token) bool {
 	switch tok.Type {
 	case token.BOOL, token.SINT, token.INT, token.DINT, token.LINT,
@@ -1240,6 +1290,7 @@ func (p *Parser) isDataTypeToken(tok token.Token) bool {
 	}
 }
 
+// parseReturnStatement parses a `RETURN` statement.
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	defer untrace(trace("parseReturnStatement"))
 	stmt := &ast.ReturnStatement{Token: p.curToken}
@@ -1252,9 +1303,20 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	return stmt
 }
 
+// parseExpression is the core of the Pratt parser. It parses expressions based on
+// operator precedence, handling prefix and infix operators.
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	defer untrace(trace(fmt.Sprintf("parseExpression (precedence %d)", precedence)))
-	prefix := p.prefixParseFns[p.curToken.Type]
+	var prefix prefixParseFn
+	// HACK: The 'fn' keyword for anonymous functions is a remnant of the Monkey
+	// language and not part of the IEC standard. The tests still rely on it.
+	// To support this without making 'fn' a reserved keyword, we treat it as a
+	// special identifier that starts a function literal expression.
+	if p.curTokenIs(token.IDENT) && p.curToken.Literal == "fn" {
+		prefix = p.parseFunctionLiteral
+	} else {
+		prefix = p.prefixParseFns[p.curToken.Type]
+	}
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
 		return nil
@@ -1287,6 +1349,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	return leftExp
 }
 
+// peekPrecedence returns the precedence of the next token.
 func (p *Parser) peekPrecedence() int {
 	if p, ok := precedences[p.peekToken.Type]; ok {
 		return p
@@ -1295,6 +1358,7 @@ func (p *Parser) peekPrecedence() int {
 	return LOWEST
 }
 
+// curPrecedence returns the precedence of the current token.
 func (p *Parser) curPrecedence() int {
 	if p, ok := precedences[p.curToken.Type]; ok {
 		return p
@@ -1303,6 +1367,7 @@ func (p *Parser) curPrecedence() int {
 	return LOWEST
 }
 
+// parseIdentifier parses an identifier token into an `ast.Identifier` node.
 func (p *Parser) parseIdentifier() ast.Expression {
 	defer untrace(trace("parseIdentifier"))
 	// An identifier is just an identifier. The Pratt parser's infix logic
@@ -1310,10 +1375,12 @@ func (p *Parser) parseIdentifier() ast.Expression {
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 }
 
+// parseDataTypeKeyword parses a keyword that represents a data type (e.g., TIME) as an identifier.
 func (p *Parser) parseDataTypeKeyword() ast.Expression {
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 }
 
+// parseIntegerLiteral parses an integer literal, handling different bases (2, 8, 10, 16) and distinguishing between signed and unsigned types.
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	defer untrace(trace("parseIntegerLiteral"))
 	lit := &ast.IntegerLiteral{Token: p.curToken}
@@ -1356,6 +1423,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	}
 }
 
+// parseRealLiteral parses a floating-point number literal.
 func (p *Parser) parseRealLiteral() ast.Expression {
 	defer untrace(trace("parseRealLiteral"))
 	lit := &ast.RealLiteral{Token: p.curToken}
@@ -1373,72 +1441,7 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 	return lit
 }
 
-// func (p *Parser) parseBitStringLiteral() ast.Expression {
-// 	defer untrace(trace("parseBitStringLiteral"))
-// 	lit := &ast.BitStringLiteral{Token: p.curToken}
-
-// 	var width int
-// 	switch p.curToken.Type {
-// 	case token.BYTE:
-// 		width = 8
-// 	case token.WORD:
-// 		width = 16
-// 	case token.DWORD:
-// 		width = 32
-// 	case token.LWORD:
-// 		width = 64
-// 	default:
-// 		// This case should ideally not be reached if prefix functions are registered correctly.
-// 		p.errors = append(p.errors, fmt.Sprintf("unknown bitstring type: %s", p.curToken.Type))
-// 		return nil
-// 	}
-// 	lit.Width = width
-
-// 	literal := p.curToken.Literal // e.g., "BYTE#16#FF" or "WORD#FF"
-
-// 	parts := strings.SplitN(literal, "#", 2) // cspell:disable-line
-// 	if len(parts) < 2 {
-// 		p.errors = append(p.errors, fmt.Sprintf("invalid bitstring literal format: %q", literal))
-// 		return nil
-// 	}
-// 	valuePart := parts[1] // e.g., "16#FF" or "FF"
-
-// 	var base int = 16 // Default base for bit strings if not specified, as per IEC 61131-3
-// 	var valueStr string = valuePart
-
-// 	// Check if the value part itself contains a base (e.g., "16#FF")
-// 	if strings.Contains(valuePart, "#") {
-// 		valueParts := strings.SplitN(valuePart, "#", 2)
-// 		if len(valueParts) == 2 {
-// 			parsedBase, err := strconv.Atoi(valueParts[0])
-// 			if err != nil {
-// 				p.errors = append(p.errors, fmt.Sprintf("invalid base in bitstring literal: %q", valueParts[0]))
-// 				return nil
-// 			}
-// 			base = parsedBase
-// 			valueStr = valueParts[1]
-// 		}
-// 	}
-
-// 	// Remove underscores from the value string before parsing
-// 	valueStr = strings.ReplaceAll(valueStr, "_", "")
-
-// 	val, err := strconv.ParseUint(valueStr, base, width)
-// 	if err != nil {
-// 		// Check if the error is due to the value being out of range for the specified width.
-// 		if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
-// 			p.errors = append(p.errors, fmt.Sprintf("value %q is out of range for type %s (width %d)", valueStr, p.curToken.Type, width))
-// 		} else {
-// 			// Handle other parsing errors.
-// 			p.errors = append(p.errors, fmt.Sprintf("could not parse %q as %s (base %d): %s", valueStr, p.curToken.Type, base, err.Error()))
-// 		}
-// 		return nil
-// 	}
-
-// 	lit.Value = val
-// 	return lit
-// }
-
+// parseStringLiteral parses a single-byte or wide-character string literal.
 func (p *Parser) parseStringLiteral() ast.Expression {
 	defer untrace(trace("parseStringLiteral")) // cspell:disable-line
 	if p.curToken.Type == token.WSTRING_LITERAL {
@@ -1448,6 +1451,7 @@ func (p *Parser) parseStringLiteral() ast.Expression {
 	}
 }
 
+// parsePrefixExpression parses a prefix operator expression (e.g., -5, NOT flag).
 func (p *Parser) parsePrefixExpression() ast.Expression {
 	defer untrace(trace("parsePrefixExpression"))
 	expression := &ast.PrefixExpression{
@@ -1462,6 +1466,7 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 	return expression
 }
 
+// parseInfixExpression parses an infix operator expression (e.g., 5 + 5).
 func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	defer untrace(trace("parseInfixExpression"))
 	expression := &ast.InfixExpression{
@@ -1484,6 +1489,7 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	return expression
 }
 
+// parseMemberAccessExpression parses a struct member access expression (e.g., myStruct.field).
 func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression {
 	defer untrace(trace("parseMemberAccessExpression"))
 	exp := &ast.MemberAccessExpression{
@@ -1504,11 +1510,13 @@ func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression
 	return exp
 }
 
+// parseBoolean parses a boolean literal (TRUE or FALSE).
 func (p *Parser) parseBoolean() ast.Expression {
 	defer untrace(trace("parseBoolean"))
 	return &ast.Boolean{Token: p.curToken, Value: p.curTokenIs(token.TRUE)}
 }
 
+// parseGroupedExpression parses an expression enclosed in parentheses.
 func (p *Parser) parseGroupedExpression() ast.Expression {
 	defer untrace(trace("parseGroupedExpression"))
 	p.nextToken()
@@ -1522,6 +1530,7 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	return exp
 }
 
+// parseIfStatement parses an `IF...THEN...ELSIF...ELSE...END_IF` statement.
 func (p *Parser) parseIfStatement() *ast.IfStatement {
 	defer untrace(trace("parseIfStatement"))
 	ifStmt := &ast.IfStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1576,6 +1585,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	return ifStmt
 }
 
+// parseForStatement parses a `FOR...DO...END_FOR` loop.
 func (p *Parser) parseForStatement() ast.Statement {
 	defer untrace(trace("parseForStatement"))
 	stmt := &ast.ForLoopStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1630,6 +1640,7 @@ func (p *Parser) parseForStatement() ast.Statement {
 	return stmt
 }
 
+// parseWhileStatement parses a `WHILE...DO...END_WHILE` loop.
 func (p *Parser) parseWhileStatement() ast.Statement {
 	defer untrace(trace("parseWhileStatement"))
 	stmt := &ast.WhileStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1659,6 +1670,7 @@ func (p *Parser) parseWhileStatement() ast.Statement {
 	return stmt
 }
 
+// parseStepList parses a list of step identifiers, used in SFC `TRANSITION` statements.
 func (p *Parser) parseStepList() []*ast.Identifier {
 	defer untrace(trace("parseStepList"))
 	// A step list can be a single identifier, a comma-separated list,
@@ -1675,6 +1687,7 @@ func (p *Parser) parseStepList() []*ast.Identifier {
 	return p.parseIdentifierList()
 }
 
+// parseRepeatStatement parses a `REPEAT...UNTIL...END_REPEAT` loop.
 func (p *Parser) parseRepeatStatement() ast.Statement {
 	defer untrace(trace("parseRepeatStatement"))
 	stmt := &ast.RepeatStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1700,6 +1713,7 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 	return stmt
 }
 
+// parseCaseStatement parses a `CASE...OF...ELSE...END_CASE` statement.
 func (p *Parser) parseCaseStatement() ast.Statement {
 	defer untrace(trace("parseCaseStatement"))
 	stmt := &ast.CaseStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1749,6 +1763,7 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	return stmt
 }
 
+// parseBlockStatementForIf is a specialized block parser for the consequence of an IF statement, stopping at ELSIF, ELSE, or END_IF.
 func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	defer untrace(trace("parseBlockStatementForIf"))
 	block := &ast.BlockStatement{Token: p.curToken}
@@ -1767,6 +1782,7 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	return block
 }
 
+// parseAssignmentStatement parses a standalone assignment statement (e.g., `x := 5;`).
 func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 	defer untrace(trace("parseAssignmentStatement"))
 	// This function is called for standalone assignments, so it should attach the leading comments.
@@ -1787,6 +1803,7 @@ func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
 	return stmt
 }
 
+// isTimeDateKeyword checks if a string is a keyword for a time or date literal type.
 func isTimeDateKeyword(name string) bool {
 	upper := strings.ToUpper(name)
 	switch upper {
@@ -1797,6 +1814,7 @@ func isTimeDateKeyword(name string) bool {
 	}
 }
 
+// parseTypedLiteralExpression parses a typed literal (e.g., `INT#10`, `COLOR#RED`).
 func (p *Parser) parseTypedLiteralExpression(left ast.Expression) ast.Expression {
 	// 'left' is the type name (e.g., the identifier 'INT' or 'COLOR').
 	// The current token is '#'.
@@ -1902,12 +1920,14 @@ end_loop:
 	}
 }
 
+// parseIntOrType disambiguates between an integer literal and a type keyword (like 'INT').
 func (p *Parser) parseIntOrType() ast.Expression {
 	// If the literal can be parsed as an integer, it's an integer literal.
 	if _, err := strconv.ParseInt(p.curToken.Literal, 10, 64); err == nil {
 		return p.parseIntegerLiteral()
 	}
 	// Otherwise, it's a type keyword like 'INT', so treat it as an identifier.
+	// This allows it to be the start of a typed literal expression (e.g., INT#10).
 	return p.parseIdentifier()
 }
 
@@ -1918,6 +1938,7 @@ func (p *Parser) parseRealOrType() ast.Expression {
 	return p.parseIdentifier()
 }
 
+// parseExpressionStatement parses a statement that consists of a single expression followed by a semicolon.
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	defer untrace(trace("parseExpressionStatement"))
 	stmt := &ast.ExpressionStatement{Token: p.curToken, LeadingComments: p.leadingComments}
@@ -1975,6 +1996,7 @@ func (p *Parser) parseVarTempBlock(blockType token.TokenType) *ast.TempVarDeclar
 	return stmt
 }
 
+// parseBlockStatementUntil parses a block of statements until one of the specified end tokens is encountered.
 func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStatement {
 	defer untrace(trace(fmt.Sprintf("parseBlockStatementUntil (until %v)", end)))
 	block := &ast.BlockStatement{Token: p.curToken}
@@ -2030,6 +2052,7 @@ func (p *Parser) isStartOfCaseLabel() bool {
 	return false
 }
 
+// parseBlockStatementRepeatLoop is a specialized block parser for `REPEAT` loops, stopping at `UNTIL`.
 func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 	defer untrace(trace("parseBlockStatementRepeatLoop"))
 	block := &ast.BlockStatement{Token: p.curToken}
@@ -2050,6 +2073,7 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 	return block
 }
 
+// isStatementEndToken checks if a token type marks the end of a block statement.
 func isStatementEndToken(tok token.TokenType) bool {
 	switch tok {
 	case token.END_VAR,
@@ -2118,6 +2142,7 @@ func isValidIecDuration(s string) bool {
 	return re.MatchString(strings.ToLower(s))
 }
 
+// parseBlockStatement parses a block of statements enclosed in curly braces (a non-standard extension).
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	defer untrace(trace("parseBlockStatement"))
 	block := &ast.BlockStatement{Token: p.curToken}
@@ -2130,12 +2155,18 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		p.nextToken()
+		// After a statement is parsed, advance to the next token, but only if
+		// the statement was not a block statement, as block statements
+		// consume their own end tokens.
+		if !isBlockStatement(stmt) {
+			p.nextToken()
+		}
 	}
 
 	return block
 }
 
+// parseFunctionLiteral parses an anonymous function definition (a non-standard extension).
 func (p *Parser) parseFunctionLiteral() ast.Expression {
 	defer untrace(trace("parseFunctionLiteral"))
 	lit := &ast.FunctionLiteral{Token: p.curToken}
@@ -2155,6 +2186,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	return lit
 }
 
+// parseFunctionParameters parses a comma-separated list of identifiers for a function's parameters.
 func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 	defer untrace(trace("parseFunctionParameters"))
 	identifiers := []*ast.Identifier{}
@@ -2183,6 +2215,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 	return identifiers
 }
 
+// parseCallExpression parses a function or function block call, including its arguments.
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 	defer untrace(trace("parseCallExpression"))
 	exp := &ast.CallExpression{Token: p.curToken, Function: function}
@@ -2190,6 +2223,7 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 	return exp
 }
 
+// parseExpressionList parses a comma-separated list of expressions, handling named and output arguments, until a specified end token.
 func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	defer untrace(trace(fmt.Sprintf("parseExpressionList (until %s)", end)))
 	list := []ast.Expression{}
@@ -2260,6 +2294,7 @@ func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expressio
 	return list
 }
 
+// parseCallArgument parses a single argument in a function call, which can be positional, named input, or named output.
 func (p *Parser) parseCallArgument() ast.Expression {
 	defer untrace(trace("parseCallArgument"))
 	// Check for named arguments (IDENT := or IDENT =>)
@@ -2285,6 +2320,7 @@ func (p *Parser) parseCallArgument() ast.Expression {
 	return p.parseExpression(LOWEST)
 }
 
+// parseArrayLiteral parses an array literal expression (e.g., `[1, 2, 3]`).
 func (p *Parser) parseArrayLiteral() ast.Expression {
 	defer untrace(trace("parseArrayLiteral"))
 	array := &ast.ArrayLiteral{Token: p.curToken}
@@ -2294,6 +2330,7 @@ func (p *Parser) parseArrayLiteral() ast.Expression {
 	return array
 }
 
+// parseIndexExpression parses an array or string indexing expression (e.g., `myArray[i]`).
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	defer untrace(trace("parseIndexExpression"))
 	exp := &ast.IndexExpression{Token: p.curToken, Left: left}
@@ -2308,6 +2345,7 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	return exp
 }
 
+// parseHashLiteral parses a hash literal expression (a non-standard extension).
 func (p *Parser) parseHashLiteral() ast.Expression {
 	defer untrace(trace("parseHashLiteral"))
 	hash := &ast.HashLiteral{Token: p.curToken}
@@ -2367,6 +2405,7 @@ func (p *Parser) parseArrayElementsList(end token.TokenType) []ast.Expression {
 	return elements
 }
 
+// parseMacroLiteral parses a macro definition (a non-standard extension).
 // parseArrayElementOrRepetition parses a single element within an array literal,
 // which can either be a regular expression or a repetition factor (e.g., 3(0)).
 func (p *Parser) parseArrayElementOrRepetition() ast.Expression {
@@ -2380,6 +2419,7 @@ func (p *Parser) parseArrayElementOrRepetition() ast.Expression {
 	return p.parseExpression(LOWEST)
 }
 
+// parseMacroLiteral parses a macro definition (a non-standard extension).
 func (p *Parser) parseMacroLiteral() ast.Expression {
 	defer untrace(trace("parseMacroLiteral"))
 	lit := &ast.MacroLiteral{Token: p.curToken}
@@ -2394,6 +2434,11 @@ func (p *Parser) parseMacroLiteral() ast.Expression {
 		return nil
 	}
 
+	// Explicitly parse the block statement here to correctly handle empty bodies `{}`
+	// which can be misidentified as hash literals otherwise.
+	if !p.curTokenIs(token.LBRACE) {
+		return nil // expectPeek already logged the error
+	}
 	lit.Body = p.parseBlockStatement()
 
 	return lit
@@ -2421,10 +2466,12 @@ func (p *Parser) parseArrayRepetition() ast.Expression {
 	}
 }
 
+// registerPrefix registers a prefix parsing function for a given token type.
 func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {
 	p.prefixParseFns[tokenType] = fn
 }
 
+// registerInfix registers an infix parsing function for a given token type.
 func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
 	p.infixParseFns[tokenType] = fn
 }
