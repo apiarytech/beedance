@@ -128,6 +128,10 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	}
 
 	p.nextToken() // consume ASSIGN
+	if p.curTokenIs(token.SEMICOLON) {
+		p.currentError("missing transition condition after ':='")
+		return stmt
+	}
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.SEMICOLON) {

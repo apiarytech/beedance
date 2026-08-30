@@ -1006,8 +1006,14 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 		// After parsing the type, we should be on the type token.
 		// Now we advance to check for initialization or semicolon.
 
-		var initialValue ast.Expression
-		if p.peekTokenIs(token.ASSIGN) {
+		var initialValue ast.Expression // cspell:disable-line
+		if p.peekTokenIs(token.EQ) {
+			p.peekError(token.ASSIGN) // Report that we expected := but got =
+			// To recover, we can try to skip until the next semicolon
+			for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) {
+				p.nextToken()
+			}
+		} else if p.peekTokenIs(token.ASSIGN) {
 			p.nextToken() // to ASSIGN
 			p.nextToken() // to expression start
 			initialValue = p.parseExpression(LOWEST)
@@ -1270,6 +1276,11 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 		return nil
 	}
 	p.nextToken() // consume 'OF', move to data type
+	if !p.isDataTypeToken(p.curToken) {
+		p.currentError("expected a data type after 'OF' in array definition, got %s", p.curToken.Type)
+		return nil
+	}
+
 	def.DataType = &ast.TypeSpecifier{Token: p.curToken}
 	return def
 }
@@ -1478,6 +1489,11 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	precedence := p.curPrecedence()
 	p.nextToken()
 
+	if p.curTokenIs(token.SEMICOLON) || p.curTokenIs(token.EOF) || isStatementEndToken(p.curToken.Type) {
+		p.currentError("missing expression after operator '%s'", expression.Operator)
+		return nil
+	}
+
 	// For right-associative operators like exponentiation, we need to use a slightly lower precedence
 	// to allow the right-hand side to be grouped first. e.g., a ** b ** c -> a ** (b ** c)
 	if expression.Operator == "**" {
@@ -1633,7 +1649,9 @@ func (p *Parser) parseForStatement() ast.Statement {
 		p.nextToken() // consume EndValue to get to the start of the body
 	}
 	stmt.Body = p.parseBlockStatementUntil(token.END_FOR)
-	if p.curTokenIs(token.END_FOR) {
+	if !p.curTokenIs(token.END_FOR) {
+		p.currentError("missing 'END_FOR' for FOR statement starting at row %d", stmt.Token.Row)
+	} else {
 		p.nextToken() // Consume END_FOR
 	}
 
@@ -1693,10 +1711,15 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 	stmt := &ast.RepeatStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // consume REPEAT
-	stmt.Body = p.parseBlockStatementRepeatLoop()
+	stmt.Body = p.parseBlockStatementUntil(token.UNTIL, token.END_REPEAT)
 
 	if !p.curTokenIs(token.UNTIL) {
-		return nil // error already reported by parseBlockStatementRepeatLoop
+		p.currentError("expected UNTIL, got %s", p.curToken.Type)
+		// Recovery: if we are at END_REPEAT, we can assume UNTIL and condition were missing
+		if p.curTokenIs(token.END_REPEAT) {
+			p.nextToken() // consume END_REPEAT
+		}
+		return stmt
 	}
 
 	p.nextToken() // consume UNTIL
@@ -1707,7 +1730,6 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 	if !p.expectPeek(token.END_REPEAT) {
 		return stmt // Error reported, return for recovery
 	}
-	// expectPeek leaves us on END_REPEAT. Consume it to advance to the next token.
 	p.nextToken()
 
 	return stmt
@@ -1748,6 +1770,11 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 		stmt.Cases = append(stmt.Cases, branch)
 	}
 
+	// After parsing branches, if there are no branches and no ELSE, it's an error.
+	if len(stmt.Cases) == 0 && !p.curTokenIs(token.ELSE) {
+		p.currentError("no case branches found in CASE statement")
+	}
+
 	// Parse optional ELSE block
 	if p.curTokenIs(token.ELSE) {
 		p.nextToken() // consume ELSE
@@ -1755,7 +1782,7 @@ func (p *Parser) parseCaseStatement() ast.Statement {
 	}
 
 	if !p.curTokenIs(token.END_CASE) {
-		p.peekError(token.END_CASE)
+		p.currentError("missing 'END_CASE' for CASE statement starting at row %d", stmt.Token.Row)
 	} else {
 		p.nextToken() // Consume END_CASE
 	}
@@ -2068,7 +2095,7 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		}
 	}
 	if !p.curTokenIs(token.UNTIL) {
-		p.peekError(token.UNTIL)
+		p.currentError("missing 'UNTIL' for REPEAT statement")
 	}
 	return block
 }
@@ -2298,6 +2325,11 @@ func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expressio
 func (p *Parser) parseCallArgument() ast.Expression {
 	defer untrace(trace("parseCallArgument"))
 	// Check for named arguments (IDENT := or IDENT =>)
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
+		p.currentError("expected := or => in function block parameter, got :")
+		// Recover by parsing as if it were a positional argument, which will likely fail but keeps the parser moving.
+		return p.parseExpression(LOWEST)
+	}
 	if p.peekTokenIs(token.ASSIGN) {
 		// Input argument: In1 := 10
 		name := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}

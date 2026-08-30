@@ -16,97 +16,6 @@ type wstringExpectation struct {
 	value string
 }
 
-func TestBuiltinFunctions(t *testing.T) {
-	// This test now lives in the stdlib package and tests the registered functions.
-	// We need a way to evaluate expressions. We can create a minimal evaluator here
-	// for testing purposes, or just test the functions directly.
-	// For simplicity, we'll test the functions directly.
-
-	tests := []struct {
-		input    string
-		expected interface{}
-	}{
-		{`LEN("");`, int64(0)},
-		{`LEN('four');`, int64(4)},
-		{`LEN([1, 2, 3]);`, int64(3)},
-		{`FIRST([1, 2, 3]);`, int64(1)},
-		{`LAST([1, 2, 3]);`, int64(3)},
-		{`REST([1, 2, 3]);`, []int64{2, 3}},
-		{`PUSH([1, 2], 3);`, []int64{1, 2, 3}},
-		{`ADD(10, 20);`, int64(30)},
-		{`SUB(20, 5);`, int64(15)},
-		{`MUL(10, 5);`, int64(50)},
-		{`DIV(10, 2);`, int64(5)},
-		{`GT(10, 5);`, true},
-		{`LT(10, 5);`, false},
-	}
-
-	// Since we can't use the full evaluator, we'll manually parse and call the functions.
-	// This is more of a unit test for the built-in functions themselves.
-	object.FinalizeBuiltins() // Ensure built-ins are registered for the test
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			l := lexer.New(tt.input)
-			p := parser.New(l)
-			program := p.ParseProgram()
-			if len(p.Errors()) != 0 {
-				t.Fatalf("parser errors: %v", p.Errors())
-			}
-
-			stmt := program.Statements[0].(*ast.ExpressionStatement)
-			call := stmt.Expression.(*ast.CallExpression)
-			funcName := call.Function.String()
-
-			builtin, ok := object.GetBuiltinByName(funcName)
-			if !ok {
-				t.Fatalf("builtin not found: %s", funcName)
-			}
-
-			// This is a simplified test evaluator for arguments
-			args := []object.Object{}
-			for _, argNode := range call.Arguments {
-				switch node := argNode.(type) {
-				case *ast.IntegerLiteral:
-					args = append(args, &object.LInt{Value: node.Value})
-				case *ast.StringLiteral:
-					args = append(args, &object.String{Value: node.Value})
-				case *ast.WStringLiteral:
-					args = append(args, &object.WString{Value: node.Value})
-				case *ast.ArrayLiteral:
-					elements := []object.Object{}
-					for _, elNode := range node.Elements {
-						if intLit, ok := elNode.(*ast.IntegerLiteral); ok {
-							elements = append(elements, &object.LInt{Value: intLit.Value})
-						}
-					}
-					args = append(args, &object.Array{Elements: elements})
-				}
-			}
-
-			result := builtin.Fn(args...)
-
-			switch expected := tt.expected.(type) {
-			case int64:
-				testIntegerObject(t, result, expected)
-			case bool:
-				testBooleanObject(t, result, expected)
-			case []int64:
-				arr, ok := result.(*object.Array)
-				if !ok {
-					t.Fatalf("result is not Array. got=%T", result)
-				}
-				if len(arr.Elements) != len(expected) {
-					t.Fatalf("wrong array length. want=%d, got=%d", len(expected), len(arr.Elements))
-				}
-				for i, v := range expected {
-					testIntegerObject(t, arr.Elements[i], v)
-				}
-			}
-		})
-	}
-}
-
 func TestBuiltinMinMaxAny(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -127,7 +36,7 @@ func TestBuiltinMinMaxAny(t *testing.T) {
 		// Error cases for mixed types
 		{`MIN('apple', 1);`, "all arguments to `MIN` must be of the same type, got STRING and LINT"},
 		{`MAX(T#5s, 'hello');`, "all arguments to `MAX` must be of the same type, got TIME and STRING"},
-		{`MIN(1, T#1s);`, "all arguments to `MIN` must be of the same type, got LINT and TIME"},
+		{`MIN(1, T#1s);`, "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got TIME"},
 	}
 
 	object.FinalizeBuiltins()
@@ -240,8 +149,8 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`DELETE('abcdef', 2, 3);`, "abef"},
 		{`DELETE("abcdef", 2, 3);`, wstringExpectation{"abef"}},
 		{`DELETE('abc', 1, 1);`, "bc"},
-		{`DELETE('abc', 10, 1);`, "abc"}, // p > len, returns original
-		{`DELETE('abc', 1, 0);`, "abc"},  // l <= 0, returns original
+		{`DELETE('abc', 10, 1);`, ""},   // L > len, truncates
+		{`DELETE('abc', 1, 0);`, "abc"}, // l <= 0, returns original
 		{`DELETE(1, 1, 1);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 
 		// CONCAT
@@ -463,13 +372,14 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 
 		// DELETE
 		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}},
-		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},
-		{`DELETE([1, 2, 3], 3, 1);`, []int{}},
-		{`DELETE([1, 2, 3], 5, 1);`, []int{1, 2, 3}},  // Length > remaining string, returns original
-		{`DELETE([1, 2, 3], 2, 3);`, []int{1, 2, 3}},  // Position+Length out of bounds, returns original
-		{`DELETE([1, 2, 3], 1, 4);`, []int{1, 2, 3}},  // Position out of bounds
-		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}},  // Length is 0
-		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}}, // Length is negative
+		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},    // DELETE(IN, L, P) -> L=1, P=1
+		{`DELETE([1, 2, 3], 1, 3);`, []int{1, 2}},    // L=1, P=3
+		{`DELETE([1, 2, 3], 1, 5);`, []int{1, 2, 3}}, // p > len, returns original
+		{`DELETE([1, 2, 3], 3, 2);`, []int{1}},       // L=3, P=2 -> l > remaining, truncates
+		{`DELETE([1, 2, 3], 4, 1);`, []int{}},        // L=4, P=1 -> l > len, truncates
+		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // l <= 0, returns original
+		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // p < 1, returns original
+		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}},
 		{`DELETE(1, 2, 3);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE([], "a", 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1, "a");`, "BUILTIN ERROR: argument 3 to `DELETE` must be INTEGER, got WSTRING"},

@@ -196,46 +196,47 @@ func init() {
 		if len(args) != 3 {
 			return object.NewBuiltinError("wrong number of arguments for DELETE. got=%d, want=3", len(args))
 		}
-		l, _, ok := object.GetIntegerObjectValue(args[1])
+		// Standard signature is DELETE(IN, L, P).
+		l, _, ok := object.GetIntegerObjectValue(args[1]) // L is the length
 		if !ok {
 			return object.NewBuiltinError("argument 2 to `DELETE` must be INTEGER, got %s", args[1].Type())
 		}
-		p, _, ok := object.GetIntegerObjectValue(args[2])
+		p, _, ok := object.GetIntegerObjectValue(args[2]) // P is the position
 		if !ok {
 			return object.NewBuiltinError("argument 3 to `DELETE` must be INTEGER, got %s", args[2].Type())
 		}
 		switch in1 := args[0].(type) {
 		case *object.Array:
 			arrLen := int64(len(in1.Elements))
-			if l <= 0 || p < 1 || p > arrLen || p+l > arrLen+1 {
+			if l <= 0 || p < 1 || p > arrLen { // If L is non-positive or P is out of bounds, do nothing.
 				return in1
 			}
 			start := p - 1
 			end := start + l
-			if end > arrLen {
+			if end > arrLen { // If deletion goes past the end, truncate to the end.
 				end = arrLen
 			}
 			newElements := append(in1.Elements[:start], in1.Elements[end:]...)
 			return &object.Array{Elements: newElements}
 		case *object.String:
-			strLen := int64(len(in1.Value))
-			if l <= 0 || p < 1 || p > strLen || p+l > strLen+1 {
+			strLen := int64(len(in1.Value))    // cspell:disable-line
+			if l <= 0 || p < 1 || p > strLen { // If L is non-positive or P is out of bounds, do nothing.
 				return in1
 			}
 			start := p - 1
 			end := start + l
-			if end > strLen {
+			if end > strLen { // If deletion goes past the end, truncate to the end.
 				end = strLen
 			}
 			return &object.String{Value: in1.Value[:start] + in1.Value[end:]}
 		case *object.WString:
-			strLen := int64(len(in1.Value))
-			if l <= 0 || p < 1 || p > strLen || p+l > strLen+1 {
+			strLen := int64(len(in1.Value))    // cspell:disable-line
+			if l <= 0 || p < 1 || p > strLen { // If L is non-positive or P is out of bounds, do nothing.
 				return in1
 			}
 			start := p - 1
 			end := start + l
-			if end > strLen {
+			if end > strLen { // If deletion goes past the end, truncate to the end.
 				end = strLen
 			}
 			return &object.WString{Value: in1.Value[:start] + in1.Value[end:]}
@@ -363,7 +364,7 @@ func init() {
 		}
 		p, _, okP := object.GetIntegerObjectValue(args[1]) // P is the 2nd argument
 		if !okP {
-			return object.NewBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
+			return object.NewBuiltinError("argument 2 to `MID` must be INTEGER, got %s", args[1].Type())
 		}
 		switch str := args[0].(type) {
 		case *object.String:
@@ -435,7 +436,7 @@ func init() {
 		}
 		p, _, okP := object.GetIntegerObjectValue(args[2]) // P is the 3rd argument
 		if !okP {
-			return object.NewBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
+			return object.NewBuiltinError("argument 3 to `REPLACE` must be INTEGER, got %s", args[2].Type())
 		}
 		if l < 0 {
 			l = 0
@@ -990,6 +991,12 @@ func modBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for MOD. got=%d, want=2", len(args))
 	}
+	_, _, ok1 := object.GetIntegerObjectValue(args[0])
+	_, _, ok2 := object.GetIntegerObjectValue(args[1])
+	if !ok1 || !ok2 {
+		return object.NewBuiltinError("arguments to `MOD` must be INTEGER, got %s and %s", args[0].Type(), args[1].Type())
+	}
+
 	return object.EvalIntegerInfix(args[0], "MOD", args[1])
 }
 
@@ -1028,11 +1035,51 @@ func evalComparison(op string, left, right object.Object) object.Object {
 }
 
 func evalInfix(left object.Object, operator string, right object.Object) object.Object {
-	if object.IsNumeric(left) && object.IsNumeric(right) {
+	switch {
+	case object.IsNumeric(left) && object.IsNumeric(right):
 		return object.EvalNumericInfix(left, right, operator)
+	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ:
+		leftVal := left.(*object.String).Value
+		rightVal := right.(*object.String).Value
+		return evalGenericComparison(operator, leftVal, rightVal)
+	case left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ:
+		leftVal := left.(*object.WString).Value
+		rightVal := right.(*object.WString).Value
+		return evalGenericComparison(operator, leftVal, rightVal)
+	case left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ:
+		leftVal := left.(*object.Boolean).Value
+		rightVal := right.(*object.Boolean).Value
+		switch operator {
+		case "=":
+			return nativeBoolToBooleanObject(leftVal == rightVal)
+		case "<>":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		default:
+			return object.NewBuiltinError("unknown operator for BOOLEAN: %s", operator)
+		}
+	case left.Type() == object.TIME_OBJ && right.Type() == object.TIME_OBJ:
+		leftVal := left.(*object.Time).Value
+		rightVal := right.(*object.Time).Value
+		return evalGenericComparison(operator, int64(leftVal), int64(rightVal))
+	case left.Type() == object.DATE_OBJ && right.Type() == object.DATE_OBJ:
+		leftVal := left.(*object.Date).Value
+		rightVal := right.(*object.Date).Value
+		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
+	case left.Type() == object.TIME_OF_DAY_OBJ && right.Type() == object.TIME_OF_DAY_OBJ:
+		leftVal := left.(*object.TimeOfDay).Value
+		rightVal := right.(*object.TimeOfDay).Value
+		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
+		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
+		return evalGenericComparison(operator, leftNs, rightNs)
+	case left.Type() == object.DATE_AND_TIME_OBJ && right.Type() == object.DATE_AND_TIME_OBJ:
+		leftVal := left.(*object.DateAndTime).Value
+		rightVal := right.(*object.DateAndTime).Value
+		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
+	case left.Type() != right.Type():
+		return object.NewBuiltinError("type mismatch for comparison: %s %s %s", left.Type(), operator, right.Type())
+	default:
+		return object.NewBuiltinError("unsupported types for infix operation: %s %s %s", left.Type(), operator, right.Type())
 	}
-	// Add other types like string, bool, etc. here
-	return object.NewBuiltinError("unsupported types for infix operation: %s %s %s", left.Type(), operator, right.Type())
 }
 
 func bitwiseBuiltin(op string, args ...object.Object) object.Object {
@@ -1159,14 +1206,14 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 
 	result := args[0]
 	firstType := result.Type()
+	isFirstNumeric := object.IsNumeric(result)
 
 	// Check if the type is orderable by the logic in EvalInfix.
 	switch firstType {
 	case object.SINT_OBJ, object.INT_OBJ, object.DINT_OBJ, object.LINT_OBJ,
 		object.USINT_OBJ, object.UINT_OBJ, object.UDINT_OBJ, object.ULINT_OBJ,
 		object.REAL_OBJ, object.LREAL_OBJ, object.STRING_OBJ, object.WSTRING_OBJ,
-		object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ,
-		object.BOOLEAN_OBJ:
+		object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ:
 		// These types are orderable.
 	default:
 		return object.NewBuiltinError("arguments to `%s` must be of an orderable elementary type, got %s", op, firstType)
@@ -1174,13 +1221,13 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 
 	for i := 1; i < len(args); i++ {
 		nextArg := args[i]
-
-		// Check for type compatibility. Numeric types can be mixed.
-		// Non-numeric types must be identical. Mixing numeric and non-numeric is an error.
-		isFirstNumeric := object.IsNumeric(result)
 		isNextNumeric := object.IsNumeric(nextArg)
 
-		if (isFirstNumeric != isNextNumeric) || (!isFirstNumeric && nextArg.Type() != firstType) {
+		if isFirstNumeric {
+			if !isNextNumeric {
+				return object.NewBuiltinError("all arguments to `%s` must be INTEGER or REAL, got %s", op, nextArg.Type())
+			}
+		} else if nextArg.Type() != firstType {
 			return object.NewBuiltinError("all arguments to `%s` must be of the same type, got %s and %s", op, firstType, nextArg.Type())
 		}
 
@@ -1229,10 +1276,47 @@ func muxBuiltin(args ...object.Object) object.Object {
 		return object.NewBuiltinError("index %d out of bounds for MUX with %d inputs", kVal, numInputs)
 	}
 
+	// All value arguments must be of the same type.
+	if numInputs > 1 {
+		firstType := valueArgs[0].Type()
+		for i := 1; i < numInputs; i++ {
+			// A stricter check would not allow mixing numeric types, but for now this is fine.
+			if valueArgs[i].Type() != firstType && !(object.IsNumeric(valueArgs[0]) && object.IsNumeric(valueArgs[i])) {
+				return object.NewBuiltinError("all value arguments to `MUX` must be of the same type, got %s but expected %s", valueArgs[i].Type(), firstType)
+			}
+		}
+	}
+
 	return valueArgs[kVal]
 }
 
 func isEqual(left, right object.Object) bool {
 	result := evalInfix(left, "=", right)
 	return result == TRUE
+}
+
+func nativeBoolToBooleanObject(input bool) *object.Boolean {
+	if input {
+		return TRUE
+	}
+	return FALSE
+}
+
+func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) object.Object {
+	switch op {
+	case "=":
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "<>":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
+	case "<=":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	default:
+		return object.NewBuiltinError("unknown operator '%s' for generic comparison", op)
+	}
 }

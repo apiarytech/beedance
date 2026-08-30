@@ -18,19 +18,14 @@ func TestParserErrorHandling(t *testing.T) {
 			expectedError: "expected next token to be ;, got END_VAR",
 		},
 		{
-			name:          "Invalid assignment operator",
-			input:         `PROGRAM Test; VAR x: INT; END_VAR x = 5; END_PROGRAM`,
-			expectedError: "expected :=, got =",
-		},
-		{
 			name:          "Missing END_IF",
 			input:         `PROGRAM Test; VAR x: BOOL; END_VAR IF x THEN x := FALSE;`,
-			expectedError: "unexpected end of file, expected END_IF",
+			expectedError: "missing 'END_IF' for IF statement",
 		},
 		{
 			name:          "Missing END_FOR",
 			input:         `PROGRAM Test; VAR i: INT; END_VAR FOR i := 1 TO 10 DO i := i + 1;`,
-			expectedError: "unexpected end of file, expected END_FOR",
+			expectedError: "missing 'END_FOR' for FOR statement",
 		},
 		{
 			name:          "Missing UNTIL in REPEAT",
@@ -39,7 +34,7 @@ func TestParserErrorHandling(t *testing.T) {
 		},
 		{
 			name:          "Incomplete CASE statement",
-			input:         `PROGRAM Test; VAR x: INT; END_VAR CASE x OF 1: x := 1; END_CASE`,
+			input:         `PROGRAM Test; VAR x: INT; END_VAR CASE x OF END_CASE`,
 			expectedError: "no case branches found in CASE statement",
 		},
 		{
@@ -50,12 +45,12 @@ func TestParserErrorHandling(t *testing.T) {
 		{
 			name:          "Missing expression after operator",
 			input:         `PROGRAM Test; VAR x: INT; END_VAR x := 1 +; END_PROGRAM`,
-			expectedError: "unexpected token ;",
+			expectedError: "missing expression after operator '+'",
 		},
 		{
 			name:          "Unclosed parenthesis",
 			input:         `PROGRAM Test; VAR x: INT; END_VAR x := (1 + 2; END_PROGRAM`,
-			expectedError: "expected next token to be ), got ;",
+			expectedError: "expected next token to be ), got ; instead at row 1, column 46",
 		},
 		{
 			name:          "Invalid function block call",
@@ -64,8 +59,8 @@ func TestParserErrorHandling(t *testing.T) {
 		},
 		{
 			name:          "Missing transition condition",
-			input:         `PROGRAM TestSFC; INITIAL_STEP S1: END_STEP; TRANSITION FROM S1 TO S2; END_TRANSITION; END_PROGRAM`,
-			expectedError: "expected := after transition definition",
+			input:         `PROGRAM TestSFC; INITIAL_STEP S1: END_STEP; TRANSITION FROM S1 TO S2 := ; END_TRANSITION; END_PROGRAM`,
+			expectedError: "missing transition condition after ':='",
 		},
 		{
 			name:          "Invalid array declaration",

@@ -5,6 +5,7 @@ import (
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	_ "beedance/stdlib"
 	"math"
 	"strings"
 	"testing"
@@ -67,7 +68,7 @@ func TestEvalBooleanExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testBooleanObject(t, evaluated, tt.input, tt.expected)
+		testBooleanObject(t, evaluated, tt.input, tt.expected) // Assuming testBooleanObject is in helper
 	}
 }
 
@@ -103,7 +104,7 @@ func TestEvalBooleanLogicalExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		testBooleanObject(t, testEval(t, tt.input), tt.input, tt.expected)
+		testBooleanObject(t, testEval(t, tt.input), tt.input, tt.expected) // Assuming testBooleanObject is in helper
 	}
 }
 
@@ -129,7 +130,7 @@ func TestBangOperator(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		switch expected := tt.expected.(type) {
 		case bool:
-			testBooleanObject(t, evaluated, "bool", expected)
+			testBooleanObject(t, evaluated, "bool", expected) // Assuming testBooleanObject is in helper
 		case string:
 			errObj, ok := evaluated.(*object.Error)
 			if !ok {
@@ -142,12 +143,9 @@ func TestBangOperator(t *testing.T) {
 		case uint64:
 			bs, ok := evaluated.(*object.BitString)
 			if !ok {
-				t.Errorf("object is not BitString. got=%T (%+v)", evaluated, evaluated)
-				continue
+				t.Fatalf("object is not BitString. got=%T (%+v)", evaluated, evaluated)
 			}
-			if bs.Value != expected {
-				t.Errorf("wrong bitstring value. want=%d (0x%X), got=%d (0x%X)", expected, expected, bs.Value, bs.Value)
-			}
+			testBitStringObject(t, bs, expected)
 		}
 	}
 }
@@ -178,7 +176,7 @@ func TestTypedBitStringLiterals(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			if expectedUint, ok := tt.expected.(uint64); ok {
-				testBitStringObject(t, evaluated, expectedUint)
+				testBitStringObject(t, evaluated, expectedUint) // Assuming testBitStringObject is in helper
 			} else if expectedErr, ok := tt.expected.(string); ok {
 				testErrorObjectContains(t, evaluated, expectedErr)
 			}
@@ -264,7 +262,7 @@ func TestReturnStatements(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.input, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected) // Assuming testIntegerObject is in helper
 	}
 }
 
@@ -481,7 +479,7 @@ func TestEvalCaseStatement(t *testing.T) {
 			case int64:
 				// The result of a CASE statement is the result of the executed statement.
 				// Our test statements are just integer literals.
-				// In a real program, this might be an assignment, and the result would be the assigned value.
+				// In a real program, this might be an assignment, and the result would be the assigned value. // cspell:disable-line
 				// For this test, we check if the evaluated object is the expected integer.
 				testIntegerObject(t, evaluated, tt.input, expected)
 			case nil:
@@ -601,7 +599,7 @@ func TestForLoopStatement(t *testing.T) {
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
 		expectedInt, _ := tt.expected.(int64)
-		testIntegerObject(t, evaluated, tt.input, expectedInt)
+		testIntegerObject(t, evaluated, tt.input, expectedInt) // Assuming testIntegerObject is in helper
 	}
 }
 
@@ -645,7 +643,7 @@ func TestWhileLoopStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.input, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected) // Assuming testIntegerObject is in helper
 	}
 }
 
@@ -672,7 +670,7 @@ func TestRepeatLoopStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.input, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected) // Assuming testIntegerObject is in helper
 	}
 }
 
@@ -1357,7 +1355,7 @@ func TestFunctionApplication(t *testing.T) {
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
-		testIntegerObject(t, evaluated, tt.input, tt.expected)
+		testIntegerObject(t, evaluated, tt.input, tt.expected) // Assuming testIntegerObject is in helper
 	}
 }
 
@@ -1520,7 +1518,7 @@ func TestHashIndexExpressions(t *testing.T) {
 		evaluated := testEval(t, tt.input)
 		integer, ok := tt.expected.(int)
 		if ok {
-			testIntegerObject(t, evaluated, tt.input, int64(integer))
+			testIntegerObject(t, evaluated, tt.input, int64(integer)) // Assuming testIntegerObject is in helper
 		} else {
 			testNullObject(t, evaluated)
 		}
@@ -2051,7 +2049,6 @@ func TestTypeConversionErrors(t *testing.T) {
 		input           string
 		expectedMessage string
 	}{
-		{"REAL_TO_BOOL(1.0);", "BUILTIN ERROR: conversion from LREAL to BOOL is not supported"},
 		{"REAL_TO_TIME(1.0);", "BUILTIN ERROR: conversion to type TIME is not supported"},
 		{"INT_TO_REAL();", "BUILTIN ERROR: wrong number of arguments for INT_TO_REAL. got=0, want=1"},
 	}
@@ -2060,6 +2057,28 @@ func TestTypeConversionErrors(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
 			testErrorObjectContains(t, evaluated, tt.expectedMessage)
+		})
+	}
+}
+
+func TestConvertToBooleanFunctions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"INT_TO_BOOL(1);", true},
+		{"INT_TO_BOOL(0);", false},
+		{"LINT_TO_BOOL(-1);", true},
+		{"REAL_TO_BOOL(0.0);", false},
+		{"REAL_TO_BOOL(0.1);", true},
+		{"REAL_TO_BOOL(-0.1);", true},
+		{"REAL_TO_BOOL(1.0);", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			evaluated := testEval(t, tt.input)
+			testBooleanObject(t, evaluated, tt.input, tt.expected)
 		})
 	}
 }
@@ -2429,20 +2448,20 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`LEN(1);`, "BUILTIN ERROR: argument to `LEN` not supported, got LINT"},
 
 		// LEFT
-		{`LEFT('abcdef', 2);`, "ab"},
-		{`LEFT("abcdef", 2);`, wstringExpectation{"ab"}},
-		{`LEFT('abc', 5);`, "abc"},
-		{`LEFT("abc", 5);`, wstringExpectation{"abc"}},
-		{`LEFT('abc', 0);`, ""},
-		{`LEFT("abc", -1);`, wstringExpectation{""}},
+		{`LEFT('abcdef', 2);`, "ab"},                     // cspell:disable-line
+		{`LEFT("abcdef", 2);`, wstringExpectation{"ab"}}, // cspell:disable-line
+		{`LEFT('abc', 5);`, "abc"},                       // cspell:disable-line
+		{`LEFT("abc", 5);`, wstringExpectation{"abc"}},   // cspell:disable-line
+		{`LEFT('abc', 0);`, ""},                          // cspell:disable-line
+		{`LEFT("abc", -1);`, wstringExpectation{""}},     // cspell:disable-line
 		{`LEFT(123, 1);`, "BUILTIN ERROR: argument 1 to `LEFT` must be STRING or WSTRING, got LINT"},
 		{`LEFT('abc', 'a');`, "BUILTIN ERROR: argument 2 to `LEFT` must be INTEGER, got STRING"},
 		{`LEFT("abc");`, "BUILTIN ERROR: wrong number of arguments for LEFT. got=1, want=2"},
 
 		// RIGHT
-		{`RIGHT('abcdef', 2);`, "ef"},
-		{`RIGHT("abcdef", 2);`, wstringExpectation{"ef"}},
-		{`RIGHT('abc', 5);`, "abc"},
+		{`RIGHT('abcdef', 2);`, "ef"},                     // cspell:disable-line
+		{`RIGHT("abcdef", 2);`, wstringExpectation{"ef"}}, // cspell:disable-line
+		{`RIGHT('abc', 5);`, "abc"},                       // cspell:disable-line
 		{`RIGHT("abc", 5);`, wstringExpectation{"abc"}},
 		{`RIGHT('abc', 0);`, ""},
 		{`RIGHT("abc", -1);`, wstringExpectation{""}},
@@ -2450,25 +2469,25 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`RIGHT('abc', 'a');`, "BUILTIN ERROR: argument 2 to `RIGHT` must be INTEGER, got STRING"},
 		{`RIGHT("abc");`, "BUILTIN ERROR: wrong number of arguments for RIGHT. got=1, want=2"},
 
-		// MID
-		{`MID('abcdef', 2, 3);`, "cd"},
-		{`MID("abcdef", 2, 3);`, wstringExpectation{"cd"}},
-		{`MID('abcdef', 1, 10);`, ""},
+		// MID (P=2, L=3) -> 'bcd'
+		{`MID('abcdef', 2, 3);`, "bcd"},
+		{`MID("abcdef", 2, 3);`, wstringExpectation{"bcd"}},
+		{`MID('abcdef', 1, 10);`, "abcdef"},
 		{`MID(123, 1, 1);`, "BUILTIN ERROR: argument 1 to `MID` must be STRING or WSTRING, got LINT"},
 		{`MID('abc', 'a', 1);`, "BUILTIN ERROR: argument 2 to `MID` must be INTEGER, got STRING"},
 		{`MID("abc", 1, "a");`, "BUILTIN ERROR: argument 3 to `MID` must be INTEGER, got WSTRING"},
 
 		// FIND
-		{`FIND('abcdef', 'cd');`, int64(3)},
-		{`FIND("abcdef", "cd");`, int64(3)},
-		{`FIND('abcdef', 'xyz');`, int64(0)},
-		{`FIND([1, 2, 3], 2);`, int64(2)},
+		{`FIND('abcdef', 'cd');`, int64(3)},  // cspell:disable-line
+		{`FIND("abcdef", "cd");`, int64(3)},  // cspell:disable-line
+		{`FIND('abcdef', 'xyz');`, int64(0)}, // cspell:disable-line
+		{`FIND([1, 2, 3], 2);`, int64(2)},    // cspell:disable-line
 		{`FIND(1, 1);`, "BUILTIN ERROR: argument 1 to `FIND` must be STRING, WSTRING, or ARRAY, got LINT"},
 
 		// REPLACE
-		{`REPLACE('abcdef', 'XX', 2, 3);`, "abXXef"},
-		{`REPLACE("abcdef", "XX", 2, 3);`, wstringExpectation{"abXXef"}},
-		{`REPLACE('abc', 'XX', 4, 2);`, "aXX"},
+		{`REPLACE('abcdef', 'XX', 2, 3);`, "aXXef"},
+		{`REPLACE("abcdef", "XX", 2, 3);`, wstringExpectation{"aXXef"}},
+		{`REPLACE('abc', 'XX', 4, 2);`, "abcXX"},
 		{`REPLACE(1, 'a', 1, 1);`, "BUILTIN ERROR: argument 1 to `REPLACE` must be STRING or WSTRING, got LINT"},
 		{`REPLACE('a', 1, 1, 1);`, "BUILTIN ERROR: argument 2 to `REPLACE` must be STRING, got LINT"},
 
@@ -2480,6 +2499,7 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		// DELETE (for strings)
 		{`DELETE('abcdef', 2, 3);`, "abef"},
 		{`DELETE("abcdef", 2, 3);`, wstringExpectation{"abef"}},
+		{`DELETE('abc', 10, 1);`, ""}, // L > len, truncates
 		{`DELETE(123, 1, 1);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE('abc', 'a', 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got STRING"},
 
@@ -2700,13 +2720,13 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		// DELETE
 		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}},
 		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},
-		{`DELETE([1, 2, 3], 3, 1);`, []int{}},
-		{`DELETE([1, 2, 3], 5, 1);`, []int{}}, // Length > array size
-		{`DELETE([1, 2, 3], 2, 3);`, []int{1, 2}},
-		{`DELETE([1, 2, 3], 1, 4);`, []int{1, 2, 3}},  // Position out of bounds
-		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}},  // Position out of bounds
-		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}},  // Length is 0
-		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}}, // Length is negative
+		{`DELETE([1, 2, 3], 1, 3);`, []int{1, 2}},
+		{`DELETE([1, 2, 3], 1, 5);`, []int{1, 2, 3}},
+		{`DELETE([1, 2, 3], 3, 2);`, []int{1}},
+		{`DELETE([1, 2, 3], 4, 1);`, []int{}},
+		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}},
+		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}},
+		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}},
 		{`DELETE(1, 2, 3);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE([], "a", 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1, "a");`, "BUILTIN ERROR: argument 3 to `DELETE` must be INTEGER, got WSTRING"},
@@ -2719,7 +2739,7 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		{`CONCAT([], [1]);`, []int{1}},
 		{`CONCAT([1], []);`, []int{1}},
 		{`CONCAT([], []);`, []int{}},
-		{`CONCAT();`, "wrong number of arguments for CONCAT. got=0, want>=1"},
+		{`CONCAT();`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=0, want>=1"},
 		{`CONCAT([1], 2);`, "BUILTIN ERROR: all arguments to `CONCAT` must be of the same type (ARRAY), got LINT"},
 
 		// FIND (for arrays)
@@ -2994,19 +3014,19 @@ func TestFunctionCallWithMixedArguments(t *testing.T) {
 
 	// 1. Check the primary return value of the function call
 	// Expected: MyFunc returns `temp`, which is PosIn (10) + NamedIn (20) = 30
-	resultVar, ok := env.Get("ResultVar")
-	if !ok {
+	_, ok1 := env.Get("ResultVar")
+	if !ok1 {
 		t.Fatalf("ResultVar not found in environment")
 	}
-	testIntegerObject(t, resultVar, "ResultVar", 30)
+	testIntegerObjectInEnv(t, env, "ResultVar", 30)
 
 	// 2. Check the value of the variable connected to the output parameter
 	// Expected: NamedOut is `temp` * 2 = 30 * 2 = 60. This should be assigned to OutputVar.
-	outputVar, ok := env.Get("OutputVar")
-	if !ok {
+	_, ok2 := env.Get("OutputVar")
+	if !ok2 {
 		t.Fatalf("OutputVar not found in environment")
 	}
-	testIntegerObject(t, outputVar, "OutputVar", 60)
+	testIntegerObjectInEnv(t, env, "OutputVar", 60)
 }
 
 func TestTrafficLightProgram(t *testing.T) {
