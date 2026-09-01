@@ -2,10 +2,10 @@ package stdlib
 
 import (
 	"beedance/ast"
-	"beedance/evaluator"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,52 +39,9 @@ func TestBuiltinMinMaxAny(t *testing.T) {
 		{`MIN(1, T#1s);`, "BUILTIN ERROR: all arguments to `MIN` must be INTEGER or REAL, got TIME"},
 	}
 
-	object.FinalizeBuiltins()
-
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			l := lexer.New(tt.input)
-			p := parser.New(l)
-			program := p.ParseProgram()
-			if len(p.Errors()) != 0 {
-				t.Fatalf("parser errors: %v", p.Errors())
-			}
-
-			stmt := program.Statements[0].(*ast.ExpressionStatement)
-			call := stmt.Expression.(*ast.CallExpression)
-			funcName := call.Function.String()
-
-			builtin, ok := object.GetBuiltinByName(funcName)
-			if !ok {
-				t.Fatalf("builtin not found: %s", funcName)
-			}
-
-			args := []object.Object{}
-			for _, argNode := range call.Arguments {
-				switch node := argNode.(type) {
-				case *ast.IntegerLiteral:
-					args = append(args, &object.LInt{Value: node.Value})
-				case *ast.StringLiteral:
-					args = append(args, &object.String{Value: node.Value})
-				case *ast.TypedLiteral:
-					// This handles literals like T#5s
-					if strings.ToUpper(node.TypeName) == "T" || strings.ToUpper(node.TypeName) == "TIME" {
-						valIdent, ok := node.Value.(*ast.Identifier)
-						if !ok {
-							t.Fatalf("time literal value is not an identifier: %T", node.Value)
-						}
-						d, err := time.ParseDuration(valIdent.Value)
-						if err != nil {
-							t.Fatalf("could not parse time literal '%s': %v", valIdent.Value, err)
-						}
-						args = append(args, &object.Time{Value: d})
-					}
-				default:
-					t.Fatalf("unhandled argument type in test: %T", node)
-				}
-			}
-
-			result := builtin.Fn(args...)
+			result := testEval(t, tt.input)
 
 			switch expected := tt.expected.(type) {
 			case string:
@@ -146,11 +103,11 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`INSERT('a', 1, 1);`, "BUILTIN ERROR: argument 2 to `INSERT` for strings must be STRING, got LINT"},
 
 		// DELETE
-		{`DELETE('abcdef', 2, 3);`, "abef"},
-		{`DELETE("abcdef", 2, 3);`, wstringExpectation{"abef"}},
+		{`DELETE('abcdef', 3, 2);`, "abef"},                     // Corrected: P=3, L=2
+		{`DELETE("abcdef", 3, 2);`, wstringExpectation{"abef"}}, // Corrected: P=3, L=2
 		{`DELETE('abc', 1, 1);`, "bc"},
-		{`DELETE('abc', 10, 1);`, ""},   // L > len, truncates
-		{`DELETE('abc', 1, 0);`, "abc"}, // l <= 0, returns original
+		{`DELETE('abc', 1, 10);`, ""},   // L > len, truncates
+		{`DELETE('abc', 0, 1);`, "abc"}, // l <= 0, returns original
 		{`DELETE(1, 1, 1);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 
 		// CONCAT
@@ -270,6 +227,10 @@ func TestBuiltinSelectionFunctions(t *testing.T) {
 		{"SEL(TRUE, 'a', 'b');", "b"},
 		{"SEL(1, 10, 20);", "BUILTIN ERROR: argument 1 to `SEL` must be BOOLEAN, got LINT"},
 		{"SEL(TRUE, 10, 'a');", "BUILTIN ERROR: arguments 2 and 3 to `SEL` must be of the same type, got LINT and STRING"},
+
+		// MOVE
+		{"MOVE(123);", int64(123)},
+		{`MOVE('hello');`, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -371,12 +332,12 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		{`INSERT([], 1);`, "BUILTIN ERROR: wrong number of arguments for INSERT. got=2, want=3"},
 
 		// DELETE
-		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}},
-		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},    // DELETE(IN, L, P) -> L=1, P=1
-		{`DELETE([1, 2, 3], 1, 3);`, []int{1, 2}},    // L=1, P=3
-		{`DELETE([1, 2, 3], 1, 5);`, []int{1, 2, 3}}, // p > len, returns original
-		{`DELETE([1, 2, 3], 3, 2);`, []int{1}},       // L=3, P=2 -> l > remaining, truncates
-		{`DELETE([1, 2, 3], 4, 1);`, []int{}},        // L=4, P=1 -> l > len, truncates
+		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}}, // P=2, L=2
+		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},    // P=1, L=1
+		{`DELETE([1, 2, 3], 3, 1);`, []int{1, 2}},    // P=3, L=1
+		{`DELETE([1, 2, 3], 5, 1);`, []int{1, 2, 3}}, // p > len, returns original
+		{`DELETE([1, 2, 3], 2, 3);`, []int{1}},       // P=2, L=3 -> l > remaining, truncates
+		{`DELETE([1, 2, 3], 1, 4);`, []int{}},        // P=1, L=4 -> l > len, truncates
 		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // l <= 0, returns original
 		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // p < 1, returns original
 		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}},
@@ -388,11 +349,11 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		// CONCAT
 		{`CONCAT([1, 2], [3, 4]);`, []int{1, 2, 3, 4}},
 		{`CONCAT([1], [2], [3], [4]);`, []int{1, 2, 3, 4}},
-		{`CONCAT([1, 2]);`, []int{1, 2}},
+		{`CONCAT([1, 2]);`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2"},
 		{`CONCAT([], [1]);`, []int{1}},
 		{`CONCAT([1], []);`, []int{1}},
 		{`CONCAT([], []);`, []int{}},
-		{`CONCAT();`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=0, want>=1"},
+		{`CONCAT();`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=0, want>=2"},
 		{`CONCAT([1], 2);`, "BUILTIN ERROR: all arguments to `CONCAT` must be of the same type (ARRAY), got LINT"},
 
 		// FIND (for arrays)
@@ -578,7 +539,104 @@ func TestBuiltinTypeConversions(t *testing.T) {
 	}
 }
 
-// testEval is a helper that parses and evaluates a given input string.
+func TestLen(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{`LEN("");`, 0},
+		{`LEN("four");`, 4},
+		{`LEN("hello world");`, 11},
+		{`LEN([1, 2, 3]);`, 3},
+		{`LEN([]);`, 0},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(t, tt.input)
+		integer, ok := evaluated.(*object.LInt)
+		if !ok {
+			t.Errorf("object is not LInt. got=%T (%+v)", evaluated, evaluated)
+			continue
+		}
+		if integer.Value != tt.expected {
+			t.Errorf("wrong value. want=%d, got=%d", tt.expected, integer.Value)
+		}
+	}
+}
+
+func TestLenWrongArgument(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			`LEN(1);`,
+			"argument to `LEN` not supported, got LINT",
+		},
+		{
+			`LEN("one", "two");`,
+			"wrong number of arguments for LEN. got=2, want=1",
+		},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(t, tt.input)
+
+		errObj, ok := evaluated.(*object.Error)
+		if !ok {
+			t.Errorf("object is not Error. got=%T (%+v)", evaluated, evaluated)
+			continue
+		}
+
+		if !strings.Contains(errObj.Message, tt.expected) {
+			t.Errorf("wrong error message. expected=%q, got=%q", tt.expected, errObj.Message)
+		}
+	}
+}
+
+func TestArrayBuiltinFunctions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		{`FIRST([1, 2, 3]);`, 1},
+		{`FIRST([]);`, nil},
+		{`LAST([1, 2, 3]);`, 3},
+		{`LAST([]);`, nil},
+		{`REST([1, 2, 3]);`, []int{2, 3}},
+		{`REST([]);`, nil},
+		{`PUSH([], 1);`, []int{1}},
+		{`PUSH([1, 2], 3);`, []int{1, 2, 3}},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(t, tt.input)
+
+		switch expected := tt.expected.(type) {
+		case int:
+			testIntegerObject(t, evaluated, int64(expected))
+		case nil:
+			testNullObject(t, evaluated)
+		case []int:
+			array, ok := evaluated.(*object.Array)
+			if !ok {
+				t.Fatalf("obj not Array. got=%T (%+v)", evaluated, evaluated)
+			}
+
+			if len(array.Elements) != len(expected) {
+				t.Fatalf("wrong num of elements. want=%d, got=%d", len(expected), len(array.Elements))
+			}
+
+			for i, expectedElem := range expected {
+				testIntegerObject(t, array.Elements[i], int64(expectedElem))
+			}
+		}
+	}
+}
+
+// testEval is a helper that parses a single function call expression and executes
+// the corresponding built-in function. It manually evaluates literal arguments
+// to avoid a circular dependency on the evaluator package.
 func testEval(t *testing.T, input string) object.Object {
 	t.Helper()
 	l := lexer.New(input)
@@ -608,15 +666,116 @@ func testEval(t *testing.T, input string) object.Object {
 		t.Fatalf("builtin not found: %s", funcName)
 	}
 
-	// This is a simplified test evaluator for arguments.
-	// It creates a dummy environment to evaluate the arguments.
-	env := object.NewEnvironment()
 	args := []object.Object{}
 	for _, argNode := range call.Arguments {
-		args = append(args, evaluator.Eval(argNode, env))
+		args = append(args, evalTestLiteral(t, argNode))
 	}
 
 	return builtin.Fn(args...)
+}
+
+func evalTestLiteral(t *testing.T, node ast.Expression) object.Object {
+	t.Helper()
+	switch node := node.(type) {
+	case *ast.IntegerLiteral:
+		return &object.LInt{Value: node.Value}
+	case *ast.RealLiteral:
+		return &object.LReal{Value: node.Value}
+	case *ast.StringLiteral:
+		return &object.String{Value: node.Value}
+	case *ast.WStringLiteral:
+		return &object.WString{Value: node.Value}
+	case *ast.Boolean:
+		return nativeBoolToBooleanObject(node.Value)
+	case *ast.ArrayLiteral:
+		elements := []object.Object{}
+		for _, elNode := range node.Elements {
+			elements = append(elements, evalTestLiteral(t, elNode))
+		}
+		return &object.Array{Elements: elements}
+	case *ast.TypedLiteral:
+		return evalTypedLiteral(t, node)
+	case *ast.PrefixExpression:
+		if node.Operator == "-" {
+			right := evalTestLiteral(t, node.Right)
+			if intVal, ok := right.(*object.LInt); ok {
+				return &object.LInt{Value: -intVal.Value}
+			} else if realVal, ok := right.(*object.Real); ok {
+				return &object.Real{Value: -realVal.Value}
+			} else if lrealVal, ok := right.(*object.LReal); ok {
+				// Assuming LReal is the underlying type for all real numbers in tests
+				return &object.LReal{Value: -lrealVal.Value}
+			}
+		}
+		t.Fatalf("unhandled prefix expression in test: %s", node.Operator)
+		return nil
+	default:
+		t.Fatalf("unhandled literal type in test: %T", node)
+		return nil
+	}
+}
+
+func evalTypedLiteral(t *testing.T, node *ast.TypedLiteral) object.Object {
+	t.Helper()
+	typeName := strings.ToUpper(node.TypeName)
+	valueStr := node.Value.String()
+
+	switch typeName {
+	case "T", "TIME":
+		d, err := time.ParseDuration(valueStr)
+		if err != nil {
+			t.Fatalf("failed to parse time duration in test: %v", err)
+		}
+		return &object.Time{Value: d}
+	case "BYTE", "WORD", "DWORD", "LWORD":
+		parts := strings.Split(valueStr, "#")
+		if len(parts) != 2 {
+			t.Fatalf("invalid bitstring literal in test: %s", valueStr)
+		}
+		val, err := strconv.ParseUint(parts[1], 16, 64)
+		if err != nil {
+			t.Fatalf("failed to parse bitstring value in test: %v", err)
+		}
+		var width int
+		switch typeName {
+		case "BYTE":
+			width = 8
+		case "WORD":
+			width = 16
+		case "DWORD":
+			width = 32
+		case "LWORD":
+			width = 64
+		}
+		return &object.BitString{Value: val, Width: width}
+	case "D", "DATE":
+		tm, err := time.Parse("2006-01-02", valueStr)
+		if err != nil {
+			t.Fatalf("failed to parse date in test: %v", err)
+		}
+		return &object.Date{Value: tm}
+	case "TOD", "TIME_OF_DAY":
+		tm, err := time.Parse("15:04:05.999999999", valueStr)
+		if err != nil {
+			tm, err = time.Parse("15:04:05", valueStr)
+			if err != nil {
+				t.Fatalf("failed to parse time of day in test: %v", err)
+			}
+		}
+		return &object.TimeOfDay{Value: tm}
+	case "DT", "DATE_AND_TIME":
+		tm, err := time.Parse("2006-01-02-15:04:05.999999999", valueStr)
+		if err != nil {
+			tm, err = time.Parse("2006-01-02-15:04:05", valueStr)
+			if err != nil {
+				t.Fatalf("failed to parse date and time in test: %v", err)
+			}
+		}
+		return &object.DateAndTime{Value: tm}
+	default:
+		t.Fatalf("unhandled typed literal in test: %s", typeName)
+		return nil
+	}
 }
 
 func testIntegerObject(t *testing.T, obj object.Object, expected int64) {
@@ -690,4 +849,13 @@ func testStringOrError(t *testing.T, obj object.Object, expected string) {
 		return
 	}
 	testStringObject(t, obj, expected)
+}
+
+func testNullObject(t *testing.T, obj object.Object) bool {
+	t.Helper()
+	if obj != NULL {
+		t.Errorf("object is not NULL. got=%T (%+v)", obj, obj)
+		return false
+	}
+	return true
 }

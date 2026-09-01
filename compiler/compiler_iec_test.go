@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"beedance/code"
+	_ "beedance/stdlib"
 	"testing"
 )
 

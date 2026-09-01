@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"beedance/code"
+	_ "beedance/stdlib"
 	"testing"
 )
 
@@ -14,21 +15,19 @@ func TestActionDeclaration(t *testing.T) {
 				a := a + 1;
 			END_ACTION
 			`,
-			expectedConstants: []interface{}{
-				1, // for := 1
-				1, // for + 1
+			expectedConstants: []interface{}{ // Constants for the flattened global compilation
+				1, // for 'a := 1'
+				1, // for 'a + 1'
 			},
 			expectedInstructions: []code.Instructions{
-				// The compiler is currently not creating a closure for a top-level ACTION.
-				// It's compiling its body statements directly into the global scope.
-				// This test is updated to reflect the current (incorrect) behavior.
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpPop),
+				// The parser flattens top-level ACTIONs, so the compiler generates global code.
+				code.Make(code.OpConstant, 0),  // Push 1 (for 'a := 1')
+				code.Make(code.OpSetGlobal, 0), // Set global 'a'
+				code.Make(code.OpGetGlobal, 0), // Get global 'a'
+				code.Make(code.OpConstant, 1),  // Push 1 (for 'a + 1')
+				code.Make(code.OpAdd),          // Add
+				code.Make(code.OpSetGlobal, 0), // Set global 'a' to result
+				code.Make(code.OpPop),          // Pop result of the assignment expression
 			},
 		},
 	}

@@ -6,6 +6,7 @@ import (
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	_ "beedance/stdlib"
 	"fmt"
 	"testing"
 	"time"
@@ -338,9 +339,7 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpConstant, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 0), // Assign result to return variable 'MyFunc'
-					code.Make(code.OpGetLocal, 0), // Load return variable
-					code.Make(code.OpReturnValue),
+					code.Make(code.OpReturnValue), // Optimized return via assignment
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -377,10 +376,7 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpGetLocal, 2), // Get OutVar (index 2)
 					code.Make(code.OpConstant, 1), // Push 1
 					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 1), // Set return value 'MyFuncWithVars' (index 1)
-					// Implicit return of the function's value
-					code.Make(code.OpGetLocal, 1), // Load return value
-					code.Make(code.OpReturnValue),
+					code.Make(code.OpReturnValue), // Optimized return
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -396,9 +392,7 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpNull),        // Initialize return var
 					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpConstant, 0), // MyFunc := 2
-					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpGetLocal, 0), // Implicit return
-					code.Make(code.OpReturnValue),
+					code.Make(code.OpReturnValue), // Optimized return
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -492,13 +486,28 @@ type compilerTestCase struct {
 	expectedInstructions []code.Instructions
 }
 
+// getTestBuiltins provides a clean, isolated set of built-in function definitions for testing.
+// This prevents test failures caused by global state pollution where the global `object.Builtins`
+// slice might be modified by another test.
+func getTestBuiltins() []object.BuiltinEntry {
+	// The indices must match the expectations in the tests (e.g., LEN is 0, PUSH is 5).
+	// We only need to define the built-ins that are actually used in compiler tests.
+	// The function implementation (Fn) is not needed for compilation, only the name.
+	builtins := make([]object.BuiltinEntry, 6) // Slice is large enough for PUSH at index 5
+	builtins[0] = object.BuiltinEntry{Name: "LEN"}
+	builtins[5] = object.BuiltinEntry{Name: "PUSH"}
+	return builtins
+}
+
 func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 	t.Helper()
 
 	for i, tt := range tests {
 		program := parse(tt.input)
 
-		compiler := New()
+		// Use the new constructor to create a compiler with a clean, known set of built-ins.
+		// This makes the test robust against global state pollution.
+		compiler := NewCompilerWithBuiltins(getTestBuiltins())
 		err := compiler.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error on test #%d/%d: %s", i+1, len(tests), err)
@@ -716,10 +725,8 @@ func TestFunctionCalls(t *testing.T) {
 					// where the function name acts as a return variable.
 					code.Make(code.OpNull),        // Initialize return var
 					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpConstant, 0), // Push 24
-					code.Make(code.OpSetLocal, 0), // Assign 24 to the return var
-					code.Make(code.OpGetLocal, 0), // Load the return var
-					code.Make(code.OpReturnValue), // Return it
+					code.Make(code.OpConstant, 0), // Push 24 for return
+					code.Make(code.OpReturnValue), // Optimized return
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -739,11 +746,9 @@ func TestFunctionCalls(t *testing.T) {
 					// The compiler correctly implements the IEC 61131-3 standard,
 					// where the function name acts as a return variable.
 					code.Make(code.OpNull),        // Initialize return var 'oneArg'
-					code.Make(code.OpSetLocal, 1), //
-					code.Make(code.OpGetLocal, 0), // Get input 'a'
-					code.Make(code.OpSetLocal, 1), // Assign 'a' to 'oneArg'
-					code.Make(code.OpGetLocal, 1), // Load 'oneArg' for return
-					code.Make(code.OpReturnValue), // Return it
+					code.Make(code.OpSetLocal, 1), // (a is 0, oneArg is 1)
+					code.Make(code.OpGetLocal, 0), // Get input 'a' for return
+					code.Make(code.OpReturnValue), // Optimized return
 				},
 				24,
 			},
@@ -762,18 +767,16 @@ func TestFunctionCalls(t *testing.T) {
 			manyArg(24, 25, 26);`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpPop), // a;
-					code.Make(code.OpGetLocal, 1),
-					code.Make(code.OpPop), // b;
 					// The compiler correctly implements the IEC 61131-3 standard,
 					// where the function name acts as a return variable.
 					code.Make(code.OpNull),        // Initialize return var 'manyArg'
 					code.Make(code.OpSetLocal, 3), //
-					code.Make(code.OpGetLocal, 2), // Get input 'c'
-					code.Make(code.OpSetLocal, 3), // Assign 'c' to 'manyArg'
-					code.Make(code.OpGetLocal, 3), // Load 'manyArg' for return
-					code.Make(code.OpReturnValue), // Return it
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpPop), // a;
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpPop),         // b;
+					code.Make(code.OpGetLocal, 2), // Get input 'c' for return
+					code.Make(code.OpReturnValue), // Optimized return
 				},
 				24,
 				25,
@@ -1095,7 +1098,7 @@ func TestBuiltins(t *testing.T) {
 			input: `fn() { LEN([]) }`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
-					code.Make(code.OpGetBuiltin, 0),
+					code.Make(code.OpGetBuiltin, 0), // LEN
 					code.Make(code.OpArray, 0),
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
@@ -1286,7 +1289,9 @@ func TestRecursiveFunctions(t *testing.T) {
 			countDown(1);`,
 			expectedConstants: []interface{}{
 				1,
-				[]code.Instructions{
+				[]code.Instructions{ // The body of countDown
+					code.Make(code.OpNull),        // Initialize return var 'countDown'
+					code.Make(code.OpSetLocal, 1), // x is 0, countDown is 1
 					code.Make(code.OpCurrentClosure),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
@@ -1314,7 +1319,9 @@ func TestRecursiveFunctions(t *testing.T) {
 			wrapper();`,
 			expectedConstants: []interface{}{
 				1,
-				[]code.Instructions{
+				[]code.Instructions{ // Body of inner countDown
+					code.Make(code.OpNull),        // Initialize return var 'countDown'
+					code.Make(code.OpSetLocal, 1), // x is 0, countDown is 1
 					code.Make(code.OpCurrentClosure),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
@@ -1324,9 +1331,11 @@ func TestRecursiveFunctions(t *testing.T) {
 				},
 				1,
 				[]code.Instructions{
+					code.Make(code.OpNull),        // Initialize return var 'wrapper'
+					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpClosure, 1, 0),
-					code.Make(code.OpSetLocal, 0),
-					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSetLocal, 1), // Store 'countDown' closure
+					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
 					code.Make(code.OpConstant, 2),
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),

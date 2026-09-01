@@ -1,6 +1,9 @@
 package vm
 
-import "testing"
+import (
+	_ "beedance/stdlib"
+	"testing"
+)
 
 func TestIecVmOperators(t *testing.T) {
 	tests := []vmTestCase{

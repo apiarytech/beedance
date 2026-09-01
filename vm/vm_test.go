@@ -6,7 +6,9 @@ import (
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"fmt"
+	"sort"
 	"testing"
 )
 
@@ -106,9 +108,9 @@ func TestStringExpressions(t *testing.T) {
 	tests := []vmTestCase{
 		// Per IEC 61131-3, STRING literals use single quotes and concatenation
 		// is handled by the CONCAT function, not the '+' operator.
-		{`'beedance'`, "beedance"},
-		{`CONCAT('mon', 'key')`, "monkey"},
-		{`CONCAT('mon', 'key', 'banana')`, "monkeybanana"},
+		{`'beedance';`, "beedance"},
+		{`CONCAT('mon', 'key');`, "monkey"},
+		{`CONCAT('mon', 'key', 'banana');`, "monkeybanana"},
 	}
 
 	runVmTests(t, tests)
@@ -116,9 +118,9 @@ func TestStringExpressions(t *testing.T) {
 
 func TestArrayLiterals(t *testing.T) {
 	tests := []vmTestCase{
-		{"[]", []int{}},
-		{"[1, 2, 3]", []int{1, 2, 3}},
-		{"[1 + 2, 3 * 4, 5 + 6]", []int{3, 12, 11}},
+		{"[];", []int{}},
+		{"[1, 2, 3];", []int{1, 2, 3}},
+		{"[1 + 2, 3 * 4, 5 + 6];", []int{3, 12, 11}},
 	}
 
 	runVmTests(t, tests)
@@ -127,17 +129,17 @@ func TestArrayLiterals(t *testing.T) {
 func TestHashLiterals(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			"{}", map[object.HashKey]int64{},
+			"{};", map[object.HashKey]int64{},
 		},
 		{
-			"{1: 2, 2: 3}",
+			"{1: 2, 2: 3};",
 			map[object.HashKey]int64{
 				(&object.LInt{Value: 1}).HashKey(): 2,
 				(&object.LInt{Value: 2}).HashKey(): 3,
 			},
 		},
 		{
-			"{1 + 1: 2 * 2, 3 + 3: 4 * 4}",
+			"{1 + 1: 2 * 2, 3 + 3: 4 * 4};",
 			map[object.HashKey]int64{
 				(&object.LInt{Value: 2}).HashKey(): 4,
 				(&object.LInt{Value: 6}).HashKey(): 16,
@@ -150,16 +152,16 @@ func TestHashLiterals(t *testing.T) {
 
 func TestIndexExpressions(t *testing.T) {
 	tests := []vmTestCase{
-		{"[1, 2, 3][1]", 2},
-		{"[1, 2, 3][0 + 2]", 3},
-		{"[[1, 1, 1]][0][0]", 1},
-		{"[][0]", Null},
-		{"[1, 2, 3][99]", Null},
-		{"[1][-1]", Null},
-		{"{1: 1, 2: 2}[1]", 1},
-		{"{1: 1, 2: 2}[2]", 2},
-		{"{1: 1}[0]", Null},
-		{"{}[0]", Null},
+		{"[1, 2, 3][1];", 2},
+		{"[1, 2, 3][0 + 2];", 3},
+		{"[[1, 1, 1]][0][0];", 1},
+		{"[][0];", Null},
+		{"[1, 2, 3][99];", Null},
+		{"[1][-1];", Null},
+		{"{1: 1, 2: 2}[1];", 1},
+		{"{1: 1, 2: 2}[2];", 2},
+		{"{1: 1}[0];", Null},
+		{"{}[0];", Null},
 	}
 
 	runVmTests(t, tests)
@@ -168,20 +170,20 @@ func TestIndexExpressions(t *testing.T) {
 func TestCallingFunctionsWithoutArguments(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION fivePlusTen : INT fivePlusTen := 5 + 10; END_FUNCTION
+			input: `FUNCTION fivePlusTen : INT fivePlusTen := 5 + 10; END_FUNCTION;
 					fivePlusTen();`,
 			expected: 15,
 		},
 		{
-			input: `FUNCTION one : INT one := 1; END_FUNCTION
-					FUNCTION two : INT two := 2; END_FUNCTION
-					one() + two()`,
+			input: `FUNCTION one : INT one := 1; END_FUNCTION;
+					FUNCTION two : INT two := 2; END_FUNCTION;
+					one() + two();`,
 			expected: 3,
 		},
 		{
-			input: `FUNCTION a : INT a := 1; END_FUNCTION
-					FUNCTION b : INT b := a() + 1; END_FUNCTION
-					FUNCTION c : INT c := b() + 1; END_FUNCTION
+			input: `FUNCTION a : INT a := 1; END_FUNCTION;
+					FUNCTION b : INT b := a() + 1; END_FUNCTION;
+					FUNCTION c : INT c := b() + 1; END_FUNCTION;
 					c();`,
 			expected: 3,
 		},
@@ -193,12 +195,12 @@ func TestCallingFunctionsWithoutArguments(t *testing.T) {
 func TestFunctionsWithReturnStatement(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION earlyExit : INT RETURN 99; END_FUNCTION
+			input: `FUNCTION earlyExit : INT RETURN 99; END_FUNCTION;
 					earlyExit();`,
 			expected: 99,
 		},
 		{
-			input: `FUNCTION earlyExit : INT RETURN 99; RETURN 100; END_FUNCTION
+			input: `FUNCTION earlyExit : INT RETURN 99; RETURN 100; END_FUNCTION;
 					earlyExit();`,
 			expected: 99,
 		},
@@ -210,13 +212,13 @@ func TestFunctionsWithReturnStatement(t *testing.T) {
 func TestFunctionsWithoutReturnValue(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION noReturn : INT END_FUNCTION
+			input: `FUNCTION noReturn : INT END_FUNCTION;
 					noReturn();`,
 			expected: Null,
 		},
 		{
-			input: `FUNCTION noReturn : INT END_FUNCTION
-					FUNCTION noReturnTwo : INT noReturnTwo := noReturn(); END_FUNCTION
+			input: `FUNCTION noReturn : INT END_FUNCTION;
+					FUNCTION noReturnTwo : INT noReturnTwo := noReturn(); END_FUNCTION;
 					noReturn();
 					noReturnTwo();`,
 			expected: Null,
@@ -228,50 +230,49 @@ func TestFunctionsWithoutReturnValue(t *testing.T) {
 func TestCallingFunctionsWithBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION one : INT VAR one_local : INT := 1; END_VAR one := one_local; END_FUNCTION
+			input: `FUNCTION one : INT VAR one_local : INT := 1; END_VAR one := one_local; END_FUNCTION;
 					one();`,
 			expected: 1,
 		},
 		{
 			input: `
-			FUNCTION oneAndTwo : INT
+			FUNCTION oneAndTwo : INT;
 				VAR one: INT := 1; two: INT := 2; END_VAR
 				oneAndTwo := one + two;
-			END_FUNCTION
+			END_FUNCTION;
 			oneAndTwo();`,
 			expected: 3,
 		},
 		{
-			input: `
-			FUNCTION oneAndTwo : INT VAR one:INT:=1; two:INT:=2; END_VAR oneAndTwo := one + two; END_FUNCTION
-			FUNCTION threeAndFour : INT VAR three:INT:=3; four:INT:=4; END_VAR threeAndFour := three + four; END_FUNCTION
+			input: `FUNCTION oneAndTwo : INT VAR one:INT:=1; two:INT:=2; END_VAR oneAndTwo := one + two; END_FUNCTION;
+			FUNCTION threeAndFour : INT VAR three:INT:=3; four:INT:=4; END_VAR threeAndFour := three + four; END_FUNCTION;
 			oneAndTwo() + threeAndFour();`,
 			expected: 10,
 		},
 		{
 			input: `
-			FUNCTION firstFoobar : INT
+			FUNCTION firstFoobar : INT;
 				VAR foobar : INT := 50; END_VAR
 				firstFoobar := foobar;
-			END_FUNCTION
-			FUNCTION secondFoobar : INT
+			END_FUNCTION;
+			FUNCTION secondFoobar : INT;
 				VAR foobar : INT := 100; END_VAR
 				secondFoobar := foobar;
-			END_FUNCTION
+			END_FUNCTION;
 			firstFoobar() + secondFoobar();`,
 			expected: 150,
 		},
 		{
 			input: `
-			VAR_GLOBAL globalSeed : INT := 50; END_VAR
-			FUNCTION minusOne : INT
+			VAR_GLOBAL globalSeed : INT := 50; END_VAR;
+			FUNCTION minusOne : INT;
 				VAR num : INT := 1; END_VAR
 				minusOne := globalSeed - num;
-			END_FUNCTION
-			FUNCTION minusTwo : INT
+			END_FUNCTION;
+			FUNCTION minusTwo : INT;
 				VAR num : INT := 2; END_VAR
 				minusTwo := globalSeed - num;
-			END_FUNCTION
+			END_FUNCTION;
 			minusOne() + minusTwo();`,
 			expected: 97,
 		},
@@ -283,43 +284,43 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION identity : INT VAR_INPUT a:INT; END_VAR identity := a; END_FUNCTION
+			input: `FUNCTION identity : INT VAR_INPUT a:INT; END_VAR identity := a; END_FUNCTION;
 					identity(4);`,
 			expected: 4,
 		},
 		{
-			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR sum := a + b; END_FUNCTION
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR sum := a + b; END_FUNCTION;
 					sum(1, 2);`,
 			expected: 3,
 		},
 		{
-			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION;
 					sum(1, 2);`,
 			expected: 3,
 		},
 		{
-			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION;
 					sum(1, 2) + sum(3, 4);`,
 			expected: 10,
 		},
 		{
-			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION
-					FUNCTION outer : INT outer := sum(1, 2) + sum(3, 4); END_FUNCTION
+			input: `FUNCTION sum : INT VAR_INPUT a:INT; b:INT; END_VAR VAR c:INT; END_VAR c := a + b; sum := c; END_FUNCTION;
+					FUNCTION outer : INT outer := sum(1, 2) + sum(3, 4); END_FUNCTION;
 					outer();`,
 			expected: 10,
 		},
 		{
 			input: `
-			VAR_GLOBAL globalNum : INT := 10; END_VAR
-			FUNCTION sum : INT
+			VAR_GLOBAL globalNum : INT := 10; END_VAR;
+			FUNCTION sum : INT;
 				VAR_INPUT a:INT; b:INT; END_VAR
 				VAR c:INT; END_VAR
 				c := a + b;
 				sum := c + globalNum;
-			END_FUNCTION
-			FUNCTION outer : INT
+			END_FUNCTION;
+			FUNCTION outer : INT;
 				outer := sum(1, 2) + sum(3, 4) + globalNum;
-			END_FUNCTION
+			END_FUNCTION;
 			outer() + globalNum;`,
 			expected: 50,
 		},
@@ -331,15 +332,15 @@ func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input:    `FUNCTION f:INT f:=1; END_FUNCTION f(1);`,
+			input:    `FUNCTION f:INT f:=1; END_FUNCTION; f(1);`,
 			expected: `wrong number of arguments: want=0, got=1`,
 		},
 		{
-			input:    `FUNCTION f:INT VAR_INPUT a:INT; END_VAR f:=a; END_FUNCTION f();`,
+			input:    `FUNCTION f:INT VAR_INPUT a:INT; END_VAR f:=a; END_FUNCTION; f();`,
 			expected: `wrong number of arguments: want=1, got=0`,
 		},
 		{
-			input:    `FUNCTION f:INT VAR_INPUT a:INT;b:INT; END_VAR f:=a+b; END_FUNCTION f(1);`,
+			input:    `FUNCTION f:INT VAR_INPUT a:INT;b:INT; END_VAR f:=a+b; END_FUNCTION; f(1);`,
 			expected: `wrong number of arguments: want=2, got=1`,
 		},
 	}
@@ -347,13 +348,25 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	for _, tt := range tests {
 		program := parse(tt.input)
 
-		comp := compiler.New()
+		// Create a local, sorted copy of built-ins to ensure deterministic indexing.
+		localBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+		copy(localBuiltinEntries, object.Builtins)
+		sort.Slice(localBuiltinEntries, func(i, j int) bool {
+			return localBuiltinEntries[i].Name < localBuiltinEntries[j].Name
+		})
+
+		vmBuiltins := make([]*object.Builtin, len(localBuiltinEntries))
+		for i, entry := range localBuiltinEntries {
+			vmBuiltins[i] = entry.Builtin
+		}
+
+		comp := compiler.NewCompilerWithBuiltins(localBuiltinEntries)
 		err := comp.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error: %s", err)
 		}
 
-		vm := New(comp.Bytecode())
+		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
 		if err == nil {
 			t.Fatalf("expected VM error but resulted in none.")
@@ -367,59 +380,80 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 
 func TestBuiltinFunctions(t *testing.T) {
 	tests := []vmTestCase{
-		{`LEN('')`, 0},
-		{`LEN('four')`, 4},
-		{`LEN('hello world')`, 11},
-		{
-			`LEN(1)`,
+		{`LEN('');`, 0},             // (* 0 *)
+		{`LEN('four');`, 4},         // (* 1 *)
+		{`LEN('hello world');`, 11}, // (* 2 *)
+		{ // (* 3 *)
+			`LEN(1);`,
 			&object.Error{
-				Message: "argument to `LEN` not supported, got LINT",
+				Message: "BUILTIN ERROR: argument to `LEN` not supported, got LINT",
 			},
 		},
-		{`LEN('one', 'two')`,
+		{`LEN('one', 'two');`, // (* 4 *)
 			&object.Error{
-				Message: "wrong number of arguments. got=2, want=1",
+				Message: "BUILTIN ERROR: wrong number of arguments for LEN. got=2, want=1",
 			},
 		},
-		{`LEN([1, 2, 3])`, 3},
-		{`LEN([])`, 0},
-		{`PUTS('hello', 'world!')`, Null},
-		{`FIRST([1, 2, 3])`, 1},
-		{`FIRST([])`, Null},
-		{`FIRST(1)`,
+		{`LEN([1, 2, 3]);`, 3},             // (* 5 *)
+		{`LEN([]);`, 0},                    // (* 6 *)
+		{`PUTS('hello', 'world!');`, Null}, // (* 7 *)
+		{`FIRST([1, 2, 3]);`, 1},           // (* 8 *)
+		{`FIRST([]);`, Null},               // (* 9 *)
+		{`FIRST(1);`, // (* 10 *)
 			&object.Error{
-				Message: "argument to `FIRST` must be ARRAY, got LINT",
+				Message: "BUILTIN ERROR: argument to `FIRST` must be ARRAY, got LINT",
 			},
 		},
-		{`LAST([1, 2, 3])`, 3},
-		{`LAST([])`, Null},
-		{`LAST(1)`,
+		{`LAST([1, 2, 3]);`, 3}, // (* 11 *)
+		{`LAST([]);`, Null},     // (* 12 *)
+		{`LAST(1);`, // (* 13 *)
 			&object.Error{
-				Message: "argument to `LAST` must be ARRAY, got LINT",
+				Message: "BUILTIN ERROR: argument to `LAST` must be ARRAY, got LINT",
 			},
 		},
-		{`REST([1, 2, 3])`, []int{2, 3}},
-		{`REST([])`, Null},
-		{`PUSH([], 1)`, []int{1}},
-		{`PUSH(1, 1)`,
+		{`REST([1, 2, 3]);`, []int{2, 3}}, // (* 14 *)
+		{`REST([]);`, Null},               // (* 15 *)
+		{`PUSH([], 1);`, []int{1}},        // (* 16 *)
+		{`PUSH(1, 1);`, // (* 17 *)
 			&object.Error{
-				Message: "argument to `PUSH` must be ARRAY, got LINT",
+				Message: "BUILTIN ERROR: argument to `PUSH` must be ARRAY, got LINT",
 			},
 		},
 		// IEC 61131-3 String Functions
-		{`CONCAT('a', 'b')`, "ab"},
-		{`CONCAT('a', 'b', 'c')`, "abc"},
-		{
-			`CONCAT('a')`,
+		{`CONCAT('a', 'b');`, "ab"},       // (* 18 *)
+		{`CONCAT('a', 'b', 'c');`, "abc"}, // (* 19 *)
+		{ // (* 20 *)
+			`CONCAT('a');`,
 			&object.Error{
-				Message: "wrong number of arguments for CONCAT. got=1, want>=2",
+				Message: "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2",
 			},
 		},
-		{`LEFT('abcde', 2)`, "ab"},
-		{`RIGHT('abcde', 2)`, "de"},
+		{`LEFT('abcde', 2);`, "ab"},  // (* 21 *)
+		{`RIGHT('abcde', 2);`, "de"}, // (* 22 *)
 		// MID(string, length, position)
-		{`MID('abcde', 3, 3)`, "cde"},
-		{`FIND('abcabc', 'b')`, 2},
+		{`MID('abcde', 3, 3);`, "cde"}, // (* 23 *)
+		{`FIND('abcabc', 'b');`, 2},    // (* 24 *)
+
+		// --- Selection Functions ---
+		{`LIMIT(10, 5, 20);`, 10},         // (* 25 *)
+		{`LIMIT(10, 15, 20);`, 15},        // (* 26 *)
+		{`LIMIT(10, 25, 20);`, 20},        // (* 27 *)
+		{`LIMIT(10.0, 5.5, 20.0);`, 10.0}, // (* 28 *)
+		{`MUX(0, 100, 101, 102);`, 100},   // (* 29 *)
+		{`MUX(2, 'a', 'b', 'c');`, "c"},   // (* 30 *)
+		{`SEL(FALSE, 10, 20);`, 10},       // (* 31 *)
+		{`SEL(TRUE, 'a', 'b');`, "b"},     // (* 32 *)
+		{`MOVE(123);`, 123},               // (* 33 *)
+		{`MOVE('hello');`, "hello"},       // (* 34 *)
+
+		// --- Math Functions ---
+		{`SQRT(9);`, 3.0},     // (* 35 *)
+		{`ABS(-10);`, 10},     // (* 36 *)
+		{`ABS(-10.5);`, 10.5}, // (* 37 *)
+		{`ROUND(3.5);`, 4},    // (* 38 *)
+		{`TRUNC(-3.9);`, -3},  // (* 39 *)
+		{`SIN(0);`, 0.0},      // (* 40 *)
+		{`COS(0);`, 1.0},      // (* 41 *)
 	}
 
 	runVmTests(t, tests)
@@ -427,31 +461,31 @@ func TestBuiltinFunctions(t *testing.T) {
 func TestRecursiveFunctions(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
+			input: `FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR;
 						IF x = 0 THEN
 							countDown := 0;
 						ELSE
 							countDown := countDown(x - 1);
 						END_IF
-					END_FUNCTION
+					END_FUNCTION;
 					countDown(1);`,
 			expected: 0,
 		},
 		{
 			input: `FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
 						IF x = 0 THEN countDown := 0; ELSE countDown := countDown(x - 1); END_IF
-					END_FUNCTION
-					FUNCTION wrapper : INT wrapper := countDown(1); END_FUNCTION
+					END_FUNCTION;
+					FUNCTION wrapper : INT wrapper := countDown(1); END_FUNCTION;
 					wrapper();`,
 			expected: 0,
 		},
 		{
-			input: `FUNCTION wrapper : INT
-						FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR
+			input: `FUNCTION wrapper : INT;
+						FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR;
 							IF x = 0 THEN countDown := 0; ELSE countDown := countDown(x - 1); END_IF
-						END_FUNCTION
+						END_FUNCTION;
 						wrapper := countDown(1);
-					END_FUNCTION
+					END_FUNCTION;
 					wrapper();`,
 			expected: 0,
 		},
@@ -463,7 +497,7 @@ func TestRecursiveFunctions(t *testing.T) {
 func TestRecursiveFibonacci(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION fibonacci : INT VAR_INPUT x:INT; END_VAR
+			input: `FUNCTION fibonacci : INT VAR_INPUT x:INT; END_VAR;
 						IF x = 0 THEN
 							fibonacci := 0;
 						ELSIF x = 1 THEN
@@ -471,7 +505,7 @@ func TestRecursiveFibonacci(t *testing.T) {
 						ELSE
 							fibonacci := fibonacci(x - 1) + fibonacci(x - 2);
 						END_IF
-					END_FUNCTION
+					END_FUNCTION;
 					fibonacci(15);`,
 			expected: 610,
 		},
@@ -491,16 +525,29 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 	for i, tt := range tests {
 		program := parse(tt.input)
 
-		comp := compiler.New()
-		err := comp.Compile(program)
-		if err != nil {
-			t.Fatalf("test #%d/%d: compiler error: %s", i, len(tests), err)
+		// Create a local, sorted copy of built-ins to ensure deterministic indexing
+		// and avoid race conditions with other test packages.
+		localBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+		copy(localBuiltinEntries, object.Builtins)
+		sort.Slice(localBuiltinEntries, func(i, j int) bool {
+			return localBuiltinEntries[i].Name < localBuiltinEntries[j].Name
+		})
+
+		vmBuiltins := make([]*object.Builtin, len(localBuiltinEntries))
+		for i, entry := range localBuiltinEntries {
+			vmBuiltins[i] = entry.Builtin
 		}
 
-		vm := New(comp.Bytecode())
+		comp := compiler.NewCompilerWithBuiltins(localBuiltinEntries)
+		err := comp.Compile(program)
+		if err != nil {
+			t.Fatalf("test #%d/%d on input '%s': compiler error: %s", i, len(tests), tt.input, err)
+		}
+
+		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
 		if err != nil {
-			t.Fatalf("test #%d/%d: vm error: %s", i, len(tests), err)
+			t.Fatalf("test #%d/%d on input '%s': vm error: %s", i, len(tests), tt.input, err)
 		}
 
 		stackElem := vm.LastPoppedStackElem()
@@ -528,6 +575,12 @@ func testExpectedObject(
 		err := testIntegerObject(int64(expected), actual)
 		if err != nil {
 			t.Errorf("test #%d: testIntegerObject failed: %s", testIndex, err)
+		}
+
+	case float64:
+		err := testRealObject(expected, actual)
+		if err != nil {
+			t.Errorf("test #%d: testRealObject failed: %s", testIndex, err)
 		}
 
 	case bool:
@@ -615,6 +668,29 @@ func testIntegerObject(expected int64, actual object.Object) error {
 	if result.Value != expected {
 		return fmt.Errorf("object has wrong value. got=%d, want=%d",
 			result.Value, expected)
+	}
+
+	return nil
+}
+
+func testRealObject(expected float64, actual object.Object) error {
+	var result float64
+	var ok bool
+	switch o := actual.(type) {
+	case *object.Real:
+		result = o.Value
+		ok = true
+	case *object.LReal:
+		result = o.Value
+		ok = true
+	}
+	if !ok {
+		return fmt.Errorf("object is not Real or LReal. got=%T (%+v)", actual, actual)
+	}
+
+	// Use a small tolerance for float comparison
+	if diff := result - expected; diff < -0.000001 || diff > 0.000001 {
+		return fmt.Errorf("object has wrong value. got=%f, want=%f", result, expected)
 	}
 
 	return nil

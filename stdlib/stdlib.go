@@ -196,12 +196,12 @@ func init() {
 		if len(args) != 3 {
 			return object.NewBuiltinError("wrong number of arguments for DELETE. got=%d, want=3", len(args))
 		}
-		// Standard signature is DELETE(IN, L, P).
-		l, _, ok := object.GetIntegerObjectValue(args[1]) // L is the length
+		// Standard signature is DELETE(IN, P, L).
+		p, _, ok := object.GetIntegerObjectValue(args[1]) // P is the position
 		if !ok {
 			return object.NewBuiltinError("argument 2 to `DELETE` must be INTEGER, got %s", args[1].Type())
 		}
-		p, _, ok := object.GetIntegerObjectValue(args[2]) // P is the position
+		l, _, ok := object.GetIntegerObjectValue(args[2]) // L is the length
 		if !ok {
 			return object.NewBuiltinError("argument 3 to `DELETE` must be INTEGER, got %s", args[2].Type())
 		}
@@ -246,8 +246,8 @@ func init() {
 	})
 
 	object.RegisterBuiltin("CONCAT", func(args ...object.Object) object.Object {
-		if len(args) < 1 {
-			return object.NewBuiltinError("wrong number of arguments for CONCAT. got=0, want>=1")
+		if len(args) < 2 {
+			return object.NewBuiltinError("wrong number of arguments for CONCAT. got=%d, want>=2", len(args))
 		}
 		switch args[0].Type() {
 		case object.ARRAY_OBJ:

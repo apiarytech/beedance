@@ -1178,9 +1178,15 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 		return nil
 	}
 
-	// Parse the task configuration (SINGLE, INTERVAL, PRIORITY)
-	for !p.curTokenIs(token.RPAREN) && !p.curTokenIs(token.EOF) {
-		p.nextToken() // move to the keyword
+	// Handle empty list: `()`
+	if p.peekTokenIs(token.RPAREN) {
+		p.nextToken() // consume ')'
+		return stmt
+	}
+
+	p.nextToken() // consume '(', move to first keyword
+
+	for {
 		switch p.curToken.Type {
 		case token.SINGLE:
 			if !p.expectPeek(token.ASSIGN) {
@@ -1200,14 +1206,21 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 			}
 			p.nextToken()
 			stmt.Priority = p.parseExpression(LOWEST)
+		default:
+			p.currentError("unexpected token in task configuration: %s", p.curToken.Type)
+			return stmt // return for recovery
 		}
-		if p.curTokenIs(token.COMMA) {
-			p.nextToken()
-		}
-	}
 
-	if !p.curTokenIs(token.RPAREN) {
-		return nil
+		p.nextToken() // Advance past the expression value
+
+		if p.curTokenIs(token.RPAREN) {
+			break
+		}
+		if !p.curTokenIs(token.COMMA) {
+			p.currentError("expected ',' or ')' in task configuration, got %s", p.curToken.Type)
+			return stmt
+		}
+		p.nextToken() // consume comma, move to next keyword
 	}
 
 	p.nextToken() // Consume ')'

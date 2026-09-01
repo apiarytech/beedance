@@ -42,15 +42,9 @@ type Compiler struct {
 	loopCtxStack  []*loopContext
 }
 
-// loopContext holds information about a loop being compiled, such as the
-// positions of `EXIT` statements (`break` in Go) that need to be patched.
-type loopContext struct {
-	breakPositions []int
-}
-
-// New creates and initializes a new Compiler instance. It sets up the main
-// compilation scope and defines the built-in functions in the global symbol table.
-func New() *Compiler {
+// NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
+// This is useful for testing to avoid dependency on global state.
+func NewCompilerWithBuiltins(builtins []object.BuiltinEntry) *Compiler {
 	mainScope := CompilationScope{
 		instructions:        code.Instructions{},
 		lastInstruction:     EmittedInstruction{},
@@ -58,8 +52,7 @@ func New() *Compiler {
 	}
 
 	symbolTable := NewSymbolTable()
-
-	for i, v := range object.Builtins {
+	for i, v := range builtins {
 		symbolTable.DefineBuiltin(i, v.Name)
 	}
 
@@ -73,13 +66,34 @@ func New() *Compiler {
 	}
 }
 
+// New creates and initializes a new Compiler instance. It sets up the main
+// compilation scope and defines the built-in functions in the global symbol table.
+func New() *Compiler {
+	return NewCompilerWithBuiltins(object.Builtins)
+}
+
 // NewWithState creates a new Compiler with a pre-existing symbol table and
 // constant pool, which is useful for testing or for a REPL environment.
 func NewWithState(s *SymbolTable, constants []object.Object) *Compiler {
-	compiler := New()
-	compiler.symbolTable = s
-	compiler.constants = constants
-	return compiler
+	mainScope := CompilationScope{
+		instructions:        code.Instructions{},
+		lastInstruction:     EmittedInstruction{},
+		previousInstruction: EmittedInstruction{},
+	}
+	return &Compiler{
+		constants:     constants,
+		symbolTable:   s,
+		scopes:        []CompilationScope{mainScope},
+		scopeIndex:    0,
+		functionStack: []*ast.FunctionDeclaration{},
+		loopCtxStack:  []*loopContext{},
+	}
+}
+
+// loopContext holds information about a loop being compiled, such as the
+// positions of `EXIT` statements (`break` in Go) that need to be patched.
+type loopContext struct {
+	breakPositions []int
 }
 
 // pushFunction adds a function declaration to the top of the function stack.
@@ -457,15 +471,24 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
-		// After the body, load the return value from its variable and return it.
-		// This handles the `FunctionName := ...` return style of IEC 61131-3.
-		returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
-		if !ok {
-			// This should not happen if we defined it above.
-			return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
+		// If the last statement in a function body is an expression, its result
+		// should be the return value. We replace the OpPop with OpReturnValue.
+		if c.lastInstructionIs(code.OpPop) {
+			c.replaceLastPopWithReturn()
 		}
-		c.loadSymbol(returnSymbol)
-		c.emit(code.OpReturnValue)
+
+		// If the function body did not already emit a return value (e.g., via
+		// an assignment to the function name, which is compiled as a return),
+		// we add an implicit return of the function's return variable.
+		if !c.lastInstructionIs(code.OpReturnValue) {
+			returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
+			if !ok {
+				// This should not happen if we defined it above.
+				return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
+			}
+			c.loadSymbol(returnSymbol)
+			c.emit(code.OpReturnValue)
+		}
 
 		freeSymbols := c.symbolTable.FreeSymbols
 		numLocals := c.symbolTable.numDefinitions
@@ -495,12 +518,25 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err != nil {
 			return err
 		}
-		// An expression statement's value is not used at the top level,
-		// so we pop its result off the stack to keep the stack clean.
-		// This is the single source of truth for this behavior.
+		// The result of an expression statement is not used, so we must
+		// pop it from the stack to prevent stack corruption.
 		c.emit(code.OpPop)
 
 	case *ast.AssignmentStatement:
+		// Check if assigning to the current function's return variable.
+		// This is the standard way to return a value in IEC 61131-3.
+		// We can optimize this by treating it as an explicit return statement.
+		if ident, ok := node.Left.(*ast.Identifier); ok {
+			if currentFn := c.currentFunction(); currentFn != nil && ident.Value == currentFn.Name.Value {
+				// Compile the value and treat it as a return statement.
+				if err := c.Compile(node.Value); err != nil {
+					return err
+				}
+				c.emit(code.OpReturnValue)
+				return nil // Statement handled.
+			}
+		}
+
 		err := c.Compile(node.Value)
 		if err != nil {
 			return err
@@ -1046,6 +1082,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		fnIndex := c.addConstant(compiledFn)
 		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
+
+	// A MacroLiteral is treated as a data structure at compile time. It's not
+	// executed but is stored as a constant to be expanded by the evaluator/VM later.
+	case *ast.MacroLiteral:
+		// The macro's body and parameters are stored in an UncompiledMacro
+		// object. The compiler does not have a runtime environment to capture,
+		// so the Env field is set to nil. The VM/evaluator will handle expansion.
+		macro := &object.UncompiledMacro{
+			Parameters: node.Parameters,
+			Body:       node.Body,
+		}
+		constIndex := c.addConstant(macro)
+		c.emit(code.OpConstant, constIndex)
 
 	// A ReturnStatement compiles the return value and emits OpReturnValue.
 	case *ast.ReturnStatement:
@@ -1678,12 +1727,23 @@ func (c *Compiler) compileArrayRepetition(ar *ast.ArrayRepetition) (int, error) 
 	numElementsPerRep := len(ar.Elements)
 	totalElements := count * numElementsPerRep
 
-	for i := 0; i < count; i++ {
-		for _, el := range ar.Elements {
-			if err := c.Compile(el); err != nil {
-				return 0, err
-			}
+	if count == 0 {
+		return 0, nil
+	}
+
+	// Compile the elements once to generate the instructions for one repetition.
+	startPos := len(c.currentInstructions())
+	for _, el := range ar.Elements {
+		if err := c.Compile(el); err != nil {
+			return 0, err
 		}
+	}
+	endPos := len(c.currentInstructions())
+	oneRepetitionInstructions := c.currentInstructions()[startPos:endPos]
+
+	// Now, append these instructions `count - 1` more times.
+	for i := 0; i < count-1; i++ {
+		c.addInstruction(oneRepetitionInstructions)
 	}
 
 	return totalElements, nil

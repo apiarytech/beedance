@@ -1,3 +1,14 @@
+/*
+ * Copyright (C) 2026 Franklin D. Amador
+ *
+ * This software is dual-licensed under:
+ * - GPL v2.0
+ * - Commercial
+ *
+ * You may choose to use this software under the terms of either license.
+ * See the LICENSE files in the project root for full license text.
+ */
+
 package vm
 
 import (
@@ -38,10 +49,22 @@ type VM struct {
 
 	frames      []*Frame
 	framesIndex int
+
+	builtins []*object.Builtin
 }
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
+	builtins := make([]*object.Builtin, len(object.Builtins))
+	for i, entry := range object.Builtins {
+		builtins[i] = entry.Builtin
+	}
+	return NewWithBuiltins(bytecode, builtins)
+}
+
+// NewWithBuiltins creates a new VM with a specific set of built-in functions.
+// This is useful for testing to avoid dependency on global state.
+func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *VM {
 	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
 	mainClosure := &object.Closure{Fn: mainFn}
 	mainFrame := NewFrame(mainClosure, 0)
@@ -50,15 +73,13 @@ func New(bytecode *compiler.Bytecode) *VM {
 	frames[0] = mainFrame
 
 	return &VM{
-		constants: bytecode.Constants,
-
-		stack: make([]object.Object, StackSize),
-		sp:    0,
-
-		globals: make([]object.Object, GlobalsSize),
-
+		constants:   bytecode.Constants,
+		stack:       make([]object.Object, StackSize),
+		sp:          0,
+		globals:     make([]object.Object, GlobalsSize),
 		frames:      frames,
 		framesIndex: 1,
+		builtins:    builtins,
 	}
 }
 
@@ -219,8 +240,15 @@ func (vm *VM) Run() error {
 			// OpGetBuiltin retrieves a built-in function and pushes it onto the stack.
 			builtinIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
-			definition := object.Builtins[builtinIndex]
-			err = vm.push(definition.Builtin)
+
+			if int(builtinIndex) >= len(vm.builtins) {
+				return fmt.Errorf("invalid builtin index: %d", builtinIndex)
+			}
+			definition := vm.builtins[builtinIndex]
+			if definition == nil {
+				return fmt.Errorf("no builtin function at index: %d", builtinIndex)
+			}
+			err = vm.push(definition)
 
 		case code.OpClosure:
 			// OpClosure creates a closure from a compiled function and free variables.
@@ -327,8 +355,14 @@ func (vm *VM) executeBinaryIntegerOperation(
 	op code.Opcode,
 	left, right object.Object,
 ) error {
-	leftValue := left.(*object.LInt).Value
-	rightValue := right.(*object.LInt).Value
+	leftValue, _, ok := object.GetIntegerObjectValue(left)
+	if !ok {
+		return fmt.Errorf("left operand is not an integer: %s", left.Type())
+	}
+	rightValue, _, ok := object.GetIntegerObjectValue(right)
+	if !ok {
+		return fmt.Errorf("right operand is not an integer: %s", right.Type())
+	}
 
 	var result int64 // Keep as int64 for now, or change to int32 if object.Integer.Value is changed
 
@@ -393,8 +427,14 @@ func (vm *VM) executeIntegerComparison(
 	op code.Opcode,
 	left, right object.Object,
 ) error {
-	leftValue := left.(*object.LInt).Value
-	rightValue := right.(*object.LInt).Value
+	leftValue, _, ok := object.GetIntegerObjectValue(left)
+	if !ok {
+		return fmt.Errorf("left operand is not an integer: %s", left.Type())
+	}
+	rightValue, _, ok := object.GetIntegerObjectValue(right)
+	if !ok {
+		return fmt.Errorf("right operand is not an integer: %s", right.Type())
+	}
 
 	switch op {
 	case code.OpEqual:
@@ -434,12 +474,18 @@ func (vm *VM) executeBangOperator() error {
 func (vm *VM) executeMinusOperator() error {
 	operand := vm.pop()
 
-	if !isInteger(operand) {
+	// The `isInteger` check allows multiple integer types, so we must handle them.
+	switch o := operand.(type) {
+	case *object.LInt:
+		return vm.push(&object.LInt{Value: -o.Value})
+	case *object.Real:
+		return vm.push(&object.Real{Value: -o.Value})
+	case *object.LReal:
+		return vm.push(&object.LReal{Value: -o.Value})
+		// In a full implementation, other integer types (SINT, INT, DINT) would be handled here.
+	default:
 		return fmt.Errorf("unsupported type for negation: %s", operand.Type())
 	}
-
-	value := operand.(*object.LInt).Value
-	return vm.push(&object.LInt{Value: -value})
 }
 
 // executeBinaryStringOperation performs a binary operation on two string objects.
@@ -504,7 +550,10 @@ func (vm *VM) executeIndexExpression(left, index object.Object) error {
 // executeArrayIndex executes an index operation on an array.
 func (vm *VM) executeArrayIndex(array, index object.Object) error {
 	arrayObject := array.(*object.Array)
-	i := index.(*object.LInt).Value
+	i, _, ok := object.GetIntegerObjectValue(index)
+	if !ok {
+		return fmt.Errorf("array index must be an integer, got %s", index.Type())
+	}
 	max := int64(len(arrayObject.Elements) - 1) // Keep as int64 for comparison with int64 `i`
 
 	if i < 0 || i > max {
