@@ -109,8 +109,6 @@ func TestStringExpressions(t *testing.T) {
 		// Per IEC 61131-3, STRING literals use single quotes and concatenation
 		// is handled by the CONCAT function, not the '+' operator.
 		{`'beedance';`, "beedance"},
-		{`CONCAT('mon', 'key');`, "monkey"},
-		{`CONCAT('mon', 'key', 'banana');`, "monkeybanana"},
 	}
 
 	runVmTests(t, tests)
@@ -284,7 +282,12 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION identity : INT VAR_INPUT a:INT; END_VAR identity := a; END_FUNCTION;
+			input: `FUNCTION identity : INT 
+						VAR_INPUT 
+							a:INT; 
+						END_VAR 
+						identity := a; 
+					END_FUNCTION;
 					identity(4);`,
 			expected: 4,
 		},
@@ -312,13 +315,18 @@ func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 		{
 			input: `
 			VAR_GLOBAL globalNum : INT := 10; END_VAR;
-			FUNCTION sum : INT;
-				VAR_INPUT a:INT; b:INT; END_VAR
-				VAR c:INT; END_VAR
+			FUNCTION sum : INT
+				VAR_INPUT 
+					a:INT; 
+					b:INT; 
+				END_VAR
+				VAR 
+					c:INT;
+				END_VAR
 				c := a + b;
 				sum := c + globalNum;
 			END_FUNCTION;
-			FUNCTION outer : INT;
+			FUNCTION outer : INT
 				outer := sum(1, 2) + sum(3, 4) + globalNum;
 			END_FUNCTION;
 			outer() + globalNum;`,
@@ -348,24 +356,24 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	for _, tt := range tests {
 		program := parse(tt.input)
 
-		// Create a local, sorted copy of built-ins to ensure deterministic indexing.
-		localBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-		copy(localBuiltinEntries, object.Builtins)
-		sort.Slice(localBuiltinEntries, func(i, j int) bool {
-			return localBuiltinEntries[i].Name < localBuiltinEntries[j].Name
+		// Create a single, sorted list of built-ins to ensure the compiler and VM
+		// use the exact same function indexing. This prevents mismatches.
+		sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+		copy(sortedBuiltinEntries, object.Builtins)
+		sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
+			return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
 		})
 
-		vmBuiltins := make([]*object.Builtin, len(localBuiltinEntries))
-		for i, entry := range localBuiltinEntries {
-			vmBuiltins[i] = entry.Builtin
-		}
-
-		comp := compiler.NewCompilerWithBuiltins(localBuiltinEntries)
+		comp := compiler.NewCompilerWithBuiltins(sortedBuiltinEntries)
 		err := comp.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error: %s", err)
 		}
 
+		vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
+		for i, entry := range sortedBuiltinEntries {
+			vmBuiltins[i] = entry.Builtin
+		}
 		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
 		if err == nil {
@@ -380,80 +388,82 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 
 func TestBuiltinFunctions(t *testing.T) {
 	tests := []vmTestCase{
-		{`LEN('');`, 0},             // (* 0 *)
-		{`LEN('four');`, 4},         // (* 1 *)
-		{`LEN('hello world');`, 11}, // (* 2 *)
+		// --- Monkey-compatible built-ins (adapted for IEC syntax) ---
+		{`LEN('');`, 0},
+		{`LEN('four');`, 4},
+		{`LEN('hello world');`, 11},
 		{ // (* 3 *)
 			`LEN(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `LEN` not supported, got LINT",
 			},
 		},
-		{`LEN('one', 'two');`, // (* 4 *)
+		{`LEN('one', 'two');`,
 			&object.Error{
 				Message: "BUILTIN ERROR: wrong number of arguments for LEN. got=2, want=1",
 			},
 		},
-		{`LEN([1, 2, 3]);`, 3},             // (* 5 *)
-		{`LEN([]);`, 0},                    // (* 6 *)
-		{`PUTS('hello', 'world!');`, Null}, // (* 7 *)
-		{`FIRST([1, 2, 3]);`, 1},           // (* 8 *)
-		{`FIRST([]);`, Null},               // (* 9 *)
-		{`FIRST(1);`, // (* 10 *)
+		{`LEN([1, 2, 3]);`, 3},
+		{`LEN([]);`, 0},
+		{`PUTS('hello world!');`, Null},
+		{`FIRST([1, 2, 3]);`, 1},
+		{`FIRST([]);`, Null},
+		{`FIRST(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `FIRST` must be ARRAY, got LINT",
 			},
 		},
-		{`LAST([1, 2, 3]);`, 3}, // (* 11 *)
-		{`LAST([]);`, Null},     // (* 12 *)
-		{`LAST(1);`, // (* 13 *)
+		{`LAST([1, 2, 3]);`, 3},
+		{`LAST([]);`, Null},
+		{`LAST(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `LAST` must be ARRAY, got LINT",
 			},
 		},
-		{`REST([1, 2, 3]);`, []int{2, 3}}, // (* 14 *)
-		{`REST([]);`, Null},               // (* 15 *)
-		{`PUSH([], 1);`, []int{1}},        // (* 16 *)
-		{`PUSH(1, 1);`, // (* 17 *)
+		{`REST([1, 2, 3]);`, []int{2, 3}},
+		{`REST([]);`, Null},
+		{`PUSH([], 1);`, []int{1}},
+		{`PUSH(1, 1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `PUSH` must be ARRAY, got LINT",
 			},
 		},
-		// IEC 61131-3 String Functions
-		{`CONCAT('a', 'b');`, "ab"},       // (* 18 *)
-		{`CONCAT('a', 'b', 'c');`, "abc"}, // (* 19 *)
-		{ // (* 20 *)
+
+		// --- IEC 61131-3 Standard Built-ins ---
+		// String Functions
+		{`CONCAT('a', 'b');`, "ab"},
+		{`CONCAT('a', 'b', 'c');`, "abc"},
+		{
 			`CONCAT('a');`,
 			&object.Error{
 				Message: "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2",
 			},
 		},
-		{`LEFT('abcde', 2);`, "ab"},  // (* 21 *)
-		{`RIGHT('abcde', 2);`, "de"}, // (* 22 *)
-		// MID(string, length, position)
-		{`MID('abcde', 3, 3);`, "cde"}, // (* 23 *)
-		{`FIND('abcabc', 'b');`, 2},    // (* 24 *)
+		{`LEFT('abcde', 2);`, "ab"},
+		{`RIGHT('abcde', 2);`, "de"},
+		{`MID('abcde', 2, 3);`, "bcd"}, // MID(IN, P, L)
+		{`FIND('abcabc', 'b');`, 2},
 
-		// --- Selection Functions ---
-		{`LIMIT(10, 5, 20);`, 10},         // (* 25 *)
-		{`LIMIT(10, 15, 20);`, 15},        // (* 26 *)
-		{`LIMIT(10, 25, 20);`, 20},        // (* 27 *)
-		{`LIMIT(10.0, 5.5, 20.0);`, 10.0}, // (* 28 *)
-		{`MUX(0, 100, 101, 102);`, 100},   // (* 29 *)
-		{`MUX(2, 'a', 'b', 'c');`, "c"},   // (* 30 *)
-		{`SEL(FALSE, 10, 20);`, 10},       // (* 31 *)
-		{`SEL(TRUE, 'a', 'b');`, "b"},     // (* 32 *)
-		{`MOVE(123);`, 123},               // (* 33 *)
-		{`MOVE('hello');`, "hello"},       // (* 34 *)
+		// Selection Functions
+		{`LIMIT(10, 5, 20);`, 10},
+		{`LIMIT(10, 15, 20);`, 15},
+		{`LIMIT(10, 25, 20);`, 20},
+		{`LIMIT(10.0, 5.5, 20.0);`, 10.0},
+		{`MUX(0, 100, 101, 102);`, 100},
+		{`MUX(2, 'a', 'b', 'c');`, "c"},
+		{`SEL(FALSE, 10, 20);`, 10},
+		{`SEL(TRUE, 'a', 'b');`, "b"},
+		{`MOVE(123);`, 123},
+		{`MOVE('hello');`, "hello"},
 
-		// --- Math Functions ---
-		{`SQRT(9);`, 3.0},     // (* 35 *)
-		{`ABS(-10);`, 10},     // (* 36 *)
-		{`ABS(-10.5);`, 10.5}, // (* 37 *)
-		{`ROUND(3.5);`, 4},    // (* 38 *)
-		{`TRUNC(-3.9);`, -3},  // (* 39 *)
-		{`SIN(0);`, 0.0},      // (* 40 *)
-		{`COS(0);`, 1.0},      // (* 41 *)
+		// Math Functions
+		{`SQRT(9);`, 3.0},
+		{`ABS(-10);`, 10},
+		{`ABS(-10.5);`, 10.5},
+		{`ROUND(3.5);`, 4},
+		{`TRUNC(-3.9);`, -3},
+		{`SIN(0);`, 0.0},
+		{`COS(0);`, 1.0},
 	}
 
 	runVmTests(t, tests)
@@ -522,28 +532,30 @@ type vmTestCase struct {
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	t.Helper()
 
+	// Finalize built-ins to ensure they are registered before tests run.
+	object.FinalizeBuiltins()
+
 	for i, tt := range tests {
 		program := parse(tt.input)
 
-		// Create a local, sorted copy of built-ins to ensure deterministic indexing
-		// and avoid race conditions with other test packages.
-		localBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-		copy(localBuiltinEntries, object.Builtins)
-		sort.Slice(localBuiltinEntries, func(i, j int) bool {
-			return localBuiltinEntries[i].Name < localBuiltinEntries[j].Name
+		// Create a single, sorted list of built-ins to ensure the compiler and VM
+		// use the exact same function indexing. This prevents mismatches.
+		sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+		copy(sortedBuiltinEntries, object.Builtins)
+		sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
+			return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
 		})
 
-		vmBuiltins := make([]*object.Builtin, len(localBuiltinEntries))
-		for i, entry := range localBuiltinEntries {
-			vmBuiltins[i] = entry.Builtin
-		}
-
-		comp := compiler.NewCompilerWithBuiltins(localBuiltinEntries)
+		comp := compiler.NewCompilerWithBuiltins(sortedBuiltinEntries)
 		err := comp.Compile(program)
 		if err != nil {
 			t.Fatalf("test #%d/%d on input '%s': compiler error: %s", i, len(tests), tt.input, err)
 		}
 
+		vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
+		for i, entry := range sortedBuiltinEntries {
+			vmBuiltins[i] = entry.Builtin
+		}
 		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
 		if err != nil {

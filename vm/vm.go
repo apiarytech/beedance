@@ -55,6 +55,9 @@ type VM struct {
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
+	// Create the list of built-in functions from the global object.Builtins.
+	// This is used when creating a VM for production (e.g., in main.go),
+	// as opposed to tests which inject a specific list.
 	builtins := make([]*object.Builtin, len(object.Builtins))
 	for i, entry := range object.Builtins {
 		builtins[i] = entry.Builtin
@@ -240,14 +243,10 @@ func (vm *VM) Run() error {
 			// OpGetBuiltin retrieves a built-in function and pushes it onto the stack.
 			builtinIndex := code.ReadUint8(ins[ip+1:])
 			vm.currentFrame().ip += 1
-
 			if int(builtinIndex) >= len(vm.builtins) {
 				return fmt.Errorf("invalid builtin index: %d", builtinIndex)
 			}
 			definition := vm.builtins[builtinIndex]
-			if definition == nil {
-				return fmt.Errorf("no builtin function at index: %d", builtinIndex)
-			}
 			err = vm.push(definition)
 
 		case code.OpClosure:
@@ -632,9 +631,11 @@ func (vm *VM) callBuiltin(builtin *object.Builtin, numArgs int) error {
 	result := builtin.Fn(args...)
 	vm.sp = vm.sp - numArgs - 1
 
-	// All built-in functions are now guaranteed to return a non-nil object.
-	// Functions that would have returned nil now return the Null singleton.
-	vm.push(result)
+	if result != nil {
+		vm.push(result)
+	} else {
+		vm.push(Null)
+	}
 
 	return nil
 }
