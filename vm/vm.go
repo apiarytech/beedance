@@ -17,6 +17,7 @@ import (
 	"beedance/object"
 	"fmt"
 	"math"
+	"sort"
 )
 
 // StackSize defines the maximum number of objects that can be on the stack.
@@ -55,13 +56,20 @@ type VM struct {
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
-	// Create the list of built-in functions from the global object.Builtins.
-	// This is used when creating a VM for production (e.g., in main.go),
-	// as opposed to tests which inject a specific list.
-	builtins := make([]*object.Builtin, len(object.Builtins))
-	for i, entry := range object.Builtins {
+	// Create a sorted list of built-in functions from the global object.Builtins.
+	// This ensures that the VM's built-in index matches the compiler's, as the
+	// compiler also sorts the built-ins before assigning indices.
+	sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+	copy(sortedBuiltinEntries, object.Builtins)
+	sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
+		return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
+	})
+
+	builtins := make([]*object.Builtin, len(sortedBuiltinEntries))
+	for i, entry := range sortedBuiltinEntries {
 		builtins[i] = entry.Builtin
 	}
+
 	return NewWithBuiltins(bytecode, builtins)
 }
 

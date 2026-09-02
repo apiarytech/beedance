@@ -16,9 +16,9 @@ func TestBuiltinRegistrationAndFinalization(t *testing.T) {
 	Builtins = nil
 
 	// 1. Register some built-ins in a non-alphabetical order.
-	RegisterBuiltin("Z_FUNC", dummyBuiltin)
-	RegisterBuiltin("A_FUNC", dummyBuiltin)
-	RegisterBuiltin("M_FUNC", dummyBuiltin)
+	RegisterBuiltin(2, "Z_FUNC", dummyBuiltin)
+	RegisterBuiltin(0, "A_FUNC", dummyBuiltin)
+	RegisterBuiltin(1, "M_FUNC", dummyBuiltin)
 
 	// 2. Check if they are in the internal map.
 	if _, ok := builtinsByName["A_FUNC"]; !ok {
@@ -39,10 +39,10 @@ func TestBuiltinRegistrationAndFinalization(t *testing.T) {
 		t.Fatalf("FinalizeBuiltins did not populate the Builtins slice correctly. want=3, got=%d", len(Builtins))
 	}
 
-	expectedOrder := []string{"A_FUNC", "M_FUNC", "Z_FUNC"}
+	expectedOrder := []string{"A_FUNC", "M_FUNC", "Z_FUNC"} // This is now order by index
 	for i, name := range expectedOrder {
 		if Builtins[i].Name != name {
-			t.Errorf("Builtins slice is not sorted correctly. want %s at index %d, got %s", name, i, Builtins[i].Name)
+			t.Errorf("Builtins slice is not ordered by index correctly. want %s at index %d, got %s", name, i, Builtins[i].Name)
 		}
 	}
 }
@@ -53,7 +53,7 @@ func TestGetBuiltinByName(t *testing.T) {
 	Builtins = nil
 
 	// Register a known function
-	RegisterBuiltin("TEST_GET", dummyBuiltin)
+	RegisterBuiltin(0, "TEST_GET", dummyBuiltin)
 
 	// Test getting an existing builtin
 	t.Run("get existing builtin", func(t *testing.T) {

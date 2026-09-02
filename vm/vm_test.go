@@ -392,7 +392,7 @@ func TestBuiltinFunctions(t *testing.T) {
 		{`LEN('');`, 0},
 		{`LEN('four');`, 4},
 		{`LEN('hello world');`, 11},
-		{ // (* 3 *)
+		{
 			`LEN(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `LEN` not supported, got LINT",
@@ -535,16 +535,21 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 	// Finalize built-ins to ensure they are registered before tests run.
 	object.FinalizeBuiltins()
 
+	// Create a single, sorted list of built-ins to ensure the compiler and VM
+	// use the exact same function indexing. This can be done once for all tests.
+	sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
+	copy(sortedBuiltinEntries, object.Builtins)
+	sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
+		return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
+	})
+
+	vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
+	for i, entry := range sortedBuiltinEntries {
+		vmBuiltins[i] = entry.Builtin
+	}
+
 	for i, tt := range tests {
 		program := parse(tt.input)
-
-		// Create a single, sorted list of built-ins to ensure the compiler and VM
-		// use the exact same function indexing. This prevents mismatches.
-		sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-		copy(sortedBuiltinEntries, object.Builtins)
-		sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
-			return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
-		})
 
 		comp := compiler.NewCompilerWithBuiltins(sortedBuiltinEntries)
 		err := comp.Compile(program)
@@ -552,10 +557,6 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 			t.Fatalf("test #%d/%d on input '%s': compiler error: %s", i, len(tests), tt.input, err)
 		}
 
-		vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
-		for i, entry := range sortedBuiltinEntries {
-			vmBuiltins[i] = entry.Builtin
-		}
 		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
 		if err != nil {

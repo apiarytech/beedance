@@ -8,6 +8,7 @@ import (
 	"beedance/parser"
 	_ "beedance/stdlib"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 )
@@ -490,12 +491,14 @@ type compilerTestCase struct {
 // This prevents test failures caused by global state pollution where the global `object.Builtins`
 // slice might be modified by another test.
 func getTestBuiltins() []object.BuiltinEntry {
-	// The indices must match the expectations in the tests (e.g., LEN is 0, PUSH is 5).
-	// We only need to define the built-ins that are actually used in compiler tests.
-	// The function implementation (Fn) is not needed for compilation, only the name.
-	builtins := make([]object.BuiltinEntry, 6) // Slice is large enough for PUSH at index 5
-	builtins[0] = object.BuiltinEntry{Name: "LEN"}
-	builtins[5] = object.BuiltinEntry{Name: "PUSH"}
+	// Create a list of the built-ins needed for the tests.
+	// The sorting ensures their indices are deterministic within the test's context,
+	// mimicking the behavior of `object.FinalizeBuiltins`.
+	builtins := []object.BuiltinEntry{
+		{Name: "LEN"},
+		{Name: "PUSH"},
+	}
+	// Alphabetical sort: LEN -> index 0, PUSH -> index 1
 	return builtins
 }
 
@@ -506,8 +509,14 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 		program := parse(tt.input)
 
 		// Use the new constructor to create a compiler with a clean, known set of built-ins.
-		// This makes the test robust against global state pollution.
-		compiler := NewCompilerWithBuiltins(getTestBuiltins())
+		// This makes the test robust against global state pollution. We sort them here
+		// to ensure a deterministic order for the test expectations.
+		testBuiltins := getTestBuiltins()
+		sort.Slice(testBuiltins, func(i, j int) bool {
+			return testBuiltins[i].Name < testBuiltins[j].Name
+		})
+
+		compiler := NewCompilerWithBuiltins(testBuiltins)
 		err := compiler.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error on test #%d/%d: %s", i+1, len(tests), err)
@@ -1087,7 +1096,7 @@ func TestBuiltins(t *testing.T) {
 				code.Make(code.OpArray, 0),
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
-				code.Make(code.OpGetBuiltin, 5),
+				code.Make(code.OpGetBuiltin, 1), // PUSH is at index 1 after sorting [LEN, PUSH]
 				code.Make(code.OpArray, 0),
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpCall, 2),
