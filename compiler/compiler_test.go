@@ -8,7 +8,6 @@ import (
 	"beedance/parser"
 	_ "beedance/stdlib"
 	"fmt"
-	"sort"
 	"testing"
 	"time"
 )
@@ -487,18 +486,22 @@ type compilerTestCase struct {
 	expectedInstructions []code.Instructions
 }
 
+// To make tests stable, we define explicit indices for the built-ins used in tests.
+// This mimics the iota-based approach for the main application.
+const (
+	testBuiltinLen = iota
+	testBuiltinPush
+)
+
 // getTestBuiltins provides a clean, isolated set of built-in function definitions for testing.
 // This prevents test failures caused by global state pollution where the global `object.Builtins`
 // slice might be modified by another test.
 func getTestBuiltins() []object.BuiltinEntry {
-	// Create a list of the built-ins needed for the tests.
-	// The sorting ensures their indices are deterministic within the test's context,
-	// mimicking the behavior of `object.FinalizeBuiltins`.
-	builtins := []object.BuiltinEntry{
-		{Name: "LEN"},
-		{Name: "PUSH"},
-	}
-	// Alphabetical sort: LEN -> index 0, PUSH -> index 1
+	// With explicit indexing, we create a slice of the correct size
+	// and place the built-ins at their designated index. No sorting is needed.
+	builtins := make([]object.BuiltinEntry, 2) // We have 2 test built-ins
+	builtins[testBuiltinLen] = object.BuiltinEntry{Name: "LEN"}
+	builtins[testBuiltinPush] = object.BuiltinEntry{Name: "PUSH"}
 	return builtins
 }
 
@@ -508,15 +511,9 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 	for i, tt := range tests {
 		program := parse(tt.input)
 
-		// Use the new constructor to create a compiler with a clean, known set of built-ins.
-		// This makes the test robust against global state pollution. We sort them here
-		// to ensure a deterministic order for the test expectations.
-		testBuiltins := getTestBuiltins()
-		sort.Slice(testBuiltins, func(i, j int) bool {
-			return testBuiltins[i].Name < testBuiltins[j].Name
-		})
-
-		compiler := NewCompilerWithBuiltins(testBuiltins)
+		// The test setup is now much simpler. No sorting is required because
+		// getTestBuiltins provides the built-ins in their final, indexed order.
+		compiler := NewCompilerWithBuiltins(getTestBuiltins())
 		err := compiler.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error on test #%d/%d: %s", i+1, len(tests), err)
@@ -1092,11 +1089,11 @@ func TestBuiltins(t *testing.T) {
 			`,
 			expectedConstants: []interface{}{1},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpGetBuiltin, 0),
+				code.Make(code.OpGetBuiltin, testBuiltinLen),
 				code.Make(code.OpArray, 0),
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
-				code.Make(code.OpGetBuiltin, 1), // PUSH is at index 1 after sorting [LEN, PUSH]
+				code.Make(code.OpGetBuiltin, testBuiltinPush),
 				code.Make(code.OpArray, 0),
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpCall, 2),
@@ -1107,7 +1104,7 @@ func TestBuiltins(t *testing.T) {
 			input: `fn() { LEN([]) }`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
-					code.Make(code.OpGetBuiltin, 0), // LEN
+					code.Make(code.OpGetBuiltin, testBuiltinLen),
 					code.Make(code.OpArray, 0),
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),

@@ -69,14 +69,9 @@ func NewCompilerWithBuiltins(builtins []object.BuiltinEntry) *Compiler {
 // New creates and initializes a new Compiler instance. It sets up the main
 // compilation scope and defines the built-in functions in the global symbol table.
 func New() *Compiler {
-	// Create a local, sorted copy of built-ins to ensure deterministic indexing.
-	// This is crucial because the order of init() functions is not guaranteed.
-	sortedBuiltins := make([]object.BuiltinEntry, len(object.Builtins))
-	copy(sortedBuiltins, object.Builtins)
-	sort.Slice(sortedBuiltins, func(i, j int) bool {
-		return sortedBuiltins[i].Name < sortedBuiltins[j].Name
-	})
-	return NewCompilerWithBuiltins(sortedBuiltins)
+	// The object.Builtins slice is now pre-indexed by FinalizeBuiltins,
+	// so we can use it directly without sorting to create the compiler.
+	return NewCompilerWithBuiltins(object.Builtins)
 }
 
 // NewWithState creates a new Compiler with a pre-existing symbol table and

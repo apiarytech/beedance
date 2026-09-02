@@ -8,7 +8,6 @@ import (
 	"beedance/parser"
 	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"fmt"
-	"sort"
 	"testing"
 )
 
@@ -353,25 +352,21 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 		},
 	}
 
+	// Finalize built-ins to ensure they are registered and correctly indexed.
+	object.FinalizeBuiltins()
+
 	for _, tt := range tests {
 		program := parse(tt.input)
 
-		// Create a single, sorted list of built-ins to ensure the compiler and VM
-		// use the exact same function indexing. This prevents mismatches.
-		sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-		copy(sortedBuiltinEntries, object.Builtins)
-		sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
-			return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
-		})
-
-		comp := compiler.NewCompilerWithBuiltins(sortedBuiltinEntries)
+		// The object.Builtins slice is now correctly indexed, so no sorting is needed.
+		comp := compiler.NewCompilerWithBuiltins(object.Builtins)
 		err := comp.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error: %s", err)
 		}
 
-		vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
-		for i, entry := range sortedBuiltinEntries {
+		vmBuiltins := make([]*object.Builtin, len(object.Builtins))
+		for i, entry := range object.Builtins {
 			vmBuiltins[i] = entry.Builtin
 		}
 		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
@@ -535,23 +530,18 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 	// Finalize built-ins to ensure they are registered before tests run.
 	object.FinalizeBuiltins()
 
-	// Create a single, sorted list of built-ins to ensure the compiler and VM
-	// use the exact same function indexing. This can be done once for all tests.
-	sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-	copy(sortedBuiltinEntries, object.Builtins)
-	sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
-		return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
-	})
-
-	vmBuiltins := make([]*object.Builtin, len(sortedBuiltinEntries))
-	for i, entry := range sortedBuiltinEntries {
+	// The object.Builtins slice is now correctly indexed by FinalizeBuiltins.
+	// No sorting is needed.
+	builtinEntries := object.Builtins
+	vmBuiltins := make([]*object.Builtin, len(builtinEntries))
+	for i, entry := range builtinEntries {
 		vmBuiltins[i] = entry.Builtin
 	}
 
 	for i, tt := range tests {
 		program := parse(tt.input)
 
-		comp := compiler.NewCompilerWithBuiltins(sortedBuiltinEntries)
+		comp := compiler.NewCompilerWithBuiltins(builtinEntries)
 		err := comp.Compile(program)
 		if err != nil {
 			t.Fatalf("test #%d/%d on input '%s': compiler error: %s", i, len(tests), tt.input, err)

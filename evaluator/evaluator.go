@@ -311,18 +311,15 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return evalPrefixExpression(node, right)
 
 	case *ast.InfixExpression:
-		// An InfixExpression (e.g., 5 + 5) is evaluated by evaluating both operands, then applying the operator.
 		left := Eval(node.Left, env)
 		if isError(left) {
 			return left
 		}
-
 		right := Eval(node.Right, env)
 		if isError(right) {
 			return right
 		}
-
-		return evalInfixExpression(node, left, right)
+		return object.EvalInfix(left, node.Operator, right)
 
 	case *ast.MemberAccessExpression:
 		// A MemberAccessExpression (e.g., MyTimer.Q) accesses a field of a struct or function block instance.
@@ -950,8 +947,7 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		if op == "SUB" {
 			op = "-"
 		} // Map to standard operators if needed
-		infixNode := &ast.InfixExpression{Operator: op}
-		result := evalInfixExpression(infixNode, crObj, operand)
+		result := object.EvalInfix(crObj, op, operand)
 		if isError(result) {
 			return result
 		}
@@ -1325,394 +1321,6 @@ func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	return FALSE
 }
 
-// evalInfixExpression dispatches to the correct evaluation function based on the
-// types of the left and right operands. It handles numeric, boolean, string, and
-// bit-string operations.
-func evalInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	switch {
-	// Handle all REAL, LREAL, and mixed INTEGER operations here.
-	case object.IsNumeric(left) && object.IsNumeric(right):
-		return evalNumericInfixExpression(node, left, right)
-	case left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ:
-		return evalBooleanInfixExpression(node, left, right)
-	case left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ && node.Operator == "+":
-		return evalWStringInfixExpression(node, left, right)
-	case left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ && node.Operator == "+":
-		return evalStringInfixExpression(node, left, right)
-	case left.Type() == object.BITSTRING_OBJ && right.Type() == object.BITSTRING_OBJ: // New: BitString operations
-		return evalBitStringInfixExpression(node, left, right)
-	case isComparisonOperator(node.Operator):
-		return evalComparisonInfix(node, left, right)
-	case left.Type() != right.Type():
-		return newError(node, "type mismatch: %s %s %s",
-			left.Type(), node.Operator, right.Type())
-	default:
-		return newError(node, "unknown operator: %s %s %s",
-			left.Type(), node.Operator, right.Type())
-	}
-}
-
-// evalPrefixExpression evaluates a prefix expression by first evaluating the
-// right-hand side, then applying the operator (e.g., NOT, -).
-func evalPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	switch node.Operator {
-	case "NOT", "!":
-		return evalNotOperatorExpression(node, right)
-	case "-":
-		return evalMinusPrefixOperatorExpression(node, right)
-	default:
-		return newError(node, "unknown operator: %s%s", node.Operator,
-			right.Type())
-	}
-}
-
-// evalNotOperatorExpression handles the `NOT` operator for both booleans and bit-strings.
-func evalNotOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	switch right := right.(type) {
-	case *object.Boolean:
-		if right.Value {
-			return FALSE
-		}
-		return TRUE
-	case *object.BitString: // Delegate all bitstring NOT operations
-		return evalBitStringPrefixExpression(node, right)
-	default:
-		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
-	}
-}
-
-// evalMinusPrefixOperatorExpression handles the unary minus operator for numeric types.
-func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	if !object.IsNumeric(right) {
-		return newError(node, "unknown operator: -%s", right.Type())
-	}
-
-	switch val := right.(type) {
-	case *object.SInt:
-		return &object.SInt{Value: -val.Value}
-	case *object.Int:
-		return &object.Int{Value: -val.Value}
-	case *object.DInt:
-		return &object.DInt{Value: -val.Value}
-	case *object.LInt:
-		return &object.LInt{Value: -val.Value}
-	case *object.Real:
-		return &object.Real{Value: -val.Value}
-	case *object.LReal:
-		return &object.LReal{Value: -val.Value}
-	// Negating an unsigned integer results in a signed integer of the same or larger size.
-	// We'll promote to the next signed size.
-	case *object.USInt:
-		return &object.SInt{Value: -int8(val.Value)}
-	case *object.UInt:
-		return &object.Int{Value: -int16(val.Value)}
-	}
-	return newError(node, "unknown operator: -%s", right.Type())
-}
-
-// evalBitStringPrefixExpression handles the bitwise `NOT` operation for BitString objects.
-func evalBitStringPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
-	if right.Type() != object.BITSTRING_OBJ {
-		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
-	}
-
-	bitString := right.(*object.BitString)
-	value := bitString.Value
-	width := bitString.Width
-
-	switch node.Operator {
-	case "NOT":
-		var mask uint64
-		if width < 64 { // For widths less than 64, create a mask of 'width' ones
-			mask = (1 << width) - 1
-		} else { // For 64-bit, all bits are relevant
-			mask = 0xFFFFFFFFFFFFFFFF // All ones
-		}
-		return &object.BitString{Value: ^value & mask, Width: width}
-	default:
-		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
-	}
-}
-
-// evalBooleanInfixExpression handles logical and comparison operators for boolean operands.
-func evalBooleanInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftVal := left.(*object.Boolean).Value
-	rightVal := right.(*object.Boolean).Value
-
-	switch node.Operator {
-	case "AND", "&":
-		return nativeBoolToBooleanObject(leftVal && rightVal)
-	case "OR":
-		return nativeBoolToBooleanObject(leftVal || rightVal)
-	case "XOR":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "=":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "<>", "!=":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	default:
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-}
-
-// evalNumericInfixExpression is the dispatcher for all numeric infix operations.
-// It promotes operands to the appropriate type (LREAL > REAL > LINT) before
-// calling the specific evaluation function.
-func evalNumericInfixExpression(node *ast.InfixExpression, left, right object.Object) object.Object {
-	// If either operand is LREAL, the result is LREAL.
-	if left.Type() == object.LREAL_OBJ || right.Type() == object.LREAL_OBJ {
-		leftVal, okL := object.GetFloat64Value(left)
-		// getFloat64Value converts any numeric type to float64.
-		rightVal, okR := object.GetFloat64Value(right)
-		if !okL || !okR {
-			return newError(node, "type mismatch in LREAL expression")
-		}
-		return evalFloatInfixExpression(node, leftVal, rightVal, true)
-	}
-
-	// If either is REAL (and none are LREAL), the result is REAL.
-	if left.Type() == object.REAL_OBJ || right.Type() == object.REAL_OBJ {
-		leftVal, okL := object.GetFloat64Value(left)
-		rightVal, okR := object.GetFloat64Value(right)
-		if !okL || !okR {
-			return newError(node, "type mismatch in REAL expression")
-		}
-		return evalFloatInfixExpression(node, leftVal, rightVal, false)
-	}
-
-	// Otherwise, both are integer types.
-	return evalIntegerInfixExpression(node, left, right)
-}
-
-// evalFloatInfixExpression performs arithmetic and comparison operations for
-// REAL and LREAL types, returning a new Real or LReal object.
-func evalFloatInfixExpression(node *ast.InfixExpression, leftVal, rightVal float64, isLReal bool) object.Object {
-	var result object.Object
-	switch node.Operator {
-	case "+":
-		result = &object.Real{Value: leftVal + rightVal}
-	case "-":
-		result = &object.Real{Value: leftVal - rightVal}
-	case "*":
-		result = &object.Real{Value: leftVal * rightVal}
-	case "/":
-		if rightVal == 0.0 {
-			return newError(node, "division by zero")
-		}
-		result = &object.Real{Value: leftVal / rightVal}
-	case "<", "LT":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">", "GT":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "=", "EQ":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=", "<>", "NE":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<=", "LE":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=", "GE":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		return newError(node, "unknown operator for REAL/LREAL: %s", node.Operator)
-	}
-
-	// If the result should be LREAL, convert it.
-	if isLReal {
-		return &object.LReal{Value: result.(*object.Real).Value}
-	}
-	return result
-}
-
-// evalBitStringInfixExpression handles bitwise logical (AND, OR, XOR, etc.) and
-// comparison operators for BitString operands, ensuring they have the same width.
-func evalBitStringInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftBitString := left.(*object.BitString)
-	rightBitString := right.(*object.BitString)
-
-	// IEC 61131-3 requires operands of bitwise operations to be of the same type (same width).
-	if leftBitString.Width != rightBitString.Width {
-		return newError(node, "type mismatch: bitstring operands must have same width, got %d and %d", leftBitString.Width, rightBitString.Width)
-	}
-
-	leftVal := leftBitString.Value
-	rightVal := rightBitString.Value
-	width := leftBitString.Width
-
-	switch node.Operator {
-	case "AND", "&":
-		return &object.BitString{Value: leftVal & rightVal, Width: width}
-	case "OR":
-		return &object.BitString{Value: leftVal | rightVal, Width: width}
-	case "XOR", "XNOR":
-		return &object.BitString{Value: leftVal ^ rightVal, Width: width}
-	case "NAND":
-		var mask uint64
-		if width < 64 {
-			mask = (1 << width) - 1
-		} else {
-			mask = 0xFFFFFFFFFFFFFFFF
-		}
-		return &object.BitString{Value: ^(leftVal & rightVal) & mask, Width: width}
-	case "NOR":
-		var mask uint64
-		if width < 64 {
-			mask = (1 << width) - 1
-		} else {
-			mask = 0xFFFFFFFFFFFFFFFF
-		}
-		return &object.BitString{Value: ^(leftVal | rightVal) & mask, Width: width}
-	case "=":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=", "<>":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-	}
-}
-
-// evalIntegerInfixExpression handles arithmetic and comparison for all integer
-// types. It determines the result type based on IEC promotion rules and performs
-// overflow/underflow checks before creating the final result object.
-func evalIntegerInfixExpression(node *ast.InfixExpression, left, right object.Object) object.Object {
-	leftType := left.Type()
-	rightType := right.Type()
-	resultType := getResultIntegerType(leftType, rightType)
-
-	// Convert both operands to the result type for the operation.
-	leftVal, isLeftUnsigned, ok := object.GetIntegerObjectValue(left)
-	if !ok {
-		return newError(node, "could not get value from left operand of type %s", left.Type())
-	}
-	rightVal, isRightUnsigned, ok := object.GetIntegerObjectValue(right)
-	if !ok {
-		return newError(node, "could not get value from right operand of type %s", right.Type())
-	}
-
-	// Perform the operation
-	var resultValue int64
-	var uResultValue uint64
-	resultIsUnsigned := isLeftUnsigned && isRightUnsigned
-
-	// If both are unsigned, use unsigned arithmetic.
-	if resultIsUnsigned {
-		uLeft, uRight := uint64(leftVal), uint64(rightVal)
-		switch node.Operator {
-		case "+":
-			if math.MaxUint64-uLeft < uRight {
-				return newError(node, "unsigned integer overflow")
-			}
-			uResultValue = uLeft + uRight
-		case "-":
-			if uLeft < uRight {
-				return newError(node, "unsigned integer underflow")
-			}
-			uResultValue = uLeft - uRight
-		case "*":
-			if uRight > 0 && uLeft > math.MaxUint64/uRight {
-				return newError(node, "unsigned integer overflow")
-			}
-			uResultValue = uLeft * uRight
-		case "/":
-			if uRight == 0 {
-				return newError(node, "division by zero")
-			}
-			uResultValue = uLeft / uRight
-		case "MOD":
-			if uRight == 0 {
-				return newError(node, "division by zero in MOD")
-			}
-			uResultValue = uLeft % uRight
-		case "<":
-			return nativeBoolToBooleanObject(uLeft < uRight)
-		case ">":
-			return nativeBoolToBooleanObject(uLeft > uRight)
-		case "<=":
-			return nativeBoolToBooleanObject(uLeft <= uRight)
-		case ">=":
-			return nativeBoolToBooleanObject(uLeft >= uRight)
-		case "=":
-			return nativeBoolToBooleanObject(uLeft == uRight)
-		case "<>", "!=":
-			return nativeBoolToBooleanObject(uLeft != uRight)
-		default:
-			return newError(node, "unknown operator for unsigned integers: %s", node.Operator)
-		}
-	} else {
-		// If one or both are signed, use signed arithmetic.
-		switch node.Operator {
-		case "+":
-			if (rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal) {
-				return newError(node, "signed integer overflow")
-			}
-			resultValue = leftVal + rightVal
-		case "-":
-			if (rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal) {
-				return newError(node, "signed integer underflow")
-			}
-			resultValue = leftVal - rightVal
-		case "*":
-			// Special case for MinInt64 to avoid overflow on negation
-			if leftVal == math.MinInt64 || rightVal == math.MinInt64 {
-				return newError(node, "signed integer overflow on multiplication with MinInt64")
-			}
-			if rightVal != 0 && leftVal > math.MaxInt64/abs(rightVal) {
-				return newError(node, "signed integer overflow")
-			}
-			if rightVal != 0 && leftVal < math.MinInt64/abs(rightVal) {
-				return newError(node, "signed integer underflow")
-			}
-			resultValue = leftVal * rightVal
-		case "/":
-			if rightVal == 0 {
-				return newError(node, "division by zero")
-			}
-			// Special case for MinInt64 / -1
-			if leftVal == math.MinInt64 && rightVal == -1 {
-				return newError(node, "signed integer overflow (MinInt64 / -1)")
-			}
-			resultValue = leftVal / rightVal
-		case "MOD":
-			if rightVal == 0 {
-				return newError(node, "division by zero in MOD")
-			}
-			resultValue = leftVal % rightVal
-		case "<":
-			return nativeBoolToBooleanObject(leftVal < rightVal)
-		case ">":
-			return nativeBoolToBooleanObject(leftVal > rightVal)
-		case "<=":
-			return nativeBoolToBooleanObject(leftVal <= rightVal)
-		case ">=":
-			return nativeBoolToBooleanObject(leftVal >= rightVal)
-		case "=":
-			return nativeBoolToBooleanObject(leftVal == rightVal)
-		case "<>", "!=":
-			return nativeBoolToBooleanObject(leftVal != rightVal)
-		default:
-			return newError(node, "unknown operator for signed integers: %s", node.Operator)
-		}
-	}
-
-	if resultIsUnsigned {
-		return checkAndCreateIntegerObject(node, resultType, int64(uResultValue), uResultValue, true)
-	} else {
-		return checkAndCreateIntegerObject(node, resultType, resultValue, 0, false)
-	}
-}
-
 // getResultIntegerType determines the result type for an integer infix operation
 // based on the standard IEC 61131-3 type promotion rules (e.g., INT + DINT results
 // in a DINT).
@@ -1907,12 +1515,12 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 		}
 		// If all are numeric, use numeric comparison to handle type promotion (e.g., INT vs REAL).
 		if object.IsNumeric(selector) && object.IsNumeric(lowerBound) && object.IsNumeric(upperBound) {
-			ge := evalNumericInfixExpression(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
+			ge := object.EvalNumericInfix(selector, lowerBound, ">=")
 			if err, isErr := ge.(*object.Error); isErr {
 				return false, err
 			}
 
-			le := evalNumericInfixExpression(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
+			le := object.EvalNumericInfix(selector, upperBound, "<=")
 			if err, isErr := le.(*object.Error); isErr {
 				return false, err
 			}
@@ -1920,8 +1528,8 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 		}
 
 		// Fallback to generic comparison for non-numeric types.
-		ge := evalComparisonInfix(&ast.InfixExpression{Operator: ">="}, selector, lowerBound)
-		le := evalComparisonInfix(&ast.InfixExpression{Operator: "<="}, selector, upperBound)
+		ge := object.EvalInfix(selector, ">=", lowerBound)
+		le := object.EvalInfix(selector, "<=", upperBound)
 
 		return object.IsTruthy(ge) && object.IsTruthy(le), nil
 	}
@@ -1946,12 +1554,12 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 
 	// For numeric types, use the dedicated numeric comparison logic.
 	if object.IsNumeric(selector) && object.IsNumeric(caseValue) {
-		eq := evalNumericInfixExpression(&ast.InfixExpression{Operator: "="}, selector, caseValue)
+		eq := object.EvalNumericInfix(selector, caseValue, "=")
 		return eq == TRUE, nil
 	}
 
 	// For non-numeric types, use the generic comparison logic.
-	eq := evalComparisonInfix(&ast.InfixExpression{Operator: "="}, selector, caseValue)
+	eq := object.EvalInfix(selector, "=", caseValue)
 	if err, isErr := eq.(*object.Error); isErr {
 		return false, err
 	}
@@ -3218,4 +2826,86 @@ func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) o
 		// but it's here for robustness.
 		return object.NewBuiltinError("unknown operator '%s' for generic comparison", op)
 	}
+}
+
+// evalPrefixExpression evaluates a prefix expression by first evaluating the
+// right-hand side, then applying the operator (e.g., NOT, -).
+func evalPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
+	switch node.Operator {
+	case "NOT", "!":
+		return evalNotOperatorExpression(node, right)
+	case "-":
+		return evalMinusPrefixOperatorExpression(node, right)
+	default:
+		return newError(node, "unknown operator: %s%s", node.Operator,
+			right.Type())
+	}
+}
+
+// evalBitStringPrefixExpression handles the bitwise `NOT` operation for BitString objects.
+func evalBitStringPrefixExpression(node *ast.PrefixExpression, right object.Object) object.Object {
+	if right.Type() != object.BITSTRING_OBJ {
+		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
+	}
+
+	bitString := right.(*object.BitString)
+	value := bitString.Value
+	width := bitString.Width
+
+	switch node.Operator {
+	case "NOT":
+		var mask uint64
+		if width < 64 { // For widths less than 64, create a mask of 'width' ones
+			mask = (1 << width) - 1
+		} else { // For 64-bit, all bits are relevant
+			mask = 0xFFFFFFFFFFFFFFFF // All ones
+		}
+		return &object.BitString{Value: ^value & mask, Width: width}
+	default:
+		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
+	}
+}
+
+// evalNotOperatorExpression handles the `NOT` operator for both booleans and bit-strings.
+func evalNotOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
+	switch right := right.(type) {
+	case *object.Boolean:
+		if right.Value {
+			return FALSE
+		}
+		return TRUE
+	case *object.BitString: // Delegate all bitstring NOT operations
+		return evalBitStringPrefixExpression(node, right)
+	default:
+		return newError(node, "unknown operator: %s%s", node.Operator, right.Type())
+	}
+}
+
+// evalMinusPrefixOperatorExpression handles the unary minus operator for numeric types.
+func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.Object) object.Object {
+	if !object.IsNumeric(right) {
+		return newError(node, "unknown operator: -%s", right.Type())
+	}
+
+	switch val := right.(type) {
+	case *object.SInt:
+		return &object.SInt{Value: -val.Value}
+	case *object.Int:
+		return &object.Int{Value: -val.Value}
+	case *object.DInt:
+		return &object.DInt{Value: -val.Value}
+	case *object.LInt:
+		return &object.LInt{Value: -val.Value}
+	case *object.Real:
+		return &object.Real{Value: -val.Value}
+	case *object.LReal:
+		return &object.LReal{Value: -val.Value}
+	// Negating an unsigned integer results in a signed integer of the same or larger size.
+	// We'll promote to the next signed size.
+	case *object.USInt:
+		return &object.SInt{Value: -int8(val.Value)}
+	case *object.UInt:
+		return &object.Int{Value: -int16(val.Value)}
+	}
+	return newError(node, "unknown operator: -%s", right.Type())
 }

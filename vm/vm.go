@@ -17,7 +17,6 @@ import (
 	"beedance/object"
 	"fmt"
 	"math"
-	"sort"
 )
 
 // StackSize defines the maximum number of objects that can be on the stack.
@@ -56,17 +55,11 @@ type VM struct {
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
-	// Create a sorted list of built-in functions from the global object.Builtins.
-	// This ensures that the VM's built-in index matches the compiler's, as the
-	// compiler also sorts the built-ins before assigning indices.
-	sortedBuiltinEntries := make([]object.BuiltinEntry, len(object.Builtins))
-	copy(sortedBuiltinEntries, object.Builtins)
-	sort.Slice(sortedBuiltinEntries, func(i, j int) bool {
-		return sortedBuiltinEntries[i].Name < sortedBuiltinEntries[j].Name
-	})
-
-	builtins := make([]*object.Builtin, len(sortedBuiltinEntries))
-	for i, entry := range sortedBuiltinEntries {
+	// The object.Builtins slice is now pre-indexed by FinalizeBuiltins.
+	// We can create the VM's built-in slice directly from it, ensuring the
+	// indices match the compiler's.
+	builtins := make([]*object.Builtin, len(object.Builtins))
+	for i, entry := range object.Builtins {
 		builtins[i] = entry.Builtin
 	}
 
@@ -464,15 +457,27 @@ func (vm *VM) executeIntegerComparison(
 // executeBangOperator performs a logical NOT operation on the top of the stack.
 func (vm *VM) executeBangOperator() error {
 	operand := vm.pop()
-
-	switch operand {
-	case True:
-		return vm.push(False)
-	case False:
+	// Use a type switch to correctly handle different object types.
+	switch operand := operand.(type) {
+	case *object.Boolean:
+		if operand.Value {
+			return vm.push(False)
+		}
 		return vm.push(True)
-	case Null:
+	case *object.Null:
 		return vm.push(True)
+	case *object.BitString:
+		// Handle bitwise NOT for bitstrings
+		var mask uint64 = math.MaxUint64
+		if operand.Width < 64 {
+			mask = (1 << operand.Width) - 1
+		}
+		invertedValue := ^operand.Value & mask
+		return vm.push(&object.BitString{Value: invertedValue, Width: operand.Width})
 	default:
+		// For any other type (like integers), the IEC standard implies that
+		// the result of a logical NOT is boolean. For non-boolean inputs,
+		// this behavior can be considered as resulting in FALSE.
 		return vm.push(False)
 	}
 }

@@ -686,7 +686,7 @@ func evalTestLiteral(t *testing.T, node ast.Expression) object.Object {
 	case *ast.WStringLiteral:
 		return &object.WString{Value: node.Value}
 	case *ast.Boolean:
-		return nativeBoolToBooleanObject(node.Value)
+		return &object.Boolean{Value: node.Value}
 	case *ast.ArrayLiteral:
 		elements := []object.Object{}
 		for _, elNode := range node.Elements {

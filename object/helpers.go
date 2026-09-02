@@ -446,12 +446,112 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		leftVal := left.(*DateAndTime).Value
 		rightVal := right.(*DateAndTime).Value
 		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
+		// Time and Date arithmetic
+	case left.Type() == TIME_OBJ:
+		switch operator {
+		case "+":
+			if right.Type() == TIME_OBJ {
+				return &Time{Value: left.(*Time).Value + right.(*Time).Value}
+			}
+		case "-":
+			if right.Type() == TIME_OBJ {
+				return &Time{Value: left.(*Time).Value - right.(*Time).Value}
+			}
+		case "*", "/":
+			if num, ok := GetFloat64Value(right); ok {
+				if operator == "/" && num == 0 {
+					return NewBuiltinError("division by zero")
+				}
+				op := func(a, b float64) float64 {
+					if operator == "*" {
+						return a * b
+					}
+					return a / b
+				}
+				return &Time{Value: time.Duration(op(float64(left.(*Time).Value), num))}
+			}
+		}
+	case right.Type() == TIME_OBJ && (operator == "*" || operator == "/"):
+		if num, ok := GetFloat64Value(left); ok {
+			if operator == "/" {
+				return NewBuiltinError("invalid operation: cannot divide a number by a TIME value")
+			}
+			return &Time{Value: time.Duration(float64(right.(*Time).Value) * num)}
+		}
+	case left.Type() == DATE_OBJ && operator == "-" && right.Type() == DATE_OBJ:
+		return &Time{Value: left.(*Date).Value.Sub(right.(*Date).Value)}
+	case left.Type() == TIME_OF_DAY_OBJ:
+		if right.Type() == TIME_OBJ {
+			if operator == "+" {
+				return &TimeOfDay{Value: left.(*TimeOfDay).Value.Add(right.(*Time).Value)}
+			} else if operator == "-" {
+				return &TimeOfDay{Value: left.(*TimeOfDay).Value.Add(-right.(*Time).Value)}
+			}
+		} else if right.Type() == TIME_OF_DAY_OBJ && operator == "-" {
+			return &Time{Value: left.(*TimeOfDay).Value.Sub(right.(*TimeOfDay).Value)}
+		}
+	case left.Type() == DATE_AND_TIME_OBJ:
+		if right.Type() == TIME_OBJ {
+			if operator == "+" {
+				return &DateAndTime{Value: left.(*DateAndTime).Value.Add(right.(*Time).Value)}
+			} else if operator == "-" {
+				return &DateAndTime{Value: left.(*DateAndTime).Value.Add(-right.(*Time).Value)}
+			}
+		} else if right.Type() == DATE_AND_TIME_OBJ && operator == "-" {
+			return &Time{Value: left.(*DateAndTime).Value.Sub(right.(*DateAndTime).Value)}
+		}
+	case left.Type() == BITSTRING_OBJ && right.Type() == BITSTRING_OBJ:
+		return evalBitStringInfix(left, operator, right)
 	case left.Type() == NULL_OBJ || right.Type() == NULL_OBJ:
 		if operator == "=" {
 			return nativeBoolToBooleanObject(left.Type() == right.Type())
 		}
 	}
 	return NewBuiltinError("unsupported types for comparison: %s %s %s", left.Type(), operator, right.Type())
+}
+
+func evalBitStringInfix(left Object, operator string, right Object) Object {
+	leftBitString := left.(*BitString)
+	rightBitString := right.(*BitString)
+
+	if leftBitString.Width != rightBitString.Width {
+		return NewBuiltinError("type mismatch: bitstring operands must have same width, got %d and %d", leftBitString.Width, rightBitString.Width)
+	}
+
+	leftVal := leftBitString.Value
+	rightVal := rightBitString.Value
+	width := leftBitString.Width
+
+	switch operator {
+	case "AND", "&":
+		return &BitString{Value: leftVal & rightVal, Width: width}
+	case "OR":
+		return &BitString{Value: leftVal | rightVal, Width: width}
+	case "XOR":
+		return &BitString{Value: leftVal ^ rightVal, Width: width}
+	case "NAND":
+		var mask uint64 = math.MaxUint64
+		if width < 64 {
+			mask = (1 << width) - 1
+		}
+		return &BitString{Value: ^(leftVal & rightVal) & mask, Width: width}
+	case "NOR":
+		var mask uint64 = math.MaxUint64
+		if width < 64 {
+			mask = (1 << width) - 1
+		}
+		return &BitString{Value: ^(leftVal | rightVal) & mask, Width: width}
+	case "=", "EQ":
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=", "<>", "NE":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<=", "LE":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=", "GE":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	default:
+		return NewBuiltinError("unknown operator for bitstrings: %s", operator)
+	}
 }
 
 func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) Object {

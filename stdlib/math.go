@@ -13,7 +13,6 @@ package stdlib
 import (
 	"beedance/object"
 	"math"
-	"time"
 )
 
 func init() {
@@ -253,108 +252,28 @@ func addBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for ADD. got=%d, want=2", len(args))
 	}
-	arg1 := args[0]
-	arg2 := args[1]
-	if object.IsNumeric(arg1) && object.IsNumeric(arg2) {
-		return object.EvalNumericInfix(arg1, arg2, "+")
-	}
-	switch a1 := arg1.(type) {
-	case *object.Time:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.Time{Value: a1.Value + a2.Value}
-		}
-	case *object.TimeOfDay:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.TimeOfDay{Value: a1.Value.Add(a2.Value)}
-		}
-	case *object.DateAndTime:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.DateAndTime{Value: a1.Value.Add(a2.Value)}
-		}
-	}
-	return object.NewBuiltinError("unsupported argument types for ADD: %s + %s", arg1.Type(), arg2.Type())
+	return object.EvalInfix(args[0], "+", args[1])
 }
 
 func subBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for SUB. got=%d, want=2", len(args))
 	}
-	arg1 := args[0]
-	arg2 := args[1]
-	if object.IsNumeric(arg1) && object.IsNumeric(arg2) {
-		return object.EvalNumericInfix(arg1, arg2, "-")
-	}
-	switch a1 := arg1.(type) {
-	case *object.Time:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.Time{Value: a1.Value - a2.Value}
-		}
-	case *object.Date:
-		if a2, ok := arg2.(*object.Date); ok {
-			return &object.Time{Value: a1.Value.Sub(a2.Value)}
-		}
-	case *object.TimeOfDay:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.TimeOfDay{Value: a1.Value.Add(-a2.Value)}
-		}
-		if a2, ok := arg2.(*object.TimeOfDay); ok {
-			return &object.Time{Value: a1.Value.Sub(a2.Value)}
-		}
-	case *object.DateAndTime:
-		if a2, ok := arg2.(*object.Time); ok {
-			return &object.DateAndTime{Value: a1.Value.Add(-a2.Value)}
-		}
-		if a2, ok := arg2.(*object.DateAndTime); ok {
-			return &object.Time{Value: a1.Value.Sub(a2.Value)}
-		}
-	}
-	return object.NewBuiltinError("unsupported argument types for SUB: %s - %s", arg1.Type(), arg2.Type())
+	return object.EvalInfix(args[0], "-", args[1])
 }
 
 func mulBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for MUL. got=%d, want=2", len(args))
 	}
-	arg1 := args[0]
-	arg2 := args[1]
-	if t, ok := arg1.(*object.Time); ok {
-		if num, ok := object.GetFloat64Value(arg2); ok {
-			return &object.Time{Value: time.Duration(float64(t.Value) * num)}
-		}
-	}
-	if t, ok := arg2.(*object.Time); ok {
-		if num, ok := object.GetFloat64Value(arg1); ok {
-			return &object.Time{Value: time.Duration(float64(t.Value) * num)}
-		}
-	}
-	if object.IsNumeric(arg1) && object.IsNumeric(arg2) {
-		return object.EvalNumericInfix(arg1, arg2, "*")
-	}
-	return object.NewBuiltinError("unsupported argument types for MUL: %s * %s", arg1.Type(), arg2.Type())
+	return object.EvalInfix(args[0], "*", args[1])
 }
 
 func divBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for DIV. got=%d, want=2", len(args))
 	}
-	arg1 := args[0]
-	arg2 := args[1]
-	if t, ok := arg1.(*object.Time); ok {
-		if num, ok := object.GetFloat64Value(arg2); ok {
-			if num == 0 {
-				return object.NewBuiltinError("division by zero")
-			}
-			return &object.Time{Value: time.Duration(float64(t.Value) / num)}
-		}
-	}
-	if object.IsNumeric(arg1) && object.IsNumeric(arg2) {
-		val2, num := object.GetFloat64Value(arg2)
-		if num && val2 == 0.0 {
-			return object.NewBuiltinError("division by zero")
-		}
-		return object.EvalNumericInfix(arg1, arg2, "/")
-	}
-	return object.NewBuiltinError("unsupported argument types for DIV: %s / %s", arg1.Type(), arg2.Type())
+	return object.EvalInfix(args[0], "/", args[1])
 }
 
 func modBuiltin(args ...object.Object) object.Object {
