@@ -152,7 +152,7 @@ func (c *Compiler) currentLoop() *loopContext {
 // parts: an initialization section and a cyclic section. This separation mirrors
 // the execution model of a PLC, where initialization runs once and the main logic
 // runs repeatedly in a scan cycle. It is renamed to match the call in main.go.
-func (c *Compiler) CompiledProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
+func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
 	// --- Initialization Phase ---
 	// Compile all variable declaration blocks (VAR, VAR_GLOBAL, etc.).
 	// This populates the symbol table and generates bytecode to set initial values.
@@ -963,6 +963,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// A BlockStatement compiles each of its inner statements.
 	case *ast.BlockStatement:
+		// Check if this is an IL program body by inspecting the first statement.
+		if len(node.Statements) > 0 {
+			if _, ok := node.Statements[0].(*ast.IlInstructionStatement); ok {
+				return c.compileIlProgram(node)
+			}
+		}
+
+		// Otherwise, it's a standard ST block.
 		for _, s := range node.Statements {
 			err := c.Compile(s)
 			if err != nil {

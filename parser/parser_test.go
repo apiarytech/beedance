@@ -3688,14 +3688,19 @@ func TestMissingEndBlockErrorRecovery(t *testing.T) {
 		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
 	}
 
-	// Check that the parser recovered and parsed both the IF and the subsequent assignment
+	// Check that the parser recovered. With a missing END_IF, a reasonable
+	// recovery strategy is to consume subsequent statements as part of the IF
+	// body until EOF or another block-ending keyword is found.
 	if len(program.Statements) != 1 {
-		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
+		t.Fatalf("Parser should parse the input as a single IF statement. got=%d statements", len(program.Statements))
 	}
-	// The parser should parse the IF statement (partially) and then the next statement.
-	_, ok := program.Statements[0].(*ast.IfStatement)
+	ifStmt, ok := program.Statements[0].(*ast.IfStatement)
 	if !ok {
-		t.Errorf("First statement should be an IfStatement after recovery.")
+		t.Fatalf("First statement should be an IfStatement after recovery. got=%T", program.Statements[0])
+	}
+	// The recovery should result in the second assignment being part of the IF's consequence.
+	if len(ifStmt.Consequence.Statements) != 2 {
+		t.Errorf("Expected IF consequence to contain 2 statements after recovery. got=%d", len(ifStmt.Consequence.Statements))
 	}
 }
 

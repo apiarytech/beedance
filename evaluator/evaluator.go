@@ -838,18 +838,6 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		}
 	}
 
-	// Handle JMP separately as it affects control flow, not data.
-	if strings.ToUpper(node.Operator) == "JMP" {
-		if operandIdent, ok := node.Operand.(*ast.Identifier); ok {
-			// We don't evaluate the operand, we just need its name as the label.
-			// The actual jump is handled by the program loop.
-			// We return a special Jump object to signal this.
-			return &object.Jump{TargetLabel: operandIdent.Value}
-		} else {
-			return newError(node, "operand for JMP must be a label identifier")
-		}
-	}
-
 	// 2. Evaluate the operand, if it exists
 	var operand object.Object
 	if node.Operand != nil {
@@ -948,26 +936,32 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		return result
 
 	case "CAL":
+		// Get the current result before the call, as CAL should not modify it.
+		crBefore, _ := env.Get(currentResultVar)
+
 		// The operand for CAL is a CallExpression to a function block instance.
 		// The 'operand' variable already holds the evaluated result of this call.
 		if isError(operand) {
 			return operand
 		}
 
-		// After a CAL instruction, the Current Result (CR) is updated with the
-		// result of the function block execution. The `applyFunction` logic
-		// already returns the FB's primary output.
-		env.Set(currentResultVar, operand)
-		return operand
+		// Per the standard, CAL does not modify the Current Result.
+		// The function block's logic will have updated its own output variables,
+		// which can be accessed in subsequent IL instructions.
+		return crBefore
 
 	case "RET":
 		// Conditional check is handled at the top. If we are here, we should return.
 		return &object.Return{}
 
-	case "JMP": // Jump and Call operators (placeholders for now)
-		// In a real evaluator, this would modify the program counter.
-		// For now, we just acknowledge it.
-		return NULL
+	case "JMP":
+		// The operand for JMP must be a label identifier.
+		if operandIdent, ok := node.Operand.(*ast.Identifier); ok {
+			// We don't evaluate the operand, we just need its name as the label.
+			// The actual jump is handled by the evalIlProgram loop, which looks for a Jump object.
+			return &object.Jump{TargetLabel: operandIdent.Value}
+		}
+		return newError(node, "operand for JMP must be a label identifier")
 	default:
 		return newError(node, "unknown IL operator: %s", node.Operator)
 	}

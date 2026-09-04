@@ -24,7 +24,7 @@ func evalTON(instanceEnv, callEnv *object.Environment) object.Object {
 
 	var startTime time.Time
 	if startTimeObj != nil {
-		if t, ok := startTimeObj.(*object.TimeOfDay); ok {
+		if t, ok := startTimeObj.(*object.DateAndTime); ok {
 			startTime = t.Value
 		}
 	}
@@ -36,7 +36,7 @@ func evalTON(instanceEnv, callEnv *object.Environment) object.Object {
 	if inBool.Value {
 		if !timerActive {
 			// Rising edge of IN: start the timer
-			instanceEnv.Set("__startTime", &object.TimeOfDay{Value: nowFunc()})
+			instanceEnv.Set("__startTime", &object.DateAndTime{Value: nowFunc()})
 			instanceEnv.Set("__timerActive", TRUE)
 			startTime = nowFunc()
 		}
@@ -75,7 +75,7 @@ func evalTOF(instanceEnv, callEnv *object.Environment) object.Object {
 
 	var stopTime time.Time
 	if stopTimeObj != nil {
-		if t, ok := stopTimeObj.(*object.TimeOfDay); ok {
+		if t, ok := stopTimeObj.(*object.DateAndTime); ok {
 			stopTime = t.Value
 		}
 	}
@@ -91,7 +91,7 @@ func evalTOF(instanceEnv, callEnv *object.Environment) object.Object {
 		// Falling edge of IN
 		if stopTime.IsZero() {
 			stopTime = nowFunc()
-			instanceEnv.Set("__stopTime", &object.TimeOfDay{Value: stopTime})
+			instanceEnv.Set("__stopTime", &object.DateAndTime{Value: stopTime})
 		}
 
 		et = nowFunc().Sub(stopTime)
@@ -125,7 +125,7 @@ func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
 
 	var startTime time.Time
 	if startTimeObj != nil {
-		if t, ok := startTimeObj.(*object.TimeOfDay); ok {
+		if t, ok := startTimeObj.(*object.DateAndTime); ok {
 			startTime = t.Value
 		}
 	}
@@ -139,7 +139,7 @@ func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
 		pulseActive = true
 		startTime = nowFunc()
 		instanceEnv.Set("__pulseActive", TRUE)
-		instanceEnv.Set("__startTime", &object.TimeOfDay{Value: startTime})
+		instanceEnv.Set("__startTime", &object.DateAndTime{Value: startTime})
 	}
 
 	if pulseActive {

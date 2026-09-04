@@ -46,6 +46,7 @@ func main() {
 	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
 	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
+	uvmFlag := flag.Bool("uvm", false, "Use the universal microcontroller virtual machine instead of the evaluator")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
 	flag.Parse()
@@ -63,6 +64,8 @@ func main() {
 	var engine string
 	if *vmFlag {
 		engine = "vm"
+	} else if *uvmFlag {
+		engine = "uvm"
 	} else {
 		engine = "eval"
 	}
@@ -147,7 +150,7 @@ func executeFile(filepath string, out io.Writer, engine string) {
 			return
 		}
 
-		compiledProg, err := comp.CompiledProgram(programDecl)
+		compiledProg, err := comp.CompileProgram(programDecl)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
 			return
@@ -174,6 +177,8 @@ func executeFile(filepath string, out io.Writer, engine string) {
 			fmt.Fprintf(out, "Cycle %d complete. Last popped value: %s\n", i+1, cyclicVM.LastPoppedStackElem().Inspect())
 			time.Sleep(100 * time.Millisecond) // Simulate scan time
 		}
+	} else if engine == "uvm" {
+		// UVM execution logic goes here
 	} else {
 		env := object.NewEnvironment()
 		evaluated := evaluator.Eval(program, env)
