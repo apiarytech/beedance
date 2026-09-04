@@ -236,6 +236,7 @@ const (
 	BuiltinFirst                   // FIRST
 	BuiltinGe                      // GE
 	BuiltinGt                      // GT
+	BuiltinGreat                   // GREAT
 	BuiltinInsert                  // INSERT
 	BuiltinIntToAnyInt             // INT_TO_ANY_INT
 	BuiltinIntToAnyReal            // INT_TO_ANY_REAL

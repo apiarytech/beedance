@@ -270,6 +270,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// Untyped integer literals are treated as the largest possible integer type (LINT)
 		// to allow for implicit type promotion in expressions without overflow.
 		return &object.LInt{Value: node.Value}
+
 	case *ast.UnsignedIntegerLiteral:
 		// Untyped unsigned integer literals are treated as ULINT.
 		return &object.ULInt{Value: node.Value}
@@ -302,12 +303,6 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		if isError(right) {
 			return right
 		}
-		// Handle NOT for BitStrings
-		// Special case for bitwise NOT on a bitstring.
-		if node.Operator == "NOT" && right.Type() == object.BITSTRING_OBJ {
-			return evalBitStringPrefixExpression(node, right)
-		}
-
 		return evalPrefixExpression(node, right)
 
 	case *ast.InfixExpression:
@@ -496,6 +491,8 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 	}
 	sfc.ActiveSteps[sfc.InitialStepName] = true
 	sfc.Steps[sfc.InitialStepName].IsActive = true
+	// Set the activation time for the initial step.
+	sfc.Steps[sfc.InitialStepName].ActivationTime = nowFunc()
 
 	// Return the initialized SFC object. The caller (e.g., a test or a scheduler) is responsible for cycling it.
 	return sfc
@@ -758,26 +755,24 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 // evalProgram evaluates a program by sequentially evaluating its statements.
 // It returns the value of the last evaluated statement, or a ReturnValue/Error if one is encountered.
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
-	var result object.Object = NULL // Default to NULL
+	var finalResult object.Object = NULL
 
 	for _, statement := range program.Statements {
 		stmtResult := Eval(statement, env)
 
-		if stmtResult != nil {
-			switch res := stmtResult.(type) {
-			case *object.ReturnValue:
-				return res.Value
-			case *object.Error:
-				return res
-			case *object.Null:
-				// Do nothing, don't let NULL from VAR blocks overwrite a previous valid result.
-			default:
-				result = stmtResult // Update the result with the value of the last non-null statement
-			}
+		// Immediately propagate errors.
+		if err, ok := stmtResult.(*object.Error); ok {
+			return err
+		}
+
+		// If we evaluate the main program block, its result is the final result.
+		// Other top-level declarations (like FUNCTION_BLOCK) are for setup and their
+		// return value should not be the final result of the program.
+		if _, ok := statement.(*ast.ProgramDeclaration); ok {
+			finalResult = stmtResult
 		}
 	}
-
-	return result
+	return finalResult
 }
 
 // evalIlProgram evaluates a block of Instruction List (IL) statements. It first
@@ -1013,21 +1008,17 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 // evalBlockStatement evaluates a block of statements sequentially. It returns the
 // value of the last statement, or propagates a ReturnValue or Error immediately.
 func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) object.Object {
-	var result object.Object = NULL // Default to NULL
+	var result object.Object
 
 	for _, statement := range block.Statements {
-		stmtResult := Eval(statement, env)
+		result = Eval(statement, env)
 
-		if stmtResult != nil {
-			switch res := stmtResult.(type) {
-			case *object.ReturnValue:
-				return res // Propagate return values immediately
-			case *object.Error:
-				return res // Propagate errors immediately
-			case *object.Null:
-				// Do nothing, don't let NULL overwrite a previous valid result.
-			default:
-				result = stmtResult // Update the result with the value of the last non-null statement
+		// If a statement returns a value that should halt execution (like a RETURN or an ERROR),
+		// we must propagate it up immediately without executing subsequent statements.
+		if result != nil {
+			rt := result.Type()
+			if rt == object.RETURN_VALUE_OBJ || rt == object.ERROR_OBJ {
+				return result
 			}
 		}
 	}
@@ -1065,6 +1056,19 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		if isError(val) {
 			return val
 		}
+		// Convert the initial value to the declared type, if necessary.
+		if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
+			targetType := strings.ToUpper(typeSpec.TokenLiteral())
+			// Avoid converting if types are already the same, or if it's not a basic type conversion.
+			// This is a simple heuristic to avoid errors with complex types like structs.
+			if string(val.Type()) != targetType && (object.IsIntegerType(targetType) || object.IsRealType(targetType) || object.IsBooleanType(targetType)) {
+				convertedVal := object.ApplyConversion(val, string(val.Type()), targetType)
+				if isError(convertedVal) {
+					return convertedVal
+				}
+				val = convertedVal
+			}
+		}
 	} else {
 		// No initial value. Check if it's a function block type that needs instantiation.
 		if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
@@ -1073,29 +1077,49 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 			typeIdentifier := &ast.Identifier{Token: typeSpec.Token, Value: typeSpec.TokenLiteral()}
 			typeObj := Eval(typeIdentifier, env) // This will call evalIdentifier
 
-			switch typeDef := typeObj.(type) {
-			case *object.FunctionBlock:
-				// User-defined FB. Create an instance.
-				instanceEnv := object.NewEnclosedEnvironment(typeDef.Env)
-				val = &object.FunctionBlockInstance{
-					Definition: typeDef,
-					Env:        instanceEnv,
-				}
-				// If the function block has an SFC body, we need to create the SFC
-				// instance and store it within the FB instance's environment.
-				if sfcAST, isSFC := typeDef.Body.(*ast.SFCProgram); isSFC {
-					// The SFC object holds the state (active steps, etc.)
-					sfcObj := evalSFCProgram(sfcAST, instanceEnv)
-					instanceEnv.Set("__sfc_instance__", sfcObj)
-				}
-			case *object.BuiltinFunctionBlock:
-				// Standard FB. Create an instance.
-				instanceEnv := object.NewEnclosedEnvironment(env)
-				// Store the logic function in the instance's environment.
-				instanceEnv.Set("__fb_logic__", typeDef)
-				val = &object.FunctionBlockInstance{
-					Definition: nil, // Built-ins don't have an AST definition
-					Env:        instanceEnv,
+			if isError(typeObj) {
+				// This is expected for primitive types like INT, BOOL etc.
+				// which are not identifiers in the environment. In this case, the variable
+				// is just declared with a nil/zero value. `val` is already nil.
+			} else {
+				switch typeDef := typeObj.(type) {
+				case *object.FunctionBlock:
+					// User-defined FB. Create an instance.
+					instanceEnv := object.NewEnclosedEnvironment(typeDef.Env)
+					val = &object.FunctionBlockInstance{
+						Definition: typeDef,
+						Env:        instanceEnv,
+					}
+					// Pre-declare all variables of the FB in its instance environment.
+					// This ensures they exist with their default (nil/zero) values before the first call.
+					for _, varDecl := range typeDef.VarInputs {
+						evalVarDeclStatement(varDecl, instanceEnv)
+					}
+					for _, varDecl := range typeDef.VarOutputs {
+						evalVarDeclStatement(varDecl, instanceEnv)
+					}
+					for _, varDecl := range typeDef.VarInOuts {
+						evalVarDeclStatement(varDecl, instanceEnv)
+					}
+					for _, varDecl := range typeDef.Vars {
+						evalVarDeclStatement(varDecl, instanceEnv)
+					}
+					// If the function block has an SFC body, we need to create the SFC
+					// instance and store it within the FB instance's environment.
+					if sfcAST, isSFC := typeDef.Body.(*ast.SFCProgram); isSFC {
+						// The SFC object holds the state (active steps, etc.)
+						sfcObj := evalSFCProgram(sfcAST, instanceEnv)
+						instanceEnv.Set("__sfc_instance__", sfcObj)
+					}
+				case *object.BuiltinFunctionBlock:
+					// Standard FB. Create an instance.
+					instanceEnv := object.NewEnclosedEnvironment(env)
+					// Store the logic function in the instance's environment.
+					instanceEnv.Set("__fb_logic__", typeDef)
+					val = &object.FunctionBlockInstance{
+						Definition: nil, // Built-ins don't have an AST definition
+						Env:        instanceEnv,
+					}
 				}
 			}
 		}
@@ -1387,86 +1411,6 @@ func abs(x int64) int64 {
 	return x
 }
 
-// checkAndCreateIntegerObject validates a computed integer value against the
-// bounds of a target IEC integer type and, if valid, creates and returns the
-// corresponding object (e.g., SInt, UINT).
-func checkAndCreateIntegerObject(node ast.Node, t object.ObjectType, val int64, uval uint64, isUnsigned bool) object.Object {
-	switch t {
-	case object.SINT_OBJ:
-		if val < math.MinInt8 {
-			return newError(node, "SINT underflow: %d", val)
-		} else if val > math.MaxInt8 {
-			return newError(node, "SINT overflow: %d", val)
-		}
-		return &object.SInt{Value: int8(val)}
-	case object.INT_OBJ:
-		if val < math.MinInt16 {
-			return newError(node, "INT underflow: %d", val)
-		} else if val > math.MaxInt16 {
-			return newError(node, "INT overflow: %d", val)
-		}
-		return &object.Int{Value: int16(val)}
-	case object.DINT_OBJ:
-		if val < math.MinInt32 {
-			return newError(node, "DINT underflow: %d", val)
-		} else if val > math.MaxInt32 {
-			return newError(node, "DINT overflow: %d", val)
-		}
-		return &object.DInt{Value: int32(val)}
-	case object.LINT_OBJ:
-		// Overflow/underflow for LINT is handled before the operation.
-		return &object.LInt{Value: val}
-	case object.USINT_OBJ:
-		if isUnsigned {
-			if uval > math.MaxUint8 { // Check against uint64 value
-				return newError(node, "USINT overflow: %d", uval)
-			}
-			return &object.USInt{Value: uint8(uval)}
-		}
-		// Result from a signed operation being cast to unsigned
-		if val < 0 {
-			return newError(node, "USINT underflow: %d", val)
-		} else if val > math.MaxUint8 {
-			return newError(node, "USINT overflow: %d", val)
-		}
-		return &object.USInt{Value: uint8(val)}
-	case object.UINT_OBJ:
-		if isUnsigned {
-			if uval > math.MaxUint16 { // Check against uint64 value
-				return newError(node, "UINT overflow: %d", uval)
-			}
-			return &object.UInt{Value: uint16(uval)}
-		}
-		if val < 0 {
-			return newError(node, "UINT underflow: %d", val)
-		} else if val > math.MaxUint16 {
-			return newError(node, "UINT overflow: %d", val)
-		}
-		return &object.UInt{Value: uint16(val)}
-	case object.UDINT_OBJ:
-		if isUnsigned {
-			if uval > math.MaxUint32 { // Check against uint64 value
-				return newError(node, "UDINT overflow: %d", uval)
-			}
-			return &object.UDInt{Value: uint32(uval)}
-		}
-		if val < 0 {
-			return newError(node, "UDINT underflow: %d", val)
-		} else if val > math.MaxUint32 {
-			return newError(node, "UDINT overflow: %d", val)
-		}
-		return &object.UDInt{Value: uint32(val)}
-	case object.ULINT_OBJ:
-		if !isUnsigned && val < 0 {
-			return newError(node, "ULINT underflow: %d", val)
-		}
-		// Overflow is handled before the operation for uint64
-		return &object.ULInt{Value: uval}
-	}
-	// Fallback to generic Integer for safety, though this path should ideally not be taken.
-	return &object.LInt{Value: val}
-}
-
 // evalCaseStatement evaluates a CASE statement by first evaluating the selector,
 // then iterating through each case branch to find a match. It handles single
 // values, lists of values, and ranges.
@@ -1524,17 +1468,17 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 			if err, isErr := le.(*object.Error); isErr {
 				return false, err
 			}
-			return object.IsTruthy(ge) && object.IsTruthy(le), nil
+			return ge == object.TRUE && le == object.TRUE, nil
 		}
 
 		// Fallback to generic comparison for non-numeric types.
 		ge := object.EvalInfix(selector, ">=", lowerBound)
 		le := object.EvalInfix(selector, "<=", upperBound)
 
-		return object.IsTruthy(ge) && object.IsTruthy(le), nil
+		return ge == object.TRUE && le == object.TRUE, nil
 	}
 
-	// Handle single values
+	// For single values, first evaluate the AST node to get the runtime object.
 	caseValue := Eval(valueNode, env)
 	if isError(caseValue) {
 		return false, caseValue.(*object.Error)
@@ -1552,18 +1496,12 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 		return match, nil
 	}
 
-	// For numeric types, use the dedicated numeric comparison logic.
-	if object.IsNumeric(selector) && object.IsNumeric(caseValue) {
-		eq := object.EvalNumericInfix(selector, caseValue, "=")
-		return eq == TRUE, nil
-	}
-
-	// For non-numeric types, use the generic comparison logic.
+	// For all single values, use the generic infix evaluation for equality.
 	eq := object.EvalInfix(selector, "=", caseValue)
 	if err, isErr := eq.(*object.Error); isErr {
 		return false, err
 	}
-	return object.IsTruthy(eq), nil
+	return eq == object.TRUE, nil
 }
 
 // evalForLoopStatement evaluates a FOR loop. It creates a new enclosed environment
@@ -1894,6 +1832,34 @@ func evalIdentifier(
 		return dereferencePointer(node, val)
 	}
 
+	// --- New logic to resolve SFC step names ---
+	// This is a special case to allow accessing step properties like StepName.T
+	// It searches the environment for any function block instances that might contain an SFC.
+	// This is a simplification; a more robust implementation might use a dedicated symbol table.
+	for _, name := range env.Names() {
+		if obj, ok := env.Get(name); ok {
+			if fbInstance, isFB := obj.(*object.FunctionBlockInstance); isFB {
+				if sfcObj, sfcOk := fbInstance.Env.Get("__sfc_instance__"); sfcOk {
+					if sfc, isSFC := sfcObj.(*object.SFC); isSFC {
+						if step, stepOk := sfc.Steps[node.Value]; stepOk {
+							return step // Found the step object
+						}
+					}
+				}
+			}
+		}
+	}
+	// Also check if the current environment itself has an SFC (for PROGRAM with SFC body)
+	// Check if the identifier is a step name within the current POU's SFC.
+	// This allows accessing step properties like `MyStep.T`.
+	if sfcObj, sfcOk := env.Get("__sfc_instance__"); sfcOk {
+		if sfc, isSFC := sfcObj.(*object.SFC); isSFC {
+			if step, stepOk := sfc.Steps[node.Value]; stepOk {
+				return step
+			}
+		}
+	}
+
 	if builtin, ok := object.GetBuiltinByName(node.Value); ok {
 		return builtin
 	}
@@ -2166,7 +2132,11 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 					if !isSFC {
 						return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
 					}
-					result = evalSFCCycle(sfcInstance, extendedEnv)
+					// When evaluating an SFC inside a function block, it's crucial to evaluate
+					// it within the function block's own environment (`extendedEnv`). This ensures
+					// that actions within the SFC can access and modify the FB's variables
+					// (VAR_INPUT, VAR_OUTPUT, VAR).
+					result = evalSFCCycle(sfcInstance, extendedEnv) // Pass the FB's env
 				} else {
 					result = Eval(fn.Definition.Body, extendedEnv)
 				}
@@ -2493,17 +2463,6 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 	}
 }
 
-// isComparisonOperator is a helper function that returns true if a given operator
-// string is one of the standard comparison operators.
-func isComparisonOperator(op string) bool {
-	switch op {
-	case "=", "!=", "<>", "<", ">", "<=", ">=":
-		return true
-	default:
-		return false
-	}
-}
-
 // applyNumericConversion parses a string value for a numeric typed literal (e.g.,
 // `INT#10`, `REAL#3.14`) and creates the corresponding runtime object, performing
 // range checking based on the specified type.
@@ -2533,25 +2492,58 @@ func applyNumericConversion(value, typeName string) object.Object {
 	}
 
 	if strings.HasPrefix(upperTypeName, "U") { // Unsigned
+		// Explicitly check for a negative sign, as ParseUint will return a syntax error,
+		// but we want to provide a more user-friendly "out of range" error.
+		if strings.HasPrefix(valueStr, "-") {
+			return object.NewBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+		}
 		uVal, err := strconv.ParseUint(valueStr, base, 64)
 		if err != nil {
-			return object.NewBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+			if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+				return object.NewBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+			}
+			return object.NewBuiltinError("could not parse %q as %s: %v", value, typeName, err)
 		}
 		targetRange := integerTypeRanges[upperTypeName]
 		if uVal > targetRange.maxUnsigned {
 			return object.NewBuiltinError("value %d is out of range for type %s", uVal, typeName)
 		}
-		return checkAndCreateIntegerObject(nil, object.ObjectType(upperTypeName), 0, uVal, true)
+		t := object.ObjectType(upperTypeName)
+		switch t {
+		case object.USINT_OBJ:
+			return &object.USInt{Value: uint8(uVal)}
+		case object.UINT_OBJ:
+			return &object.UInt{Value: uint16(uVal)}
+		case object.UDINT_OBJ:
+			return &object.UDInt{Value: uint32(uVal)}
+		case object.ULINT_OBJ:
+			return &object.ULInt{Value: uVal}
+		}
+		return object.NewBuiltinError("internal error: unhandled unsigned integer type %s", t)
 	} else { // Signed
 		val, err := strconv.ParseInt(valueStr, base, 64)
 		if err != nil {
-			return object.NewBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+			if numErr, ok := err.(*strconv.NumError); ok && numErr.Err == strconv.ErrRange {
+				return object.NewBuiltinError("value %s is out of range for type %s", valueStr, typeName)
+			}
+			return object.NewBuiltinError("could not parse %q as %s: %v", value, typeName, err)
 		}
 		targetRange := integerTypeRanges[upperTypeName]
 		if val < targetRange.minSigned || val > targetRange.maxSigned {
 			return object.NewBuiltinError("value %d is out of range for type %s", val, typeName)
 		}
-		return checkAndCreateIntegerObject(nil, object.ObjectType(upperTypeName), val, 0, false)
+		t := object.ObjectType(upperTypeName)
+		switch t {
+		case object.SINT_OBJ:
+			return &object.SInt{Value: int8(val)}
+		case object.INT_OBJ:
+			return &object.Int{Value: int16(val)}
+		case object.DINT_OBJ:
+			return &object.DInt{Value: int32(val)}
+		case object.LINT_OBJ:
+			return &object.LInt{Value: val}
+		}
+		return object.NewBuiltinError("internal error: unhandled signed integer type %s", t)
 	}
 }
 

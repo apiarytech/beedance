@@ -1,11 +1,10 @@
 package stdlib
 
 import (
-	"beedance/ast"
+	"beedance/evaluator"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -600,11 +599,11 @@ func TestArrayBuiltinFunctions(t *testing.T) {
 		expected interface{}
 	}{
 		{`FIRST([1, 2, 3]);`, 1},
-		{`FIRST([]);`, nil},
+		{`FIRST([]);`, &object.Null{}},
 		{`LAST([1, 2, 3]);`, 3},
-		{`LAST([]);`, nil},
+		{`LAST([]);`, &object.Null{}},
 		{`REST([1, 2, 3]);`, []int{2, 3}},
-		{`REST([]);`, nil},
+		{`REST([]);`, &object.Null{}},
 		{`PUSH([], 1);`, []int{1}},
 		{`PUSH([1, 2], 3);`, []int{1, 2, 3}},
 	}
@@ -634,148 +633,22 @@ func TestArrayBuiltinFunctions(t *testing.T) {
 	}
 }
 
-// testEval is a helper that parses a single function call expression and executes
-// the corresponding built-in function. It manually evaluates literal arguments
-// to avoid a circular dependency on the evaluator package.
+// testEval is a helper that parses and evaluates a given input string using the
+// main evaluator, ensuring that tests run through the same code path as the application.
 func testEval(t *testing.T, input string) object.Object {
 	t.Helper()
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
 	if len(p.Errors()) > 0 {
-		t.Fatalf("parser errors on input %q: %v", input, p.Errors())
+		t.Errorf("parser has %d errors", len(p.Errors()))
+		for _, msg := range p.Errors() {
+			t.Errorf("parser error: %q", msg)
+		}
+		t.FailNow()
 	}
-
-	if len(program.Statements) != 1 {
-		t.Fatalf("expected 1 statement, got %d", len(program.Statements))
-	}
-
-	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
-	if !ok {
-		t.Fatalf("statement is not ExpressionStatement, got %T", program.Statements[0])
-	}
-
-	call, ok := stmt.Expression.(*ast.CallExpression)
-	if !ok {
-		t.Fatalf("expression is not CallExpression, got %T", stmt.Expression)
-	}
-
-	funcName := call.Function.String()
-	builtin, ok := object.GetBuiltinByName(strings.ToUpper(funcName))
-	if !ok {
-		t.Fatalf("builtin not found: %s", funcName)
-	}
-
-	args := []object.Object{}
-	for _, argNode := range call.Arguments {
-		args = append(args, evalTestLiteral(t, argNode))
-	}
-
-	return builtin.Fn(args...)
-}
-
-func evalTestLiteral(t *testing.T, node ast.Expression) object.Object {
-	t.Helper()
-	switch node := node.(type) {
-	case *ast.IntegerLiteral:
-		return &object.LInt{Value: node.Value}
-	case *ast.RealLiteral:
-		return &object.LReal{Value: node.Value}
-	case *ast.StringLiteral:
-		return &object.String{Value: node.Value}
-	case *ast.WStringLiteral:
-		return &object.WString{Value: node.Value}
-	case *ast.Boolean:
-		return &object.Boolean{Value: node.Value}
-	case *ast.ArrayLiteral:
-		elements := []object.Object{}
-		for _, elNode := range node.Elements {
-			elements = append(elements, evalTestLiteral(t, elNode))
-		}
-		return &object.Array{Elements: elements}
-	case *ast.TypedLiteral:
-		return evalTypedLiteral(t, node)
-	case *ast.PrefixExpression:
-		if node.Operator == "-" {
-			right := evalTestLiteral(t, node.Right)
-			if intVal, ok := right.(*object.LInt); ok {
-				return &object.LInt{Value: -intVal.Value}
-			} else if realVal, ok := right.(*object.Real); ok {
-				return &object.Real{Value: -realVal.Value}
-			} else if lrealVal, ok := right.(*object.LReal); ok {
-				// Assuming LReal is the underlying type for all real numbers in tests
-				return &object.LReal{Value: -lrealVal.Value}
-			}
-		}
-		t.Fatalf("unhandled prefix expression in test: %s", node.Operator)
-		return nil
-	default:
-		t.Fatalf("unhandled literal type in test: %T", node)
-		return nil
-	}
-}
-
-func evalTypedLiteral(t *testing.T, node *ast.TypedLiteral) object.Object {
-	t.Helper()
-	typeName := strings.ToUpper(node.TypeName)
-	valueStr := node.Value.String()
-
-	switch typeName {
-	case "T", "TIME":
-		d, err := time.ParseDuration(valueStr)
-		if err != nil {
-			t.Fatalf("failed to parse time duration in test: %v", err)
-		}
-		return &object.Time{Value: d}
-	case "BYTE", "WORD", "DWORD", "LWORD":
-		parts := strings.Split(valueStr, "#")
-		if len(parts) != 2 {
-			t.Fatalf("invalid bitstring literal in test: %s", valueStr)
-		}
-		val, err := strconv.ParseUint(parts[1], 16, 64)
-		if err != nil {
-			t.Fatalf("failed to parse bitstring value in test: %v", err)
-		}
-		var width int
-		switch typeName {
-		case "BYTE":
-			width = 8
-		case "WORD":
-			width = 16
-		case "DWORD":
-			width = 32
-		case "LWORD":
-			width = 64
-		}
-		return &object.BitString{Value: val, Width: width}
-	case "D", "DATE":
-		tm, err := time.Parse("2006-01-02", valueStr)
-		if err != nil {
-			t.Fatalf("failed to parse date in test: %v", err)
-		}
-		return &object.Date{Value: tm}
-	case "TOD", "TIME_OF_DAY":
-		tm, err := time.Parse("15:04:05.999999999", valueStr)
-		if err != nil {
-			tm, err = time.Parse("15:04:05", valueStr)
-			if err != nil {
-				t.Fatalf("failed to parse time of day in test: %v", err)
-			}
-		}
-		return &object.TimeOfDay{Value: tm}
-	case "DT", "DATE_AND_TIME":
-		tm, err := time.Parse("2006-01-02-15:04:05.999999999", valueStr)
-		if err != nil {
-			tm, err = time.Parse("2006-01-02-15:04:05", valueStr)
-			if err != nil {
-				t.Fatalf("failed to parse date and time in test: %v", err)
-			}
-		}
-		return &object.DateAndTime{Value: tm}
-	default:
-		t.Fatalf("unhandled typed literal in test: %s", typeName)
-		return nil
-	}
+	env := object.NewEnvironment()
+	return evaluator.Eval(program, env)
 }
 
 func testIntegerObject(t *testing.T, obj object.Object, expected int64) {
@@ -853,7 +726,7 @@ func testStringOrError(t *testing.T, obj object.Object, expected string) {
 
 func testNullObject(t *testing.T, obj object.Object) bool {
 	t.Helper()
-	if obj != NULL {
+	if (obj != &object.Null{}) {
 		t.Errorf("object is not NULL. got=%T (%+v)", obj, obj)
 		return false
 	}

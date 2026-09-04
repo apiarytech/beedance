@@ -1526,8 +1526,13 @@ func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression
 		Struct: left,
 	}
 
-	// We expect an identifier after the dot.
-	if !p.expectPeek(token.IDENT) {
+	// The member can be an identifier or a keyword used as an identifier (e.g., 'T', 'IN', 'Q').
+	// We advance to the member token and then create an identifier from its literal.
+	p.nextToken() // consume the '.'
+
+	// Basic validation: a member name can't be a delimiter like a parenthesis or semicolon.
+	if p.curTokenIs(token.SEMICOLON) || p.curTokenIs(token.LPAREN) || p.curTokenIs(token.RPAREN) {
+		p.currentError("expected identifier for member access, got %s", p.curToken.Type)
 		return nil
 	}
 

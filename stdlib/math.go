@@ -13,6 +13,7 @@ package stdlib
 import (
 	"beedance/object"
 	"math"
+	"strings"
 )
 
 func init() {
@@ -252,28 +253,52 @@ func addBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for ADD. got=%d, want=2", len(args))
 	}
-	return object.EvalInfix(args[0], "+", args[1])
+	left, right := args[0], args[1]
+	result := object.EvalInfix(left, "+", right)
+	if _, ok := result.(*object.Error); ok {
+		return object.NewBuiltinError("unsupported argument types for ADD: %s + %s", left.Type(), right.Type())
+	}
+	return result
 }
 
 func subBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for SUB. got=%d, want=2", len(args))
 	}
-	return object.EvalInfix(args[0], "-", args[1])
+	left, right := args[0], args[1]
+	result := object.EvalInfix(left, "-", right)
+	if _, ok := result.(*object.Error); ok {
+		return object.NewBuiltinError("unsupported argument types for SUB: %s - %s", left.Type(), right.Type())
+	}
+	return result
 }
 
 func mulBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for MUL. got=%d, want=2", len(args))
 	}
-	return object.EvalInfix(args[0], "*", args[1])
+	left, right := args[0], args[1]
+	result := object.EvalInfix(left, "*", right)
+	if _, ok := result.(*object.Error); ok {
+		return object.NewBuiltinError("unsupported argument types for MUL: %s * %s", left.Type(), right.Type())
+	}
+	return result
 }
 
 func divBuiltin(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for DIV. got=%d, want=2", len(args))
 	}
-	return object.EvalInfix(args[0], "/", args[1])
+	left, right := args[0], args[1]
+	result := object.EvalInfix(left, "/", right)
+	if err, ok := result.(*object.Error); ok {
+		// Preserve "division by zero" error from EvalInfix
+		if strings.Contains(err.Message, "division by zero") {
+			return err
+		}
+		return object.NewBuiltinError("unsupported argument types for DIV: %s / %s", left.Type(), right.Type())
+	}
+	return result
 }
 
 func modBuiltin(args ...object.Object) object.Object {

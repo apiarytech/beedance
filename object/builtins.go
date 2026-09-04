@@ -9,11 +9,14 @@
 
 package object
 
+import "sort"
+
 // BuiltinEntry holds the name and implementation of a built-in function.
 // This is used for the indexed list required by the compiler and VM.
 type BuiltinEntry struct {
-	Name    string
-	Builtin *Builtin
+	Name    string   // The name of the built-in function (e.g., "LEN")
+	Builtin *Builtin // The function implementation
+	Index   int      // The stable, iota-generated index
 }
 
 // Builtins is a slice of all registered built-in functions, sorted by name.
@@ -27,7 +30,6 @@ var builtinsByName = make(map[string]*Builtin)
 // builtinsByIndex is a temporary map to hold builtins before finalization.
 // It maps the stable iota-generated index to the builtin's definition.
 var builtinsByIndex = make(map[int]BuiltinEntry)
-var maxBuiltinIndex = -1
 
 // RegisterBuiltin is called by packages (like evaluator) to register
 // the implementation of a built-in function. This function is not thread-safe
@@ -36,33 +38,32 @@ func RegisterBuiltin(index int, name string, fn BuiltinFunction) {
 	entry := BuiltinEntry{
 		Name:    name,
 		Builtin: &Builtin{Fn: fn},
+		Index:   index,
 	}
 	builtinsByIndex[index] = entry
 	builtinsByName[name] = entry.Builtin // Keep for evaluator's name-based lookup
-
-	if index > maxBuiltinIndex {
-		maxBuiltinIndex = index
-	}
 }
 
 // FinalizeBuiltins sorts the built-ins by name and populates the public
-// `Builtins` slice. This MUST be called after all built-ins have been
-// registered, typically in a main init() or at the start of main().
+// `Builtins` slice. This function is now designed to create a dense slice
+// from the registered built-ins and sort it by the `iota`-generated index.
+// This ensures a stable and predictable order for the compiler and VM.
 func FinalizeBuiltins() {
-	if len(builtinsByIndex) == 0 {
-		Builtins = []BuiltinEntry{}
-		return
+	// Convert the map to a slice for sorting.
+	// This creates a dense slice, which is more robust than a sparse one.
+	builtinsList := make([]BuiltinEntry, 0, len(builtinsByIndex))
+	for _, entry := range builtinsByIndex {
+		builtinsList = append(builtinsList, entry)
 	}
 
-	// Create a slice large enough to hold all builtins up to the max registered index.
-	Builtins = make([]BuiltinEntry, maxBuiltinIndex+1)
+	// Sort the slice based on the iota-generated Index.
+	// This is the critical step to ensure the compiler and VM have a
+	// consistent index for each built-in function.
+	sort.Slice(builtinsList, func(i, j int) bool {
+		return builtinsList[i].Index < builtinsList[j].Index
+	})
 
-	// Place each builtin at its designated index. This creates a sparse slice if some
-	// indices are not registered, but ensures that the index remains stable and
-	// consistent with the iota constants.
-	for index, entry := range builtinsByIndex {
-		Builtins[index] = entry
-	}
+	Builtins = builtinsList
 }
 
 // GetBuiltinByName is used by the evaluator to look up built-in functions by name.

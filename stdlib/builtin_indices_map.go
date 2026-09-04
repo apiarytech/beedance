@@ -238,6 +238,7 @@ var BuiltinNameToIndex = map[string]int{
 	"FIRST":               BuiltinFirst,
 	"GE":                  BuiltinGe,
 	"GT":                  BuiltinGt,
+	"GREAT":               BuiltinGreat,
 	"INSERT":              BuiltinInsert,
 	"INT_TO_ANY_INT":      BuiltinIntToAnyInt,
 	"INT_TO_ANY_REAL":     BuiltinIntToAnyReal,

@@ -4,6 +4,7 @@ import (
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -47,12 +48,22 @@ func testIntegerObject(t *testing.T, obj object.Object, name string, expected in
 
 func testIntegerObjectInEnv(t *testing.T, env *object.Environment, name string, expected int64) bool {
 	t.Helper()
-	return testIntegerObject(t, mustGet(env, name), name, expected)
+	obj, err := mustGet(env, name)
+	if err != nil {
+		t.Errorf("%v", err)
+		return false
+	}
+	return testIntegerObject(t, obj, name, expected)
 }
 
 func testBooleanObjectInEnv(t *testing.T, env *object.Environment, name string, expected bool) bool {
 	t.Helper()
-	return testBooleanObject(t, mustGet(env, name), name, expected)
+	obj, err := mustGet(env, name)
+	if err != nil {
+		t.Errorf("%v", err)
+		return false
+	}
+	return testBooleanObject(t, obj, name, expected)
 }
 
 func testBooleanObject(t *testing.T, obj object.Object, name string, expected bool) bool {
@@ -85,7 +96,12 @@ func testTimeObject(t *testing.T, obj object.Object, name string, expected time.
 
 func testTimeObjectInEnv(t *testing.T, env *object.Environment, name string, expected time.Duration) bool {
 	t.Helper()
-	return testTimeObject(t, mustGet(env, name), name, expected)
+	obj, err := mustGet(env, name)
+	if err != nil {
+		t.Errorf("%v", err)
+		return false
+	}
+	return testTimeObject(t, obj, name, expected)
 }
 
 func testNullObject(t *testing.T, obj object.Object) bool {
@@ -126,12 +142,12 @@ func checkParserErrors(t *testing.T, p *parser.Parser, testName string, input st
 }
 
 // mustGet is a test helper to get a value from the environment and fail if not found.
-func mustGet(env *object.Environment, name string) object.Object {
+func mustGet(env *object.Environment, name string) (object.Object, error) {
 	obj, ok := env.Get(name)
 	if !ok {
-		panic("variable " + name + " not found in environment")
+		return nil, fmt.Errorf("variable '%s' not found in environment", name)
 	}
-	return obj
+	return obj, nil
 }
 
 func testRealObject(t *testing.T, obj object.Object, name string, expected float64) bool {
@@ -151,7 +167,12 @@ func testRealObject(t *testing.T, obj object.Object, name string, expected float
 
 func testRealObjectInEnv(t *testing.T, env *object.Environment, name string, expected float64) bool {
 	t.Helper()
-	return testRealObject(t, mustGet(env, name), name, expected)
+	obj, err := mustGet(env, name)
+	if err != nil {
+		t.Errorf("%v", err)
+		return false
+	}
+	return testRealObject(t, obj, name, expected)
 }
 
 func testBitStringObject(t *testing.T, obj object.Object, expected uint64) bool {
@@ -184,7 +205,12 @@ func testStringObject(t *testing.T, obj object.Object, name string, expected str
 
 func testStringObjectInEnv(t *testing.T, env *object.Environment, name string, expected string) bool {
 	t.Helper()
-	return testStringObject(t, mustGet(env, name), name, expected)
+	obj, err := mustGet(env, name)
+	if err != nil {
+		t.Errorf("%v", err)
+		return false
+	}
+	return testStringObject(t, obj, name, expected)
 }
 
 func testParserErrorContains(t *testing.T, errors []string, expectedMessage string) bool {

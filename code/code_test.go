@@ -8,10 +8,10 @@ func TestMake(t *testing.T) {
 		operands []int
 		expected []byte
 	}{
-		{OpConstant, []int{65534}, []byte{byte(OpConstant), 255, 254}},
+		{OpConstant, []int{65534}, []byte{byte(OpConstant), 254, 255}},
 		{OpAdd, []int{}, []byte{byte(OpAdd)}},
 		{OpGetLocal, []int{255}, []byte{byte(OpGetLocal), 255}},
-		{OpClosure, []int{65534, 255}, []byte{byte(OpClosure), 255, 254, 255}},
+		{OpClosure, []int{65534, 255}, []byte{byte(OpClosure), 254, 255, 255}},
 	}
 
 	for _, tt := range tests {

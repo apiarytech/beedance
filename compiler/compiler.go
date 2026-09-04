@@ -52,8 +52,8 @@ func NewCompilerWithBuiltins(builtins []object.BuiltinEntry) *Compiler {
 	}
 
 	symbolTable := NewSymbolTable()
-	for i, v := range builtins {
-		symbolTable.DefineBuiltin(i, v.Name)
+	for _, v := range builtins {
+		symbolTable.DefineBuiltin(v.Index, v.Name) // Use the explicit Index from BuiltinEntry
 	}
 
 	return &Compiler{

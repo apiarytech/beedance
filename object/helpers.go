@@ -129,6 +129,26 @@ func GetBitStringWidth(typeName string) (int, bool) {
 	}
 }
 
+// IsComparisonOperator checks if an operator is a comparison operator.
+func IsComparisonOperator(op string) bool {
+	switch op {
+	case "=", "EQ", "!=", "<>", "NE", "<", "LT", ">", "GT", "<=", "LE", ">=", "GE":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsBitwiseOperator checks if an operator is a bitwise operator.
+func IsBitwiseOperator(op string) bool {
+	switch op {
+	case "AND", "&", "OR", "XOR", "NAND", "NOR":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsTimeDateKeyword checks if a given string is the name of a standard IEC 61131-3 time or date type.
 func IsTimeDateKeyword(name string) bool {
 	upper := strings.ToUpper(name)
@@ -330,28 +350,6 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 	return NewBuiltinError("conversion to type %s is not supported", toType)
 }
 
-func checkAndCreateIntegerObject(t ObjectType, val int64, uval uint64, isUnsigned bool) Object {
-	switch t {
-	case SINT_OBJ:
-		return &SInt{Value: int8(val)}
-	case INT_OBJ:
-		return &Int{Value: int16(val)}
-	case DINT_OBJ:
-		return &DInt{Value: int32(val)}
-	case LINT_OBJ:
-		return &LInt{Value: val}
-	case USINT_OBJ:
-		return &USInt{Value: uint8(uval)}
-	case UINT_OBJ:
-		return &UInt{Value: uint16(uval)}
-	case UDINT_OBJ:
-		return &UDInt{Value: uint32(uval)}
-	case ULINT_OBJ:
-		return &ULInt{Value: uval}
-	}
-	return &LInt{Value: val}
-}
-
 func intToBcd(val int64) (uint16, error) {
 	if val < 0 || val > 9999 {
 		return 0, fmt.Errorf("value %d out of range for 4-digit BCD conversion (0-9999)", val)
@@ -388,6 +386,66 @@ func bcdToInt(input Object) Object {
 	return &LInt{Value: result}
 }
 
+// checkAndCreateIntegerObject validates a computed integer value against the
+// bounds of a target IEC integer type and, if valid, creates and returns the
+// corresponding object (e.g., SInt, UINT).
+func checkAndCreateIntegerObject(t ObjectType, val int64, uval uint64, isUnsigned bool) Object {
+	targetRange, ok := integerTypeRanges[string(t)]
+	if !ok {
+		return NewBuiltinError("internal error: unknown integer type %s", t)
+	}
+
+	if strings.HasPrefix(string(t), "U") { // Unsigned target
+		var checkVal uint64
+		if isUnsigned {
+			checkVal = uval
+		} else {
+			if val < 0 {
+				return NewBuiltinError("%s underflow: %d", t, val)
+			}
+			checkVal = uint64(val)
+		}
+		if checkVal > targetRange.maxUnsigned {
+			return NewBuiltinError("%s overflow: %d", t, checkVal)
+		}
+	} else { // Signed target
+		checkVal := val
+		if isUnsigned {
+			if uval > uint64(targetRange.maxSigned) {
+				return NewBuiltinError("%s overflow: %d", t, uval)
+			}
+			checkVal = int64(uval)
+		}
+		if checkVal < targetRange.minSigned {
+			return NewBuiltinError("%s underflow: %d", t, checkVal)
+		}
+		if checkVal > targetRange.maxSigned {
+			return NewBuiltinError("%s overflow: %d", t, checkVal)
+		}
+	}
+
+	// If checks pass, create the object
+	switch t {
+	case SINT_OBJ:
+		return &SInt{Value: int8(val)}
+	case INT_OBJ:
+		return &Int{Value: int16(val)}
+	case DINT_OBJ:
+		return &DInt{Value: int32(val)}
+	case LINT_OBJ:
+		return &LInt{Value: val}
+	case USINT_OBJ:
+		return &USInt{Value: uint8(uval)}
+	case UINT_OBJ:
+		return &UInt{Value: uint16(uval)}
+	case UDINT_OBJ:
+		return &UDInt{Value: uint32(uval)}
+	case ULINT_OBJ:
+		return &ULInt{Value: uval}
+	}
+	return &LInt{Value: val}
+}
+
 // IsEqual performs a deep equality check between two objects, respecting IEC 61131-3 type semantics.
 func IsEqual(left, right Object) bool {
 	// evalInfixForIsEqual is a simplified, self-contained version of the evaluator's logic.
@@ -405,6 +463,16 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		leftVal := left.(*Boolean).Value
 		rightVal := right.(*Boolean).Value
 		switch operator {
+		case "AND", "&":
+			return nativeBoolToBooleanObject(leftVal && rightVal)
+		case "OR":
+			return nativeBoolToBooleanObject(leftVal || rightVal)
+		case "XOR":
+			return nativeBoolToBooleanObject(leftVal != rightVal)
+		case "NAND":
+			return nativeBoolToBooleanObject(!(leftVal && rightVal))
+		case "NOR":
+			return nativeBoolToBooleanObject(!(leftVal || rightVal))
 		case "=", "EQ":
 			return nativeBoolToBooleanObject(leftVal == rightVal)
 		case "!=", "<>", "NE":
@@ -421,85 +489,18 @@ func EvalInfix(left Object, operator string, right Object) Object {
 			return NewBuiltinError("unknown operator for BOOLEAN: %s", operator)
 		}
 	case left.Type() == STRING_OBJ && right.Type() == STRING_OBJ:
-		leftVal := left.(*String).Value
-		rightVal := right.(*String).Value
-		return evalGenericComparison(operator, leftVal, rightVal)
+		return evalStringInfix(left.(*String), operator, right.(*String))
 	case left.Type() == WSTRING_OBJ && right.Type() == WSTRING_OBJ:
-		leftVal := left.(*WString).Value
-		rightVal := right.(*WString).Value
-		return evalGenericComparison(operator, leftVal, rightVal)
-	case left.Type() == TIME_OBJ && right.Type() == TIME_OBJ:
-		leftVal := left.(*Time).Value
-		rightVal := right.(*Time).Value
-		return evalGenericComparison(operator, int64(leftVal), int64(rightVal))
-	case left.Type() == DATE_OBJ && right.Type() == DATE_OBJ:
-		leftVal := left.(*Date).Value
-		rightVal := right.(*Date).Value
-		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
-	case left.Type() == TIME_OF_DAY_OBJ && right.Type() == TIME_OF_DAY_OBJ:
-		leftVal := left.(*TimeOfDay).Value
-		rightVal := right.(*TimeOfDay).Value
-		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
-		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
-		return evalGenericComparison(operator, leftNs, rightNs)
-	case left.Type() == DATE_AND_TIME_OBJ && right.Type() == DATE_AND_TIME_OBJ:
-		leftVal := left.(*DateAndTime).Value
-		rightVal := right.(*DateAndTime).Value
-		return evalGenericComparison(operator, leftVal.UnixNano(), rightVal.UnixNano())
-		// Time and Date arithmetic
-	case left.Type() == TIME_OBJ:
-		switch operator {
-		case "+":
-			if right.Type() == TIME_OBJ {
-				return &Time{Value: left.(*Time).Value + right.(*Time).Value}
-			}
-		case "-":
-			if right.Type() == TIME_OBJ {
-				return &Time{Value: left.(*Time).Value - right.(*Time).Value}
-			}
-		case "*", "/":
-			if num, ok := GetFloat64Value(right); ok {
-				if operator == "/" && num == 0 {
-					return NewBuiltinError("division by zero")
-				}
-				op := func(a, b float64) float64 {
-					if operator == "*" {
-						return a * b
-					}
-					return a / b
-				}
-				return &Time{Value: time.Duration(op(float64(left.(*Time).Value), num))}
-			}
-		}
-	case right.Type() == TIME_OBJ && (operator == "*" || operator == "/"):
-		if num, ok := GetFloat64Value(left); ok {
-			if operator == "/" {
-				return NewBuiltinError("invalid operation: cannot divide a number by a TIME value")
-			}
-			return &Time{Value: time.Duration(float64(right.(*Time).Value) * num)}
-		}
-	case left.Type() == DATE_OBJ && operator == "-" && right.Type() == DATE_OBJ:
-		return &Time{Value: left.(*Date).Value.Sub(right.(*Date).Value)}
-	case left.Type() == TIME_OF_DAY_OBJ:
-		if right.Type() == TIME_OBJ {
-			if operator == "+" {
-				return &TimeOfDay{Value: left.(*TimeOfDay).Value.Add(right.(*Time).Value)}
-			} else if operator == "-" {
-				return &TimeOfDay{Value: left.(*TimeOfDay).Value.Add(-right.(*Time).Value)}
-			}
-		} else if right.Type() == TIME_OF_DAY_OBJ && operator == "-" {
-			return &Time{Value: left.(*TimeOfDay).Value.Sub(right.(*TimeOfDay).Value)}
-		}
-	case left.Type() == DATE_AND_TIME_OBJ:
-		if right.Type() == TIME_OBJ {
-			if operator == "+" {
-				return &DateAndTime{Value: left.(*DateAndTime).Value.Add(right.(*Time).Value)}
-			} else if operator == "-" {
-				return &DateAndTime{Value: left.(*DateAndTime).Value.Add(-right.(*Time).Value)}
-			}
-		} else if right.Type() == DATE_AND_TIME_OBJ && operator == "-" {
-			return &Time{Value: left.(*DateAndTime).Value.Sub(right.(*DateAndTime).Value)}
-		}
+		return evalWStringInfix(left.(*WString), operator, right.(*WString))
+	// Time and Date arithmetic and comparison (order is important: specific to general)
+	case left.Type() == DATE_AND_TIME_OBJ || right.Type() == DATE_AND_TIME_OBJ:
+		return evalDateAndTimeInfix(left, operator, right)
+	case left.Type() == TIME_OF_DAY_OBJ || right.Type() == TIME_OF_DAY_OBJ:
+		return evalTimeOfDayInfix(left, operator, right)
+	case left.Type() == DATE_OBJ || right.Type() == DATE_OBJ:
+		return evalDateInfix(left, operator, right)
+	case left.Type() == TIME_OBJ || right.Type() == TIME_OBJ:
+		return evalTimeInfix(left, operator, right)
 	case left.Type() == BITSTRING_OBJ && right.Type() == BITSTRING_OBJ:
 		return evalBitStringInfix(left, operator, right)
 	case left.Type() == NULL_OBJ || right.Type() == NULL_OBJ:
@@ -507,7 +508,55 @@ func EvalInfix(left Object, operator string, right Object) Object {
 			return nativeBoolToBooleanObject(left.Type() == right.Type())
 		}
 	}
-	return NewBuiltinError("unsupported types for comparison: %s %s %s", left.Type(), operator, right.Type())
+	if IsBitwiseOperator(operator) && (left.Type() == BITSTRING_OBJ || right.Type() == BITSTRING_OBJ) {
+		return NewBuiltinError("type mismatch: %s %s %s", left.Type(), operator, right.Type())
+	}
+	if IsComparisonOperator(operator) {
+		return NewBuiltinError("type mismatch for comparison: %s %s %s", left.Type(), operator, right.Type())
+	}
+	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
+}
+
+func evalStringInfix(left *String, operator string, right *String) Object {
+	switch operator {
+	case "+":
+		return &String{Value: left.Value + right.Value}
+	case "=", "EQ":
+		return nativeBoolToBooleanObject(left.Value == right.Value)
+	case "!=", "<>", "NE":
+		return nativeBoolToBooleanObject(left.Value != right.Value)
+	case "<", "LT":
+		return nativeBoolToBooleanObject(left.Value < right.Value)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(left.Value > right.Value)
+	case "<=", "LE":
+		return nativeBoolToBooleanObject(left.Value <= right.Value)
+	case ">=", "GE":
+		return nativeBoolToBooleanObject(left.Value >= right.Value)
+	default:
+		return NewBuiltinError("unsupported operator '%s' for types STRING and STRING", operator)
+	}
+}
+
+func evalWStringInfix(left *WString, operator string, right *WString) Object {
+	switch operator {
+	case "+":
+		return &WString{Value: left.Value + right.Value}
+	case "=", "EQ":
+		return nativeBoolToBooleanObject(left.Value == right.Value)
+	case "!=", "<>", "NE":
+		return nativeBoolToBooleanObject(left.Value != right.Value)
+	case "<", "LT":
+		return nativeBoolToBooleanObject(left.Value < right.Value)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(left.Value > right.Value)
+	case "<=", "LE":
+		return nativeBoolToBooleanObject(left.Value <= right.Value)
+	case ">=", "GE":
+		return nativeBoolToBooleanObject(left.Value >= right.Value)
+	default:
+		return NewBuiltinError("unsupported operator '%s' for types WSTRING and WSTRING", operator)
+	}
 }
 
 func evalBitStringInfix(left Object, operator string, right Object) Object {
@@ -552,6 +601,100 @@ func evalBitStringInfix(left Object, operator string, right Object) Object {
 	default:
 		return NewBuiltinError("unknown operator for bitstrings: %s", operator)
 	}
+}
+
+func evalTimeInfix(left Object, operator string, right Object) Object {
+	if left.Type() == TIME_OBJ && right.Type() == TIME_OBJ {
+		lVal := left.(*Time).Value
+		rVal := right.(*Time).Value
+		switch operator {
+		case "+":
+			return &Time{Value: lVal + rVal}
+		case "-":
+			return &Time{Value: lVal - rVal}
+		case "*", "/":
+			return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
+		default: // Comparison operators
+			return evalGenericComparison(operator, int64(lVal), int64(rVal))
+		}
+	}
+	if left.Type() == TIME_OBJ && IsNumeric(right) {
+		lVal := left.(*Time).Value
+		rVal, _ := GetFloat64Value(right)
+		switch operator {
+		case "*":
+			return &Time{Value: time.Duration(float64(lVal) * rVal)}
+		case "/":
+			if rVal == 0 {
+				return NewBuiltinError("division by zero")
+			}
+			return &Time{Value: time.Duration(float64(lVal) / rVal)}
+		}
+	}
+	if IsNumeric(left) && right.Type() == TIME_OBJ {
+		lVal, _ := GetFloat64Value(left)
+		rVal := right.(*Time).Value
+		if operator == "*" {
+			return &Time{Value: time.Duration(lVal * float64(rVal))}
+		}
+	}
+	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
+}
+
+func evalDateInfix(left Object, operator string, right Object) Object {
+	if left.Type() == DATE_OBJ && right.Type() == DATE_OBJ {
+		lVal := left.(*Date).Value
+		rVal := right.(*Date).Value
+		if operator == "-" {
+			return &Time{Value: lVal.Sub(rVal)}
+		}
+		return evalGenericComparison(operator, lVal.UnixNano(), rVal.UnixNano())
+	}
+	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
+}
+
+func evalTimeOfDayInfix(left Object, operator string, right Object) Object {
+	if left.Type() == TIME_OF_DAY_OBJ {
+		lVal := left.(*TimeOfDay).Value
+		if right.Type() == TIME_OBJ {
+			rVal := right.(*Time).Value
+			if operator == "+" {
+				return &TimeOfDay{Value: lVal.Add(rVal)}
+			} else if operator == "-" {
+				return &TimeOfDay{Value: lVal.Add(-rVal)}
+			}
+		} else if right.Type() == TIME_OF_DAY_OBJ {
+			rVal := right.(*TimeOfDay).Value
+			if operator == "-" {
+				return &Time{Value: lVal.Sub(rVal)}
+			}
+			leftNs := int64(lVal.Hour())*int64(time.Hour) + int64(lVal.Minute())*int64(time.Minute) + int64(lVal.Second())*int64(time.Second) + int64(lVal.Nanosecond())
+			rightNs := int64(rVal.Hour())*int64(time.Hour) + int64(rVal.Minute())*int64(time.Minute) + int64(rVal.Second())*int64(time.Second) + int64(rVal.Nanosecond())
+			return evalGenericComparison(operator, leftNs, rightNs)
+		}
+	}
+	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
+}
+
+func evalDateAndTimeInfix(left Object, operator string, right Object) Object {
+	if left.Type() == DATE_AND_TIME_OBJ {
+		lVal := left.(*DateAndTime).Value
+		if right.Type() == TIME_OBJ {
+			rVal := right.(*Time).Value
+			if operator == "+" {
+				return &DateAndTime{Value: lVal.Add(rVal)}
+			} else if operator == "-" {
+				return &DateAndTime{Value: lVal.Add(-rVal)}
+			}
+		} else if right.Type() == DATE_AND_TIME_OBJ {
+			rVal := right.(*DateAndTime).Value
+			if operator == "-" {
+				return &Time{Value: lVal.Sub(rVal)}
+			}
+			return evalGenericComparison(operator, lVal.UnixNano(), rVal.UnixNano())
+		}
+	}
+	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
 }
 
 func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) Object {
@@ -626,42 +769,102 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 	leftType := left.Type()
 	rightType := right.Type()
 	resultType := getResultIntegerType(leftType, rightType)
-	leftVal, isLeftUnsigned, _ := GetIntegerObjectValue(left)
-	rightVal, _, _ := GetIntegerObjectValue(right)
-	var resultValue int64
-	switch operator {
-	case "+":
-		resultValue = leftVal + rightVal
-	case "-":
-		resultValue = leftVal - rightVal
-	case "*":
-		resultValue = leftVal * rightVal
-	case "/":
-		if rightVal == 0 {
-			return NewBuiltinError("division by zero")
-		}
-		resultValue = leftVal / rightVal
-	case "MOD":
-		if rightVal == 0 {
-			return NewBuiltinError("division by zero in MOD")
-		}
-		resultValue = leftVal % rightVal
-	case "<", "LT":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">", "GT":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "=", "EQ":
-		return nativeBoolToBooleanObject(leftVal == rightVal)
-	case "!=", "<>", "NE":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<=", "LE":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=", "GE":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		return NewBuiltinError("unknown operator for integers: %s", operator)
+
+	leftVal, isLeftUnsigned, ok := GetIntegerObjectValue(left)
+	if !ok {
+		return NewBuiltinError("could not get value from left operand of type %s", left.Type())
 	}
-	return checkAndCreateIntegerObject(resultType, resultValue, uint64(resultValue), isLeftUnsigned)
+	rightVal, isRightUnsigned, ok := GetIntegerObjectValue(right)
+	if !ok {
+		return NewBuiltinError("could not get value from right operand of type %s", right.Type())
+	}
+
+	var resultValue int64
+	var uResultValue uint64
+	resultIsUnsigned := isLeftUnsigned && isRightUnsigned
+
+	if resultIsUnsigned {
+		uLeft, uRight := uint64(leftVal), uint64(rightVal)
+		switch operator {
+		case "+":
+			if math.MaxUint64-uLeft < uRight {
+				return NewBuiltinError("unsigned integer overflow")
+			}
+			uResultValue = uLeft + uRight
+		case "-":
+			if uLeft < uRight {
+				return NewBuiltinError("unsigned integer underflow")
+			}
+			uResultValue = uLeft - uRight
+		case "*":
+			if uRight > 0 && uLeft > math.MaxUint64/uRight {
+				return NewBuiltinError("unsigned integer overflow")
+			}
+			uResultValue = uLeft * uRight
+		case "/":
+			if uRight == 0 {
+				return NewBuiltinError("division by zero")
+			}
+			uResultValue = uLeft / uRight
+		case "MOD":
+			if uRight == 0 {
+				return NewBuiltinError("division by zero in MOD")
+			}
+			uResultValue = uLeft % uRight
+		case "<", "LT":
+			return nativeBoolToBooleanObject(uLeft < uRight)
+		case ">", "GT":
+			return nativeBoolToBooleanObject(uLeft > uRight)
+		case "=", "EQ":
+			return nativeBoolToBooleanObject(uLeft == uRight)
+		case "!=", "<>", "NE":
+			return nativeBoolToBooleanObject(uLeft != uRight)
+		case "<=", "LE":
+			return nativeBoolToBooleanObject(uLeft <= uRight)
+		case ">=", "GE":
+			return nativeBoolToBooleanObject(uLeft >= uRight)
+		default:
+			return NewBuiltinError("unknown operator for unsigned integers: %s", operator)
+		}
+	} else {
+		// Signed arithmetic
+		switch operator {
+		case "+":
+			if (rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal) {
+				return NewBuiltinError("signed integer overflow")
+			}
+			resultValue = leftVal + rightVal
+		case "-":
+			if (rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal) {
+				return NewBuiltinError("signed integer underflow")
+			}
+			resultValue = leftVal - rightVal
+		case "*":
+			if rightVal != 0 && ((leftVal > math.MaxInt64/rightVal && rightVal > 0) || (leftVal < math.MinInt64/rightVal && rightVal > 0) || (leftVal > math.MinInt64/rightVal && rightVal < -1) || (leftVal < math.MaxInt64/rightVal && rightVal < -1)) {
+				return NewBuiltinError("signed integer overflow")
+			}
+			resultValue = leftVal * rightVal
+		case "/":
+			if rightVal == 0 {
+				return NewBuiltinError("division by zero")
+			}
+			if leftVal == math.MinInt64 && rightVal == -1 {
+				return NewBuiltinError("signed integer overflow")
+			}
+			resultValue = leftVal / rightVal
+		case "MOD":
+			if rightVal == 0 {
+				return NewBuiltinError("division by zero in MOD")
+			}
+			resultValue = leftVal % rightVal
+		case "<", "LT", ">", "GT", "=", "EQ", "!=", "<>", "NE", "<=", "LE", ">=", "GE":
+			return evalGenericComparison(operator, leftVal, rightVal)
+		default:
+			return NewBuiltinError("unknown operator for signed integers: %s", operator)
+		}
+	}
+
+	return checkAndCreateIntegerObject(resultType, resultValue, uResultValue, resultIsUnsigned)
 }
 
 func getResultIntegerType(t1, t2 ObjectType) ObjectType {

@@ -384,41 +384,45 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 func TestBuiltinFunctions(t *testing.T) {
 	tests := []vmTestCase{
 		// --- Monkey-compatible built-ins (adapted for IEC syntax) ---
-		{`LEN('');`, 0},
-		{`LEN('four');`, 4},
-		{`LEN('hello world');`, 11},
-		{
+		{`LEN('');`, 0},             // Test #0
+		{`LEN('four');`, 4},         // Test #1
+		{`LEN('hello world');`, 11}, // Test #2
+		{ // Test #3
 			`LEN(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `LEN` not supported, got LINT",
 			},
 		},
-		{`LEN('one', 'two');`,
+		{ // Test #4
+			`LEN('one', 'two');`,
 			&object.Error{
 				Message: "BUILTIN ERROR: wrong number of arguments for LEN. got=2, want=1",
 			},
 		},
-		{`LEN([1, 2, 3]);`, 3},
-		{`LEN([]);`, 0},
-		{`PUTS('hello world!');`, Null},
-		{`FIRST([1, 2, 3]);`, 1},
-		{`FIRST([]);`, Null},
-		{`FIRST(1);`,
+		{`LEN([1, 2, 3]);`, 3},          // Test #5
+		{`LEN([]);`, 0},                 // Test #6
+		{`PUTS('hello world!');`, Null}, // Test #7
+		{`FIRST([1, 2, 3]);`, 1},        // Test #8
+		{`FIRST([]);`, Null},            // Test #9
+		{ // Test #10
+			`FIRST(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `FIRST` must be ARRAY, got LINT",
 			},
 		},
-		{`LAST([1, 2, 3]);`, 3},
-		{`LAST([]);`, Null},
-		{`LAST(1);`,
+		{`LAST([1, 2, 3]);`, 3}, // Test #11
+		{`LAST([]);`, Null},     // Test #12
+		{ // Test #13
+			`LAST(1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `LAST` must be ARRAY, got LINT",
 			},
 		},
-		{`REST([1, 2, 3]);`, []int{2, 3}},
-		{`REST([]);`, Null},
-		{`PUSH([], 1);`, []int{1}},
-		{`PUSH(1, 1);`,
+		{`REST([1, 2, 3]);`, []int{2, 3}}, // Test #14
+		{`REST([]);`, Null},               // Test #15
+		{`PUSH([], 1);`, []int{1}},        // Test #16
+		{ // Test #17
+			`PUSH(1, 1);`,
 			&object.Error{
 				Message: "BUILTIN ERROR: argument to `PUSH` must be ARRAY, got LINT",
 			},
@@ -426,39 +430,39 @@ func TestBuiltinFunctions(t *testing.T) {
 
 		// --- IEC 61131-3 Standard Built-ins ---
 		// String Functions
-		{`CONCAT('a', 'b');`, "ab"},
-		{`CONCAT('a', 'b', 'c');`, "abc"},
-		{
+		{`CONCAT('a', 'b');`, "ab"},       // Test #18
+		{`CONCAT('a', 'b', 'c');`, "abc"}, // Test #19
+		{ // Test #20
 			`CONCAT('a');`,
 			&object.Error{
 				Message: "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2",
 			},
 		},
-		{`LEFT('abcde', 2);`, "ab"},
-		{`RIGHT('abcde', 2);`, "de"},
-		{`MID('abcde', 2, 3);`, "bcd"}, // MID(IN, P, L)
-		{`FIND('abcabc', 'b');`, 2},
+		{`LEFT('abcde', 2);`, "ab"},    // Test #21
+		{`RIGHT('abcde', 2);`, "de"},   // Test #22
+		{`MID('abcde', 2, 3);`, "bcd"}, // Test #23, MID(IN, P, L)
+		{`FIND('abcabc', 'b');`, 2},    // Test #24
 
 		// Selection Functions
-		{`LIMIT(10, 5, 20);`, 10},
-		{`LIMIT(10, 15, 20);`, 15},
-		{`LIMIT(10, 25, 20);`, 20},
-		{`LIMIT(10.0, 5.5, 20.0);`, 10.0},
-		{`MUX(0, 100, 101, 102);`, 100},
-		{`MUX(2, 'a', 'b', 'c');`, "c"},
-		{`SEL(FALSE, 10, 20);`, 10},
-		{`SEL(TRUE, 'a', 'b');`, "b"},
-		{`MOVE(123);`, 123},
-		{`MOVE('hello');`, "hello"},
+		{`LIMIT(10, 5, 20);`, 10},         // Test #25
+		{`LIMIT(10, 15, 20);`, 15},        // Test #26
+		{`LIMIT(10, 25, 20);`, 20},        // Test #27
+		{`LIMIT(10.0, 5.5, 20.0);`, 10.0}, // Test #28
+		{`MUX(0, 100, 101, 102);`, 100},   // Test #29
+		{`MUX(2, 'a', 'b', 'c');`, "c"},   // Test #30
+		{`SEL(FALSE, 10, 20);`, 10},       // Test #31
+		{`SEL(TRUE, 'a', 'b');`, "b"},     // Test #32
+		{`MOVE(123);`, 123},               // Test #33
+		{`MOVE('hello');`, "hello"},       // Test #34
 
 		// Math Functions
-		{`SQRT(9);`, 3.0},
-		{`ABS(-10);`, 10},
-		{`ABS(-10.5);`, 10.5},
-		{`ROUND(3.5);`, 4},
-		{`TRUNC(-3.9);`, -3},
-		{`SIN(0);`, 0.0},
-		{`COS(0);`, 1.0},
+		{`SQRT(9);`, 3.0},     // Test #35
+		{`ABS(-10);`, 10},     // Test #36
+		{`ABS(-10.5);`, 10.5}, // Test #37
+		{`ROUND(3.5);`, 4},    // Test #38
+		{`TRUNC(-3.9);`, -3},  // Test #39
+		{`SIN(0);`, 0.0},      // Test #40
+		{`COS(0);`, 1.0},      // Test #41
 	}
 
 	runVmTests(t, tests)
@@ -527,15 +531,24 @@ type vmTestCase struct {
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	t.Helper()
 
-	// Finalize built-ins to ensure they are registered before tests run.
+	// Finalize built-ins to ensure they are registered from all stdlib packages
+	// and sorted by their iota-defined index.
 	object.FinalizeBuiltins()
 
-	// The object.Builtins slice is now correctly indexed by FinalizeBuiltins.
-	// No sorting is needed.
 	builtinEntries := object.Builtins
-	vmBuiltins := make([]*object.Builtin, len(builtinEntries))
-	for i, entry := range builtinEntries {
-		vmBuiltins[i] = entry.Builtin
+
+	// Create a slice for the VM's built-ins that is explicitly sized
+	// to the highest registered index. This is more robust than relying
+	// on the length of the `builtinEntries` slice.
+	maxIndex := -1
+	for _, entry := range builtinEntries {
+		if entry.Index > maxIndex {
+			maxIndex = entry.Index
+		}
+	}
+	vmBuiltins := make([]*object.Builtin, maxIndex+1)
+	for _, entry := range builtinEntries {
+		vmBuiltins[entry.Index] = entry.Builtin
 	}
 
 	for i, tt := range tests {

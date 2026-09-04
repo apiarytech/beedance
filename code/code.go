@@ -198,7 +198,7 @@ var definitions = map[Opcode]*Definition{
 	OpGetLocal: {"OpGetLocal", []int{1}},
 	OpSetLocal: {"OpSetLocal", []int{1}},
 
-	OpGetBuiltin: {"OpGetBuiltin", []int{1}},
+	OpGetBuiltin: {"OpGetBuiltin", []int{2}},
 
 	OpClosure: {"OpClosure", []int{2, 1}},
 
@@ -246,7 +246,7 @@ func Make(op Opcode, operands ...int) []byte {
 		switch width {
 		// Handles 2-byte operands (e.g., for OpConstant).
 		case 2:
-			binary.BigEndian.PutUint16(instruction[offset:], uint16(o))
+			binary.LittleEndian.PutUint16(instruction[offset:], uint16(o))
 		// Handles 1-byte operands (e.g., for OpGetLocal).
 		case 1:
 			instruction[offset] = byte(o)
@@ -282,5 +282,5 @@ func ReadUint8(ins Instructions) uint8 { return uint8(ins[0]) }
 
 // ReadUint16 reads two bytes from an instruction stream as a uint16 in big-endian format.
 func ReadUint16(ins Instructions) uint16 {
-	return binary.BigEndian.Uint16(ins)
+	return binary.LittleEndian.Uint16(ins)
 }

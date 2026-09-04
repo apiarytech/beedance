@@ -55,12 +55,22 @@ type VM struct {
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
-	// The object.Builtins slice is now pre-indexed by FinalizeBuiltins.
-	// We can create the VM's built-in slice directly from it, ensuring the
-	// indices match the compiler's.
-	builtins := make([]*object.Builtin, len(object.Builtins))
-	for i, entry := range object.Builtins {
-		builtins[i] = entry.Builtin
+	// The object.Builtins slice is guaranteed to be sorted by index
+	// thanks to the FinalizeBuiltins function called in main.
+
+	// Create a slice for the VM's built-ins that is explicitly sized
+	// to the highest registered index. This is more robust than relying
+	// on the length of the `object.Builtins` slice.
+	maxIndex := -1
+	for _, entry := range object.Builtins {
+		if entry.Index > maxIndex {
+			maxIndex = entry.Index
+		}
+	}
+
+	builtins := make([]*object.Builtin, maxIndex+1)
+	for _, entry := range object.Builtins {
+		builtins[entry.Index] = entry.Builtin
 	}
 
 	return NewWithBuiltins(bytecode, builtins)
@@ -242,8 +252,10 @@ func (vm *VM) Run() error {
 
 		case code.OpGetBuiltin:
 			// OpGetBuiltin retrieves a built-in function and pushes it onto the stack.
-			builtinIndex := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
+			// The operand is a 16-bit index to support more than 256 built-ins.
+			builtinIndex := code.ReadUint16(ins[ip+1:])
+			vm.currentFrame().ip += 2 // Advance past the 2-byte operand
+
 			if int(builtinIndex) >= len(vm.builtins) {
 				return fmt.Errorf("invalid builtin index: %d", builtinIndex)
 			}

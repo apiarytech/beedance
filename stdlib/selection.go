@@ -108,6 +108,16 @@ func muxBuiltin(args ...object.Object) object.Object {
 	valueArgs := args[1:]
 	numInputs := len(valueArgs)
 
+	// Check that all value arguments are of the same type.
+	if numInputs > 1 {
+		firstType := valueArgs[0].Type()
+		for i := 1; i < numInputs; i++ {
+			if valueArgs[i].Type() != firstType {
+				return object.NewBuiltinError("all value arguments to `MUX` must be of the same type, got %s but expected %s", valueArgs[i].Type(), firstType)
+			}
+		}
+	}
+
 	if kVal < 0 || kVal >= int64(numInputs) {
 		return object.NewBuiltinError("index %d out of bounds for MUX with %d inputs", kVal, numInputs)
 	}

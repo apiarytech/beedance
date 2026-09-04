@@ -273,11 +273,11 @@ func TestErrorHandling(t *testing.T) {
 	}{
 		{
 			"5 + true;",
-			"ERROR (1:3): type mismatch: LINT + BOOLEAN",
+			"unsupported operator '+' for types LINT and BOOLEAN",
 		},
 		{
 			"5 + true; 5;",
-			"ERROR (1:3): type mismatch: LINT + BOOLEAN",
+			"unsupported operator '+' for types LINT and BOOLEAN",
 		},
 		{
 			"-true;",
@@ -285,27 +285,27 @@ func TestErrorHandling(t *testing.T) {
 		},
 		{
 			"true + false;",
-			"ERROR (1:6): unknown operator: BOOLEAN + BOOLEAN",
+			"unknown operator for BOOLEAN: +",
 		},
 		{
 			"true + false + true + false;",
-			"ERROR (1:6): unknown operator: BOOLEAN + BOOLEAN",
+			"unknown operator for BOOLEAN: +",
 		},
 		{
 			"5; true + false; 5;",
-			"ERROR (1:9): unknown operator: BOOLEAN + BOOLEAN",
+			"unknown operator for BOOLEAN: +",
 		},
 		{
-			`'Hello' - 'World';`,
-			"ERROR (1:9): unknown operator: STRING - STRING",
+			`'Hello' - 'World';`, // String subtraction is not supported
+			"unsupported operator '-' for types STRING and STRING",
 		},
 		{
-			`"Hello" - "World";`,
-			"ERROR (1:9): unknown operator: WSTRING - WSTRING",
+			`"Hello" - "World";`, // WString subtraction is not supported
+			"unsupported operator '-' for types WSTRING and WSTRING",
 		},
 		{
 			"IF (10 > 1) THEN true + false; END_IF",
-			"ERROR (1:23): unknown operator: BOOLEAN + BOOLEAN",
+			"unknown operator for BOOLEAN: +",
 		},
 		{
 			`
@@ -318,7 +318,7 @@ func TestErrorHandling(t *testing.T) {
 				RETURN 1;
 			END_IF
 			`,
-			"ERROR (6:18): unknown operator: BOOLEAN + BOOLEAN",
+			"unknown operator for BOOLEAN: +",
 		},
 		{
 			"foobar;",
@@ -496,14 +496,14 @@ func TestCaseStatementErrors(t *testing.T) {
 		input           string
 		expectedMessage string
 	}{
-		// {
-		// 	`CASE 1 OF 'a': 10; END_CASE`,
-		// 	"type mismatch for comparison: LINT = STRING",
-		// },
-		// {
-		// 	`CASE 'a' OF 1: 10; END_CASE`,
-		// 	"type mismatch for comparison: STRING = LINT",
-		// },
+		{
+			`CASE 1 OF 'a': 10; END_CASE`,
+			"type mismatch for comparison: LINT = STRING",
+		},
+		{
+			`CASE 'a' OF 1: 10; END_CASE`,
+			"type mismatch for comparison: STRING = LINT",
+		},
 		{`
 			 TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
 			 VAR myColor : INT := 1; END_VAR
@@ -512,13 +512,13 @@ func TestCaseStatementErrors(t *testing.T) {
 			 	COLOR#GREEN: 2;
 			 	COLOR#BLUE: 3;
 			 END_CASE
-		`, "type mismatch for comparison: LINT = ENUMERATED_VALUE",
+		`, "type mismatch for comparison: INT = ENUMERATED_VALUE",
 		},
-		// {
-		// 	`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
-		// 	 CASE COLOR#RED OF 1: 1; END_CASE`,
-		// 	"type mismatch for comparison: ENUMERATED_VALUE = LINT",
-		// },
+		{
+			`TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
+			 CASE COLOR#RED OF 1: 1; END_CASE`,
+			"type mismatch for comparison: ENUMERATED_VALUE = LINT",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1029,7 +1029,7 @@ func TestSFCDivergenceConvergence(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestSFCBranching", input)
+	checkParserErrors(t, p, "TestSFCBranching", input)
 
 	env := object.NewEnvironment()
 	// This will declare the PROGRAM POU and its variables
@@ -1128,7 +1128,7 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestSFCTimedQualifiers", input)
+	checkParserErrors(t, p, "TestSFCTimedQualifiers", input)
 
 	env := object.NewEnvironment()
 	Eval(program, env) // Declare the PROGRAM POU
@@ -1392,31 +1392,100 @@ func TestBuiltinFunctions(t *testing.T) {
 		input    string
 		expected interface{}
 	}{
-		{`LEN("");`, int64(0)},
-		{`LEN("four");`, int64(4)},
-		{`LEN("hello world");`, int64(11)},
+		// LEN
+		{`LEN('');`, int64(0)},
+		{`LEN('four');`, int64(4)},
+		{`LEN('hello world');`, int64(11)},
 		{`LEN(1);`, "BUILTIN ERROR: argument to `LEN` not supported, got LINT"},
-		{`LEN("one", "two");`, "BUILTIN ERROR: wrong number of arguments for LEN. got=2, want=1"},
+		{`LEN('one', 'two');`, "BUILTIN ERROR: wrong number of arguments for LEN. got=2, want=1"},
 		{`LEN([1, 2, 3]);`, int64(3)},
 		{`LEN([]);`, int64(0)},
+
+		// FIRST
+		{`FIRST([1, 2, 3]);`, int64(1)},
+		{`FIRST([]);`, nil},
+		{`FIRST(1);`, "BUILTIN ERROR: argument to `FIRST` must be ARRAY, got LINT"},
+
+		// LAST
+		{`LAST([1, 2, 3]);`, int64(3)},
+		{`LAST([]);`, nil},
+		{`LAST(1);`, "BUILTIN ERROR: argument to `LAST` must be ARRAY, got LINT"},
+
+		// REST
+		{`REST([1, 2, 3]);`, []int{2, 3}},
+		{`REST([]);`, nil},
+
+		// PUSH
+		{`PUSH([], 1);`, []int{1}},
+		{`PUSH(1, 1);`, "BUILTIN ERROR: argument to `PUSH` must be ARRAY, got LINT"},
+
+		// --- IEC 61131-3 Standard Built-ins ---
+		// String Functions
+		{`CONCAT('a', 'b');`, "ab"},
+		{`CONCAT('a', 'b', 'c');`, "abc"},
+		{`CONCAT('a');`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2"},
+		{`LEFT('abcde', 2);`, "ab"},
+		{`RIGHT('abcde', 2);`, "de"},
+		{`MID('abcde', 2, 3);`, "bcd"},
+		{`FIND('abcabc', 'b');`, int64(2)},
+
+		// Selection Functions
+		{`LIMIT(10, 5, 20);`, int64(10)},
+		{`LIMIT(10, 15, 20);`, int64(15)},
+		{`LIMIT(10, 25, 20);`, int64(20)},
+		{`LIMIT(10.0, 5.5, 20.0);`, 10.0},
+		{`MUX(0, 100, 101, 102);`, int64(100)},
+		{`MUX(2, 'a', 'b', 'c');`, "c"},
+		{`SEL(FALSE, 10, 20);`, int64(10)},
+		{`SEL(TRUE, 'a', 'b');`, "b"},
+		{`MOVE(123);`, int64(123)},
+		{`MOVE('hello');`, "hello"},
+
+		// Math Functions
+		{`SQRT(9);`, 3.0},
+		{`ABS(-10);`, int64(10)},
+		{`ABS(-10.5);`, 10.5},
+		{`ROUND(3.5);`, int64(4)},
+		{`TRUNC(-3.9);`, int64(-3)},
+		{"SIN(0);", 0.0},
+		{"COS(0);", 1.0},
 	}
 
 	for _, tt := range tests {
 		evaluated := testEval(t, tt.input)
 
 		switch expected := tt.expected.(type) {
+		case int:
+			testIntegerObject(t, evaluated, tt.input, int64(expected))
 		case int64:
 			testIntegerObject(t, evaluated, tt.input, expected)
+		case float64:
+			testRealObject(t, evaluated, tt.input, expected)
+		case bool:
+			testBooleanObject(t, evaluated, tt.input, expected)
+		case nil:
+			testNullObject(t, evaluated)
 		case string:
-			errObj, ok := evaluated.(*object.Error)
+			// Can be a string result or an error message
+			if errObj, ok := evaluated.(*object.Error); ok {
+				if !strings.Contains(errObj.Message, expected) {
+					t.Errorf("wrong error message. expected to contain %q, got %q", expected, errObj.Message)
+				}
+			} else {
+				testStringObject(t, evaluated, tt.input, expected)
+			}
+		case []int:
+			array, ok := evaluated.(*object.Array)
 			if !ok {
-				t.Errorf("object is not Error. got=%T (%+v)",
-					evaluated, evaluated)
+				t.Errorf("object not Array: %T (%+v)", evaluated, evaluated)
 				continue
 			}
-			if errObj.Message != expected {
-				t.Errorf("wrong error message. expected=%q, got=%q",
-					expected, errObj.Message)
+			if len(array.Elements) != len(expected) {
+				t.Errorf("wrong num of elements. want=%d, got=%d", len(expected), len(array.Elements))
+				continue
+			}
+			for i, expectedElem := range expected {
+				testIntegerObject(t, array.Elements[i], "elem", int64(expectedElem))
 			}
 		}
 	}
@@ -3091,7 +3160,7 @@ func TestTrafficLightProgram(t *testing.T) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestTrafficLightProgram", input)
+	checkParserErrors(t, p, "TestTrafficLightProgram", input)
 
 	env := object.NewEnvironment()
 	// Evaluating the program will declare the POU and its variables.
@@ -3438,88 +3507,126 @@ func TestTP_PulseTimer(t *testing.T) {
 	testTimeObjectInEnv(t, env, "ET", 0)
 }
 
-func TestFunctionBlockWithSFCBody(t *testing.T) {
+func TestFunctionBlockWithSFCBody_EdgeCases(t *testing.T) {
+	// This test verifies edge cases, like a transition condition remaining true
+	// for multiple cycles.
+	// Mock time for timer tests
+	originalNowFunc := nowFunc
+	mockTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	nowFunc = func() time.Time { return mockTime }
+	defer func() { nowFunc = originalNowFunc }()
+
+	// Helper to advance mock time
+	advanceTime := func(d time.Duration) {
+		mockTime = mockTime.Add(d)
+	}
+
 	input := `
 		FUNCTION_BLOCK MySFC_FB
 			VAR_INPUT
-				EnableTransition : BOOL;
+				EnableTransitionToS2 : BOOL;
+				EnableTransitionToS1 : BOOL;
 			END_VAR
 			VAR_OUTPUT
 				ActiveStepOut : INT;
 			END_VAR
 
-			ACTION S1_Action: ActiveStepOut := 1; END_ACTION
-			ACTION S2_Action: ActiveStepOut := 2; END_ACTION
+			ACTION S1_Action: 
+				ActiveStepOut := 1; 
+			END_ACTION
+			ACTION S2_Action: 
+				ActiveStepOut := 2; 
+			END_ACTION
 
 			INITIAL_STEP S1:
-				S1_Action(N);
+				S1_Action(N); 
 			END_STEP
 
-			TRANSITION FROM S1 TO S2 := EnableTransition;
+			TRANSITION 
+				FROM S1 TO S2 := EnableTransitionToS2; 
 			END_TRANSITION
 
-			STEP S2:
-				S2_Action(N);
+			STEP S2: 
+				S2_Action(N); 
 			END_STEP
+
+			TRANSITION 
+				FROM S2 TO S1 := EnableTransitionToS1; 
+			END_TRANSITION
 		END_FUNCTION_BLOCK
 
-		PROGRAM TestSFCinFB
+		PROGRAM TestSFCinFB_Edges
 			VAR
 				myFb : MySFC_FB;
-				doTransition : BOOL := FALSE;
+				doTransitionToS2 : BOOL := FALSE;
+				doTransitionToS1 : BOOL := FALSE;
 				currentActiveStep : INT;
 			END_VAR
 
-			myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);
+			myFb(
+				EnableTransitionToS2 := doTransitionToS2,
+				EnableTransitionToS1 := doTransitionToS1,
+				ActiveStepOut => currentActiveStep
+			);
 		END_PROGRAM
 	`
 
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
-	checkEvaluatorErrors(t, p, "TestFunctionBlockWithSFCBody", input)
 
 	env := object.NewEnvironment()
-	// Evaluate the entire program to declare the FB type and the main program POU.
+	// First, evaluate the whole program to set up the environment and FB instance.
+	// This performs the first scan cycle.
 	Eval(program, env)
 
-	// Helper to run one "scan" by re-evaluating the call to the FB instance.
+	// To simulate subsequent scan cycles, we re-evaluate only the program's body.
+	var progDecl *ast.ProgramDeclaration
+	for _, stmt := range program.Statements {
+		if pd, ok := stmt.(*ast.ProgramDeclaration); ok {
+			progDecl = pd
+			break
+		}
+	}
+	if progDecl == nil {
+		t.Fatalf("No PROGRAM declaration found in test input")
+	}
 	runScan := func() {
-		// In a real PLC, the program body would be re-evaluated.
-		// For this test, we just need to re-evaluate the FB call.
-		testEvalWithEnv(t, `myFb(EnableTransition := doTransition, ActiveStepOut => currentActiveStep);`, env)
+		Eval(progDecl.Body, env)
 	}
 
-	// --- Cycle 1: Initial state ---
-	// The FB is called with doTransition = FALSE.
-	// The SFC should be in S1, and ActiveStepOut should be 1.
-	runScan()
+	// --- Cycle 1: Initial State ---
+	// The initial Eval() call already executed the first scan.
 	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
 
-	// --- Cycle 2: Still in S1 ---
-	// doTransition is still FALSE, so no transition should occur.
+	// --- Cycle 2: Set transition condition to TRUE ---
+	env.Set("doTransitionToS2", TRUE)
 	runScan()
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
-
-	// --- Cycle 3: Transition to S2 ---
-	// Set the input condition to TRUE and run the scan.
-	env.Set("doTransition", TRUE)
-	runScan()
+	advanceTime(1 * time.Second)
+	// The transition should have occurred. We are now in S2.
 	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
-}
 
-func checkEvaluatorErrors(t *testing.T, p *parser.Parser, testName string, input string) {
-	t.Helper()
-	errors := p.Errors()
-	if len(errors) == 0 {
-		return
-	}
+	// --- Cycle 3: Transition condition remains TRUE ---
+	// The SFC should remain in S2. A cleared transition should not re-fire
+	// just because the condition is still true.
+	runScan()
+	advanceTime(1 * time.Second)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
 
-	t.Errorf("FAIL: %s - parser has %d errors for input:\n%s", testName, len(errors), input)
-	for _, msg := range errors {
-		t.Errorf("Evaluator error: %q", msg)
-	}
-	t.FailNow()
+	// --- Cycle 4: Reset condition and transition back to S1 ---
+	env.Set("doTransitionToS2", FALSE)
+	env.Set("doTransitionToS1", TRUE)
+	runScan()
+	advanceTime(1 * time.Second)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
+
+	// --- Cycle 5: Both transition conditions are TRUE ---
+	// Since the active step is S1, only the S1->S2 transition should be evaluated.
+	env.Set("doTransitionToS2", TRUE)
+	env.Set("doTransitionToS1", TRUE)
+	runScan()
+	advanceTime(1 * time.Second)
+	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
 }
 
 func TestNestedInOutVarPassing(t *testing.T) {

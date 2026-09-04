@@ -499,9 +499,9 @@ const (
 func getTestBuiltins() []object.BuiltinEntry {
 	// With explicit indexing, we create a slice of the correct size
 	// and place the built-ins at their designated index. No sorting is needed.
-	builtins := make([]object.BuiltinEntry, 2) // We have 2 test built-ins
-	builtins[testBuiltinLen] = object.BuiltinEntry{Name: "LEN"}
-	builtins[testBuiltinPush] = object.BuiltinEntry{Name: "PUSH"}
+	builtins := make([]object.BuiltinEntry, 2)
+	builtins[testBuiltinLen] = object.BuiltinEntry{Name: "LEN", Index: testBuiltinLen}
+	builtins[testBuiltinPush] = object.BuiltinEntry{Name: "PUSH", Index: testBuiltinPush}
 	return builtins
 }
 

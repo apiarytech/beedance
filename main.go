@@ -47,7 +47,13 @@ func main() {
 	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
+	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
 	flag.Parse()
+
+	if *checkBuiltinsFlag {
+		checkBuiltins()
+		os.Exit(0)
+	}
 
 	if *versionFlag {
 		fmt.Printf("beedance version %s\n", version)
@@ -126,8 +132,8 @@ func executeFile(filepath string, out io.Writer, engine string) {
 
 	if engine == "vm" {
 		symbolTable := compiler.NewSymbolTable()
-		for i, v := range object.Builtins {
-			symbolTable.DefineBuiltin(i, v.Name)
+		for _, v := range object.Builtins {
+			symbolTable.DefineBuiltin(v.Index, v.Name)
 		}
 		globals := make([]object.Object, vm.GlobalsSize)
 
@@ -187,8 +193,8 @@ func executeString(input string, out io.Writer, engine string) {
 
 	if engine == "vm" {
 		symbolTable := compiler.NewSymbolTable()
-		for i, v := range object.Builtins {
-			symbolTable.DefineBuiltin(i, v.Name)
+		for _, v := range object.Builtins {
+			symbolTable.DefineBuiltin(v.Index, v.Name)
 		}
 		globals := make([]object.Object, vm.GlobalsSize)
 

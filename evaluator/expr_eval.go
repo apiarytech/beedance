@@ -66,12 +66,33 @@ func isEvalCall(node ast.Node) bool {
 // AST. It handles various object types like integers, booleans, and even other quotes.
 func convertObjectToASTNode(obj object.Object) ast.Node {
 	switch obj := obj.(type) {
+	case *object.SInt:
+		t := token.Token{Type: token.INT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.IntegerLiteral{Token: t, Value: int64(obj.Value)}
+	case *object.Int:
+		t := token.Token{Type: token.INT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.IntegerLiteral{Token: t, Value: int64(obj.Value)}
+	case *object.DInt:
+		t := token.Token{Type: token.INT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.IntegerLiteral{Token: t, Value: int64(obj.Value)}
 	case *object.LInt:
 		t := token.Token{
 			Type:    token.INT,
 			Literal: fmt.Sprintf("%d", obj.Value),
 		}
 		return &ast.IntegerLiteral{Token: t, Value: obj.Value}
+	case *object.USInt:
+		t := token.Token{Type: token.UINT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.UnsignedIntegerLiteral{Token: t, Value: uint64(obj.Value)}
+	case *object.UInt:
+		t := token.Token{Type: token.UINT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.UnsignedIntegerLiteral{Token: t, Value: uint64(obj.Value)}
+	case *object.UDInt:
+		t := token.Token{Type: token.UINT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.UnsignedIntegerLiteral{Token: t, Value: uint64(obj.Value)}
+	case *object.ULInt:
+		t := token.Token{Type: token.UINT, Literal: fmt.Sprintf("%d", obj.Value)}
+		return &ast.UnsignedIntegerLiteral{Token: t, Value: obj.Value}
 
 	case *object.Boolean:
 		var t token.Token
