@@ -3558,8 +3558,8 @@ func TestFunctionBlockWithSFCBody_EdgeCases(t *testing.T) {
 		PROGRAM TestSFCinFB_Edges
 			VAR
 				myFb : MySFC_FB;
-				doTransitionToS2 : BOOL := FALSE;
-				doTransitionToS1 : BOOL := FALSE;
+				doTransitionToS2 : BOOL;
+				doTransitionToS1 : BOOL;
 				currentActiveStep : INT;
 			END_VAR
 

@@ -2092,9 +2092,11 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Re-initialize VAR_TEMP variables at the start of every scan cycle.
 		if fn.Definition != nil {
-			for i, tempVar := range fn.Definition.VarTemp {
-				if err := evalVarDeclStatement(tempVar.Vars[i], extendedEnv); isError(err) {
-					return err
+			for _, tempVarBlock := range fn.Definition.VarTemp {
+				for _, tempVar := range tempVarBlock.Vars {
+					if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+						return err
+					}
 				}
 			}
 		}
