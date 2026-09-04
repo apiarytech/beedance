@@ -60,7 +60,7 @@ func testBooleanObjectInEnv(t *testing.T, env *object.Environment, name string, 
 	t.Helper()
 	obj, err := mustGet(env, name)
 	if err != nil {
-		t.Errorf("%v", err)
+		t.Errorf("object is not Boolean. got=%T (%+v)", err, err)
 		return false
 	}
 	return testBooleanObject(t, obj, name, expected)
@@ -98,7 +98,7 @@ func testTimeObjectInEnv(t *testing.T, env *object.Environment, name string, exp
 	t.Helper()
 	obj, err := mustGet(env, name)
 	if err != nil {
-		t.Errorf("%v", err)
+		t.Errorf("object is not Time. got=%T (%+v)", err, err)
 		return false
 	}
 	return testTimeObject(t, obj, name, expected)
@@ -115,6 +115,10 @@ func testNullObject(t *testing.T, obj object.Object) bool {
 
 func testErrorObjectContains(t *testing.T, obj object.Object, expectedMessage string) bool {
 	t.Helper()
+	if obj == nil {
+		t.Errorf("object is nil, expected Error containing %q", expectedMessage)
+		return false
+	}
 	errObj, ok := obj.(*object.Error)
 	if !ok {
 		t.Errorf("object is not Error. got=%T (%+v)", obj, obj)
@@ -169,7 +173,7 @@ func testRealObjectInEnv(t *testing.T, env *object.Environment, name string, exp
 	t.Helper()
 	obj, err := mustGet(env, name)
 	if err != nil {
-		t.Errorf("%v", err)
+		t.Errorf("object is not a REAL type. got=%T (%+v)", err, err)
 		return false
 	}
 	return testRealObject(t, obj, name, expected)
@@ -207,7 +211,7 @@ func testStringObjectInEnv(t *testing.T, env *object.Environment, name string, e
 	t.Helper()
 	obj, err := mustGet(env, name)
 	if err != nil {
-		t.Errorf("%v", err)
+		t.Errorf("object is not String. got=%T (%+v)", err, err)
 		return false
 	}
 	return testStringObject(t, obj, name, expected)

@@ -178,11 +178,7 @@ func bitwiseBuiltin(op string, args ...object.Object) object.Object {
 		} else {
 			mask = 0xFFFFFFFFFFFFFFFF
 		}
-		if op == "NAND" {
-			result = ^result & mask
-		} else {
-			result = ^result & mask
-		}
+		result = ^result & mask
 	}
 	return &object.BitString{Value: result, Width: width}
 }

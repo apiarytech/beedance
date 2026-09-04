@@ -39,15 +39,28 @@ func comparisonBuiltin(op string) object.BuiltinFunction {
 		}
 		opMap := map[string]string{"GT": ">", "GE": ">=", "EQ": "=", "LE": "<=", "LT": "<", "NE": "<>", "GREAT": ">"}
 		symbolicOp := opMap[op]
-		result := object.EvalInfix(args[0], symbolicOp, args[1])
+
+		left, right := args[0], args[1]
+		result := object.EvalInfix(left, symbolicOp, right)
+
 		// If EvalInfix returns a generic "unsupported operator" error, replace it
 		// with a more specific "type mismatch for comparison" error. This can happen
 		// when comparing incompatible types like TIME and INT.
 		if err, ok := result.(*object.Error); ok {
 			if strings.Contains(err.Message, "unsupported operator") {
-				return object.NewBuiltinError("type mismatch for comparison: %s %s %s", args[0].Type(), symbolicOp, args[1].Type())
+				return object.NewBuiltinError("type mismatch for comparison: %s %s %s", left.Type(), symbolicOp, right.Type())
 			}
+			// Propagate other errors as-is.
+			return err
 		}
 		return result
 	}
+}
+
+// nativeBoolToBooleanObject is a helper to avoid depending on the evaluator's singletons.
+func nativeBoolToBooleanObject(input bool) *object.Boolean {
+	if input {
+		return TRUE
+	}
+	return FALSE
 }

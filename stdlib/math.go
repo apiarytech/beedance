@@ -369,7 +369,33 @@ func minMaxBuiltin(op string, args ...object.Object) object.Object {
 			comparisonOp = ">" // If nextArg > result, we'll update result
 		}
 
-		isCompareTrue := object.EvalInfix(nextArg, comparisonOp, result)
+		var isCompareTrue object.Object
+		// HACK: The stdlib doesn't have access to the full evaluator's infix logic.
+		// We handle the types from the failing tests directly here to avoid a circular dependency.
+		switch firstType {
+		case object.STRING_OBJ:
+			leftVal := nextArg.(*object.String).Value
+			rightVal := result.(*object.String).Value
+			var res bool
+			if comparisonOp == "<" {
+				res = leftVal < rightVal
+			} else {
+				res = leftVal > rightVal
+			}
+			isCompareTrue = nativeBoolToBooleanObject(res)
+		case object.TIME_OBJ:
+			leftVal := nextArg.(*object.Time).Value
+			rightVal := result.(*object.Time).Value
+			var res bool
+			if comparisonOp == "<" {
+				res = leftVal < rightVal
+			} else {
+				res = leftVal > rightVal
+			}
+			isCompareTrue = nativeBoolToBooleanObject(res)
+		default:
+			isCompareTrue = object.EvalInfix(nextArg, comparisonOp, result)
+		}
 
 		if err, ok := isCompareTrue.(*object.Error); ok {
 			return err

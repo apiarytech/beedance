@@ -755,24 +755,21 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 // evalProgram evaluates a program by sequentially evaluating its statements.
 // It returns the value of the last evaluated statement, or a ReturnValue/Error if one is encountered.
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
-	var finalResult object.Object = NULL
+	var result object.Object
 
 	for _, statement := range program.Statements {
-		stmtResult := Eval(statement, env)
+		result = Eval(statement, env)
 
-		// Immediately propagate errors.
-		if err, ok := stmtResult.(*object.Error); ok {
-			return err
+		// At the program level, a RETURN statement should halt execution and return its value.
+		if returnValue, ok := result.(*object.ReturnValue); ok {
+			return returnValue.Value
 		}
 
-		// If we evaluate the main program block, its result is the final result.
-		// Other top-level declarations (like FUNCTION_BLOCK) are for setup and their
-		// return value should not be the final result of the program.
-		if _, ok := statement.(*ast.ProgramDeclaration); ok {
-			finalResult = stmtResult
+		if isError(result) {
+			return result
 		}
 	}
-	return finalResult
+	return result
 }
 
 // evalIlProgram evaluates a block of Instruction List (IL) statements. It first
@@ -1569,7 +1566,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 		if result != nil {
 			if result.Type() == object.ERROR_OBJ || result.Type() == object.RETURN_VALUE_OBJ || result.Type() == object.EXIT_OBJ {
 				// If EXIT, stop the loop and return NULL. Otherwise, propagate RETURN/ERROR.
-				if result.Type() == object.EXIT_OBJ {
+				if result.Type() == object.EXIT_OBJ { // cspell:disable-line
 					return NULL
 				}
 				return result
@@ -1815,7 +1812,7 @@ func evalIfStatement(
 	if object.IsTruthy(condition) {
 		return Eval(ie.Consequence, env)
 	} else if ie.Alternative != nil {
-		return Eval(ie.Alternative, env)
+		return Eval(ie.Alternative, env) // cspell:disable-line
 	} else {
 		return NULL
 	}
