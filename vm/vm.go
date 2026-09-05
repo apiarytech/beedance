@@ -281,6 +281,31 @@ func (vm *VM) Run() error {
 			currentClosure := vm.currentFrame().cl
 			err = vm.push(currentClosure)
 
+		case code.OpMakeNamedArg:
+			nameIndex := code.ReadUint16(ins[ip+1:])
+			vm.currentFrame().ip += 2
+
+			nameObj, ok := vm.constants[nameIndex].(*object.String)
+			if !ok {
+				return fmt.Errorf("operand to OpMakeNamedArg must be a string constant")
+			}
+
+			value := vm.pop()
+			namedArg := &object.NamedArgument{Name: nameObj.Value, Value: value}
+			err = vm.push(namedArg)
+
+		case code.OpReturnValueMulti:
+			// This opcode is used for functions with VAR_OUTPUTs.
+			// It constructs a hash of all outputs and returns that.
+			primaryReturnValue := vm.pop()
+			frame := vm.popFrame()
+
+			hash, err := vm.buildOutputHash(primaryReturnValue, frame)
+			if err != nil {
+				return err
+			}
+			vm.sp = frame.basePointer - 1
+			err = vm.push(hash)
 		case code.OpDup:
 			// OpDup duplicates the top element of the stack.
 			err = vm.push(vm.stack[vm.sp-1])
@@ -636,14 +661,53 @@ func (vm *VM) executeCall(numArgs int) error {
 
 // callClosure handles the logic for calling a closure.
 func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
+	// The callee (closure object) is at vm.stack[vm.sp - 1 - numArgs].
+	// The arguments are at vm.stack[vm.sp - numArgs] to vm.stack[vm.sp - 1].
+
+	// Check for argument count mismatch.
 	if numArgs != cl.Fn.NumParameters {
 		return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
 			cl.Fn.NumParameters, numArgs)
 	}
 
-	frame := NewFrame(cl, vm.sp-numArgs)
+	// The basePointer for the new frame will be where the arguments start on the stack.
+	basePointer := vm.sp - numArgs
+
+	// Pop the callee (closure object) from the stack.
+	// This effectively removes the closure object itself, leaving only the arguments.
+	vm.sp = basePointer
+
+	frame := NewFrame(cl, basePointer)
 	vm.pushFrame(frame)
 
+	// Initialize local variables *after* the parameters to Null.
+	// The parameters themselves are already on the stack (at basePointer to basePointer + numArgs - 1).
+	// These slots correspond to the first `cl.Fn.NumParameters` locals.
+	// So, we start initializing from `basePointer + cl.Fn.NumParameters`.
+	for i := cl.Fn.NumParameters; i < cl.Fn.NumLocals; i++ {
+		vm.stack[frame.basePointer+i] = Null
+	}
+
+	// Handle named arguments.
+	// Create a map of parameter names to their index for quick lookup.
+	paramIndexMap := make(map[string]int)
+	for i, name := range cl.Fn.ParameterNames {
+		paramIndexMap[name] = i
+	}
+
+	// Iterate through the arguments that were passed on the stack.
+	for i := 0; i < numArgs; i++ {
+		arg := vm.stack[basePointer+i] // Get the argument from its current position
+		if namedArg, ok := arg.(*object.NamedArgument); ok {
+			idx, exists := paramIndexMap[namedArg.Name]
+			if !exists {
+				return fmt.Errorf("unknown named argument: %s", namedArg.Name)
+			}
+			vm.stack[frame.basePointer+idx] = namedArg.Value
+		}
+	}
+
+	// Set the new stack pointer past all locals for the new frame.
 	vm.sp = frame.basePointer + cl.Fn.NumLocals
 
 	return nil
@@ -681,6 +745,33 @@ func (vm *VM) pushClosure(constIndex, numFree int) error {
 
 	closure := &object.Closure{Fn: function, Free: free}
 	return vm.push(closure)
+}
+
+// buildOutputHash creates a hash object from a function's primary return value
+// and its VAR_OUTPUT parameters stored in a frame's local variables.
+func (vm *VM) buildOutputHash(primaryReturn object.Object, frame *Frame) (*object.Hash, error) {
+	cl := frame.cl
+	numOutputs := len(cl.Fn.OutputNames)
+	pairs := make(map[object.HashKey]object.HashPair, numOutputs+1)
+
+	// Add primary return value
+	key := &object.String{Value: "__return__"}
+	pairs[key.HashKey()] = object.HashPair{Key: key, Value: primaryReturn}
+
+	// Ensure the compiler provided consistent data.
+	if len(cl.Fn.OutputNames) != len(cl.Fn.OutputIndices) {
+		return nil, fmt.Errorf("internal vm error: mismatch between output names and indices")
+	}
+
+	// Add VAR_OUTPUT values by looking them up in the stack frame using the indices
+	// provided by the compiler.
+	for i, name := range cl.Fn.OutputNames {
+		index := cl.Fn.OutputIndices[i]
+		val := vm.stack[frame.basePointer+index]
+		key := &object.String{Value: name}
+		pairs[key.HashKey()] = object.HashPair{Key: key, Value: val}
+	}
+	return &object.Hash{Pairs: pairs}, nil
 }
 
 // nativeBoolToBooleanObject returns a singleton boolean object for a given native boolean value.

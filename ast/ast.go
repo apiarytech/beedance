@@ -958,10 +958,31 @@ func (cs *CaseStatement) String() string {
 	return out.String()
 }
 
+// FunctionParameter represents a typed parameter in a function literal.
+type FunctionParameter struct {
+	Name     *Identifier
+	DataType Expression // Can be TypeSpecifier or Identifier for user-defined types
+}
+
+// expressionNode marks FunctionParameter as an expression node (for consistency, though not strictly an expression).
+func (fp *FunctionParameter) expressionNode() {}
+
+// Pos returns the position of the parameter's name token.
+func (fp *FunctionParameter) Pos() (int, int) { return fp.Name.Pos() }
+
+// TokenLiteral returns the literal value of the parameter's name token.
+func (fp *FunctionParameter) TokenLiteral() string { return fp.Name.TokenLiteral() }
+
+// String returns the string representation of the function parameter.
+func (fp *FunctionParameter) String() string {
+	return fmt.Sprintf("%s : %s", fp.Name.String(), fp.DataType.String())
+}
+
 // FunctionLiteral represents an anonymous function expression.
 type FunctionLiteral struct {
-	Token      token.Token // The 'fn' token
-	Parameters []*Identifier
+	Token      token.Token          // The 'fn' token
+	Parameters []*FunctionParameter // Changed from []*Identifier
+	ReturnType Expression           // New field for return type
 	Body       *BlockStatement
 	Name       string
 }
@@ -979,7 +1000,7 @@ func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
 func (fl *FunctionLiteral) String() string {
 	var out bytes.Buffer
 
-	params := []string{}
+	params := []string{} // Now fl.Parameters is []*FunctionParameter
 	for _, p := range fl.Parameters {
 		params = append(params, p.String())
 	}
@@ -990,7 +1011,11 @@ func (fl *FunctionLiteral) String() string {
 	}
 	out.WriteString("(")
 	out.WriteString(strings.Join(params, ", "))
-	out.WriteString(") ")
+	out.WriteString(")")
+	if fl.ReturnType != nil {
+		out.WriteString(" : " + fl.ReturnType.String())
+	}
+	out.WriteString(" ")
 	out.WriteString(fl.Body.String())
 
 	return out.String()

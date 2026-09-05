@@ -168,15 +168,12 @@ FUNCTION MyFunc : INT
     MyFunc := Local;
 END_FUNCTION
 `
-	// Note: The current transpiler has a known issue where it doesn't automatically dereference VAR_IN_OUT variables.
-	// The test reflects the current (incorrect) output to highlight this.
-	// A correct implementation would generate `(*C) = ((*C) + 1.0)`.
 	expected := `
 func MyFunc(A iec.INT, C *iec.REAL) iec.INT {
 	var Local iec.INT
 
 	Local = (A * 2)
-	C = (C + 1.000000)
+	(*C) = ((*C) + 1.000000)
 	return Local
 }
 `
@@ -257,8 +254,6 @@ PROGRAM ControlFlow
     END_REPEAT
 END_PROGRAM
 `
-	// Note: The transpiler has a known issue where `CASE 4..7` becomes `case (4 .. 7)`, which is invalid Go.
-	// The test reflects the current output. A correct implementation would expand the range or use if/else.
 	expected := `type ControlFlow struct {
 	x iec.INT
 	y iec.INT
@@ -288,14 +283,14 @@ func (p *ControlFlow) Logic(now time.Time) {
 		p.x = 0
 	}
 
-	switch p.color {
-	case 1:
+	caseSelector := p.color
+	if (caseSelector == 1) {
 		p.z = 10
-	case 2, 3:
+	} else if (caseSelector == 2) || (caseSelector == 3) {
 		p.z = 20
-	case (4 .. 7):
+	} else if (caseSelector >= 4 && caseSelector <= 7) {
 		p.z = 30
-	default:
+	} else {
 		p.z = (-1)
 	}
 

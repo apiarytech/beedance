@@ -58,9 +58,18 @@ func Modify(node Node, modifier ModifierFunc) Node {
 			node.Value, _ = Modify(node.Value, modifier).(Expression)
 		}
 
+	case *FunctionParameter:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.DataType != nil {
+			node.DataType, _ = Modify(node.DataType, modifier).(Expression)
+		}
+
 	case *FunctionLiteral:
 		for i, _ := range node.Parameters {
-			node.Parameters[i], _ = Modify(node.Parameters[i], modifier).(*Identifier)
+			node.Parameters[i], _ = Modify(node.Parameters[i], modifier).(*FunctionParameter)
+		}
+		if node.ReturnType != nil {
+			node.ReturnType, _ = Modify(node.ReturnType, modifier).(Expression)
 		}
 		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
 

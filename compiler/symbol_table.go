@@ -29,6 +29,7 @@ type Symbol struct {
 	Name       string
 	Scope      SymbolScope
 	Index      int
+	IsConstant bool
 	IsReadOnly bool
 }
 
@@ -60,8 +61,8 @@ func NewSymbolTable() *SymbolTable {
 
 // Define adds a new symbol to the current symbol table. It determines the scope
 // (Global or Local) based on whether the table has an outer scope.
-func (s *SymbolTable) Define(name string) Symbol {
-	symbol := Symbol{Name: name, Index: s.numDefinitions}
+func (s *SymbolTable) Define(name string, isConstant bool) Symbol {
+	symbol := Symbol{Name: name, Index: s.numDefinitions, IsConstant: isConstant}
 	if s.Outer == nil {
 		symbol.Scope = GlobalScope
 	} else {
@@ -140,7 +141,7 @@ func (s *SymbolTable) DefineFunctionName(name string) Symbol {
 func (s *SymbolTable) defineFree(original Symbol) Symbol {
 	s.FreeSymbols = append(s.FreeSymbols, original)
 
-	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1}
+	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, IsConstant: original.IsConstant}
 	symbol.Scope = FreeScope
 
 	s.store[original.Name] = symbol

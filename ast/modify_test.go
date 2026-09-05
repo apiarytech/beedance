@@ -97,7 +97,13 @@ func TestModify(t *testing.T) {
 		},
 		{
 			&FunctionLiteral{
-				Parameters: []*Identifier{},
+				Parameters: []*FunctionParameter{
+					{
+						Name:     &Identifier{Value: "x"},
+						DataType: one(),
+					},
+				},
+				ReturnType: one(),
 				Body: &BlockStatement{
 					Statements: []Statement{
 						&ExpressionStatement{Expression: one()},
@@ -105,7 +111,13 @@ func TestModify(t *testing.T) {
 				},
 			},
 			&FunctionLiteral{
-				Parameters: []*Identifier{},
+				Parameters: []*FunctionParameter{
+					{
+						Name:     &Identifier{Value: "x"},
+						DataType: two(),
+					},
+				},
+				ReturnType: two(),
 				Body: &BlockStatement{
 					Statements: []Statement{
 						&ExpressionStatement{Expression: two()},

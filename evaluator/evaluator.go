@@ -31,6 +31,9 @@ var (
 	nowFunc = time.Now
 )
 
+// ioMap simulates a hardware I/O map for located variables (AT %).
+var ioMap = make(map[string]object.Object)
+
 // integerTypeRanges defines the minimum and maximum values for standard IEC integer types.
 // This is used for overflow/underflow checking during type conversions and arithmetic.
 var integerTypeRanges = map[string]struct {
@@ -364,8 +367,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 		for i, p := range node.Parameters {
 			varInputs[i] = &ast.VarDeclStatement{
-				Name: p,
-				// DataType would be ANY or inferred in a more advanced system.
+				Name:     p.Name,
+				DataType: p.DataType,
 			}
 		}
 		body := node.Body
@@ -393,9 +396,41 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 	case *ast.ArrayLiteral:
 		// An ArrayLiteral is evaluated by evaluating each of its elements and creating an Array object.
-		elements := evalExpressions(node.Elements, env)
-		if len(elements) == 1 && isError(elements[0]) {
-			return elements[0]
+		var elements []object.Object
+		for _, el := range node.Elements {
+			if rep, ok := el.(*ast.ArrayRepetition); ok {
+				// It's a repetition, e.g., 3(0)
+				// Evaluate the factor
+				factorObj := Eval(rep.Factor, env)
+				if isError(factorObj) {
+					return factorObj
+				}
+				factor, _, ok := object.GetIntegerObjectValue(factorObj)
+				if !ok {
+					return newError(rep.Factor, "array repetition factor must be an integer, got %s", factorObj.Type())
+				}
+				if factor < 0 {
+					return newError(rep.Factor, "array repetition factor cannot be negative, got %d", factor)
+				}
+
+				// Evaluate the elements to be repeated
+				repeatedElements := evalExpressions(rep.Elements, env)
+				if len(repeatedElements) == 1 && isError(repeatedElements[0]) {
+					return repeatedElements[0]
+				}
+
+				// Append the elements `factor` times
+				for i := 0; i < int(factor); i++ {
+					elements = append(elements, repeatedElements...)
+				}
+			} else {
+				// It's a regular element
+				evaluated := Eval(el, env)
+				if isError(evaluated) {
+					return evaluated
+				}
+				elements = append(elements, evaluated)
+			}
 		}
 		return &object.Array{Elements: elements}
 
@@ -976,13 +1011,23 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 	}
 
 	if ident, ok := node.Left.(*ast.Identifier); ok {
-		// Check if the variable we are assigning to is a pointer (VAR_IN_OUT).
-		// We use GetRaw to only check the current function's scope for the pointer object itself.
+		// When assigning, we must check if the target is a pointer-like object
+		// (for VAR_IN_OUT or VAR ... AT) to update the underlying value correctly.
+		// We use GetRaw to get the object from the environment without dereferencing.
 		if existing, ok := env.GetRaw(ident.Value); ok {
-			if ptr, isPtr := existing.(*object.Pointer); isPtr {
-				// It's a pointer. Assign the value to the variable in the pointed-to environment.
-				// Use Assign on the pointer's environment to handle nested pointers correctly.
-				ptr.Env.Assign(ptr.Name, val)
+			switch v := existing.(type) {
+			case *object.Constant:
+				// It's a constant. Assignment is not allowed.
+				return newError(node, "cannot assign to constant variable '%s'", ident.Value)
+
+			case *object.Pointer:
+				if v.Env == nil { // This signifies a located variable.
+					// It's a located variable. The assignment updates the I/O map.
+					ioMap[v.Name] = val // v.Name holds the address string.
+				} else {
+					// It's a regular VAR_IN_OUT pointer.
+					v.Env.Assign(v.Name, val)
+				}
 				return val
 			}
 		}
@@ -1041,6 +1086,28 @@ func evalGenericVarBlock(decls []*ast.VarDeclStatement, env *object.Environment)
 // is provided, it's evaluated and set. If the type is a function block, a new
 // instance of that FB is created and stored.
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
+	// Handle located variables (AT %) first.
+	if node.Location != nil {
+		address := node.Location.Location.String()
+		// Create a pointer-like object that holds the I/O address.
+		// Use a Pointer with a nil Env to signify a located variable.
+		locatedObj := &object.Pointer{Name: address, Env: nil}
+		env.Set(node.Name.Value, locatedObj)
+
+		// Set the initial value in the shared I/O map.
+		if node.Value != nil {
+			val := Eval(node.Value, env)
+			if isError(val) {
+				return val
+			}
+			ioMap[address] = val
+		} else if _, ok := ioMap[address]; !ok {
+			// If no initial value is given and the address isn't already in the map,
+			// initialize it to NULL.
+			ioMap[address] = NULL
+		}
+		return locatedObj
+	}
 	var val object.Object
 	if node.Value != nil {
 		val = Eval(node.Value, env)
@@ -1819,8 +1886,25 @@ func evalIdentifier(
 	node *ast.Identifier,
 	env *object.Environment,
 ) object.Object {
+	// Special handling for constant values to unwrap them.
+	if val, ok := env.GetRaw(node.Value); ok {
+		if constant, isConst := val.(*object.Constant); isConst {
+			return constant.Value
+		}
+	}
 	if val, ok := env.Get(node.Value); ok {
-		return dereferencePointer(node, val)
+		// If the identifier points to a located variable, we must fetch the
+		// actual value from the shared I/O map. We check for a Pointer with a nil Env.
+		if ptr, isPtr := val.(*object.Pointer); isPtr && ptr.Env == nil {
+			address := ptr.Name
+			if ioVal, ok := ioMap[address]; ok {
+				// The value in ioMap is the final value, don't dereference further.
+				return ioVal
+			}
+			// If the I/O address hasn't been written to yet, return NULL.
+			return NULL
+		}
+		return dereferencePointer(node, val) // This handles regular pointers (VAR_IN_OUT)
 	}
 
 	// --- New logic to resolve SFC step names ---

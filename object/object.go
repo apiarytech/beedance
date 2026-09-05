@@ -79,6 +79,8 @@ const (
 	ARRAY_DEFINITION_OBJ        = "ARRAY_DEFINITION"        // The definition of an array type
 	UNCOMPILED_MACRO_OBJ        = "UNCOMPILED_MACRO"        // A macro that has been parsed but not yet expanded
 	CLOSURE_OBJ                 = "CLOSURE"                 // A function that captures its environment
+	NAMED_ARGUMENT_OBJ          = "NAMED_ARGUMENT"          // A named argument for a function call
+	CONSTANT_OBJ                = "CONSTANT"                // A wrapper for a constant value
 )
 
 // Generic ANY types
@@ -1032,9 +1034,12 @@ func (pi *ProgramInstance) Inspect() string {
 
 // CompiledFunction holds the bytecode and metadata for a compiled function.
 type CompiledFunction struct {
-	Instructions  code.Instructions
-	NumLocals     int
-	NumParameters int
+	Instructions   code.Instructions
+	NumLocals      int
+	NumParameters  int
+	ParameterNames []string
+	OutputIndices  []int
+	OutputNames    []string
 }
 
 // Type returns the object's type.
@@ -1055,6 +1060,29 @@ type Closure struct {
 func (c *Closure) Type() ObjectType { return CLOSURE_OBJ }
 func (c *Closure) Inspect() string {
 	return fmt.Sprintf("Closure[%p]", c)
+}
+
+// Constant wraps another object to make it immutable.
+type Constant struct {
+	Value Object
+}
+
+// Type returns the object's type.
+func (c *Constant) Type() ObjectType { return CONSTANT_OBJ }
+
+// Inspect returns a string representation of the wrapped object's value.
+func (c *Constant) Inspect() string { return c.Value.Inspect() }
+
+// NamedArgument wraps a value with a parameter name for function calls.
+type NamedArgument struct {
+	Name  string
+	Value Object
+}
+
+// Type returns the object's type.
+func (na *NamedArgument) Type() ObjectType { return NAMED_ARGUMENT_OBJ }
+func (na *NamedArgument) Inspect() string {
+	return fmt.Sprintf("%s := %s", na.Name, na.Value.Inspect())
 }
 
 // UncompiledMacro represents a macro that has been parsed but whose body has not been compiled.

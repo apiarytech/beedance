@@ -136,6 +136,9 @@ const (
 
 	OpDup
 	OpSwap
+
+	OpMakeNamedArg
+	OpReturnValueMulti
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -213,6 +216,9 @@ var definitions = map[Opcode]*Definition{
 
 	OpDup:  {"OpDup", []int{}},
 	OpSwap: {"OpSwap", []int{}},
+
+	OpMakeNamedArg:     {"OpMakeNamedArg", []int{2}},
+	OpReturnValueMulti: {"OpReturnValueMulti", []int{}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

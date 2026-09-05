@@ -687,7 +687,7 @@ func TestIndexExpressions(t *testing.T) {
 func TestFunctionsWithoutReturnValue(t *testing.T) {
 	tests := []compilerTestCase{
 		{
-			input: `fn() { }`,
+			input: `fn() : VOID { }`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpReturn),
@@ -705,7 +705,7 @@ func TestFunctionsWithoutReturnValue(t *testing.T) {
 func TestFunctionCalls(t *testing.T) {
 	tests := []compilerTestCase{
 		{
-			input: `fn() { 24 }();`,
+			input: `fn() : INT { 24 }();`,
 			expectedConstants: []interface{}{
 				24,
 				[]code.Instructions{
@@ -809,7 +809,7 @@ func TestVarStatementScopes(t *testing.T) {
 		{
 			input: `
 			VAR num: INT := 55; END_VAR
-			fn() { num }
+			fn() : INT { num }
 			`,
 			expectedConstants: []interface{}{
 				55,
@@ -828,11 +828,9 @@ func TestVarStatementScopes(t *testing.T) {
 		{
 			input: `
 			fn() {
-				VAR
-					num: INT := 55;
-				END_VAR
+				VAR num: INT := 55; END_VAR
 				num;
-			}
+			}()
 			`,
 			expectedConstants: []interface{}{
 				55,
@@ -844,19 +842,18 @@ func TestVarStatementScopes(t *testing.T) {
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 1, 0),
-				code.Make(code.OpPop),
+				code.Make(code.OpClosure, 1, 0), // The closure for fn
+				code.Make(code.OpCall, 0),       // The call to fn
+				code.Make(code.OpPop),           // Pop the result of the call
 			},
 		},
 		{
 			input: `
-			fn() {
-				VAR
-					a: INT := 55;
-					b: INT := 77;
-				END_VAR
+			fn() : INT {
+				VAR a: INT := 55; END_VAR
+				VAR b: INT := 77; END_VAR
 				a + b;
-			}
+			}()
 			`,
 			expectedConstants: []interface{}{
 				55,
@@ -873,8 +870,9 @@ func TestVarStatementScopes(t *testing.T) {
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 2, 0),
-				code.Make(code.OpPop),
+				code.Make(code.OpClosure, 2, 0), // The closure for fn
+				code.Make(code.OpCall, 0),       // The call to fn
+				code.Make(code.OpPop),           // Pop the result of the call
 			},
 		},
 	}
@@ -1168,11 +1166,11 @@ func TestClosures(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
-			fn(a) {
-				fn(b) {
+			fn(a : INT) {
+				fn(b : INT) {
 					a + b
 				}
-			}
+			};
 			`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
@@ -1194,9 +1192,9 @@ func TestClosures(t *testing.T) {
 		},
 		{
 			input: `
-			fn(a) {
-				fn(b) {
-					fn(c) {
+			fn(a : INT) {
+				fn(b : INT) {
+					fn(c : INT) {
 						a + b + c
 					}
 				}
@@ -1231,11 +1229,11 @@ func TestClosures(t *testing.T) {
 		{
 			input: `
 			VAR global: INT := 55; END_VAR
-			fn() {
+			fn() : VOID {
 				VAR a: INT := 66; END_VAR
-				fn() {
+				fn() : VOID {
 					VAR b: INT := 77; END_VAR
-					fn() {
+					fn() : INT {
 						VAR c: INT := 88; END_VAR
 						global + a + b + c;
 					}

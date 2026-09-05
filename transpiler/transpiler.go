@@ -3,6 +3,9 @@ package transpiler
 
 import (
 	"beedance/ast"
+	"beedance/evaluator"
+	"beedance/object"
+	"beedance/token"
 	"fmt"
 	"io"
 	"log" // Added for time.Time and time.Duration
@@ -114,6 +117,7 @@ type Transpiler struct {
 	programVarName  string // The name of the receiver for program methods, e.g., "p"
 	currentFunc     *ast.FunctionDeclaration
 	varInfo         map[string]*ast.TypeDeclaration // Maps var names in current scope to their type declaration
+	inOutVars       map[string]bool                 // Set of VAR_IN_OUT variable names in the current function scope
 	accessVars      map[string]bool                 // Set of VAR_ACCESS variable names in the current scope
 	tempVars        map[string]bool                 // Set of VAR_TEMP variable names in the current scope
 	ilCurrentCRType string                          // The data type of the IL Current Result
@@ -131,15 +135,30 @@ func New(w io.Writer) *Transpiler {
 		mainGenerated: false,
 		accessVars:    make(map[string]bool),
 		tempVars:      make(map[string]bool),
+		inOutVars:     make(map[string]bool),
 		globalVars:    make(map[string]bool),
 		varInfo:       make(map[string]*ast.TypeDeclaration),
 		typeInfo:      make(map[string]ast.Node),
 	}
 }
 
-// Transpile is the main entry point for the transpilation process, dispatching to specific handlers based on the AST node type.
-// Transpile is the main entry point.
-func (t *Transpiler) Transpile(node ast.Node) error {
+// Transpile is the main entry point for the transpilation process. It orchestrates
+// a two-pass approach: first expanding macros, then generating Go code.
+func (t *Transpiler) Transpile(programAST *ast.Program) error { // Changed parameter name
+	// --- Pass 1: Macro Definition & Expansion ---
+	// To handle macros correctly, we must expand them before generating Go code.
+	// We can reuse the evaluator's macro engine for this.
+	macroEnv := object.NewEnvironment()
+	evaluator.DefineMacros(programAST, macroEnv)                // Use programAST here
+	expandedAST := evaluator.ExpandMacros(programAST, macroEnv) // Use programAST here
+
+	// --- Pass 2: Code Generation ---
+	// Now, we transpile the modified AST that has all macros expanded.
+	return t.transpileNode(expandedAST)
+}
+
+// transpileNode is the recursive heart of the transpiler, handling code generation for each AST node.
+func (t *Transpiler) transpileNode(node ast.Node) error {
 	// Check if the node has leading comments and transpile them.
 	if nodeWithComments, ok := node.(interface{ GetLeadingComments() []string }); ok {
 		t.transpileLeadingComments(nodeWithComments.GetLeadingComments())
@@ -150,7 +169,7 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 		t.buildTypeInfo(node) // First pass to collect type definitions
 		t.buildGlobalVarInfo(node)
 		for _, stmt := range node.Statements {
-			if err := t.Transpile(stmt); err != nil {
+			if err := t.transpileNode(stmt); err != nil {
 				return err
 			}
 		}
@@ -158,26 +177,26 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 	case *ast.ProgramDeclaration:
 		// First, transpile any global var blocks that might exist at the program level
 		t.transpileGlobalVarBlocks(node.VarGlobal)
-		return t.transpileProgram(node)
+		return t.transpileProgram(node) // This will call transpileNode recursively
 	case *ast.BlockStatement:
-		return t.transpileBlockStatement(node)
+		return t.transpileBlockStatement(node) // This will call transpileNode recursively
 	case *ast.VarDeclStatement:
 		t.transpileVarDecl(node)
 		return nil
 	case *ast.AssignmentStatement:
-		return t.transpileAssignmentStatement(node)
+		return t.transpileAssignmentStatement(node) // This will call transpileNode recursively
 	case *ast.IfStatement:
-		return t.transpileIfStatement(node)
+		return t.transpileIfStatement(node) // This will call transpileNode recursively
 	case *ast.CaseStatement:
-		return t.transpileCaseStatement(node)
+		return t.transpileCaseStatement(node) // This will call transpileNode recursively
 	case *ast.ForLoopStatement:
-		return t.transpileForLoopStatement(node)
+		return t.transpileForLoopStatement(node) // This will call transpileNode recursively
 	case *ast.WhileStatement:
-		return t.transpileWhileStatement(node)
+		return t.transpileWhileStatement(node) // This will call transpileNode recursively
 	case *ast.RepeatStatement:
-		return t.transpileRepeatStatement(node)
+		return t.transpileRepeatStatement(node) // This will call transpileNode recursively
 	case *ast.ReturnStatement:
-		return t.transpileReturnStatement(node)
+		return t.transpileReturnStatement(node) // This will call transpileNode recursively
 	case *ast.ExitStatement:
 		return t.transpileExitStatement(node)
 	case *ast.ExpressionStatement:
@@ -191,17 +210,17 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 				Left:  infix.Left,
 				Value: infix.Right,
 			}
-			return t.transpileAssignmentStatement(assignment)
+			return t.transpileAssignmentStatement(assignment) // This will call transpileNode recursively
 		}
 		// For other expression statements (like function block calls), they are expected
 		// to handle their own formatting (indentation and newlines).
-		return t.transpileExpression(node.Expression)
+		return t.transpileExpression(node.Expression) // This will call transpileNode recursively
 	case *ast.FunctionBlockDeclaration:
-		return t.transpileFunctionBlockDeclaration(node)
+		return t.transpileFunctionBlockDeclaration(node) // This will call transpileNode recursively
 	case *ast.TypeBlockDeclaration:
-		return t.transpileTypeBlockDeclaration(node)
+		return t.transpileTypeBlockDeclaration(node) // This will call transpileNode recursively
 	case *ast.ConfigurationDeclaration:
-		return t.transpileConfigurationDeclaration(node)
+		return t.transpileConfigurationDeclaration(node) // This will call transpileNode recursively
 	case *ast.SFCProgram:
 		// This is handled within transpileProgram/transpileFunctionBlockDeclaration
 		// but we add a case to prevent "unhandled type" errors if it appears elsewhere.
@@ -210,7 +229,7 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 		t.transpileGlobalVarBlocks([]*ast.GlobalVarDeclaration{node})
 		return nil
 	case *ast.FunctionDeclaration:
-		return t.transpileFunctionDeclaration(node)
+		return t.transpileFunctionDeclaration(node) // This will call transpileNode recursively
 	case *ast.VarBlockDeclaration:
 		// This handles VAR blocks that might appear as statements inside a body.
 		// We treat them as local variable declarations.
@@ -219,7 +238,7 @@ func (t *Transpiler) Transpile(node ast.Node) error {
 			if decl.Value != nil {
 				t.write(" = ")
 				// Use a temporary transpiler to avoid carrying over receiver context.
-				valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
+				valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars} // This will call transpileNode recursively
 				if err := valT.transpileExpression(decl.Value); err != nil {
 					return err
 				}
@@ -548,7 +567,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	// If the body is an SFC program, transpile it as a state machine.
 	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
 		if err := t.transpileSFCProgram(sfc); err != nil {
-			return err
+			return err // This will call transpileNode recursively
 		}
 	} else if block, ok := prog.Body.(*ast.BlockStatement); ok && isIlBlock(block) {
 		// It's an IL program
@@ -557,7 +576,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		}
 	} else {
 		// Otherwise, transpile as a regular ST block of statements.
-		if err := t.Transpile(prog.Body); err != nil {
+		if err := t.transpileNode(prog.Body); err != nil {
 			return err
 		}
 	}
@@ -1060,7 +1079,7 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 	t.write("\t// Process actions for active steps\n")
 	for _, element := range sfc.Elements {
 		if step, ok := element.(*ast.StepStatement); ok {
-			// Group action associations by name to resolve qualifier priorities (R > S > others).
+			// Group action associations by name to resolve qualifier priorities (R > S > others). // This will call transpileNode recursively
 			actionsInStep := make(map[string][]*ast.ActionBlockStatement)
 			for _, actionAssoc := range step.Actions {
 				actionName := actionAssoc.ActionName.Value
@@ -1130,8 +1149,8 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 			if block, isBlock := def.Body.(*ast.BlockStatement); isBlock {
 				// Manually iterate and indent statements within the action body.
 				for _, s := range block.Statements {
-					t.write("\t")
-					if err := t.Transpile(s); err != nil {
+					t.write("\t") // This will call transpileNode recursively
+					if err := t.transpileNode(s); err != nil {
 						return err
 					}
 				}
@@ -1276,7 +1295,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 		}
 	}
 
-	if err := t.Transpile(fb.Body); err != nil {
+	if err := t.transpileNode(fb.Body); err != nil {
 		t.programVarName = originalProgramVarName // Restore context on error
 		return err
 	}
@@ -1320,7 +1339,7 @@ func (t *Transpiler) transpileSFCTransition(trans *ast.TransitionStatement) {
 	t.write("\t\t// Transition from %s to %s\n", trans.From[0].Value, trans.To[0].Value)
 	t.write("\t\tif ")
 	t.transpileExpression(trans.Condition)
-	t.write(" {\n")
+	t.write(" {\n") // This will call transpileNode recursively
 	// Deactivate source steps and activate destination steps
 	for _, from := range trans.From {
 		t.write("\t\t\tdelete(nextActiveSteps, %q)\n", from.Value)
@@ -1421,6 +1440,16 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	t.currentFunc = fd
 	defer func() { t.currentFunc = originalFunc }()
 
+	// Standalone functions do not have a receiver like programs or FBs.
+	originalProgramVarName := t.programVarName
+	t.programVarName = ""
+	defer func() { t.programVarName = originalProgramVarName }()
+
+	// Track VAR_IN_OUT variables to handle dereferencing.
+	originalInOutVars := t.inOutVars
+	t.inOutVars = make(map[string]bool)
+	defer func() { t.inOutVars = originalInOutVars }()
+
 	// --- 1. Build the function signature ---
 	t.write("func %s(", fd.Name.Value)
 
@@ -1433,6 +1462,7 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	for _, p := range fd.VarInOuts {
 		goType := t.mapIecTypeToGo(p.DataType)
 		params = append(params, fmt.Sprintf("%s *%s", p.Name.Value, goType))
+		t.inOutVars[p.Name.Value] = true
 	}
 	t.write("%s", strings.Join(params, ", "))
 	t.write(") ")
@@ -1460,7 +1490,7 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	t.write("\n")
 
 	// --- 3. Transpile the function body ---
-	if err := t.Transpile(fd.Body); err != nil {
+	if err := t.transpileNode(fd.Body); err != nil {
 		return err
 	}
 
@@ -1479,6 +1509,30 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	if varDecl.Location != nil {
 		goType := t.mapIecTypeToGo(varDecl.DataType)
 		t.write("\t%s *%s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.Location.String())
+		return
+	}
+
+	// Special handling for FUNCTION type to generate a func signature.
+	if typeSpec, ok := varDecl.DataType.(*ast.TypeSpecifier); ok && typeSpec.Token.Type == token.FUNCTION {
+		// Infer the signature from the initial value if it's a function literal.
+		if fnLit, ok := varDecl.Value.(*ast.FunctionLiteral); ok {
+			t.write("\t%s func(", varDecl.Name.Value)
+			params := []string{}
+			for _, p := range fnLit.Parameters {
+				goType := t.mapIecTypeToGo(p.DataType)
+				params = append(params, fmt.Sprintf("%s %s", p.Name.Value, goType))
+			}
+			t.write("%s", strings.Join(params, ", "))
+			t.write(")")
+
+			if returnTypeSpec, ok := fnLit.ReturnType.(*ast.TypeSpecifier); !ok || strings.ToUpper(returnTypeSpec.Token.Literal) != "VOID" {
+				t.write(" %s", t.mapIecTypeToGo(fnLit.ReturnType))
+			}
+			t.write("\n")
+			return
+		}
+		// Fallback for a FUNCTION variable without a literal assignment.
+		t.write("\t%s func()\n", varDecl.Name.Value)
 		return
 	}
 
@@ -1533,7 +1587,27 @@ func (t *Transpiler) transpileVarDeclInOut(varDecl *ast.VarDeclStatement) {
 
 // transpileCaseStatement transpiles an IEC 61131-3 CASE statement into a Go `switch` statement.
 // transpileCaseStatement transpiles an IEC 61131-3 CASE statement to a Go switch statement.
+// If the CASE statement includes ranges, it transpiles to an if-else-if chain instead.
 func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
+	// Check if any case uses a range. If so, we must generate an if/else if chain.
+	hasRange := false
+	for _, caseElem := range stmt.Cases {
+		for _, val := range caseElem.Values {
+			if infix, ok := val.(*ast.InfixExpression); ok && infix.Operator == ".." {
+				hasRange = true
+				break
+			}
+		}
+		if hasRange {
+			break
+		}
+	}
+
+	if hasRange {
+		return t.transpileCaseWithRanges(stmt)
+	}
+
+	// Original switch-based implementation for non-range cases.
 	t.write("\tswitch ")
 	if err := t.transpileExpression(stmt.Expression); err != nil {
 		return err
@@ -1551,24 +1625,66 @@ func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
 			}
 		}
 		t.write(":\n")
-		for _, s := range caseElem.Consequence.Statements {
-			t.write("\t")
-			if err := t.Transpile(s); err != nil {
-				return err
-			}
-		}
+		t.transpileNode(caseElem.Consequence)
 	}
 
 	if stmt.Alternative != nil {
 		t.write("\tdefault:\n")
-		for _, s := range stmt.Alternative.Statements {
-			t.write("\t")
-			if err := t.Transpile(s); err != nil {
-				return err
-			}
-		}
+		t.transpileNode(stmt.Alternative)
 	}
 	t.write("\t}\n")
+	return nil
+}
+
+// transpileCaseWithRanges transpiles a CASE statement into a Go if-else-if chain
+// to correctly handle range conditions (e.g., 1..10).
+func (t *Transpiler) transpileCaseWithRanges(stmt *ast.CaseStatement) error {
+	// Store the selector expression in a temporary variable to avoid re-evaluation.
+	t.write("\tcaseSelector := ")
+	if err := t.transpileExpression(stmt.Expression); err != nil {
+		return err
+	}
+	t.write("\n")
+
+	for i, caseElem := range stmt.Cases {
+		if i == 0 {
+			t.write("\tif ")
+		} else {
+			t.write(" else if ")
+		}
+
+		// Build the condition for the if/else if
+		for j, val := range caseElem.Values {
+			if j > 0 {
+				t.write(" || ")
+			}
+			if infix, ok := val.(*ast.InfixExpression); ok && infix.Operator == ".." {
+				// Range: (caseSelector >= L && caseSelector <= H)
+				t.write("(caseSelector >= ")
+				t.transpileExpression(infix.Left)
+				t.write(" && caseSelector <= ")
+				t.transpileExpression(infix.Right)
+				t.write(")")
+			} else {
+				// Simple value: caseSelector == V
+				t.write("(caseSelector == ")
+				t.transpileExpression(val)
+				t.write(")")
+			}
+		}
+		t.write(" {\n")
+		t.transpileNode(caseElem.Consequence)
+		t.write("\t}")
+	}
+
+	// Handle the final ELSE block
+	if stmt.Alternative != nil {
+		t.write(" else {\n")
+		t.transpileNode(stmt.Alternative)
+		t.write("\t}")
+	}
+	t.write("\n")
+
 	return nil
 }
 
@@ -1722,7 +1838,7 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 	t.write(" {\n")
 	for _, s := range stmt.Body.Statements {
 		t.write("\t")
-		if err := t.Transpile(s); err != nil {
+		if err := t.transpileNode(s); err != nil {
 			return err
 		}
 	}
@@ -1737,7 +1853,7 @@ func (t *Transpiler) transpileBlockStatement(bs *ast.BlockStatement) error {
 		return nil
 	}
 	for _, stmt := range bs.Statements {
-		if err := t.Transpile(stmt); err != nil {
+		if err := t.transpileNode(stmt); err != nil {
 			return err
 		}
 	}
@@ -1754,7 +1870,7 @@ func (t *Transpiler) transpileWhileStatement(stmt *ast.WhileStatement) error {
 	t.write(" {\n")
 	for _, s := range stmt.Body.Statements {
 		t.write("\t")
-		if err := t.Transpile(s); err != nil {
+		if err := t.transpileNode(s); err != nil {
 			return err
 		}
 	}
@@ -1768,7 +1884,7 @@ func (t *Transpiler) transpileRepeatStatement(stmt *ast.RepeatStatement) error {
 	t.write("\tfor {\n")
 	for _, s := range stmt.Body.Statements {
 		t.write("\t")
-		if err := t.Transpile(s); err != nil {
+		if err := t.transpileNode(s); err != nil {
 			return err
 		}
 	}
@@ -1813,6 +1929,9 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
 		} else if t.accessVars[exp.Value] {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
+		} else if t.inOutVars[exp.Value] {
+			// VAR_IN_OUT in a FUNCTION is a pointer and must be dereferenced.
+			t.write("(*%s)", exp.Value)
 		} else if t.tempVars[exp.Value] {
 			// It's a temporary variable, local to the Logic function.
 			t.write("%s", exp.Value)
@@ -1877,8 +1996,8 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 		// This is handled by transpileArrayLiteral, but we add a case to be safe.
 		return t.transpileArrayRepetition(exp)
 	case *ast.MacroLiteral:
-		t.write("/* macro literal not yet supported for transpilation */")
-		return nil
+		// This case should no longer be hit, as macros are expanded before this function is called.
+		return fmt.Errorf("unhandled macro literal found during code generation pass")
 	case *ast.ArrayLiteral:
 		return t.transpileArrayLiteral(exp)
 
@@ -1987,7 +2106,7 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 	// Manually transpile block to add extra indentation
 	for _, s := range stmt.Consequence.Statements {
 		t.write("\t")
-		if err := t.Transpile(s); err != nil {
+		if err := t.transpileNode(s); err != nil {
 			return err
 		}
 	}
@@ -2002,7 +2121,7 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 			t.write(" {\n")
 			for _, s := range elseifStmt.Consequence.Statements {
 				t.write("\t")
-				if err := t.Transpile(s); err != nil {
+				if err := t.transpileNode(s); err != nil {
 					return err
 				}
 			}
@@ -2013,7 +2132,7 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 			if elseBlock, ok := alt.(*ast.BlockStatement); ok {
 				for _, s := range elseBlock.Statements {
 					t.write("\t")
-					if err := t.Transpile(s); err != nil {
+					if err := t.transpileNode(s); err != nil {
 						return err
 					}
 				}
@@ -2354,24 +2473,62 @@ func (t *Transpiler) getFunctionBlockDefinition(fbExpr ast.Expression) *ast.Func
 // transpileFunctionLiteral is a placeholder for transpiling IEC 61131-3 function literals.
 // Direct transpilation to Go anonymous functions with the same semantics is complex.
 func (t *Transpiler) transpileFunctionLiteral(fl *ast.FunctionLiteral) error {
-	// Transpiling anonymous functions (function literals) to Go is complex
-	// as Go does not have a direct equivalent that can be assigned to a variable
-	// in the same way. This would likely involve declaring a named function
-	// with a generated name and then assigning that function to the variable.
-	// For now, we'll just put a placeholder.
-	t.write("/* anonymous function literal not yet supported for transpilation */")
+	// This implementation assumes the AST has been extended to support typed
+	// anonymous functions, including Parameters and a ReturnType.
+	if fl.Parameters == nil || fl.ReturnType == nil {
+		t.write("func() { panic(\"anonymous functions must have explicit types for transpilation\") }")
+		return nil
+	}
+
+	// --- 1. Build the function signature ---
+	t.write("func(")
+	params := []string{}
+	for _, p := range fl.Parameters {
+		goType := t.mapIecTypeToGo(p.DataType)
+		params = append(params, fmt.Sprintf("%s %s", p.Name.Value, goType))
+	}
+	t.write("%s", strings.Join(params, ", "))
+	t.write(")")
+
+	// Handle return type. VOID means no return value in Go.
+	if returnTypeSpec, ok := fl.ReturnType.(*ast.TypeSpecifier); !ok || strings.ToUpper(returnTypeSpec.Token.Literal) != "VOID" {
+		t.write(" %s", t.mapIecTypeToGo(fl.ReturnType))
+	}
+
+	t.write(" {\n")
+
+	// --- 2. Transpile the body ---
+	// The body is transpiled within the context of the function literal.
+	// We need to ensure that variable references inside are not prefixed with the program receiver.
+	originalProgramVarName := t.programVarName
+	t.programVarName = "" // No receiver inside anonymous function
+	defer func() { t.programVarName = originalProgramVarName }()
+
+	t.transpileNode(fl.Body)
+
+	t.write("}") // End of anonymous function
 	return nil
 }
 
 // transpileHashLiteral is a placeholder for transpiling IEC 61131-3 hash literals.
 // It currently generates a Go `map[string]interface{}`.
 func (t *Transpiler) transpileHashLiteral(hl *ast.HashLiteral) error {
-	// Transpiling hash literals (maps)
-	t.write("map[string]interface{}{\n") // Assuming map[string]interface{} for simplicity
-	for key, value := range hl.Pairs {
+	// Transpiling hash literals (maps).
+	// Since IEC 61131-3 does not have a standard map type, we generate a Go map.
+	// We use map[any]any to be flexible, as beedance allows various hashable key types.
+	t.write("map[any]any{\n")
+
+	// Sort keys for deterministic output
+	keys := make([]ast.Expression, 0, len(hl.Pairs))
+	for k := range hl.Pairs {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+
+	for _, key := range keys {
 		t.transpileExpression(key)
 		t.write(": ")
-		t.transpileExpression(value)
+		t.transpileExpression(hl.Pairs[key])
 		t.write(",\n")
 	}
 	t.write("}")

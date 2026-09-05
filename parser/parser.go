@@ -2220,35 +2220,87 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		return nil
 	}
 
-	lit.Parameters = p.parseFunctionParameters()
+	lit.Parameters = p.parseFunctionParameters() // This will now return []*ast.FunctionParameter
+
+	// Parse optional return type
+	if p.peekTokenIs(token.COLON) {
+		p.nextToken() // Consume ')'
+		p.nextToken() // Consume ':'
+		lit.ReturnType = p.parseTypeSpecifier()
+	}
 
 	if !p.expectPeek(token.LBRACE) {
 		return nil
 	}
-
 	lit.Body = p.parseBlockStatement()
 
 	return lit
 }
 
-// parseFunctionParameters parses a comma-separated list of identifiers for a function's parameters.
-func (p *Parser) parseFunctionParameters() []*ast.Identifier {
+// parseFunctionParameters parses a comma-separated list of typed parameters for a function literal.
+func (p *Parser) parseFunctionParameters() []*ast.FunctionParameter {
 	defer untrace(trace("parseFunctionParameters"))
+	parameters := []*ast.FunctionParameter{}
+
+	if p.peekTokenIs(token.RPAREN) {
+		p.nextToken() // Consume ')'
+		return parameters
+	}
+
+	p.nextToken() // Consume '(' or previous token
+
+	// Parse the first parameter
+	param := p.parseFunctionParameter()
+	if param != nil {
+		parameters = append(parameters, param)
+	}
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // Consume ','
+		p.nextToken() // Move to the next parameter's identifier
+		param = p.parseFunctionParameter()
+		if param != nil {
+			parameters = append(parameters, param)
+		}
+	}
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
+
+	return parameters
+}
+
+// parseFunctionParameter parses a single function parameter (e.g., `x : INT`).
+func (p *Parser) parseFunctionParameter() *ast.FunctionParameter {
+	defer untrace(trace("parseFunctionParameter"))
+	param := &ast.FunctionParameter{}
+
+	param.Name = p.parseIdentifier().(*ast.Identifier)
+	p.expectPeek(token.COLON)
+	p.nextToken() // Consume ':', move to data type
+	param.DataType = p.parseTypeSpecifier()
+	return param
+}
+
+// parseIdentifierParameters parses a comma-separated list of identifiers, used for macros.
+func (p *Parser) parseIdentifierParameters() []*ast.Identifier {
+	defer untrace(trace("parseIdentifierParameters"))
 	identifiers := []*ast.Identifier{}
 
 	if p.peekTokenIs(token.RPAREN) {
-		p.nextToken()
+		p.nextToken() // consume ')'
 		return identifiers
 	}
 
-	p.nextToken()
+	p.nextToken() // consume '('
 
 	ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	identifiers = append(identifiers, ident)
 
 	for p.peekTokenIs(token.COMMA) {
-		p.nextToken()
-		p.nextToken()
+		p.nextToken() // consume ','
+		p.nextToken() // consume the identifier
 		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		identifiers = append(identifiers, ident)
 	}
@@ -2478,7 +2530,7 @@ func (p *Parser) parseMacroLiteral() ast.Expression {
 		return nil
 	}
 
-	lit.Parameters = p.parseFunctionParameters()
+	lit.Parameters = p.parseIdentifierParameters()
 
 	if !p.expectPeek(token.LBRACE) {
 		return nil

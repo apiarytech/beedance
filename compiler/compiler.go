@@ -250,7 +250,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.TypeDeclaration:
 		// A type declaration defines a "template" that gets stored in a global variable.
 		// The actual instantiation happens when a VAR of this type is declared.
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Name.Value, false)
 
 		var typeDefObject object.Object
 
@@ -291,19 +291,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// This treats an FB declaration similarly to a function declaration.
 		// It compiles the body into a callable unit and defines the FB's name globally.
 		// The resulting object is a "template" or "class" that can later be instantiated.
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Name.Value, false)
 
 		c.enterScope()
 
 		// Define all variables in the FB's scope so the body can be compiled correctly.
 		for _, p := range node.VarInputs {
-			c.symbolTable.Define(p.Name.Value)
+			c.symbolTable.Define(p.Name.Value, false)
 		}
 		for _, p := range node.VarOutputs {
-			c.symbolTable.Define(p.Name.Value)
+			c.symbolTable.Define(p.Name.Value, false)
 		}
 		for _, p := range node.VarInOuts {
-			c.symbolTable.Define(p.Name.Value)
+			c.symbolTable.Define(p.Name.Value, false)
 		}
 
 		// Compile local variable declarations to handle initial values.
@@ -351,7 +351,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.ActionStatement:
 		// An Action is like a parameter-less function.
 		// Compile its body into a callable unit.
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Name.Value, false)
 
 		c.enterScope()
 
@@ -436,7 +436,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.FunctionDeclaration:
 		// This is a statement that defines a function in the current scope.
 		// First, define the function name in the current scope so it can be captured in a closure.
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Name.Value, false)
 
 		// Then, compile the function body itself.
 		c.enterScope()
@@ -444,21 +444,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		c.symbolTable.DefineFunctionName(node.Name.Value) // For recursion
 
+		paramNames := make([]string, len(node.VarInputs))
 		// Define input parameters first, as they are the first locals in the stack frame.
-		for _, p := range node.VarInputs {
+		for i, p := range node.VarInputs {
 			c.symbolTable.DefineVarInput(p.Name.Value)
+			paramNames[i] = p.Name.Value
 		}
 
 		// Define the function name as a local variable to hold the return value.
-		returnSymbol := c.symbolTable.Define(node.Name.Value)
+		returnSymbol := c.symbolTable.Define(node.Name.Value, false)
+
+		outputNames := make([]string, len(node.VarOutputs))
+		outputIndices := make([]int, len(node.VarOutputs))
+		for i, p := range node.VarOutputs {
+			outputNames[i] = p.Name.Value
+			// The index will be populated when the symbol is defined below.
+		}
 
 		// Initialize the return variable to Null. This ensures that if no explicit
 		// return value is assigned, the function implicitly returns Null.
 		c.emit(code.OpNull)
 		c.emit(code.OpSetLocal, returnSymbol.Index)
 
-		for _, p := range node.VarOutputs {
-			c.symbolTable.Define(p.Name.Value)
+		for i, p := range node.VarOutputs {
+			symbol := c.symbolTable.Define(p.Name.Value, false)
+			outputIndices[i] = symbol.Index
 		}
 
 		// Compile local variable declarations (VAR ... END_VAR) to define them
@@ -483,13 +493,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// an assignment to the function name, which is compiled as a return),
 		// we add an implicit return of the function's return variable.
 		if !c.lastInstructionIs(code.OpReturnValue) {
-			returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
-			if !ok {
-				// This should not happen if we defined it above.
-				return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
+			if len(outputNames) > 0 {
+				c.loadSymbol(returnSymbol) // Load primary return value onto stack
+				c.emit(code.OpReturnValueMulti)
+			} else {
+				returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
+				if !ok {
+					// This should not happen if we defined it above.
+					return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
+				}
+				c.loadSymbol(returnSymbol)
+				c.emit(code.OpReturnValue)
 			}
-			c.loadSymbol(returnSymbol)
-			c.emit(code.OpReturnValue)
 		}
 
 		freeSymbols := c.symbolTable.FreeSymbols
@@ -499,9 +514,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.popFunction()
 
 		compiledFn := &object.CompiledFunction{
-			Instructions:  instructions,
-			NumLocals:     numLocals,
-			NumParameters: len(node.VarInputs),
+			Instructions:   instructions,
+			NumLocals:      numLocals,
+			NumParameters:  len(node.VarInputs),
+			ParameterNames: paramNames,
+			OutputNames:    outputNames,
+			OutputIndices:  outputIndices,
 		}
 		fnIndex := c.addConstant(compiledFn)
 
@@ -606,7 +624,24 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A VarDeclStatement defines a symbol and compiles its initial value (or null).
 	// It then emits an instruction to store that value in the correct scope.
 	case *ast.VarDeclStatement:
-		symbol := c.symbolTable.Define(node.Name.Value)
+		// Handle located variables (AT %) by treating them as external symbols.
+		// The VM will be responsible for mapping the address string to physical I/O.
+		if node.Location != nil {
+			address := node.Location.Location.String()
+			constIndex := c.addConstant(&object.String{Value: address})
+			symbol := c.symbolTable.DefineExternal(node.Name.Value, constIndex)
+
+			// If an initial value is provided, compile it and emit OpSetExternal.
+			if node.Value != nil {
+				if err := c.Compile(node.Value); err != nil {
+					return err
+				}
+				c.emit(code.OpSetExternal, symbol.Index)
+			}
+			return nil // This declaration is fully handled.
+		}
+
+		symbol := c.symbolTable.Define(node.Name.Value, node.IsConstant)
 
 		if node.Value != nil {
 			err := c.Compile(node.Value)
@@ -812,7 +847,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.ControlVar.Value); err != nil {
 			return err
 		}
-		symbol := c.symbolTable.Define(controlVarName)
+		symbol := c.symbolTable.Define(controlVarName, false)
 		c.emit(code.OpSetLocal, symbol.Index)
 
 		loopStartPos := len(c.currentInstructions())
@@ -1059,7 +1094,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		for _, p := range node.Parameters {
-			c.symbolTable.Define(p.Value)
+			c.symbolTable.Define(p.Name.Value, false)
 		}
 
 		err := c.Compile(node.Body)
@@ -1118,6 +1153,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A CallExpression compiles the function/callable and all arguments, then
 	// emits an OpCall instruction.
 	case *ast.CallExpression:
+		// Separate arguments into inputs (positional/named) and outputs (=>).
+		inputArgs := []ast.Expression{}
+		outputArgs := []*ast.OutputArgument{}
+		for _, arg := range node.Arguments {
+			if out, ok := arg.(*ast.OutputArgument); ok {
+				outputArgs = append(outputArgs, out)
+			} else {
+				inputArgs = append(inputArgs, arg)
+			}
+		}
+
+		// --- Part 1: Compile the function call with its inputs ---
 		// Check for recursive call
 		isRecursive := false
 		if ident, ok := node.Function.(*ast.Identifier); ok {
@@ -1125,7 +1172,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 				isRecursive = true
 			}
 		}
-
 		if isRecursive {
 			c.emit(code.OpCurrentClosure)
 		} else {
@@ -1134,14 +1180,52 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-		for _, a := range node.Arguments {
-			err := c.Compile(a)
+		// Compile input arguments.
+		for _, arg := range inputArgs {
+			if named, ok := arg.(*ast.NamedArgument); ok {
+				// Compile the value of the named argument.
+				if err := c.Compile(named.Value); err != nil {
+					return err
+				}
+				// Add the name as a constant and emit the new opcode.
+				nameIndex := c.addConstant(&object.String{Value: named.Name.Value})
+				c.emit(code.OpMakeNamedArg, nameIndex)
+			} else {
+				// It's a positional argument.
+				if err := c.Compile(arg); err != nil {
+					return err
+				}
+			}
+		}
+
+		c.emit(code.OpCall, len(inputArgs))
+
+		// --- Part 2: Compile output assignments ---
+		// The result of the call (FB instance or return value hash) is now on the stack.
+		for i, out := range outputArgs {
+			// If we have more assignments to make, duplicate the function result on the stack.
+			if i < len(outputArgs) {
+				c.emit(code.OpDup)
+			}
+
+			// Compile member access: <func_result>.<source_name>
+			c.emit(code.OpConstant, c.addConstant(&object.String{Value: out.Source.Value}))
+			c.emit(code.OpIndex)
+
+			// Compile assignment to the target variable.
+			targetIdent, ok := out.Target.(*ast.Identifier)
+			if !ok {
+				return fmt.Errorf("output argument target must be an identifier, got %T", out.Target)
+			}
+			symbol, ok := c.symbolTable.Resolve(targetIdent.Value)
+			if !ok {
+				return fmt.Errorf("undefined variable %s", targetIdent.Value)
+			}
+			err := c.setSymbol(symbol)
 			if err != nil {
 				return err
 			}
 		}
-
-		c.emit(code.OpCall, len(node.Arguments))
 
 	}
 
@@ -1294,6 +1378,9 @@ func (c *Compiler) loadSymbol(s Symbol) {
 
 // setSymbol emits the correct `Set` instruction based on the symbol's scope.
 func (c *Compiler) setSymbol(s Symbol) error {
+	if s.IsConstant {
+		return fmt.Errorf("cannot assign to a constant variable '%s'", s.Name)
+	}
 	if s.IsReadOnly {
 		return fmt.Errorf("cannot assign to read-only variable '%s'", s.Name)
 	}
@@ -1444,7 +1531,7 @@ func (c *Compiler) compileSFCProgram(node *ast.SFCProgram) error {
 // representing the entire system configuration.
 func (c *Compiler) compileConfiguration(config *ast.ConfigurationDeclaration) error {
 	// Define a global symbol for the configuration itself.
-	symbol := c.symbolTable.Define(config.Name.Value)
+	symbol := c.symbolTable.Define(config.Name.Value, false)
 
 	// Compile any global vars defined directly in the configuration.
 	for _, gv := range config.GlobalVars {

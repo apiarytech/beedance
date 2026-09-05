@@ -61,7 +61,15 @@ func TestStringMethods(t *testing.T) {
 		{&ArrayLiteral{Elements: []Expression{&IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "1"}, Value: 1}, &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "2"}, Value: 2}}}, "[1, 2]"},
 		{&IndexExpression{Left: &Identifier{Token: token.Token{Type: token.IDENT, Literal: "myArr"}, Value: "myArr"}, Index: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "0"}, Value: 0}}, "(myArr[0])"},
 		{&HashLiteral{Pairs: map[Expression]Expression{&StringLiteral{Token: token.Token{Type: token.STRING_LITERAL, Literal: `"key"`}, Value: "key"}: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "1"}, Value: 1}}}, `{"key": 1}`},
-		{&FunctionLiteral{Token: token.Token{Type: token.FUNCTION, Literal: "FUNCTION"}, Parameters: []*Identifier{{Value: "x"}}, Body: &BlockStatement{}}, "FUNCTION(x) "},
+		{&FunctionLiteral{
+			Token: token.Token{Type: token.FUNCTION, Literal: "FUNCTION"},
+			Parameters: []*FunctionParameter{
+				{Name: &Identifier{Value: "x"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}},
+			},
+			ReturnType: &TypeSpecifier{Token: token.Token{Type: token.BOOL, Literal: "BOOL"}},
+			Body:       &BlockStatement{},
+		},
+			"FUNCTION(x : INT) : BOOL "},
 		{&MacroLiteral{Token: token.Token{Type: token.MACRO, Literal: "macro"}, Parameters: []*Identifier{{Token: token.Token{Type: token.IDENT, Literal: "x"}, Value: "x"}}, Body: &BlockStatement{Statements: []Statement{}}}, "macro(x) "}, // Corrected in previous turn
 
 		// Statements
