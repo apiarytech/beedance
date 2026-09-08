@@ -179,8 +179,8 @@ func TestTypeDeclarations(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestStepStatement", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestTypeDeclarations", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -258,8 +258,8 @@ func TestStructTypeDeclaration(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestWhileStatement", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestStructTypeDeclaration", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -301,25 +301,240 @@ func TestStructTypeDeclaration(t *testing.T) {
 	}
 }
 
-func TestVarInFunctionError(t *testing.T) {
+func TestStructMemberParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string // Just the content of the STRUCT block
+		expectedError string
+		check         func(t *testing.T, def *ast.StructDefinition)
+	}{
+		{
+			name:  "Valid member with initial value",
+			input: `Field1 : INT := 10;`,
+			check: func(t *testing.T, def *ast.StructDefinition) {
+				if len(def.Members) != 1 {
+					t.Fatalf("Expected 1 member, got %d", len(def.Members))
+				}
+				member1 := def.Members[0]
+				if !testVarDeclStatement(t, member1, "Field1", "INT") || !testLiteralExpression(t, member1.Value, 10) {
+					t.Error("Member 'Field1 : INT := 10;' not parsed correctly")
+				}
+			},
+		},
+		{
+			name:  "Valid member without initial value",
+			input: `Field1 : BOOL;`,
+			check: func(t *testing.T, def *ast.StructDefinition) {
+				if len(def.Members) != 1 {
+					t.Fatalf("Expected 1 member, got %d", len(def.Members))
+				}
+				member1 := def.Members[0]
+				if !testVarDeclStatement(t, member1, "Field1", "BOOL") {
+					t.Error("Member 'Field1 : BOOL;' not parsed correctly")
+				}
+				if member1.Value != nil {
+					t.Errorf("Expected nil initial value, got %v", member1.Value)
+				}
+			},
+		},
+		{
+			name:          "Error on missing member name",
+			input:         `: INT;`,
+			expectedError: "expected member name (identifier), got :",
+		},
+		{
+			name:          "Error on missing colon",
+			input:         `Field1 INT;`,
+			expectedError: "expected next token to be :, got INT instead",
+		},
+		{
+			name:          "Error on invalid data type",
+			input:         `Field1 : := 5;`,
+			expectedError: "expected a data type, got :=",
+		},
+		{
+			name:          "Recovery on missing semicolon",
+			input:         `Field1 : INT`, // Missing semicolon before END_STRUCT
+			expectedError: "expected next token to be ;, got END_STRUCT instead",
+			check: func(t *testing.T, def *ast.StructDefinition) {
+				// Check that the member was still parsed despite the missing semicolon
+				if len(def.Members) != 1 {
+					t.Fatalf("Expected 1 member after recovery, got %d", len(def.Members))
+				}
+				if !testVarDeclStatement(t, def.Members[0], "Field1", "INT") {
+					t.Error("Member not parsed correctly after semicolon recovery")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fullInput := fmt.Sprintf("TYPE MyStruct : STRUCT %s END_STRUCT; END_TYPE", tt.input)
+			l := lexer.New(fullInput)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+			} else {
+				checkParserErrors(t, p, tt.name, fullInput)
+			}
+
+			if tt.check != nil {
+				if len(program.Statements) == 0 {
+					t.Fatal("No statements parsed")
+				}
+				typeBlock, ok := program.Statements[0].(*ast.TypeBlockDeclaration)
+				if !ok {
+					t.Fatalf("Expected ast.TypeBlockDeclaration, got %T", program.Statements[0])
+				}
+				if len(typeBlock.Declarations) == 0 {
+					t.Fatal("No type declarations parsed in block")
+				}
+				typeDecl := typeBlock.Declarations[0]
+				structDef, ok := typeDecl.DataType.(*ast.StructDefinition)
+				if !ok {
+					t.Fatalf("Expected ast.StructDefinition, got %T", typeDecl.DataType)
+				}
+				tt.check(t, structDef)
+			}
+		})
+	}
+}
+
+func TestFunctionLiteralParsing(t *testing.T) {
+	// This test covers the non-standard 'fn' keyword for anonymous functions,
+	// which is a remnant from a previous language version and handled as a special case.
+	input := `fn(x : INT, y : BOOL) : REAL { RETURN x > 0; };`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionLiteralParsing", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("statement is not ast.ExpressionStatement. got=%T", program.Statements[0])
+	}
+
+	function, ok := stmt.Expression.(*ast.FunctionLiteral)
+	if !ok {
+		t.Fatalf("stmt.Expression is not ast.FunctionLiteral. got=%T", stmt.Expression)
+	}
+
+	if len(function.Parameters) != 2 {
+		t.Fatalf("function literal parameters wrong. want 2, got=%d", len(function.Parameters))
+	}
+
+	if function.Parameters[0].Name.Value != "x" || function.Parameters[0].DataType.String() != "INT" {
+		t.Errorf("parameter 0 is not 'x : INT'. got=%s", function.Parameters[0].String())
+	}
+	if function.Parameters[1].Name.Value != "y" || function.Parameters[1].DataType.String() != "BOOL" {
+		t.Errorf("parameter 1 is not 'y : BOOL'. got=%s", function.Parameters[1].String())
+	}
+
+	if function.ReturnType.String() != "REAL" {
+		t.Errorf("function return type is not 'REAL'. got=%q", function.ReturnType.String())
+	}
+
+	if len(function.Body.Statements) != 1 {
+		t.Fatalf("function.Body.Statements has not 1 statements. got=%d", len(function.Body.Statements))
+	}
+
+	if _, ok := function.Body.Statements[0].(*ast.ReturnStatement); !ok {
+		t.Fatalf("function body stmt is not ast.ReturnStatement. got=%T", function.Body.Statements[0])
+	}
+}
+
+func TestFunctionDeclarationWithAllVarBlocks(t *testing.T) {
 	input := `
-	FUNCTION MyFunc : INT
-		VAR_EXTERNAL
-			x : INT;
-		END_VAR
-		MyFunc := x;
-	END_FUNCTION
+		FUNCTION MyFunc : INT
+			VAR_INPUT
+				in_var : INT;
+			END_VAR
+			VAR_OUTPUT
+				out_var : BOOL;
+			END_VAR
+			VAR_IN_OUT
+				inout_var : REAL;
+			END_VAR
+			VAR
+				local_var : DINT;
+			END_VAR
+			MyFunc := 1;
+		END_FUNCTION
 	`
 	l := lexer.New(input)
 	p := New(l)
-	p.ParseProgram()
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionDeclarationWithAllVarBlocks", input)
 
-	if len(p.Errors()) == 0 {
-		t.Fatalf("Expected parser error for VAR in FUNCTION, but got none")
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
 	}
 
-	expectedError := "VAR_EXTERNAL declarations are not allowed in a FUNCTION at row 3, column 3"
-	assertErrorContains(t, p.Errors(), expectedError)
+	fn, ok := program.Statements[0].(*ast.FunctionDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(fn.VarInputs) != 1 {
+		t.Errorf("Expected 1 VAR_INPUT, got %d", len(fn.VarInputs))
+	}
+	testVarDeclStatement(t, fn.VarInputs[0], "in_var", "INT")
+
+	if len(fn.VarOutputs) != 1 {
+		t.Errorf("Expected 1 VAR_OUTPUT, got %d", len(fn.VarOutputs))
+	}
+	testVarDeclStatement(t, fn.VarOutputs[0], "out_var", "BOOL")
+
+	if len(fn.VarInOuts) != 1 {
+		t.Errorf("Expected 1 VAR_IN_OUT, got %d", len(fn.VarInOuts))
+	}
+	testVarDeclStatement(t, fn.VarInOuts[0], "inout_var", "REAL")
+
+	if len(fn.Vars) != 1 {
+		t.Errorf("Expected 1 VAR, got %d", len(fn.Vars))
+	}
+	testVarDeclStatement(t, fn.Vars[0], "local_var", "DINT")
+}
+
+func TestInvalidVarBlocksInFunction(t *testing.T) {
+	tests := []struct {
+		varBlockType  string
+		expectedError string
+	}{
+		{"VAR_EXTERNAL", "VAR_EXTERNAL declarations are not allowed in a FUNCTION"},
+		{"VAR_GLOBAL", "VAR_GLOBAL declarations are not allowed in a FUNCTION"},
+		{"VAR_ACCESS", "VAR_ACCESS declarations are not allowed in a FUNCTION"},
+		{"VAR_TEMP", "VAR_TEMP declarations are not allowed in a FUNCTION"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.varBlockType, func(t *testing.T) {
+			input := fmt.Sprintf(`
+				FUNCTION MyFunc : INT
+					%s
+						myVar : INT;
+					END_VAR
+					MyFunc := 1;
+				END_FUNCTION`, tt.varBlockType)
+
+			l := lexer.New(input)
+			p := New(l)
+			p.ParseProgram()
+
+			if len(p.Errors()) == 0 {
+				t.Fatalf("Expected an error for %s in FUNCTION, but got none", tt.varBlockType)
+			}
+			assertErrorContains(t, p.Errors(), tt.expectedError)
+		})
+	}
 }
 
 func TestComplexTypeBlockDeclaration(t *testing.T) {
@@ -335,8 +550,8 @@ func TestComplexTypeBlockDeclaration(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestForLoopStatement", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestComplexTypeBlockDeclaration", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -451,8 +666,8 @@ func TestVarDeclWithUserDefinedType(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestVarDeclWithUserDefinedArrayType", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestVarDeclWithUserDefinedType", input)
 
 	if len(program.Statements) != 2 {
 		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
@@ -483,8 +698,8 @@ func TestVarDeclWithUserDefinedArrayType(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestVarDeclWithUserDefinedType", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestVarDeclWithUserDefinedArrayType", input)
 
 	if len(program.Statements) != 2 {
 		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
@@ -503,17 +718,18 @@ func TestVarDeclWithUserDefinedArrayType(t *testing.T) {
 	testVarDeclStatement(t, stmt, "myArr", "MyIntArray")
 }
 
-func TestConfigVarDeclarations(t *testing.T) {
+func TestParseVarConfigComplex(t *testing.T) {
 	input := `
-		VAR_CONFIG MyProg
-			Config1 : INT;
-			Config2 : BOOL;
+		VAR_CONFIG
+			STATION_1.P1.COUNT : INT := 1;
+			STATION_1.P1.TIME1 : TON := (PT := T#2.5s);
+			STATION_2.P4.FB1.C2 AT %QB25 : BYTE;
 		END_VAR
 	`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestConfigVarDeclarations", input)
+	checkParserErrors(t, p, "TestParseVarConfigComplex", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -524,20 +740,66 @@ func TestConfigVarDeclarations(t *testing.T) {
 		t.Fatalf("program.Statements[0] is not ast.ConfigVarDeclaration. got=%T", program.Statements[0])
 	}
 
-	if stmt.ProgramInstanceName == nil || stmt.ProgramInstanceName.Value != "MyProg" {
-		t.Fatalf("Expected ProgramInstanceName to be 'MyProg'. got=%v", stmt.ProgramInstanceName)
+	if len(stmt.Declarations) != 3 {
+		t.Fatalf("Expected 3 declarations in VAR_CONFIG block. got=%d", len(stmt.Declarations))
 	}
 
-	if len(stmt.Declarations) != 2 {
-		t.Fatalf("Expected 2 config variables. got=%d", len(stmt.Declarations))
+	// --- Check Declaration 1: STATION_1.P1.COUNT : INT := 1; ---
+	decl1 := stmt.Declarations[0]
+	if decl1.AccessPath.String() != "STATION_1.P1.COUNT" {
+		t.Errorf("decl1.AccessPath not 'STATION_1.P1.COUNT'. got=%s", decl1.AccessPath.String())
+	}
+	if decl1.DataType.String() != "INT" {
+		t.Errorf("decl1.DataType not 'INT'. got=%s", decl1.DataType.String())
+	}
+	if !testIntegerLiteral(t, decl1.Value, 1) {
+		t.Errorf("decl1.Value is not 1.")
+	}
+	if decl1.Location != nil {
+		t.Errorf("decl1.Location should be nil.")
 	}
 
-	if !testVarDeclStatement(t, stmt.Declarations[0], "Config1", "INT") {
-		return
+	// --- Check Declaration 2: STATION_1.P1.TIME1 : TON := (PT := T#2.5s); ---
+	decl2 := stmt.Declarations[1]
+	if decl2.AccessPath.String() != "STATION_1.P1.TIME1" {
+		t.Errorf("decl2.AccessPath not 'STATION_1.P1.TIME1'. got=%s", decl2.AccessPath.String())
+	}
+	if decl2.DataType.String() != "TON" {
+		t.Errorf("decl2.DataType not 'TON'. got=%s", decl2.DataType.String())
+	}
+	infixExpr, ok := decl2.Value.(*ast.InfixExpression)
+	if !ok {
+		t.Fatalf("decl2.Value is not an InfixExpression (for struct literal). got=%T", decl2.Value)
+	}
+	if !testIdentifier(t, infixExpr.Left, "PT") {
+		t.Errorf("Infix left side is not 'PT'.")
+	}
+	if infixExpr.Operator != ":=" {
+		t.Errorf("Infix operator is not ':='. got=%s", infixExpr.Operator)
+	}
+	if !testTypedLiteral(t, infixExpr.Right, "T", "2.5s") {
+		t.Errorf("Infix right side is not T#2.5s.")
+	}
+	if decl2.Location != nil {
+		t.Errorf("decl2.Location should be nil.")
 	}
 
-	if !testVarDeclStatement(t, stmt.Declarations[1], "Config2", "BOOL") {
-		return
+	// --- Check Declaration 3: STATION_2.P4.FB1.C2 AT %QB25 : BYTE; ---
+	decl3 := stmt.Declarations[2]
+	if decl3.AccessPath.String() != "STATION_2.P4.FB1.C2" {
+		t.Errorf("decl3.AccessPath not 'STATION_2.P4.FB1.C2'. got=%s", decl3.AccessPath.String())
+	}
+	if decl3.DataType.String() != "BYTE" {
+		t.Errorf("decl3.DataType not 'BYTE'. got=%s", decl3.DataType.String())
+	}
+	if decl3.Value != nil {
+		t.Errorf("decl3.Value should be nil.")
+	}
+	if decl3.Location == nil {
+		t.Fatalf("decl3.Location should not be nil.")
+	}
+	if decl3.Location.Location.Address != "QB25" {
+		t.Errorf("decl3.Location address not 'QB25'. got=%s", decl3.Location.Location.Address)
 	}
 }
 
@@ -550,8 +812,8 @@ func TestTempVarDeclarations(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestTempVarDeclarations", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestVarDeclWithUserDefinedArrayType", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -575,17 +837,18 @@ func TestTempVarDeclarations(t *testing.T) {
 	}
 }
 
-func TestAccessVarDeclarations(t *testing.T) {
+func TestParseVarAccess(t *testing.T) {
 	input := `
 		VAR_ACCESS
-			Path1 : MyFB READ_ONLY;
-			Path2 : OtherFB READ_WRITE;
+			ExternalName1 : ResourceName.ProgInstance.InternalVar1 : INT READ_WRITE;
+			ExternalName2 : ResourceName.ProgInstance.InternalVar2 : REAL READ_ONLY;
+			SimpleAccess  : GlobalVar : BOOL;
 		END_VAR
 	`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestAccessVarDeclarations", input)
+	checkParserErrors(t, p, "TestParseVarAccess", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -596,36 +859,53 @@ func TestAccessVarDeclarations(t *testing.T) {
 		t.Fatalf("program.Statements[0] is not ast.AccessVarDeclaration. got=%T", program.Statements[0])
 	}
 
-	if len(stmt.Vars) != 2 {
-		t.Fatalf("Expected 2 access variables. got=%d", len(stmt.Vars))
+	if len(stmt.Vars) != 3 {
+		t.Fatalf("Expected 3 declarations in VAR_ACCESS block. got=%d", len(stmt.Vars))
 	}
 
+	// --- Check Declaration 1 ---
 	decl1 := stmt.Vars[0]
-	if decl1.Name.Value != "Path1" {
-		t.Errorf("decl1.Name.Value not 'Path1'. got=%s", decl1.Name.Value)
+	if decl1.Name.Value != "ExternalName1" {
+		t.Errorf("decl1.Name not 'ExternalName1'. got=%s", decl1.Name.Value)
 	}
-	if decl1.AccessPath.String() != "MyFB" {
-		t.Errorf("decl1.AccessPath not 'MyFB'. got=%s", decl1.AccessPath.String())
+	if decl1.AccessPath.String() != "ResourceName.ProgInstance.InternalVar1" {
+		t.Errorf("decl1.AccessPath not correct. got=%s", decl1.AccessPath.String())
 	}
-	if decl1.AccessType != "READ_ONLY" {
-		t.Errorf("decl1.AccessType not 'READ_ONLY'. got=%s", decl1.AccessType)
+	if decl1.DataType.String() != "INT" {
+		t.Errorf("decl1.DataType not 'INT'. got=%s", decl1.DataType.String())
 	}
-	if decl1.DataType != nil {
-		t.Errorf("decl1.DataType should be nil for VAR_ACCESS. got=%v", decl1.DataType)
+	if decl1.AccessType != "READ_WRITE" {
+		t.Errorf("decl1.AccessType not 'READ_WRITE'. got=%s", decl1.AccessType)
 	}
 
+	// --- Check Declaration 2 ---
 	decl2 := stmt.Vars[1]
-	if decl2.Name.Value != "Path2" {
-		t.Errorf("decl2.Name.Value not 'Path2'. got=%s", decl2.Name.Value)
+	if decl2.Name.Value != "ExternalName2" {
+		t.Errorf("decl2.Name not 'ExternalName2'. got=%s", decl2.Name.Value)
 	}
-	if decl2.AccessPath.String() != "OtherFB" {
-		t.Errorf("decl2.AccessPath not 'OtherFB'. got=%s", decl2.AccessPath.String())
+	if decl2.AccessPath.String() != "ResourceName.ProgInstance.InternalVar2" {
+		t.Errorf("decl2.AccessPath not correct. got=%s", decl2.AccessPath.String())
 	}
-	if decl2.AccessType != "READ_WRITE" {
-		t.Errorf("decl2.AccessType not 'READ_WRITE'. got=%s", decl2.AccessType)
+	if decl2.DataType.String() != "REAL" {
+		t.Errorf("decl2.DataType not 'REAL'. got=%s", decl2.DataType.String())
 	}
-	if decl2.DataType != nil {
-		t.Errorf("decl2.DataType should be nil for VAR_ACCESS. got=%v", decl2.DataType)
+	if decl2.AccessType != "READ_ONLY" {
+		t.Errorf("decl2.AccessType not 'READ_ONLY'. got=%s", decl2.AccessType)
+	}
+
+	// --- Check Declaration 3 ---
+	decl3 := stmt.Vars[2]
+	if decl3.Name.Value != "SimpleAccess" {
+		t.Errorf("decl3.Name not 'SimpleAccess'. got=%s", decl3.Name.Value)
+	}
+	if decl3.AccessPath.String() != "GlobalVar" {
+		t.Errorf("decl3.AccessPath not 'GlobalVar'. got=%s", decl3.AccessPath.String())
+	}
+	if decl3.DataType.String() != "BOOL" {
+		t.Errorf("decl3.DataType not 'BOOL'. got=%s", decl3.DataType.String())
+	}
+	if decl3.AccessType != "" {
+		t.Errorf("decl3.AccessType not empty. got=%s", decl3.AccessType)
 	}
 }
 
@@ -641,7 +921,7 @@ func TestExternalVarDeclarations(t *testing.T) {
 `
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestExternalVarDeclarations", input)
 
 	if len(program.Statements) != 2 {
@@ -688,8 +968,8 @@ func TestMixedExternalVarDeclarations(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestAccessVarDeclarations", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestMixedExternalVarDeclarations", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -1582,8 +1862,8 @@ func TestIfStatementWithEmptyBlocks(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestStructTypeDeclaration", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestIfStatementWithEmptyBlocks", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -1689,8 +1969,8 @@ func TestFunctionWithMultipleVarBlocks(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestTypeDeclarations", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionWithMultipleVarBlocks", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -2411,6 +2691,33 @@ func TestForLoopStatement(t *testing.T) {
 	testInfixExpression(t, 0, bodyStmt.Value, "x", "+", 1)
 }
 
+func TestForLoopErrorRecovery(t *testing.T) {
+	input := `
+		FOR i := 1 10 DO // Missing TO
+			x := x + 1;
+		END_FOR
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 1 {
+		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
+	}
+
+	expectedError := "expected next token to be TO, got INT instead"
+	assertErrorContains(t, p.Errors(), expectedError)
+
+	// Check that the parser recovered and still parsed a FOR loop structure
+	if len(program.Statements) != 1 {
+		t.Fatalf("Parser did not recover, expected 1 statement. got=%d", len(program.Statements))
+	}
+	_, ok := program.Statements[0].(*ast.ForLoopStatement)
+	if !ok {
+		t.Fatalf("Statement is not ForLoopStatement. got=%T", program.Statements[0])
+	}
+}
+
 func TestWhileStatement(t *testing.T) {
 	input := `
 		WHILE x < 10 DO 
@@ -2419,8 +2726,8 @@ func TestWhileStatement(t *testing.T) {
 		`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestInitialStepStatement", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestComplexTypeBlockDeclaration", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -2458,7 +2765,7 @@ func TestRepeatUntilStatement(t *testing.T) {
 
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestRepeatUntilStatement", input)
 
 	if len(program.Statements) != 1 {
@@ -2674,7 +2981,7 @@ func TestFunctionBlockDeclaration(t *testing.T) {
 
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestFunctionBlockDeclaration", input)
 
 	if len(program.Statements) != 1 {
@@ -2744,7 +3051,7 @@ func TestProgramDeclaration(t *testing.T) {
 
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestProgramDeclaration", input)
 
 	if len(program.Statements) != 1 {
@@ -2968,6 +3275,47 @@ func TestFunctionBlockWithSFCBody(t *testing.T) {
 	}
 }
 
+func TestProgramWithIlBody(t *testing.T) {
+	input := `
+		PROGRAM MyIlProgram
+			VAR
+				myVar : INT;
+			END_VAR
+
+			LD    10
+			ADD   5
+			ST    myVar
+		END_PROGRAM
+	`
+
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramWithIlBody", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	progDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ProgramDeclaration. got=%T", program.Statements[0])
+	}
+
+	body, ok := progDecl.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("Program body is not ast.BlockStatement for IL. got=%T", progDecl.Body)
+	}
+
+	if len(body.Statements) != 3 {
+		t.Fatalf("IL body does not have 3 statements. got=%d", len(body.Statements))
+	}
+
+	testIlInstruction(t, body.Statements[0], "LD", "10")
+	testIlInstruction(t, body.Statements[1], "ADD", "5")
+	testIlInstruction(t, body.Statements[2], "ST", "myVar")
+}
+
 func TestIlProgramParsing(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -3021,6 +3369,65 @@ func TestIlProgramParsing(t *testing.T) {
 				}
 				testIlInstruction(t, body.Statements[0], "LD", "A")
 				testIlInstruction(t, body.Statements[1], "ST", "B")
+			},
+		},
+		{
+			"Simple JMP Instruction",
+			`
+				FUNCTION_BLOCK MyJmpFB
+					JMP Label
+				Label:
+					RET
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 2 {
+					t.Fatalf("Expected 2 statements, got %d", len(body.Statements))
+				}
+				testIlInstruction(t, body.Statements[0], "JMP", "Label")
+				testIlInstruction(t, body.Statements[1], "RET", "")
+			},
+		},
+		{
+			"Simple CAL Instruction",
+			`
+				FUNCTION_BLOCK MyCalFB
+					CAL MyOtherFB(In := TRUE)
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 1 {
+					t.Fatalf("Expected 1 statement, got %d", len(body.Statements))
+				}
+				inst, ok := body.Statements[0].(*ast.IlInstructionStatement)
+				if !ok {
+					t.Fatalf("Statement is not IlInstructionStatement. got=%T", body.Statements[0])
+				}
+				if inst.Operator != "CAL" {
+					t.Errorf("Operator is not CAL. got=%s", inst.Operator)
+				}
+				if _, ok := inst.Operand.(*ast.CallExpression); !ok {
+					t.Fatalf("Operand is not CallExpression. got=%T", inst.Operand)
+				}
+			},
+		},
+		{
+			"Simple SUB Instruction",
+			`
+				FUNCTION_BLOCK MySubFB
+					LD 10
+					SUB 3
+				END_FUNCTION_BLOCK
+			`,
+			func(t *testing.T, body *ast.BlockStatement) {
+				if len(body.Statements) != 2 {
+					t.Fatalf("Expected 2 statements, got %d", len(body.Statements))
+				}
+				// This test ensures that mnemonics like SUB, which are not ambiguous
+				// with ST operators, fall through to the default case and are
+				// correctly parsed by parseIlInstruction.
+				testIlInstruction(t, body.Statements[0], "LD", "10")
+				testIlInstruction(t, body.Statements[1], "SUB", "3")
 			},
 		},
 		{
@@ -3121,7 +3528,7 @@ func TestActionStatement(t *testing.T) {
 
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestActionStatement", input)
 
 	if len(program.Statements) != 1 {
@@ -3196,7 +3603,7 @@ func TestExitStatement(t *testing.T) {
 
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
+	program := p.ParseProgram()
 	checkParserErrors(t, p, "TestExitStatement", input)
 
 	if len(program.Statements) != 1 {
@@ -3309,8 +3716,8 @@ func TestInitialStepStatement(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestInitialStepStatement", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestIfStatementWithEmptyBlocks", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -3361,8 +3768,8 @@ func TestConfigurationDeclaration(t *testing.T) {
 	`
 	l := lexer.New(input)
 	p := New(l)
-	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestConfigurationDeclaration", input)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionWithMultipleVarBlocks", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -3763,23 +4170,21 @@ func TestMissingEndFunctionBlockErrorRecovery(t *testing.T) {
 	p := New(l)
 	program := p.ParseProgram()
 
-	if len(p.Errors()) != 1 {
-		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
-	}
-
-	expectedError := "expected next token to be END_FUNCTION_BLOCK, got EOF instead at row 12, column 2"
-	if !strings.Contains(p.Errors()[0], expectedError) {
-		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
-	}
+	assertErrorContains(t, p.Errors(), "expected next token to be END_FUNCTION_BLOCK, got VAR instead at row 9, column 3")
 
 	// Check that the parser recovered and parsed both the FUNCTION_BLOCK and the subsequent VAR block
-	if len(program.Statements) != 1 {
-		t.Fatalf("Parser did not recover, expected 1 statements to be parsed. got=%d", len(program.Statements))
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
 
 	_, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
 	if !ok {
 		t.Errorf("First statement should be a FunctionBlockDeclaration after recovery.")
+	}
+
+	_, ok = program.Statements[1].(*ast.VarBlockDeclaration)
+	if !ok {
+		t.Errorf("Second statement should be a VarBlockDeclaration after recovery.")
 	}
 }
 
@@ -3800,22 +4205,19 @@ func TestMissingEndProgramErrorRecovery(t *testing.T) {
 	p := New(l)
 	program := p.ParseProgram()
 
-	if len(p.Errors()) != 1 {
-		t.Fatalf("Expected parser to have 1 error, but it had %d: %v", len(p.Errors()), p.Errors())
-	}
-
-	expectedError := "expected next token to be END_PROGRAM, got EOF instead at row 12, column 2"
-	if !strings.Contains(p.Errors()[0], expectedError) {
-		t.Errorf("Expected error message to contain %q, got %q", expectedError, p.Errors()[0])
-	}
+	assertErrorContains(t, p.Errors(), "expected next token to be END_PROGRAM, got VAR instead at row 9, column 3")
 
 	// Check that the parser recovered and parsed both the PROGRAM and the subsequent VAR block
-	if len(program.Statements) != 1 {
-		t.Fatalf("Parser did not recover, expected 1 statements to be parsed. got=%d", len(program.Statements))
+	if len(program.Statements) != 2 {
+		t.Fatalf("Parser did not recover, expected 2 statements to be parsed. got=%d", len(program.Statements))
 	}
 
 	if _, ok := program.Statements[0].(*ast.ProgramDeclaration); !ok {
 		t.Errorf("First statement should be a ProgramDeclaration after recovery.")
+	}
+
+	if _, ok := program.Statements[1].(*ast.VarBlockDeclaration); !ok {
+		t.Errorf("Second statement should be a VarBlockDeclaration after recovery.")
 	}
 }
 
@@ -3878,10 +4280,12 @@ func testVarDeclStatement(t *testing.T, s *ast.VarDeclStatement, name string, da
 		return false
 	}
 
-	if s.DataType.String() != dataType && s.DataType.TokenLiteral() != dataType {
-		t.Errorf("s.DataType.String() not '%s'. got=%s",
-			dataType, s.DataType.String())
-		return false
+	if dataType != "" {
+		if s.DataType.String() != dataType && s.DataType.TokenLiteral() != dataType {
+			t.Errorf("s.DataType.String() not '%s'. got=%s",
+				dataType, s.DataType.String())
+			return false
+		}
 	}
 
 	return true
@@ -4061,6 +4465,1058 @@ func isExpectedType(t *testing.T, expectedType interface{}, actual interface{}) 
 	expected := fmt.Sprintf("%T", expectedType)
 	result := fmt.Sprintf("%T", actual)
 	return expected == result
+}
+
+func TestPeek2TokenIs(t *testing.T) {
+	input := `VAR myVar : INT := 5;`
+	l := lexer.New(input)
+	p := New(l)
+
+	// After New(), tokens are:
+	// curToken:  VAR
+	// peekToken: myVar (IDENT)
+	// peek2Token: : (COLON)
+
+	if !p.curTokenIs(token.VAR) {
+		t.Fatalf("Expected curToken to be VAR, got %s", p.curToken.Type)
+	}
+	if !p.peekTokenIs(token.IDENT) {
+		t.Fatalf("Expected peekToken to be IDENT, got %s", p.peekToken.Type)
+	}
+	if !p.peek2TokenIs(token.COLON) {
+		t.Fatalf("Expected peek2Token to be COLON, but peek2TokenIs returned false. Token is %s", p.peek2Token.Type)
+	}
+
+	// Advance tokens by one
+	p.nextToken()
+
+	// New state:
+	// curToken:  myVar (IDENT)
+	// peekToken: : (COLON)
+	// peek2Token: INT
+	if !p.peek2TokenIs(token.INT) {
+		t.Fatalf("After nextToken(), expected peek2Token to be INT, but peek2TokenIs returned false. Token is %s", p.peek2Token.Type)
+	}
+}
+
+func TestFunctionBlockVarBlockTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+		check         func(t *testing.T, stmt *ast.FunctionBlockDeclaration)
+	}{
+		{
+			name: "VAR_TEMP in FUNCTION_BLOCK",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_TEMP
+						tempVar : INT;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, stmt *ast.FunctionBlockDeclaration) {
+				if len(stmt.VarTemp) != 1 {
+					t.Fatalf("Expected 1 VAR_TEMP block, got %d", len(stmt.VarTemp))
+				}
+				if len(stmt.VarTemp[0].Vars) != 1 {
+					t.Fatalf("Expected 1 var in VAR_TEMP block, got %d", len(stmt.VarTemp[0].Vars))
+				}
+				testVarDeclStatement(t, stmt.VarTemp[0].Vars[0], "tempVar", "INT")
+			},
+		},
+		{
+			name: "VAR_EXTERNAL in FUNCTION_BLOCK",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_EXTERNAL
+						extVar : BOOL;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, stmt *ast.FunctionBlockDeclaration) {
+				if len(stmt.VarExternal) != 1 {
+					t.Fatalf("Expected 1 VAR_EXTERNAL block, got %d", len(stmt.VarExternal))
+				}
+				if len(stmt.VarExternal[0].Vars) != 1 {
+					t.Fatalf("Expected 1 var in VAR_EXTERNAL block, got %d", len(stmt.VarExternal[0].Vars))
+				}
+				testVarDeclStatement(t, stmt.VarExternal[0].Vars[0], "extVar", "BOOL")
+			},
+		},
+		{
+			name: "VAR_TEMP with multiple variables",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_TEMP
+						temp1 : INT;
+						temp2 : REAL;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, stmt *ast.FunctionBlockDeclaration) {
+				if len(stmt.VarTemp) != 1 {
+					t.Fatalf("Expected 1 VAR_TEMP block, got %d", len(stmt.VarTemp))
+				}
+				if len(stmt.VarTemp[0].Vars) != 2 {
+					t.Fatalf("Expected 2 vars in VAR_TEMP block, got %d", len(stmt.VarTemp[0].Vars))
+				}
+				testVarDeclStatement(t, stmt.VarTemp[0].Vars[0], "temp1", "INT")
+				testVarDeclStatement(t, stmt.VarTemp[0].Vars[1], "temp2", "REAL")
+			},
+		},
+		{
+			name: "VAR_TEMP missing END_VAR",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_TEMP
+						tempVar : INT;
+					(* Missing END_VAR *)
+					tempVar := 1;
+				END_FUNCTION_BLOCK
+			`,
+			// The parser recovers by seeing the assignment as the start of the body.
+			// It reports that END_VAR was expected before the identifier 'tempVar'.
+			expectedError: "expected next token to be END_VAR, got IDENT instead",
+		},
+		{
+			name: "Multiple VAR_TEMP blocks in FUNCTION_BLOCK",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_TEMP
+						tempVar1 : INT;
+					END_VAR
+					VAR_TEMP
+						tempVar2 : BOOL;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, stmt *ast.FunctionBlockDeclaration) {
+				if len(stmt.VarTemp) != 2 {
+					t.Fatalf("Expected 2 VAR_TEMP blocks, got %d", len(stmt.VarTemp))
+				}
+				// Check first block
+				testVarDeclStatement(t, stmt.VarTemp[0].Vars[0], "tempVar1", "INT")
+				// Check second block
+				testVarDeclStatement(t, stmt.VarTemp[1].Vars[0], "tempVar2", "BOOL")
+			},
+		},
+		{
+			name: "VAR_ACCESS in FUNCTION_BLOCK (error)",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_ACCESS
+						accVar : OtherFB READ_ONLY;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			expectedError: "VAR_ACCESS declarations are not allowed in a FUNCTION_BLOCK",
+		},
+		{
+			name: "VAR_GLOBAL in FUNCTION_BLOCK (error)",
+			input: `
+				FUNCTION_BLOCK MyFB
+					VAR_GLOBAL
+						gVar : REAL;
+					END_VAR
+				END_FUNCTION_BLOCK
+			`,
+			expectedError: "VAR_GLOBAL declarations are not allowed in a FUNCTION_BLOCK",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+				return
+			}
+
+			checkParserErrors(t, p, tt.name, tt.input)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+			}
+
+			if tt.check != nil {
+				tt.check(t, stmt)
+			}
+		})
+	}
+}
+
+func TestParseVarDeclarationsComprehensive(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string // Input is just the content of a VAR block
+		numDecls      int
+		expectedError string
+		check         func(t *testing.T, decls []*ast.VarDeclStatement)
+	}{
+		{
+			name:     "RETAIN and CONSTANT qualifiers",
+			input:    `RETAIN CONSTANT myVar : INT := 1;`,
+			numDecls: 1,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				if !decls[0].IsRetain {
+					t.Error("Expected IsRetain to be true")
+				}
+				if !decls[0].IsConstant {
+					t.Error("Expected IsConstant to be true")
+				}
+			},
+		},
+		{
+			name:     "AT clause before type",
+			input:    `myVar AT %IX0.0 : BOOL;`,
+			numDecls: 1,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				if decls[0].Location == nil {
+					t.Fatal("Expected Location to be parsed")
+				}
+				if decls[0].Location.Location.Address != "IX0.0" {
+					t.Errorf("Expected location address to be 'IX0.0', got %s", decls[0].Location.Location.Address)
+				}
+			},
+		},
+		{
+			name:     "AT clause after type",
+			input:    `myVar : BOOL AT %QX1.1;`,
+			numDecls: 1,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				if decls[0].Location == nil {
+					t.Fatal("Expected Location to be parsed")
+				}
+				if decls[0].Location.Location.Address != "QX1.1" {
+					t.Errorf("Expected location address to be 'QX1.1', got %s", decls[0].Location.Location.Address)
+				}
+			},
+		},
+		{
+			name:          "Error on missing END_VAR",
+			input:         `myVar : INT; IF x THEN END_IF`,
+			numDecls:      1, // It should parse the first line
+			expectedError: "expected next token to be END_VAR, got IF instead",
+		},
+		{
+			name:          "Error on using = instead of :=",
+			input:         `myVar : INT = 5;`,
+			numDecls:      0, // The faulty declaration is now skipped entirely by the improved recovery.
+			expectedError: "expected next token to be :=, got = instead",
+		},
+		{
+			name:     "Comment between declarations",
+			input:    `var1 : INT; (* a comment *) var2 : BOOL;`,
+			numDecls: 2,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				testVarDeclStatement(t, decls[0], "var1", "INT")
+				testVarDeclStatement(t, decls[1], "var2", "BOOL")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Wrap the input in a VAR block for the parser
+			fullInput := fmt.Sprintf("VAR %s END_VAR", tt.input)
+			l := lexer.New(fullInput)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				if len(p.Errors()) == 0 {
+					t.Fatalf("Expected an error but got none")
+				}
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+			} else {
+				checkParserErrors(t, p, tt.name, fullInput)
+			}
+
+			if len(program.Statements) > 0 {
+				block, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+				if !ok {
+					t.Fatalf("Expected ast.VarBlockDeclaration, got %T", program.Statements[0])
+				}
+				if len(block.Declarations) != tt.numDecls {
+					t.Fatalf("Expected %d declarations, got %d", tt.numDecls, len(block.Declarations))
+				}
+				if tt.check != nil {
+					tt.check(t, block.Declarations)
+				}
+			} else if tt.numDecls > 0 {
+				t.Fatalf("Expected statements but got none")
+			}
+		})
+	}
+}
+
+func TestParseAccessDeclarationsErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string // Just the content of a VAR_ACCESS block
+		expectedError string
+		numDecls      int // Expected number of declarations parsed after recovery
+	}{
+		{
+			name:          "Missing END_VAR",
+			input:         `accVar : OtherFB; PROGRAM MyProg END_PROGRAM`,
+			expectedError: "expected next token to be END_VAR, got IDENT instead",
+			numDecls:      1,
+		},
+		{
+			name:          "Missing identifier for local name",
+			input:         `: OtherFB; END_VAR`,
+			expectedError: "expected identifier for local access variable name, got :",
+			numDecls:      0,
+		},
+		{
+			name:          "Missing colon after local name",
+			input:         `accVar OtherFB; END_VAR`,
+			expectedError: "expected next token to be :, got IDENT instead",
+			numDecls:      0,
+		},
+		{
+			name:          "Invalid access path",
+			input:         `accVar : ; END_VAR`,
+			expectedError: "no prefix parse function for ; found",
+			numDecls:      0, // No declaration should be parsed
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fullInput := fmt.Sprintf("VAR_ACCESS %s", tt.input)
+			l := lexer.New(fullInput)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if len(p.Errors()) == 0 {
+				t.Fatalf("Expected an error but got none for input: %s", fullInput)
+			}
+			assertErrorContains(t, p.Errors(), tt.expectedError)
+
+			if len(program.Statements) == 0 {
+				if tt.numDecls > 0 {
+					t.Fatalf("Expected %d declarations, but no statements were parsed.", tt.numDecls)
+				}
+				return
+			}
+
+			// The first statement should be the AccessVarDeclaration block
+			accessBlock, ok := program.Statements[0].(*ast.AccessVarDeclaration)
+			if !ok {
+				t.Fatalf("Expected ast.AccessVarDeclaration as the first statement, got %T", program.Statements[0])
+			}
+
+			if len(accessBlock.Vars) != tt.numDecls {
+				t.Errorf("Expected %d declarations in the VAR_ACCESS block after recovery, got %d", tt.numDecls, len(accessBlock.Vars))
+			}
+		})
+	}
+}
+
+func TestStepStatementWithComments(t *testing.T) {
+	input := `
+		STEP MyStep:
+			Action1(N);
+			(* This is a multi-line comment *)
+			Action2(P);
+			// This is a single-line comment
+			Action3(S);
+		END_STEP
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestStepStatementWithComments", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.StepStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Actions) != 3 {
+		t.Fatalf("Expected 3 action associations. got=%d", len(stmt.Actions))
+	}
+
+	action1 := stmt.Actions[0]
+	if action1.ActionName.Value != "Action1" || action1.Qualifier.Value != "N" {
+		t.Errorf("Incorrect first action. Expected 'Action1(N)', got %s", action1.String())
+	}
+
+	action2 := stmt.Actions[1]
+	if action2.ActionName.Value != "Action2" || action2.Qualifier.Value != "P" {
+		t.Errorf("Incorrect second action. Expected 'Action2(P)', got %s", action2.String())
+	}
+
+	action3 := stmt.Actions[2]
+	if action3.ActionName.Value != "Action3" || action3.Qualifier.Value != "S" {
+		t.Errorf("Incorrect third action. Expected 'Action3(S)', got %s", action3.String())
+	}
+}
+
+func TestStepActionWithDuration(t *testing.T) {
+	input := `
+		STEP MyStep:
+			MyAction(L, T#5s);
+		END_STEP
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestStepActionWithDuration", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.StepStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.StepStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Actions) != 1 {
+		t.Fatalf("Expected 1 action association. got=%d", len(stmt.Actions))
+	}
+
+	action := stmt.Actions[0]
+	if action.ActionName.Value != "MyAction" {
+		t.Errorf("Action name is not 'MyAction'. got=%s", action.ActionName.Value)
+	}
+	if action.Qualifier == nil || action.Qualifier.Value != "L" {
+		t.Errorf("Action qualifier is not 'L'. got=%v", action.Qualifier)
+	}
+
+	if action.Duration == nil {
+		t.Fatal("Action duration was not parsed.")
+	}
+
+	// The parser will parse T#5s as a TypedLiteral.
+	// Use the helper to verify its components.
+	if !testTypedLiteral(t, action.Duration, "T", "5s") {
+		t.Errorf("Duration was not parsed correctly.")
+	}
+}
+
+func TestTaskDeclarationParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+		check         func(t *testing.T, stmt *ast.TaskDeclaration)
+	}{
+		{
+			name:  "Valid task with all parameters",
+			input: `TASK T1 (SINGLE := TRUE, INTERVAL := T#1s, PRIORITY := 1);`,
+			check: func(t *testing.T, stmt *ast.TaskDeclaration) {
+				if stmt.Name.Value != "T1" {
+					t.Errorf("Expected task name 'T1', got %s", stmt.Name.Value)
+				}
+				if stmt.Single == nil {
+					t.Error("Expected SINGLE parameter to be parsed")
+				}
+				if stmt.Interval == nil {
+					t.Error("Expected INTERVAL parameter to be parsed")
+				}
+				if stmt.Priority == nil {
+					t.Error("Expected PRIORITY parameter to be parsed")
+				}
+			},
+		},
+		{
+			name:  "Task with empty parameters",
+			input: `TASK T2 ();`,
+			check: func(t *testing.T, stmt *ast.TaskDeclaration) {
+				if stmt.Name.Value != "T2" {
+					t.Errorf("Expected task name 'T2', got %s", stmt.Name.Value)
+				}
+				if stmt.Single != nil || stmt.Interval != nil || stmt.Priority != nil {
+					t.Error("Expected no parameters to be parsed")
+				}
+			},
+		},
+		{
+			name:          "Error on missing task name",
+			input:         `TASK (PRIORITY := 1);`,
+			expectedError: "expected next token to be IDENT, got ( instead",
+		},
+		{
+			name:          "Error on missing left parenthesis",
+			input:         `TASK T1 PRIORITY := 1);`,
+			expectedError: "expected next token to be (, got PRIORITY instead",
+		},
+		{
+			name:          "Error on missing assignment in SINGLE",
+			input:         `TASK T1 (SINGLE TRUE);`,
+			expectedError: "expected next token to be :=, got TRUE instead",
+		},
+		{
+			name:          "Error on missing assignment in PRIORITY",
+			input:         `TASK T1 (PRIORITY 1);`,
+			expectedError: "expected next token to be :=, got INT instead",
+		},
+		{
+			name:          "Error on unexpected token in parameters",
+			input:         `TASK T1 (VAR);`,
+			expectedError: "unexpected token in task configuration: VAR",
+		},
+		{
+			name:          "Error on missing comma between parameters",
+			input:         `TASK T1 (PRIORITY := 1 INTERVAL := T#1s);`,
+			expectedError: "expected ',' or ')' in task configuration, got INTERVAL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// TASK declarations are only valid inside a RESOURCE block.
+			// We wrap the input to create a valid program for the parser.
+			fullInput := fmt.Sprintf("CONFIGURATION Cfg\nRESOURCE Res ON PLC\n%s\nEND_RESOURCE\nEND_CONFIGURATION", tt.input)
+			l := lexer.New(fullInput)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+				return // Don't check the AST if an error was expected
+			}
+
+			checkParserErrors(t, p, tt.name, fullInput)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			config, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+			}
+			if len(config.Resources) != 1 {
+				t.Fatalf("Expected 1 resource, got %d", len(config.Resources))
+			}
+			resource := config.Resources[0]
+
+			if len(resource.Tasks) != 1 {
+				t.Fatalf("Expected 1 task, got %d", len(resource.Tasks))
+			}
+			stmt := resource.Tasks[0]
+
+			if tt.check != nil {
+				tt.check(t, stmt)
+			}
+		})
+	}
+}
+
+func TestParseSpecialVarBlocks(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+		check         func(t *testing.T, program *ast.Program)
+	}{
+		{
+			name: "VAR_EXTERNAL happy path",
+			input: `PROGRAM MyProg
+						VAR_EXTERNAL
+							extVar : BOOL;
+						END_VAR
+					END_PROGRAM`,
+			check: func(t *testing.T, program *ast.Program) {
+				progDecl := program.Statements[0].(*ast.ProgramDeclaration)
+				if len(progDecl.VarExternal) != 1 {
+					t.Fatalf("Expected 1 VAR_EXTERNAL block, got %d", len(progDecl.VarExternal))
+				}
+				extBlock := progDecl.VarExternal[0]
+				if len(extBlock.Vars) != 1 {
+					t.Fatalf("Expected 1 var in VAR_EXTERNAL, got %d", len(extBlock.Vars))
+				}
+				testVarDeclStatement(t, extBlock.Vars[0], "extVar", "BOOL")
+			},
+		},
+		{
+			name:          "VAR_EXTERNAL missing END_VAR",
+			input:         `PROGRAM MyProg VAR_EXTERNAL extVar : BOOL; PROGRAM OtherProg END_PROGRAM`,
+			expectedError: "expected next token to be END_VAR, got PROGRAM instead",
+		},
+		{
+			name: "VAR_ACCESS with READ_WRITE",
+			input: `PROGRAM MyProg
+						VAR_ACCESS
+							accVar : OtherFB READ_WRITE;
+						END_VAR
+					END_PROGRAM`,
+			check: func(t *testing.T, program *ast.Program) {
+				progDecl := program.Statements[0].(*ast.ProgramDeclaration)
+				if len(progDecl.VarAccess) != 1 {
+					t.Fatalf("Expected 1 VAR_ACCESS block, got %d", len(progDecl.VarAccess))
+				}
+				accBlock := progDecl.VarAccess[0]
+				if len(accBlock.Vars) != 1 {
+					t.Fatalf("Expected 1 var in VAR_ACCESS, got %d", len(accBlock.Vars))
+				}
+				decl := accBlock.Vars[0]
+				if decl.Name.Value != "accVar" || decl.AccessPath.String() != "OtherFB" || decl.AccessType != "READ_WRITE" {
+					t.Errorf("VAR_ACCESS declaration parsed incorrectly")
+				}
+			},
+		},
+		{
+			name: "VAR_ACCESS with no access type",
+			input: `PROGRAM MyProg
+						VAR_ACCESS
+							accVar : OtherFB;
+						END_VAR
+					END_PROGRAM`,
+			check: func(t *testing.T, program *ast.Program) {
+				progDecl := program.Statements[0].(*ast.ProgramDeclaration)
+				if len(progDecl.VarAccess) != 1 {
+					t.Fatalf("Expected 1 VAR_ACCESS block, got %d", len(progDecl.VarAccess))
+				}
+				accBlock := progDecl.VarAccess[0]
+				if len(accBlock.Vars) != 1 {
+					t.Fatalf("Expected 1 var in VAR_ACCESS, got %d", len(accBlock.Vars))
+				}
+				decl := accBlock.Vars[0]
+				if decl.AccessType != "" {
+					t.Errorf("Expected empty access type, got %s", decl.AccessType)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+			} else {
+				checkParserErrors(t, p, tt.name, tt.input)
+			}
+
+			if tt.check != nil {
+				if len(program.Statements) == 0 {
+					t.Fatal("No statements parsed")
+				}
+				tt.check(t, program)
+			}
+		})
+	}
+}
+
+func TestProgramDeclarationWithComments(t *testing.T) {
+	input := `
+		PROGRAM MyProgWithComments
+			VAR_INPUT
+				In1 : BOOL;
+			END_VAR
+			(* This is a multi-line comment *)
+			VAR_OUTPUT
+				Out1 : INT;
+			END_VAR
+			// This is a single-line comment
+			VAR
+				Local1 : REAL;
+			END_VAR
+		END_PROGRAM
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramDeclarationWithComments", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	prog, ok := program.Statements[0].(*ast.ProgramDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ProgramDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(prog.VarInputs) != 1 {
+		t.Errorf("Expected 1 VAR_INPUT block, got %d", len(prog.VarInputs))
+	}
+	if len(prog.VarOutputs) != 1 {
+		t.Errorf("Expected 1 VAR_OUTPUT block, got %d", len(prog.VarOutputs))
+	}
+	if len(prog.Vars) != 1 {
+		t.Errorf("Expected 1 VAR block, got %d", len(prog.Vars))
+	}
+
+	testVarDeclStatement(t, prog.VarInputs[0], "In1", "BOOL")
+	testVarDeclStatement(t, prog.VarOutputs[0], "Out1", "INT")
+	testVarDeclStatement(t, prog.Vars[0], "Local1", "REAL")
+}
+
+func TestProgramConfigurationWithParameters(t *testing.T) {
+	input := `
+		CONFIGURATION MyConfig
+			RESOURCE Res1 ON PLC1
+				TASK Task1 (INTERVAL := T#100ms, PRIORITY := 1);
+				PROGRAM Prog1 WITH Task1 : ProgType1(Input1 := 42, Out1 => GlobalVar);
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramConfigurationWithParameters", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	config, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(config.Resources) != 1 {
+		t.Fatalf("Expected 1 resource. got=%d", len(config.Resources))
+	}
+	resource := config.Resources[0]
+
+	if len(resource.Programs) != 1 {
+		t.Fatalf("Expected 1 program configuration. got=%d", len(resource.Programs))
+	}
+	progConfig := resource.Programs[0]
+
+	if progConfig.InstanceName.Value != "Prog1" {
+		t.Errorf("Program instance name is not 'Prog1'. got=%s", progConfig.InstanceName.Value)
+	}
+
+	if len(progConfig.Parameters) != 2 {
+		t.Fatalf("Expected 2 parameters in program configuration. got=%d", len(progConfig.Parameters))
+	}
+
+	// Check first parameter: Input1 := 42
+	namedArg, ok := progConfig.Parameters[0].(*ast.NamedArgument)
+	if !ok {
+		t.Fatalf("First parameter is not a NamedArgument. got=%T", progConfig.Parameters[0])
+	}
+	testVarDeclStatement(t, &ast.VarDeclStatement{Token: namedArg.Name.Token, Name: namedArg.Name, Value: namedArg.Value}, "Input1", "")
+
+	// Check second parameter: Out1 => GlobalVar
+	outputArg, ok := progConfig.Parameters[1].(*ast.OutputArgument)
+	if !ok {
+		t.Fatalf("Second parameter is not an OutputArgument. got=%T", progConfig.Parameters[1])
+	}
+	if outputArg.Source.Value != "Out1" {
+		t.Errorf("Output argument source is not 'Out1'. got=%s", outputArg.Source.Value)
+	}
+	testIdentifier(t, outputArg.Target, "GlobalVar")
+}
+
+func TestVarBlockQualifiers(t *testing.T) {
+	tests := []struct {
+		input       string
+		isConstant  bool
+		isRetain    bool
+		isNonRetain bool
+	}{
+		{"VAR CONSTANT myVar : INT; END_VAR", true, false, false},
+		{"VAR RETAIN myVar : INT; END_VAR", false, true, false},
+		{"VAR NON_RETAIN myVar : INT; END_VAR", false, false, true},
+		{"VAR CONSTANT RETAIN myVar : INT; END_VAR", true, true, false},
+		{"VAR CONSTANT NON_RETAIN myVar : INT; END_VAR", true, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p, "TestVarBlockQualifiers", tt.input)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			block, ok := program.Statements[0].(*ast.VarBlockDeclaration)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.VarBlockDeclaration. got=%T", program.Statements[0])
+			}
+
+			if len(block.Declarations) != 1 {
+				t.Fatalf("block.Declarations does not contain 1 statement. got=%d", len(block.Declarations))
+			}
+			stmt := block.Declarations[0]
+
+			if stmt.IsConstant != tt.isConstant {
+				t.Errorf("IsConstant wrong. want=%v, got=%v", tt.isConstant, stmt.IsConstant)
+			}
+			if stmt.IsRetain != tt.isRetain {
+				t.Errorf("IsRetain wrong. want=%v, got=%v", tt.isRetain, stmt.IsRetain)
+			}
+		})
+	}
+}
+
+func TestProgramConfigurationWithRetain(t *testing.T) {
+	input := `
+		CONFIGURATION MyConfig
+			RESOURCE Res1 ON PLC1
+				TASK Task1 (INTERVAL := T#100ms, PRIORITY := 1);
+				PROGRAM RETAIN Prog1 WITH Task1 : ProgType1;
+				PROGRAM NON_RETAIN Prog2 WITH Task1 : ProgType2;
+				PROGRAM Prog3 WITH Task1 : ProgType3;
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramConfigurationWithRetain", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	config, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(config.Resources) != 1 {
+		t.Fatalf("Expected 1 resource. got=%d", len(config.Resources))
+	}
+	resource := config.Resources[0]
+
+	if len(resource.Programs) != 3 {
+		t.Fatalf("Expected 3 program configurations, got %d", len(resource.Programs))
+	}
+
+	prog1 := resource.Programs[0]
+	if !prog1.IsRetain {
+		t.Errorf("Expected Prog1 to have IsRetain = true")
+	}
+
+	prog2 := resource.Programs[1]
+	if !prog2.IsNonRetain {
+		t.Errorf("Expected Prog2 to have IsNonRetain = true")
+	}
+
+	prog3 := resource.Programs[2]
+	if prog3.IsRetain || prog3.IsNonRetain {
+		t.Errorf("Expected Prog3 to have no retain flags set")
+	}
+}
+
+func TestProgramConfigurationWithFbTask(t *testing.T) {
+	input := `
+		CONFIGURATION MyConfig
+			RESOURCE Res1 ON PLC1
+				TASK TaskA (PRIORITY := 1);
+				TASK TaskB (PRIORITY := 2);
+				PROGRAM MyProg : ProgType(FB1 WITH TaskA, In1 := TRUE, FB2 WITH TaskB);
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestProgramConfigurationWithFbTask", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	config, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(config.Resources) != 1 {
+		t.Fatalf("Expected 1 resource. got=%d", len(config.Resources))
+	}
+	resource := config.Resources[0]
+
+	if len(resource.Programs) != 1 {
+		t.Fatalf("Expected 1 program configuration. got=%d", len(resource.Programs))
+	}
+	progConfig := resource.Programs[0]
+
+	if len(progConfig.FbTasks) != 2 {
+		t.Fatalf("Expected 2 FB-Task associations, got %d", len(progConfig.FbTasks))
+	}
+
+	// Check first fb_task
+	if progConfig.FbTasks[0].FbName.Value != "FB1" || progConfig.FbTasks[0].TaskName.Value != "TaskA" {
+		t.Errorf("Incorrect first FB-Task association parsed. want='FB1 WITH TaskA', got=%q", progConfig.FbTasks[0].String())
+	}
+
+	// Check second fb_task
+	if progConfig.FbTasks[1].FbName.Value != "FB2" || progConfig.FbTasks[1].TaskName.Value != "TaskB" {
+		t.Errorf("Incorrect second FB-Task association parsed. want='FB2 WITH TaskB', got=%q", progConfig.FbTasks[1].String())
+	}
+
+	// Check the standard parameter
+	if len(progConfig.Parameters) != 1 {
+		t.Fatalf("Expected 1 standard parameter (prog_cnxn), got %d", len(progConfig.Parameters))
+	}
+	if _, ok := progConfig.Parameters[0].(*ast.NamedArgument); !ok {
+		t.Errorf("Failed to parse named argument alongside fb_task. got=%T", progConfig.Parameters[0])
+	}
+}
+
+func TestSfcErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name:          "Missing RPAREN in action association",
+			input:         `STEP MyStep: MyAction(N; END_STEP`,
+			expectedError: "expected next token to be ), got ; instead",
+		},
+		{
+			name:          "Missing END_ACTION",
+			input:         `ACTION MyAction: x := 1;`,
+			expectedError: "expected next token to be END_ACTION, got EOF instead",
+		},
+		{
+			name:          "Missing FROM in TRANSITION",
+			input:         `TRANSITION S1 TO S2 := TRUE; END_TRANSITION`,
+			expectedError: "expected next token to be FROM, got IDENT instead",
+		},
+		{
+			name:          "Missing TO in TRANSITION",
+			input:         `TRANSITION FROM S1 S2 := TRUE; END_TRANSITION`,
+			expectedError: "expected next token to be TO, got IDENT instead",
+		},
+		{
+			name:          "Missing assignment in TRANSITION",
+			input:         `TRANSITION FROM S1 TO S2 TRUE; END_TRANSITION`,
+			expectedError: "expected next token to be :=, got TRUE instead",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			p.ParseProgram()
+
+			if len(p.Errors()) == 0 {
+				t.Fatalf("Expected an error but got none")
+			}
+			assertErrorContains(t, p.Errors(), tt.expectedError)
+		})
+	}
+}
+
+func TestSFCProgramWithMixedElements(t *testing.T) {
+	// This test validates the loop in `parseSFCProgram`, specifically covering
+	// the skipping of comments and the handling of non-block statements.
+	input := `
+		PROGRAM MySFC
+			INITIAL_STEP S1: END_STEP
+			(* A comment between elements *)
+			x := 1; // This is a non-block statement
+			// Another comment
+			TRANSITION FROM S1 TO S2 := TRUE; END_TRANSITION
+		END_PROGRAM
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestSFCProgramWithMixedElements", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	progDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ProgramDeclaration. got=%T", program.Statements[0])
+	}
+
+	sfcBody, ok := progDecl.Body.(*ast.SFCProgram)
+	if !ok {
+		t.Fatalf("Program body is not ast.SFCProgram. got=%T", progDecl.Body)
+	}
+
+	if len(sfcBody.Elements) != 3 {
+		t.Fatalf("SFC body should have 3 elements. got=%d", len(sfcBody.Elements))
+	}
+
+	// Check element 1: Step (Block Statement)
+	if _, ok := sfcBody.Elements[0].(*ast.StepStatement); !ok {
+		t.Errorf("Element 0 should be a StepStatement, got %T", sfcBody.Elements[0])
+	}
+
+	// Check element 2: AssignmentStatement (Non-Block Statement)
+	assignStmt, ok := sfcBody.Elements[1].(*ast.AssignmentStatement)
+	if !ok {
+		t.Errorf("Element 1 should be an AssignmentStatement, got %T", sfcBody.Elements[1])
+	}
+	testAssignmentStatement(t, assignStmt, "x", "1")
+
+	// Check element 3: Transition (Block Statement)
+	if _, ok := sfcBody.Elements[2].(*ast.TransitionStatement); !ok {
+		t.Errorf("Element 2 should be a TransitionStatement, got %T", sfcBody.Elements[2])
+	}
+}
+
+func TestConfigurationWithVarAccess(t *testing.T) {
+	input := `
+		CONFIGURATION MyConfig
+			VAR_ACCESS
+				RemoteVar : OtherProgram.Var READ_ONLY;
+			END_VAR
+		END_CONFIGURATION
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestConfigurationWithVarAccess", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	config, ok := program.Statements[0].(*ast.ConfigurationDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ConfigurationDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(config.AccessVars) != 1 {
+		t.Fatalf("Expected 1 VAR_ACCESS block. got=%d", len(config.AccessVars))
+	}
+
+	accessBlock := config.AccessVars[0]
+	if len(accessBlock.Vars) != 1 {
+		t.Fatalf("Expected 1 declaration in VAR_ACCESS block. got=%d", len(accessBlock.Vars))
+	}
+
+	decl := accessBlock.Vars[0]
+	if decl.Name.Value != "RemoteVar" {
+		t.Errorf("decl.Name.Value not 'RemoteVar'. got=%s", decl.Name.Value)
+	}
+	if decl.AccessPath.String() != "OtherProgram.Var" {
+		t.Errorf("decl.AccessPath not 'OtherProgram.Var'. got=%s", decl.AccessPath.String())
+	}
+	if decl.AccessType != "READ_ONLY" {
+		t.Errorf("decl.AccessType not 'READ_ONLY'. got=%s", decl.AccessType)
+	}
 }
 
 func assertErrorContains(t *testing.T, errors []string, expected string, index ...int) {

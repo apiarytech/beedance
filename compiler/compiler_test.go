@@ -1333,20 +1333,20 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
 				},
-				1,
+				1, // For the `1` in `countDown(1)`
 				[]code.Instructions{
 					code.Make(code.OpNull),        // Initialize return var 'wrapper'
 					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpClosure, 1, 0),
 					code.Make(code.OpSetLocal, 1), // Store 'countDown' closure
 					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
-					code.Make(code.OpConstant, 2),
-					code.Make(code.OpCall, 1),
+					code.Make(code.OpConstant, 2), // Now correctly refers to the second `1` constant
+					code.Make(code.OpCall, 1),     // Call countDown(1)
 					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpClosure, 3, 0), // Now correctly refers to the wrapper body at index 3
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpCall, 0),

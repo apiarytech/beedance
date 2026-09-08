@@ -94,7 +94,7 @@ func (p *Parser) parseActionStatement() ast.Statement {
 	stmt.Body = p.parseBlockStatementUntil(token.END_ACTION)
 
 	if !p.curTokenIs(token.END_ACTION) {
-		p.peekError(token.END_ACTION)
+		p.currentError("expected next token to be %s, got %s instead", token.END_ACTION, p.curToken.Type)
 	} else {
 		p.nextToken() // Consume END_ACTION
 	}
@@ -110,21 +110,24 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	stmt := &ast.TransitionStatement{Token: p.curToken}
 
 	if !p.expectPeek(token.FROM) {
-		// Allow recovery even if FROM is missing
+		p.synchronize(token.END_TRANSITION) // Error logged by expectPeek. Synchronize to the end of the block.
+		return stmt
 	} else {
 		p.nextToken() // consume FROM
 		stmt.From = p.parseStepList()
 	}
 
 	if !p.expectPeek(token.TO) {
-		// Allow recovery even if TO is missing
+		p.synchronize(token.END_TRANSITION) // Error logged by expectPeek. Synchronize to the end of the block.
+		return stmt
 	} else {
 		p.nextToken() // consume TO
 		stmt.To = p.parseStepList()
 	}
 
 	if !p.expectPeek(token.ASSIGN) {
-		return nil
+		p.synchronize(token.END_TRANSITION) // expectPeek already logged the error. Synchronize to the end of the block.
+		return stmt
 	}
 
 	p.nextToken() // consume ASSIGN
@@ -241,8 +244,10 @@ func (p *Parser) parseActionBlockStatement() *ast.ActionBlockStatement {
 
 	// After parsing arguments, we must find the closing parenthesis.
 	if !p.expectPeek(token.RPAREN) {
-		p.peekError(token.RPAREN)
-		return nil
+		// Error was logged by expectPeek. We should now try to find the end of this statement (the semicolon)
+		// and consume it, so the parent parser is in a good state.
+		p.synchronize(token.SEMICOLON, token.END_STEP) // Synchronize to the end of the block.
+		return nil                                     // Return nil to signal failure.
 	}
 
 	// After the closing parenthesis, there must be a semicolon.

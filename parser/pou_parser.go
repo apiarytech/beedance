@@ -47,7 +47,17 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 
 	p.nextToken() // Consume ':', move to return type
-	stmt.ReturnType = p.parseTypeSpecifier().(*ast.TypeSpecifier)
+	returnType := p.parseTypeSpecifier()
+	if returnType == nil {
+		// Error already logged by parseTypeSpecifier
+		return nil
+	}
+	ts, ok := returnType.(*ast.TypeSpecifier)
+	if !ok {
+		p.currentError("function return type cannot be a complex type like ARRAY or STRUCT, got %T", returnType)
+		return nil
+	}
+	stmt.ReturnType = ts
 
 	p.nextToken() // Consume return type
 
@@ -61,6 +71,10 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 		} else if p.curTokenIs(token.VAR_IN_OUT) {
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		} else if p.curTokenIs(token.VAR_EXTERNAL) || p.curTokenIs(token.VAR_GLOBAL) || p.curTokenIs(token.VAR_ACCESS) || p.curTokenIs(token.VAR_TEMP) {
+			// In a valid program, the loop should break before this, but this handles recovery.
+			if p.curTokenIs(token.END_FUNCTION) {
+				break
+			}
 			p.currentError("%s declarations are not allowed in a FUNCTION", p.curToken.Type)
 			// To prevent an infinite loop and to recover, we parse the invalid block and discard it.
 			// This switch handles parsing different invalid block types for recovery.
@@ -108,7 +122,7 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 	p.nextToken()
 
 	// Loop to parse all variable declaration blocks.
-	// Loop to parse all variable declaration blocks
+var_loop:
 	for {
 		if p.curTokenIs(token.COMMENT) {
 			p.nextToken()
@@ -144,11 +158,9 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 
 		default:
 			// No more VAR blocks, break the loop to parse the body
-			goto end_var_parsing
+			break var_loop
 		}
 	}
-end_var_parsing:
-
 	// After var blocks, we have the body. Check if it's IL or ST.
 	// A simple heuristic: if it starts with an IL operator, parse as IL.
 	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
@@ -228,42 +240,47 @@ func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDe
 // parseProgramConfiguration parses a program instance declaration within a RESOURCE block.
 // This includes the instance name, the program type, an optional task assignment
 // (WITH clause), and optional parameter assignments.
-func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
-	defer untrace(trace("parseProgramConfiguration"))
-	stmt := &ast.ProgramConfiguration{Token: p.curToken}
+// func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
+// 	defer untrace(trace("parseProgramConfiguration"))
+// 	stmt := &ast.ProgramConfiguration{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected program instance name
-	}
-	stmt.InstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+// 	if !p.expectPeek(token.IDENT) {
+// 		return nil // Expected program instance name
+// 	}
+// 	stmt.InstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	// Check for optional WITH clause
-	if p.peekTokenIs(token.WITH) {
-		p.nextToken() // consume instance name, move to WITH
-		if !p.expectPeek(token.IDENT) {
-			return nil // Expected task name
-		}
-		stmt.TaskName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-	}
+// 	// Check for optional WITH clause
+// 	if p.peekTokenIs(token.WITH) {
+// 		p.nextToken() // consume instance name, move to WITH
+// 		if !p.expectPeek(token.IDENT) {
+// 			return nil // Expected task name
+// 		}
+// 		stmt.TaskName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+// 		p.nextToken() // Consume the task name (e.g., T1)
+// 	}
 
-	if !p.expectPeek(token.COLON) {
-		return nil
-	}
+// 	// If a type name is explicitly provided with a colon
+// 	if p.peekTokenIs(token.COLON) {
+// 		p.nextToken() // consume instance/task name
+// 		p.nextToken() // consume COLON
+// 		if !p.curTokenIs(token.IDENT) {
+// 			p.currentError("expected program type name after :")
+// 			return nil
+// 		}
+// 		stmt.TypeName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+// 	} else {
+// 		// Otherwise, the type name is the same as the instance name.
+// 		stmt.TypeName = stmt.InstanceName
+// 	}
+// 	// TODO: Parse optional parenthesized connection list `(...)`
+// 	// Optional: ( <parameter_assignments> )
+// 	if p.peekTokenIs(token.LPAREN) {
+// 		p.nextToken() // consume type name, move to LPAREN
+// 		stmt.Parameters = p.parseExpressionList(token.RPAREN)
+// 	}
 
-	if !p.expectPeek(token.IDENT) {
-		return nil // Expected program type name
-	}
-	stmt.TypeName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+// 	// Program configuration must end with a semicolon
+// 	p.expectPeek(token.SEMICOLON) // Consume semicolon
 
-	// TODO: Parse optional parenthesized connection list `(...)`
-	// Optional: ( <parameter_assignments> )
-	if p.peekTokenIs(token.LPAREN) {
-		p.nextToken() // consume type name, move to LPAREN
-		stmt.Parameters = p.parseExpressionList(token.RPAREN)
-	}
-
-	// Program configuration must end with a semicolon
-	p.expectPeek(token.SEMICOLON) // Consume semicolon
-
-	return stmt
-}
+// 	return stmt
+// }

@@ -25,11 +25,23 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 
 	case *ExpressionStatement:
-		node.Expression, _ = Modify(node.Expression, modifier).(Expression)
+		if node.Expression != nil {
+			node.Expression, _ = Modify(node.Expression, modifier).(Expression)
+		}
+
+	case *AssignmentStatement:
+		node.Left, _ = Modify(node.Left, modifier).(Expression)
+		if node.Value != nil {
+			node.Value, _ = Modify(node.Value, modifier).(Expression)
+		}
 
 	case *InfixExpression:
 		node.Left, _ = Modify(node.Left, modifier).(Expression)
 		node.Right, _ = Modify(node.Right, modifier).(Expression)
+
+	case *MemberAccessExpression:
+		node.Struct, _ = Modify(node.Struct, modifier).(Expression)
+		node.Member, _ = Modify(node.Member, modifier).(*Identifier)
 
 	case *PrefixExpression:
 		node.Right, _ = Modify(node.Right, modifier).(Expression)
@@ -42,7 +54,7 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		node.Condition, _ = Modify(node.Condition, modifier).(Expression)
 		node.Consequence, _ = Modify(node.Consequence, modifier).(*BlockStatement)
 		if node.Alternative != nil {
-			node.Alternative, _ = Modify(node.Alternative, modifier).(*BlockStatement)
+			node.Alternative, _ = Modify(node.Alternative, modifier).(Statement)
 		}
 
 	case *BlockStatement:
@@ -51,12 +63,51 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 
 	case *ReturnStatement:
-		node.ReturnValue, _ = Modify(node.ReturnValue, modifier).(Expression)
+		if node.ReturnValue != nil {
+			node.ReturnValue, _ = Modify(node.ReturnValue, modifier).(Expression)
+		}
 
 	case *VarDeclStatement:
+		if node.DataType != nil {
+			node.DataType, _ = Modify(node.DataType, modifier).(Expression)
+		}
 		if node.Value != nil {
 			node.Value, _ = Modify(node.Value, modifier).(Expression)
 		}
+		if node.Location != nil {
+			node.Location, _ = Modify(node.Location, modifier).(*AtDeclaration)
+		}
+
+	case *ForLoopStatement:
+		node.ControlVar, _ = Modify(node.ControlVar, modifier).(*AssignmentStatement)
+		node.EndValue, _ = Modify(node.EndValue, modifier).(Expression)
+		if node.StepValue != nil {
+			node.StepValue, _ = Modify(node.StepValue, modifier).(Expression)
+		}
+		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+
+	case *WhileStatement:
+		node.Condition, _ = Modify(node.Condition, modifier).(Expression)
+		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+
+	case *RepeatStatement:
+		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+		node.Condition, _ = Modify(node.Condition, modifier).(Expression)
+
+	case *CaseStatement:
+		node.Expression, _ = Modify(node.Expression, modifier).(Expression)
+		for i, _ := range node.Cases {
+			node.Cases[i], _ = Modify(node.Cases[i], modifier).(*CaseBranch)
+		}
+		if node.Alternative != nil {
+			node.Alternative, _ = Modify(node.Alternative, modifier).(*BlockStatement)
+		}
+
+	case *CaseBranch:
+		for i, _ := range node.Values {
+			node.Values[i], _ = Modify(node.Values[i], modifier).(Expression)
+		}
+		node.Consequence, _ = Modify(node.Consequence, modifier).(*BlockStatement)
 
 	case *FunctionParameter:
 		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
@@ -73,6 +124,12 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
 
+	case *CallExpression:
+		node.Function, _ = Modify(node.Function, modifier).(Expression)
+		for i, _ := range node.Arguments {
+			node.Arguments[i], _ = Modify(node.Arguments[i], modifier).(Expression)
+		}
+
 	case *ArrayLiteral:
 		for i, _ := range node.Elements {
 			node.Elements[i], _ = Modify(node.Elements[i], modifier).(Expression)
@@ -87,6 +144,37 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 		node.Pairs = newPairs
 
+	case *AtDeclaration:
+		node.Location, _ = Modify(node.Location, modifier).(*DirectVariable)
+
+	case *NamedArgument:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		node.Value, _ = Modify(node.Value, modifier).(Expression)
+
+	case *OutputArgument:
+		if node.Source != nil {
+			node.Source, _ = Modify(node.Source, modifier).(*Identifier)
+		}
+		if node.Target != nil {
+			node.Target, _ = Modify(node.Target, modifier).(Expression)
+		}
+
+	case *ProgramConfiguration:
+		node.InstanceName, _ = Modify(node.InstanceName, modifier).(*Identifier)
+		if node.TaskName != nil {
+			node.TaskName, _ = Modify(node.TaskName, modifier).(*Identifier)
+		}
+		node.TypeName, _ = Modify(node.TypeName, modifier).(*Identifier)
+		for i := range node.Parameters {
+			node.Parameters[i], _ = Modify(node.Parameters[i], modifier).(Expression)
+		}
+		for i := range node.FbTasks {
+			node.FbTasks[i], _ = Modify(node.FbTasks[i], modifier).(*FbTaskAssociation)
+		}
+
+	case *FbTaskAssociation:
+		node.FbName, _ = Modify(node.FbName, modifier).(*Identifier)
+		node.TaskName, _ = Modify(node.TaskName, modifier).(*Identifier)
 	}
 
 	return modifier(node)

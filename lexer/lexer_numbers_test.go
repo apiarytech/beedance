@@ -131,6 +131,75 @@ func TestInvalidLiterals(t *testing.T) {
 	})
 }
 
+func TestInvalidBasedLiterals(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		expectedTokens []token.Token
+	}{
+		{
+			"Invalid base", "12#123", []token.Token{
+				{Type: token.INT, Literal: "12"},
+				{Type: token.HASH, Literal: "#"},
+				{Type: token.INT, Literal: "123"},
+				{Type: token.EOF, Literal: ""},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			for i, expectedToken := range tt.expectedTokens {
+				tok := l.NextToken()
+				if tok.Type != expectedToken.Type {
+					t.Errorf("token %d type wrong. want=%q, got=%q", i, expectedToken.Type, tok.Type)
+				}
+				if tok.Literal != expectedToken.Literal {
+					t.Errorf("token %d literal wrong. want=%q, got=%q", i, expectedToken.Literal, tok.Literal)
+				}
+			}
+		})
+	}
+}
+
+func TestBasedLiteralsWithExponentChar(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		expectedTokens []token.Token
+	}{
+		{
+			"Decimal based literal with 'e'", "10#123e4", []token.Token{
+				{Type: token.INT, Literal: "10#123"},
+				{Type: token.IDENT, Literal: "e4"},
+				{Type: token.EOF, Literal: ""},
+			},
+		},
+		{
+			"Hex based literal with 'e' (valid digit)", "16#123e4", []token.Token{
+				{Type: token.INT, Literal: "16#123e4"},
+				{Type: token.EOF, Literal: ""},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			for i, expectedToken := range tt.expectedTokens {
+				tok := l.NextToken()
+				if tok.Type != expectedToken.Type {
+					t.Errorf("token %d type wrong. want=%q, got=%q", i, expectedToken.Type, tok.Type)
+				}
+				if tok.Literal != expectedToken.Literal {
+					t.Errorf("token %d literal wrong. want=%q, got=%q", i, expectedToken.Literal, tok.Literal)
+				}
+			}
+		})
+	}
+}
+
 func TestDirectlyRepresentedVariables(t *testing.T) {
 	tests := []struct {
 		input           string

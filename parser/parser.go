@@ -65,6 +65,7 @@ var precedences = map[token.TokenType]int{
 	token.LPAREN:    CALL,
 	token.LBRACKET:  INDEX,
 	token.DOT:       MEMBER,
+	token.WITH:      MEMBER, // Give WITH similar precedence for program config
 	token.HASH:      MEMBER, // Typed literals have similar precedence to member access.
 }
 
@@ -224,6 +225,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
 	p.registerInfix(token.HASH, p.parseTypedLiteralExpression)
+	p.registerInfix(token.WITH, p.parseInfixExpression)
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
 	p.nextToken()
@@ -280,18 +282,10 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 		p.nextToken()
 		return true
 	} else {
-		p.peekError(t)
-		// If we expected a semicolon, we can often recover by just pretending it was there
-		// and continuing. For other tokens, this might not be safe.
-		if t == token.SEMICOLON {
-			// We don't advance the token, we just allow parsing to continue from the current position
-			// as if the semicolon was optional.
-			return true // "Recovered"
-		}
-		// For other errors, we might want to skip until the next semicolon or block end.
-		// for !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.EOF) {
-		// 	p.nextToken()
-		// }
+		p.peekError(t) // Log the error
+		// Always advance the token to prevent getting stuck, even if the expected token was not found.
+		// This is crucial for robust error recovery.
+		p.nextToken()
 		return false
 	}
 }
@@ -351,6 +345,24 @@ func (p *Parser) synchronizeParser() {
 	}
 }
 
+// synchronize advances the parser until it finds one of the given end tokens or EOF.
+// This is useful for recovering from an error within a block by skipping to the end of it.
+func (p *Parser) synchronize(endTokens ...token.TokenType) {
+	for {
+		isEnd := false
+		for _, et := range endTokens {
+			if p.curTokenIs(et) {
+				isEnd = true
+				break
+			}
+		}
+		if isEnd || p.curTokenIs(token.EOF) {
+			break
+		}
+		p.nextToken()
+	}
+}
+
 // consumeLeadingComments consumes a sequence of comment tokens and stores their
 // literals in the parser's leadingComments slice. This is called before parsing
 // a statement to associate comments with the subsequent AST node.
@@ -395,8 +407,11 @@ func (p *Parser) ParseProgram() *ast.Program {
 
 		// Infinite loop detection: if the token position hasn't changed since the last iteration, we're stuck.
 		if p.curToken.Pos == lastPosition {
-			p.errors = append(p.errors, fmt.Sprintf("Infinite loop detected at row %d, column %d. Parser is not advancing past token %s (%s).", p.curToken.Row, p.curToken.Column, p.curToken.Type, p.curToken.Literal))
-			break // Break out of the loop to prevent the program from hanging.
+			// If we are stuck, log an error and force the parser to advance
+			// to the next token to prevent hanging. This is a recovery mechanism.
+			p.currentError("parser stuck on token %s (%s), forcing advance to recover", p.curToken.Type, p.curToken.Literal)
+			p.nextToken()
+			continue // Continue to the next iteration of the loop with the new token.
 		}
 		lastPosition = p.curToken.Pos
 
@@ -528,103 +543,6 @@ func (p *Parser) parseExitStatement() *ast.ExitStatement {
 	return stmt
 }
 
-// parseSingleVarDecl parses a single variable declaration line, typically used inside a VAR block.
-func (p *Parser) parseSingleVarDecl() *ast.VarDeclStatement {
-	defer untrace(trace("parseSingleVarDecl"))
-	stmt := &ast.VarDeclStatement{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil
-	}
-
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	if !p.expectPeek(token.COLON) {
-		return nil
-	}
-
-	p.nextToken() // Move to the data type token
-
-	// Check for CONSTANT qualifier
-	if p.curTokenIs(token.CONSTANT) {
-		stmt.IsConstant = true
-		p.nextToken() // consume CONSTANT, move to data type
-	}
-
-	// Check for RETAIN/NON_RETAIN qualifiers
-	if p.curTokenIs(token.RETAIN) {
-		stmt.IsRetain = true
-		p.nextToken() // consume RETAIN
-	} else if p.curTokenIs(token.NON_RETAIN) {
-		stmt.IsNonRetain = true
-		p.nextToken() // consume NON_RETAIN
-	}
-
-	// Check if the current token is a valid data type
-	if !p.isDataTypeToken(p.curToken) {
-		p.errors = append(p.errors, fmt.Sprintf("expected a data type, got %s", p.curToken.Literal))
-		return nil
-	}
-
-	stmt.DataType = &ast.TypeSpecifier{Token: p.curToken}
-
-	// Check for optional initial value assignment (:=)
-	if p.peekTokenIs(token.ASSIGN) {
-		p.nextToken() // consume ':='
-		p.nextToken() // consume expression start
-		stmt.Value = p.parseExpression(LOWEST)
-	}
-
-	if p.peekTokenIs(token.SEMICOLON) {
-		p.nextToken()
-	}
-
-	return stmt
-}
-
-// parseVarDeclStatement parses a variable declaration, including its name, data type, and optional initial value.
-func (p *Parser) parseVarDeclStatement() *ast.VarDeclStatement {
-	defer untrace(trace("parseVarDeclStatement"))
-	stmt := &ast.VarDeclStatement{Token: p.curToken}
-
-	if !p.expectPeek(token.IDENT) {
-		return nil
-	}
-
-	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	if !p.expectPeek(token.COLON) {
-		return nil
-	}
-
-	p.nextToken() // Move to the data type token
-
-	// Check for RETAIN/NON_RETAIN qualifiers
-	if p.curTokenIs(token.RETAIN) {
-		stmt.IsRetain = true
-		p.nextToken() // consume RETAIN
-	} else if p.curTokenIs(token.NON_RETAIN) {
-		stmt.IsNonRetain = true
-		p.nextToken() // consume NON_RETAIN
-	}
-
-	stmt.DataType = p.parseTypeSpecifier() // This now correctly assigns ast.Expression
-	if stmt.DataType == nil {
-		return nil
-	}
-	p.nextToken() // consume data type
-
-	// Check for optional initial value assignment (:=)
-	if p.peekTokenIs(token.ASSIGN) {
-		p.nextToken() // consume ':='
-		p.nextToken() // consume expression start
-		stmt.Value = p.parseExpression(LOWEST)
-	}
-
-	p.expectPeek(token.SEMICOLON) // Consume the semicolon
-	return stmt
-}
-
 // parseVarBlockStatement parses a `VAR ... END_VAR` block, containing one or more variable declarations.
 func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	defer untrace(trace("parseVarBlockStatement"))
@@ -654,18 +572,24 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
 	if !p.curTokenIs(token.IDENT) {
-		p.errors = append(p.errors, fmt.Sprintf("expected member name (identifier), got %s", p.curToken.Type))
+		p.currentError("expected member name (identifier), got %s", p.curToken.Type)
+		// Synchronize to the next potential member or end of struct
+		p.synchronize(token.SEMICOLON, token.END_STRUCT)
 		return nil
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 	if !p.expectPeek(token.COLON) {
+		// Error logged by expectPeek. Synchronize to recover.
+		p.synchronize(token.SEMICOLON, token.END_STRUCT)
 		return nil
 	}
 	p.nextToken() // Move to the data type token
 
 	stmt.DataType = p.parseTypeSpecifier()
 	if stmt.DataType == nil {
+		// Error logged by parseTypeSpecifier. Synchronize to recover.
+		p.synchronize(token.SEMICOLON, token.END_STRUCT)
 		return nil
 	}
 
@@ -740,31 +664,60 @@ func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 		// VAR_ACCESS syntax is: LocalName : AccessPath [READ_ONLY | READ_WRITE];
 		if !p.curTokenIs(token.IDENT) {
 			p.currentError("expected identifier for local access variable name, got %s", p.curToken.Type)
-			p.synchronizeParser()
+			p.synchronize(token.SEMICOLON, token.END_VAR)
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken() // Consume recovery token
+			}
 			continue
 		}
 		localName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 		if !p.expectPeek(token.COLON) {
-			return nil
+			// Error logged by expectPeek. Synchronize and continue to next declaration.
+			p.synchronize(token.SEMICOLON, token.END_VAR)
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken() // Consume recovery token
+			}
+			continue
 		}
 
 		p.nextToken() // Consume ':', move to access path
+		// The access path can be a simple identifier (for global vars) or a
+		// hierarchical path (e.g., resource.program.variable).
+		// We parse it as a general expression.
 		accessPath := p.parseExpression(LOWEST)
 
+		if accessPath == nil {
+			// Error already logged by parseExpression. Synchronize and continue.
+			p.synchronize(token.SEMICOLON, token.END_VAR)
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken() // Consume recovery token
+			}
+			continue
+		}
+
+		var dataType ast.Expression
+		// The data type is optional. If present, it's preceded by a colon.
+		if p.peekTokenIs(token.COLON) {
+			p.nextToken() // consume access path
+			p.nextToken() // consume ':', move to data type
+			dataType = p.parseTypeSpecifier()
+		}
 		// Check for optional READ_ONLY or READ_WRITE
 		var accessType string
 		if p.peekTokenIs(token.READ_ONLY) || p.peekTokenIs(token.READ_WRITE) {
-			p.nextToken()
+			p.nextToken() // consume access path or data type
 			accessType = p.curToken.Literal
 		}
 
-		// DataType is implicit and resolved by the compiler/linker.
-		decl := &ast.VarDeclStatement{Token: localName.Token, Name: localName, AccessPath: accessPath, DataType: nil, AccessType: accessType, LeadingComments: p.leadingComments}
+		decl := &ast.VarDeclStatement{Token: localName.Token, Name: localName, AccessPath: accessPath, DataType: dataType, AccessType: accessType, LeadingComments: p.leadingComments}
 		varDecls = append(varDecls, decl)
-
-		p.expectPeek(token.SEMICOLON)
-		p.nextToken() // Consume semicolon to move to the next declaration or END_VAR
+		if !p.expectPeek(token.SEMICOLON) {
+			// Error logged, recovery happened. Continue to next iteration.
+			continue
+		}
+		// Semicolon was found, p.curToken is now ';'. Advance past it.
+		p.nextToken()
 	}
 	return varDecls
 }
@@ -786,24 +739,83 @@ func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 // parseConfigVarDeclStatement parses a `VAR_CONFIG ... END_VAR` block, which is used to configure program instances.
 func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 	defer untrace(trace("parseConfigVarDeclStatement"))
+	// This block assigns instance-specific locations or initial values.
+	// Syntax: VAR_CONFIG ... END_VAR
 	stmt := &ast.ConfigVarDeclaration{Token: p.curToken}
 	p.nextToken() // consume VAR_CONFIG
 
-	if !p.curTokenIs(token.IDENT) {
-		p.currentError("expected program instance name after VAR_CONFIG, got %s", p.curToken.Type)
-		// Attempt to recover by skipping to the end of the block.
-		for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
-			p.nextToken()
-		}
-		return nil
+	// A VAR_CONFIG block can optionally be scoped to a single program instance.
+	// e.g., VAR_CONFIG MyProgram ... END_VAR
+	// Heuristic: If the token after VAR_CONFIG is an IDENT, and the token after that
+	// is NOT a '.', ':', or 'AT', then we assume the first IDENT is a ProgramInstanceName.
+	if p.curTokenIs(token.IDENT) && !(p.peekTokenIs(token.DOT) || p.peekTokenIs(token.COLON) || p.peekTokenIs(token.AT)) {
+		stmt.ProgramInstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume program instance name
 	}
-	stmt.ProgramInstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken() // consume instance name
 
-	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
-	if p.curTokenIs(token.END_VAR) {
+	declarations := []*ast.VarDeclStatement{}
+	for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
+		// Each line is an instance-specific assignment.
+		// e.g., Station_1.P1.COUNT : INT := 1;
+		// Add a check for a valid start of a declaration.
+		if !p.curTokenIs(token.IDENT) {
+			p.currentError("expected program instance name after VAR_CONFIG, got %s", p.curToken.Type)
+			p.synchronize(token.SEMICOLON, token.END_VAR)
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken()
+			}
+			continue
+		}
+		// e.g., Station_1.P1.COUNT : INT := 1;
+		// e.g., Station_2.P4.FB1.C2 AT %QB25 : BYTE;
+		// Use LOWEST precedence to parse the full member access path (e.g., a.b.c)
+		varPath := p.parseExpression(LOWEST)
+
+		var atDecl *ast.AtDeclaration
+		// The AT clause comes after the full path, so we check the peek token.
+		if p.peekTokenIs(token.AT) {
+			p.nextToken() // consume last part of path, curToken is now AT
+			atDecl = p.parseAtDeclaration()
+		}
+
+		if !p.expectPeek(token.COLON) {
+			p.synchronize(token.SEMICOLON, token.END_VAR)
+			continue
+		}
+		p.nextToken() // consume colon
+
+		dataType := p.parseTypeSpecifier()
+
+		var initialValue ast.Expression
+		if p.peekTokenIs(token.ASSIGN) {
+			p.nextToken() // to ASSIGN
+			p.nextToken() // to expression start
+			initialValue = p.parseExpression(LOWEST)
+		}
+
+		decl := &ast.VarDeclStatement{
+			AccessPath: varPath,
+			Location:   atDecl,
+			DataType:   dataType,
+			Value:      initialValue,
+		}
+		declarations = append(declarations, decl)
+
+		if !p.expectPeek(token.SEMICOLON) {
+			// Error logged, recovery happened. Continue to next iteration.
+			continue
+		}
+		// Semicolon was found, p.curToken is now ';'. Advance past it.
+		p.nextToken()
+	}
+	stmt.Declarations = declarations
+
+	if !p.curTokenIs(token.END_VAR) {
+		p.currentError("expected END_VAR, got %s", p.curToken.Type)
+	} else {
 		p.nextToken() // Consume END_VAR
 	}
+
 	return stmt
 }
 
@@ -823,7 +835,11 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 		if decl != nil {
 			block.Declarations = append(block.Declarations, decl)
 		}
-		// p.parseTypeDeclaration consumes the semicolon, so we just advance.
+		// If parseTypeDeclaration's error recovery (from a missing semicolon)
+		// landed us on END_TYPE, we should break the loop.
+		if p.curTokenIs(token.END_TYPE) {
+			break
+		}
 		p.nextToken()
 	}
 
@@ -890,12 +906,16 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 		if member != nil {
 			structDef.Members = append(structDef.Members, member)
 		}
-		p.nextToken() // parseStructMember consumed the ';', so advance to next token
+		// If parseStructMember's error recovery landed us on END_STRUCT, break the loop.
+		if p.curTokenIs(token.END_STRUCT) {
+			break
+		}
+		p.nextToken() // parseStructMember consumed the ';', so advance to the next token.
 	}
 
 	if !p.curTokenIs(token.END_STRUCT) {
 		p.specificError("missing 'END_STRUCT' for struct definition starting at row %d", structDef.Token.Row)
-		return nil
+		// Do not return nil. Return the partially parsed struct to allow for better recovery.
 	}
 
 	return structDef
@@ -938,24 +958,27 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
 
-	var isRetain bool
-	var isNonRetain bool
-	isConstant := false
+	var isConstant, isRetain, isNonRetain bool
 
-	if p.curTokenIs(token.CONSTANT) {
-		isConstant = true
-		p.nextToken() // consume CONSTANT
-	} else if p.curTokenIs(token.RETAIN) {
-		isRetain = true
-		p.nextToken() // consume RETAIN
-	} else if p.curTokenIs(token.NON_RETAIN) {
-		isNonRetain = true
-		p.nextToken() // consume NON_RETAIN
-	}
-	// Check for the optional CONSTANT keyword after VAR
-	if p.curTokenIs(token.CONSTANT) {
-		isConstant = true
-		p.nextToken() // consume CONSTANT
+	// Loop to parse multiple qualifiers like CONSTANT, RETAIN, NON_RETAIN in any order.
+	for {
+		if p.curTokenIs(token.CONSTANT) {
+			isConstant = true
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.RETAIN) {
+			isRetain = true
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.NON_RETAIN) {
+			isNonRetain = true
+			p.nextToken()
+			continue
+		}
+		// If no more qualifiers are found, break the loop.
+		break
 	}
 
 	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
@@ -975,6 +998,13 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			// This allows the main loop to process the current token as the start of a new statement.
 			p.currentError("expected next token to be %s, got %s instead", endToken, p.curToken.Type)
 			return varDecls // Return what we have, leaving the parser on the new statement's keyword.
+		}
+		// Additional heuristic: if we see what looks like an assignment statement,
+		// it's likely the start of the body, and END_VAR was missing.
+		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.ASSIGN) {
+			p.currentError("expected next token to be %s, got %s instead", endToken, p.curToken.Type)
+			// Return what we have, leaving the parser on the IDENT to parse the assignment.
+			return varDecls
 		}
 		// Each iteration parses one or more variables of the same type.
 		// e.g., Var1, Var2 : INT;
@@ -1009,10 +1039,12 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 		var initialValue ast.Expression // cspell:disable-line
 		if p.peekTokenIs(token.EQ) {
 			p.peekError(token.ASSIGN) // Report that we expected := but got =
-			// To recover, we can try to skip until the next semicolon
-			for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.EOF) {
+			p.synchronize(token.SEMICOLON)
+			// Now that we are at the semicolon (or EOF), we can consume it and continue to the next declaration
+			if p.curTokenIs(token.SEMICOLON) {
 				p.nextToken()
 			}
+			continue // Continue to the next iteration of the `parseVarDeclarations` loop
 		} else if p.peekTokenIs(token.ASSIGN) {
 			p.nextToken() // to ASSIGN
 			p.nextToken() // to expression start
@@ -1033,8 +1065,10 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			}
 			varDecls = append(varDecls, decl)
 		}
-		p.expectPeek(token.SEMICOLON)
-		p.nextToken()
+		if p.expectPeek(token.SEMICOLON) {
+			p.nextToken() // Consume semicolon to move to the next declaration or end token
+		}
+		// If semicolon was missing, expectPeek already advanced us to the next token.
 		// // After parsing the declaration, we should be at the semicolon.
 		// if !p.peekTokenIs(token.IDENT) || isStatementStartKeyword(p.curToken.Type) {
 		// 	// Report the missing end token, but do not advance the parser.
@@ -1145,20 +1179,99 @@ func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 
 	p.nextToken()
 
-	for !p.curTokenIs(token.END_RESOURCE) && !p.curTokenIs(token.EOF) {
+	for !p.curTokenIs(token.END_RESOURCE) && !p.curTokenIs(token.EOF) { // cspell:disable-line
 		switch p.curToken.Type {
+		case token.VAR_GLOBAL:
+			globalVar := p.parseGlobalVarDeclStatement()
+			if globalVar != nil {
+				// This assumes ast.ResourceDeclaration has a GlobalVars field.
+				stmt.GlobalVars = append(stmt.GlobalVars, globalVar)
+			}
 		case token.TASK:
 			task := p.parseTaskDeclaration()
 			if task != nil {
 				stmt.Tasks = append(stmt.Tasks, task)
 			}
+			p.expectPeek(token.SEMICOLON)
 		case token.PROGRAM:
 			progConfig := p.parseProgramConfiguration()
 			if progConfig != nil {
 				stmt.Programs = append(stmt.Programs, progConfig)
 			}
+			p.expectPeek(token.SEMICOLON)
+		case token.IDENT:
+			// An IDENT at this level is likely a misplaced program instantiation.
+			// The correct syntax is `PROGRAM <instance> ...`
+			p.currentError("unexpected identifier '%s' in resource block, use PROGRAM keyword for instantiation", p.curToken.Literal)
+			p.nextToken() // Skip to recover
+
+		default:
+			p.currentError("unexpected token '%s' in resource block", p.curToken.Type)
+			p.nextToken() // Skip to recover
 		}
 		p.nextToken()
+	}
+
+	return stmt
+}
+
+// parseProgramConfiguration parses a program instantiation within a resource block.
+// The new syntax is: `PROGRAM InstanceName WITH TaskName : ProgramType;`
+func (p *Parser) parseProgramConfiguration() *ast.ProgramConfiguration {
+	defer untrace(trace("parseProgramConfiguration"))
+	// Current token is PROGRAM.
+	stmt := &ast.ProgramConfiguration{Token: p.curToken}
+
+	// After PROGRAM, check for optional RETAIN or NON_RETAIN
+	if p.peekTokenIs(token.RETAIN) {
+		p.nextToken() // consume PROGRAM, curToken is now RETAIN
+		stmt.IsRetain = true
+	} else if p.peekTokenIs(token.NON_RETAIN) {
+		p.nextToken() // consume PROGRAM, curToken is now NON_RETAIN
+		stmt.IsNonRetain = true
+	}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected program instance name
+	}
+	stmt.InstanceName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Check for optional WITH clause
+	if p.peekTokenIs(token.WITH) {
+		p.nextToken() // consume instance name, move to WITH
+		p.nextToken() // consume WITH
+		if !p.curTokenIs(token.IDENT) {
+			p.currentError("expected task name after 'WITH', got %s", p.curToken.Type)
+			return nil
+		}
+		stmt.TaskName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	// After instance name and optional WITH clause, we expect a colon.
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+
+	// After the colon is the program type name.
+	if !p.expectPeek(token.IDENT) {
+		p.currentError("expected program type name after ':', got %s", p.curToken.Type)
+		return nil
+	}
+	stmt.TypeName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Optional parameters: (...)
+	if p.peekTokenIs(token.LPAREN) {
+		p.nextToken() // consume type name
+		allParams := p.parseExpressionList(token.RPAREN)
+		stmt.Parameters = []ast.Expression{}
+		stmt.FbTasks = []*ast.FbTaskAssociation{}
+		for _, param := range allParams {
+			if fbTask, ok := param.(*ast.FbTaskAssociation); ok {
+				stmt.FbTasks = append(stmt.FbTasks, fbTask)
+			} else {
+				stmt.Parameters = append(stmt.Parameters, param)
+			}
+		}
 	}
 
 	return stmt
@@ -1208,7 +1321,11 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 			stmt.Priority = p.parseExpression(LOWEST)
 		default:
 			p.currentError("unexpected token in task configuration: %s", p.curToken.Type)
-			return stmt // return for recovery
+			// Synchronize to the end of the task declaration to allow parsing to continue.
+			for !p.curTokenIs(token.RPAREN) && !p.curTokenIs(token.EOF) {
+				p.nextToken()
+			}
+			return stmt
 		}
 
 		p.nextToken() // Advance past the expression value
@@ -1218,12 +1335,14 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 		}
 		if !p.curTokenIs(token.COMMA) {
 			p.currentError("expected ',' or ')' in task configuration, got %s", p.curToken.Type)
-			return stmt
+			// Synchronize to the end of the task declaration to allow parsing to continue.
+			for !p.curTokenIs(token.RPAREN) && !p.curTokenIs(token.EOF) {
+				p.nextToken()
+			}
+			return stmt // Return partially parsed statement for recovery
 		}
 		p.nextToken() // consume comma, move to next keyword
 	}
-
-	p.nextToken() // Consume ')'
 
 	return stmt
 }
@@ -1348,18 +1467,6 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	leftExp := prefix()
 
 	for !p.peekTokenIs(token.SEMICOLON) && precedence < p.peekPrecedence() {
-		// This is a workaround for a suspected lexer bug where '=' is tokenized
-		// as an IDENTIFIER instead of an operator token. We manually check for it
-		// and treat it as an infix operator.
-		if p.peekToken.Type == token.IDENT && p.peekToken.Literal == "=" {
-			if precedence < EQUALS { // Use the same precedence as '=='
-				p.nextToken() // Consume leftExp, curToken is now '='
-				// Manually construct the InfixExpression for '='
-				leftExp = p.parseInfixExpression(leftExp)
-				continue // Continue the loop to check for more operators
-			}
-		}
-
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -1575,11 +1682,11 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	// After parsing the condition, the next token should be THEN.
 	if !p.expectPeek(token.THEN) {
 		// Error recovery: if THEN is missing, an error has been logged by expectPeek.
-		// We return the partially parsed statement and let the main ParseProgram loop's
-		// recovery mechanism handle synchronization to the next statement.
-		//return ifStmt
+		// expectPeek has already advanced us to the start of the consequence,
+		// so we don't need to do anything extra to recover here.
+	} else {
+		p.nextToken() // Consume THEN
 	}
-	p.nextToken() // Consume THEN
 
 	ifStmt.Consequence = p.parseBlockStatementUntil(token.ELSIF, token.ELSE, token.END_IF)
 
@@ -1643,11 +1750,17 @@ func (p *Parser) parseForStatement() ast.Statement {
 	stmt.ControlVar = &ast.AssignmentStatement{Token: assignToken, Left: controlVarIdent, Value: startValue}
 
 	// After parsing the start value, the next token should be TO.
+	// If 'TO' is missing, expectPeek will log an error. We then proceed to parse
+	// the EndValue from the current token (which would be the unexpected token).
+	// If 'TO' was present, expectPeek would have consumed it, and p.curToken would be 'TO'.
 	if !p.expectPeek(token.TO) {
-		return nil
+		// Error logged by expectPeek. expectPeek has already advanced us
+		// to the token that should have been the EndValue.
+		// So we can just proceed to parse the expression now.
+	} else {
+		// If 'TO' was found, p.curToken is now 'TO'. Advance past it to the actual EndValue.
+		p.nextToken()
 	}
-
-	p.nextToken() // Move to the start of the EndValue expression
 	stmt.EndValue = p.parseExpression(LOWEST)
 
 	// [BY <step_value>]
@@ -2057,6 +2170,17 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 	}
 
 	for !isEndToken(p.curToken.Type) && !p.curTokenIs(token.EOF) {
+		// Heuristic for error recovery: if we encounter a keyword that can only start a
+		// top-level POU or a VAR block, it's a strong signal that the current block
+		// was not closed correctly. We stop parsing this block and let the calling
+		// function handle the error.
+		isTopLevelOrVarKeyword := func(t token.TokenType) bool {
+			return t == token.PROGRAM || t == token.FUNCTION || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION || t == token.VAR
+		}
+		if isTopLevelOrVarKeyword(p.curToken.Type) {
+			break
+		}
+
 		// Skip any comments that might be inside the block.
 		if p.curTokenIs(token.COMMENT) {
 			p.nextToken()
@@ -2394,6 +2518,22 @@ func (p *Parser) parseGenericExpressionList(end token.TokenType) []ast.Expressio
 // parseCallArgument parses a single argument in a function call, which can be positional, named input, or named output.
 func (p *Parser) parseCallArgument() ast.Expression {
 	defer untrace(trace("parseCallArgument"))
+
+	// Check for fb_task: fb_name WITH task_name
+	// This is a specific pattern IDENTIFIER WITH IDENTIFIER
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.WITH) && p.peek2TokenIs(token.IDENT) {
+		fbName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume fb_name, curToken is now WITH
+		p.nextToken() // consume WITH, curToken is now task_name
+		taskName := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+		return &ast.FbTaskAssociation{
+			Token:    fbName.Token,
+			FbName:   fbName,
+			TaskName: taskName,
+		}
+	}
+
 	// Check for named arguments (IDENT := or IDENT =>)
 	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
 		p.currentError("expected := or => in function block parameter, got :")

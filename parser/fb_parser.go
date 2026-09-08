@@ -29,6 +29,7 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	p.nextToken()
 
 	// Loop to parse all variable declaration blocks
+var_loop:
 	for {
 		// This switch handles the various types of variable blocks that can appear
 		// at the start of a function block declaration.
@@ -53,11 +54,9 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 			p.parseGlobalVarDeclStatement() // Parse to recover
 		default:
 			// No more VAR blocks, break the loop to parse the body
-			goto end_var_parsing
+			break var_loop
 		}
 	}
-end_var_parsing:
-
 	// After var blocks, we have the body. Check if it's IL or ST.
 	// A simple heuristic: if it starts with an IL operator, parse as IL.
 	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {

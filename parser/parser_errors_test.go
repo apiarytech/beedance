@@ -67,6 +67,41 @@ func TestParserErrorHandling(t *testing.T) {
 			input:         `PROGRAM Test; VAR arr: ARRAY[1..10] OF; END_VAR END_PROGRAM`,
 			expectedError: "expected a data type after 'OF' in array definition",
 		},
+		{
+			name:          "Unterminated string literal",
+			input:         `'this is an unterminated string`,
+			expectedError: "unterminated string",
+		},
+		{
+			name:          "Missing function block name",
+			input:         `FUNCTION_BLOCK;`,
+			expectedError: "expected next token to be IDENT, got ; instead",
+		},
+		{
+			name:          "Invalid IL mnemonic",
+			input:         `FUNCTION_BLOCK MyIlFb LD A; NOT_AN_OP B; END_FUNCTION_BLOCK`,
+			expectedError: `expected IL instruction mnemonic (e.g., LD, ST, ADD), got "NOT_AN_OP"`,
+		},
+		{
+			name:          "IL instruction followed by statement keyword",
+			input:         `FUNCTION_BLOCK MyIlFb LD IF x > 0 THEN END_IF END_FUNCTION_BLOCK`,
+			expectedError: `expected IL instruction mnemonic (e.g., LD, ST, ADD), got "IF"`,
+		},
+		{
+			name:          "Missing program instance name in VAR_CONFIG",
+			input:         `VAR_CONFIG;`,
+			expectedError: "expected program instance name after VAR_CONFIG, got ;",
+		},
+		{
+			name:          "Invalid prefix token",
+			input:         `* 5;`,
+			expectedError: "no prefix parse function for * found",
+		},
+		{
+			name:          "Invalid infix token",
+			input:         `5 NOT 5;`,
+			expectedError: "expected next token to be ;, got NOT instead",
+		},
 	}
 
 	for _, tt := range tests {

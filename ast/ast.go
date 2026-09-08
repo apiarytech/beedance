@@ -187,12 +187,13 @@ func (dv *DirectVariable) String() string {
 
 // ConfigurationDeclaration represents a CONFIGURATION block.
 type ConfigurationDeclaration struct {
-	Token      token.Token // The 'CONFIGURATION' token
-	Name       *Identifier
-	GlobalVars []*GlobalVarDeclaration
-	Resources  []*ResourceDeclaration
-	AccessVars []*AccessVarDeclaration
-	VarConfigs []*ConfigVarDeclaration
+	Token           token.Token // The 'CONFIGURATION' token
+	Name            *Identifier
+	GlobalVars      []*GlobalVarDeclaration
+	Resources       []*ResourceDeclaration
+	AccessVars      []*AccessVarDeclaration
+	VarConfigs      []*ConfigVarDeclaration
+	LeadingComments []string
 }
 
 // statementNode marks ConfigurationDeclaration as a statement node.
@@ -200,6 +201,9 @@ func (cd *ConfigurationDeclaration) statementNode() {}
 
 // Pos returns the position of the configuration token.
 func (cd *ConfigurationDeclaration) Pos() (int, int) { return cd.Token.Row, cd.Token.Column }
+
+// GetLeadingComments returns the leading comments for the statement.
+func (cd *ConfigurationDeclaration) GetLeadingComments() []string { return cd.LeadingComments }
 
 // TokenLiteral returns the literal value of the token.
 func (cd *ConfigurationDeclaration) TokenLiteral() string { return cd.Token.Literal }
@@ -247,7 +251,15 @@ func (rd *ResourceDeclaration) TokenLiteral() string { return rd.Token.Literal }
 func (rd *ResourceDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("RESOURCE " + rd.Name.String() + " ON " + rd.ResourceType.String() + "\n")
-	// ... string representations for children
+	for _, gv := range rd.GlobalVars {
+		out.WriteString(gv.String() + "\n")
+	}
+	for _, task := range rd.Tasks {
+		out.WriteString(task.String() + "\n")
+	}
+	for _, prog := range rd.Programs {
+		out.WriteString(prog.String() + "\n")
+	}
 	out.WriteString("END_RESOURCE")
 	return out.String()
 }
@@ -274,28 +286,51 @@ func (td *TaskDeclaration) TokenLiteral() string { return td.Token.Literal }
 func (td *TaskDeclaration) String() string {
 	var out bytes.Buffer
 	out.WriteString("TASK " + td.Name.String())
-	out.WriteString("(")
+	params := []string{}
 	if td.Single != nil {
-		out.WriteString("SINGLE := ")
-		out.WriteString(td.Single.String())
+		params = append(params, "SINGLE := "+td.Single.String())
 	}
 	if td.Interval != nil {
-		out.WriteString("INTERVAL := ")
-		out.WriteString(td.Interval.String())
+		params = append(params, "INTERVAL := "+td.Interval.String())
 	}
-	out.WriteString("PRIORITY := ")
-	out.WriteString(td.Priority.String())
+	if td.Priority != nil {
+		params = append(params, "PRIORITY := "+td.Priority.String())
+	}
+	out.WriteString("(")
+	out.WriteString(strings.Join(params, ", "))
 	out.WriteString(")")
+	return out.String()
+}
+
+// FbTaskAssociation represents an association of a function block instance
+// to a specific task within a program configuration. e.g., FB1 WITH MyTask
+type FbTaskAssociation struct {
+	Token    token.Token // The fb_name token
+	FbName   *Identifier
+	TaskName *Identifier
+}
+
+func (fta *FbTaskAssociation) expressionNode()      {}
+func (fta *FbTaskAssociation) Pos() (int, int)      { return fta.Token.Row, fta.Token.Column }
+func (fta *FbTaskAssociation) TokenLiteral() string { return fta.Token.Literal }
+func (fta *FbTaskAssociation) String() string {
+	var out bytes.Buffer
+	out.WriteString(fta.FbName.String())
+	out.WriteString(" WITH ")
+	out.WriteString(fta.TaskName.String())
 	return out.String()
 }
 
 // ProgramConfiguration represents a program instance within a RESOURCE.
 type ProgramConfiguration struct {
 	Token        token.Token // The 'PROGRAM' token
+	IsRetain     bool        // cspell:disable-line
+	IsNonRetain  bool        // cspell:disable-line
 	InstanceName *Identifier
 	TaskName     *Identifier // Optional: from WITH clause
 	TypeName     *Identifier
-	Parameters   []Expression // <-- Add this line
+	Parameters   []Expression         // Holds prog_cnxn elements
+	FbTasks      []*FbTaskAssociation // Holds fb_task elements
 }
 
 // statementNode marks ProgramConfiguration as a statement node.
@@ -311,6 +346,12 @@ func (pc *ProgramConfiguration) TokenLiteral() string { return pc.Token.Literal 
 func (pc *ProgramConfiguration) String() string {
 	var out bytes.Buffer
 	out.WriteString("PROGRAM ")
+	if pc.IsRetain {
+		out.WriteString("RETAIN ")
+	}
+	if pc.IsNonRetain {
+		out.WriteString("NON_RETAIN ")
+	}
 	out.WriteString(pc.InstanceName.String())
 	if pc.TaskName != nil {
 		out.WriteString(" WITH ")
@@ -318,6 +359,19 @@ func (pc *ProgramConfiguration) String() string {
 	}
 	out.WriteString(" : ")
 	out.WriteString(pc.TypeName.String())
+
+	// Combine FbTasks and Parameters for printing
+	allParams := []string{}
+	for _, fbTask := range pc.FbTasks {
+		allParams = append(allParams, fbTask.String())
+	}
+	for _, param := range pc.Parameters {
+		allParams = append(allParams, param.String())
+	}
+
+	if len(allParams) > 0 {
+		out.WriteString("(" + strings.Join(allParams, ", ") + ")")
+	}
 	out.WriteString(";")
 	return out.String()
 }
@@ -955,6 +1009,16 @@ func (cs *CaseStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("CASE ")
 	out.WriteString(cs.Expression.String())
+	out.WriteString(" OF\n")
+	for _, c := range cs.Cases {
+		out.WriteString("\t" + c.String() + "\n")
+	}
+	if cs.Alternative != nil {
+		out.WriteString("ELSE\n\t")
+		out.WriteString(cs.Alternative.String())
+		out.WriteString("\n")
+	}
+	out.WriteString("END_CASE")
 	return out.String()
 }
 
@@ -1942,16 +2006,27 @@ func (ss *StepStatement) TokenLiteral() string { return ss.Token.Literal }
 // String returns the string representation of the step statement.
 func (ss *StepStatement) String() string {
 	var out bytes.Buffer
+	if ss.IsInitial {
+		out.WriteString("INITIAL_STEP ")
+	} else {
+		out.WriteString("STEP ")
+	}
+	out.WriteString(ss.Name.String())
+	out.WriteString(":\n")
 	for _, a := range ss.Actions {
-		out.WriteString(a.String())
+		out.WriteString("\t" + a.String() + "\n")
 	}
-	for _, t := range ss.Transitions {
-		out.WriteString(t.String())
-	}
-	out.WriteString("STEP " + ss.Name.String())
 	if ss.Body != nil {
-		out.WriteString("\n" + ss.Body.String())
+		bodyStr := ss.Body.String()
+		if bodyStr != "" {
+			if len(ss.Actions) > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString(bodyStr)
+			out.WriteString("\n")
+		}
 	}
+	out.WriteString("END_STEP")
 	return out.String()
 }
 
@@ -1972,8 +2047,33 @@ func (ts *TransitionStatement) Pos() (int, int) { return ts.Token.Row, ts.Token.
 // TokenLiteral returns the literal value of the token.
 func (ts *TransitionStatement) TokenLiteral() string { return ts.Token.Literal }
 
-// String returns the string "TRANSITION".
-func (ts *TransitionStatement) String() string { return "TRANSITION" }
+// String returns the string representation of the transition statement.
+func (ts *TransitionStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("TRANSITION")
+	if len(ts.From) > 0 {
+		out.WriteString(" FROM ")
+		froms := []string{}
+		for _, f := range ts.From {
+			froms = append(froms, f.String())
+		}
+		out.WriteString(strings.Join(froms, ", "))
+	}
+	if len(ts.To) > 0 {
+		out.WriteString(" TO ")
+		tos := []string{}
+		for _, t := range ts.To {
+			tos = append(tos, t.String())
+		}
+		out.WriteString(strings.Join(tos, ", "))
+	}
+	out.WriteString(" := ")
+	if ts.Condition != nil {
+		out.WriteString(ts.Condition.String())
+	}
+	out.WriteString(";\nEND_TRANSITION")
+	return out.String()
+}
 
 // SFCProgram represents a Sequential Function Chart program.
 type SFCProgram struct {
@@ -1985,13 +2085,18 @@ type SFCProgram struct {
 func (sp *SFCProgram) statementNode() {}
 
 // TokenLiteral returns the literal value of the token.
-func (sp *SFCProgram) TokenLiteral() string { return sp.Token.Literal }
+func (sp *SFCProgram) TokenLiteral() string {
+	if len(sp.Elements) > 0 {
+		return sp.Elements[0].TokenLiteral()
+	}
+	return sp.Token.Literal
+}
 
 // String returns the string representation of the SFC program.
 func (sp *SFCProgram) String() string {
 	var out bytes.Buffer
 	for _, s := range sp.Elements {
-		out.WriteString(s.String())
+		out.WriteString(s.String() + "\n")
 	}
 	return out.String()
 }

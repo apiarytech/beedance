@@ -396,17 +396,6 @@ func (l *Lexer) readNumber() (string, token.TokenType) {
 	return l.input[position:l.position], tokType
 }
 
-// readTimeLiteralValue consumes the value part of a time or date literal. This is
-// a special case because these literals can contain characters like `-` and `:`
-// which would normally be treated as separate tokens.
-func (l *Lexer) readTimeLiteralValue() string {
-	position := l.position
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '.' || l.ch == '-' || l.ch == ':' {
-		l.readChar()
-	}
-	return l.input[position:l.position]
-}
-
 // readDirectVariable consumes a directly represented variable, like `%IX0.0` or `%MW100`.
 func (l *Lexer) readDirectVariable() string {
 	position := l.position
@@ -416,36 +405,6 @@ func (l *Lexer) readDirectVariable() string {
 		l.readChar()
 	}
 	return l.input[position:l.position]
-}
-
-// readBasedIntegerPart consumes the value part of a based integer literal, such as `16#FF_AB`.
-func (l *Lexer) readBasedIntegerPart() {
-	// Optional base (e.g., 2, 8, 16)
-	if isDigit(l.ch) {
-		for isDigit(l.ch) {
-			l.readChar()
-		}
-	}
-
-	// It must be followed by a hash
-	if l.ch == '#' {
-		l.readChar() // consume '#'
-	}
-
-	// Value part (hex digits for bit-strings)
-	for isHexDigit(l.ch) || l.ch == '_' {
-		l.readChar()
-	}
-}
-
-// readIntegerPart consumes a standard integer value, including an optional sign.
-func (l *Lexer) readIntegerPart() {
-	if l.ch == '+' || l.ch == '-' {
-		l.readChar()
-	}
-	for isDigit(l.ch) || l.ch == '_' {
-		l.readChar()
-	}
 }
 
 // readString consumes a string literal enclosed in either single or double quotes.
@@ -466,33 +425,6 @@ func (l *Lexer) readString(quote byte) (string, token.TokenType) {
 		return l.input[position:l.position], token.WSTRING_LITERAL
 	} else {
 		return l.input[position:l.position], token.STRING_LITERAL
-	}
-}
-
-// readRealPart reads the value part of a REAL or LREAL literal.
-func (l *Lexer) readRealPart() {
-	// This logic is similar to readNumber but simplified for the value part of a typed literal.
-	if l.ch == '+' || l.ch == '-' {
-		l.readChar()
-	}
-	for isDigit(l.ch) || l.ch == '_' {
-		l.readChar()
-	}
-	if l.ch == '.' {
-		l.readChar() // consume '.'
-		for isDigit(l.ch) || l.ch == '_' {
-			l.readChar()
-		}
-	}
-	// Check for an exponent part (e.g., E+4, e-2)
-	if l.ch == 'e' || l.ch == 'E' {
-		l.readChar() // consume 'e' or 'E'
-		if l.ch == '+' || l.ch == '-' {
-			l.readChar()
-		}
-		for isDigit(l.ch) || l.ch == '_' {
-			l.readChar()
-		}
 	}
 }
 

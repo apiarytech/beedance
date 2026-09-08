@@ -1,0 +1,66 @@
+configuration_name ::= identifier
+resource_type_name ::= identifier
+configuration_declaration ::=
+'CONFIGURATION' configuration_name
+   [global_var_declarations]
+   (single_resource_declaration
+      | (resource_declaration {resource_declaration}))
+   [access_declarations]
+   [instance_specific_initializations]
+'END_CONFIGURATION'
+resource_declaration ::=
+'RESOURCE' resource_name 'ON' resource_type_name
+   [global_var_declarations]
+   single_resource_declaration
+ 'END_RESOURCE'
+single_resource_declaration ::=
+{task_configuration ';'}
+program_configuration ';'
+{program_configuration ';'}
+resource_name ::= identifier
+access_declarations ::=
+'VAR_ACCESS'
+ access_declaration ';'
+ {access_declaration ';'}
+'END_VAR'
+access_declaration ::= access_name ':' access_path ':'
+non_generic_type_name [direction]
+access_path ::= [resource_name '.'] direct_variable
+| [resource_name '.'] [program_name '.']
+    {fb_name'.'} symbolic_variable
+global_var_reference ::=
+[resource_name '.'] global_var_name ['.' structure_element_name]
+access_name ::= identifier
+program_output_reference ::= program_name '.' symbolic_variable
+program_name ::= identifier
+direction ::= 'READ_WRITE' | 'READ_ONLY'
+task_configuration ::= 'TASK' task_name task_initialization
+task_name := identifier
+task_initialization ::=
+'(' ['SINGLE' ':=' data_source ',']
+    ['INTERVAL' ':=' data_source ',']
+    'PRIORITY' ':=' integer ')'
+data_source ::= constant | global_var_reference
+| program_output_reference | direct_variable
+program_configuration ::=
+'PROGRAM' [RETAIN | NON_RETAIN]
+  program_name ['WITH' task_name] ':' program_type_name
+  ['(' prog_conf_elements ')']
+prog_conf_elements ::= prog_conf_element {',' prog_conf_element}
+prog_conf_element ::= fb_task | prog_cnxn
+fb_task ::= fb_name 'WITH' task_name
+prog_cnxn ::= symbolic_variable ':=' prog_data_source
+| symbolic_variable '=>' data_sink
+prog_data_source ::=
+constant | enumerated_value | global_var_reference | direct_variable
+data_sink ::= global_var_reference | direct_variable
+instance_specific_initializations ::=
+'VAR_CONFIG'
+  instance_specific_init ';'
+  {instance_specific_init ';'}
+'END_VAR'
+instance_specific_init ::=
+resource_name '.' program_name '.' {fb_name '.'}
+((variable_name [location] ':' located_var_spec_init) |
+ (fb_name ':' function_block_type_name ':='
+structure_initialization))

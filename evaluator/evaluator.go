@@ -105,10 +105,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// An ExternalVarDeclaration is a block of external variables.
 		return evalGenericVarBlock(node.Vars, env)
 	case *ast.AccessVarDeclaration:
-		// An AccessVarDeclaration defines variables that are mapped to external systems.
-		// For the evaluator, we'll treat this like a normal var block for now.
-		// A more complex implementation would handle the access path semantics.
-		return evalGenericVarBlock(node.Vars, env)
+		return evalAccessVarDeclaration(node, env)
 	case *ast.TempVarDeclaration:
 		// A TempVarDeclaration defines temporary variables for a POU.
 		// For a single evaluation pass, VAR_TEMP is the same as VAR.
@@ -159,50 +156,38 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return fb
 
 	case *ast.ProgramDeclaration:
-		// A ProgramDeclaration defines a main program unit. The evaluator creates a Program
-		// object, populates the environment with its variables, and then evaluates its body.
-		// When a PROGRAM is declared, we need to process its VAR blocks
-		// and then evaluate its body. If the body is an SFC, this will
-		// return the *object.SFC that can be scheduled.
+		// When a PROGRAM is declared, we create an object representing it.
+		// This object needs its own persistent environment for its static VARs.
+		instanceEnv := object.NewEnclosedEnvironment(env)
 		prog := &object.Program{
-			Name:        node.Name,
-			VarInputs:   node.VarInputs,
-			VarOutputs:  node.VarOutputs,
-			VarInOuts:   node.VarInOuts,
-			Vars:        node.Vars,
-			VarExternal: node.VarExternal,
-			VarGlobal:   node.VarGlobal,
-			VarAccess:   node.VarAccess,
-			VarTemp:     node.VarTemp,
-			Body:        node.Body,
-			Env:         env,
+			Name:       node.Name,
+			VarInputs:  node.VarInputs,
+			VarOutputs: node.VarOutputs,
+			VarInOuts:  node.VarInOuts,
+			Vars:       node.Vars,
+			VarTemp:    node.VarTemp,
+			Body:       node.Body,
+			Env:        instanceEnv, // The program's own persistent environment
 		}
-		// Set the program definition in the environment.
+		// Set the program definition in the outer environment.
 		env.Set(node.Name.Value, prog)
 
-		// Evaluate all GLOBAL VAR blocks to populate the environment.
-		for _, globalVarBlock := range node.VarGlobal {
-			Eval(globalVarBlock, env)
-		}
-		for _, externalVarBlock := range node.VarExternal {
-			Eval(externalVarBlock, env)
-		}
-		for _, accessVarBlock := range node.VarAccess {
-			Eval(accessVarBlock, env)
-		}
-
-		// Evaluate all VAR blocks to populate the environment.
+		// Evaluate all VAR blocks to populate the program's instance environment.
 		for _, varDecl := range node.Vars {
-			Eval(varDecl, env)
+			Eval(varDecl, instanceEnv)
 		}
 
-		// Evaluate all VAR_TEMP blocks. In the evaluator, they are treated like VAR.
-		for _, tempVarBlock := range node.VarTemp {
-			Eval(tempVarBlock, env)
+		// If the program has an SFC body, evaluate it to create the SFC object instance
+		// and store it in the program's persistent environment.
+		if sfcAST, isSFC := node.Body.(*ast.SFCProgram); isSFC {
+			sfcObj := evalSFCProgram(sfcAST, instanceEnv)
+			instanceEnv.Set("__sfc_instance__", sfcObj)
+			// For testing convenience, return the created SFC object.
+			return sfcObj
 		}
 
-		// Now, evaluate the body within the program's context.
-		return Eval(node.Body, env)
+		// For non-SFC programs, the declaration itself doesn't return a value.
+		return prog
 
 	case *ast.ReturnStatement:
 		// A ReturnStatement evaluates its return value and wraps it in a ReturnValue object to signal a return.
@@ -857,18 +842,21 @@ func evalIlProgram(stmts []ast.Statement, env *object.Environment) object.Object
 // conditional execution), updating the Current Result (CR) in the environment.
 func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.Environment) object.Object {
 	// 1. Handle conditional execution (C modifier)
-	// This applies to JMP, CAL, RET.
-	isConditional := strings.Contains(node.Modifier, "C")
+	op := strings.ToUpper(node.Operator)
+	isConditional := (op == "JMP" || op == "CAL" || op == "RET") && strings.Contains(node.Modifier, "C")
+
 	if isConditional {
 		crObj, ok := env.Get(currentResultVar)
-		isNegatedConditional := strings.Contains(node.Modifier, "N") // e.g., JMPCN
-
 		// If CR is not set, it's considered FALSE.
 		crIsTruthy := ok && object.IsTruthy(crObj)
+		isNegated := strings.Contains(node.Modifier, "N") // e.g., JMPCN
 
-		// If JMPC and CR is FALSE, skip.
-		// If JMPCN and CR is TRUE, skip.
-		if (isConditional && !isNegatedConditional && !crIsTruthy) || (isNegatedConditional && crIsTruthy) {
+		// JMPC/CALC/RETC jump/call/ret if CR is TRUE.
+		// JMPCN/CALCN/RETCN jump/call/ret if CR is FALSE.
+		// If the condition is not met, we skip the instruction by returning NULL.
+		// Skip JMPCN if CR is TRUE.
+		// Skip JMPC if CR is FALSE.
+		if (isNegated && crIsTruthy) || (!isNegated && !crIsTruthy) {
 			return NULL // Skip instruction
 		}
 	}
@@ -907,7 +895,7 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 	}
 
 	// 4. Execute the operator logic
-	switch strings.ToUpper(node.Operator) {
+	switch op {
 	case "LD":
 		env.Set(currentResultVar, operand)
 		return operand
@@ -959,10 +947,19 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 
 		// Reuse the infix evaluation logic
 		op := node.Operator
-		if op == "SUB" {
+		// Map IL operators to the standard operators expected by EvalInfix
+		switch strings.ToUpper(op) {
+		case "ADD":
+			op = "+"
+		case "SUB":
 			op = "-"
-		} // Map to standard operators if needed
+		case "MUL":
+			op = "*"
+		case "DIV":
+			op = "/"
+		}
 		result := object.EvalInfix(crObj, op, operand)
+
 		if isError(result) {
 			return result
 		}
@@ -1013,8 +1010,9 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 	if ident, ok := node.Left.(*ast.Identifier); ok {
 		// When assigning, we must check if the target is a pointer-like object
 		// (for VAR_IN_OUT or VAR ... AT) to update the underlying value correctly.
-		// We use GetRaw to get the object from the environment without dereferencing.
-		if existing, ok := env.GetRaw(ident.Value); ok {
+		// We use Get to find the variable, which may be in an outer scope (e.g.,
+		// when executing a POU body in an enclosed environment).
+		if existing, ok := env.Get(ident.Value); ok {
 			switch v := existing.(type) {
 			case *object.Constant:
 				// It's a constant. Assignment is not allowed.
@@ -1182,7 +1180,11 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 			}
 		}
 	}
-	env.Set(node.Name.Value, val)
+	if node.IsConstant {
+		env.Set(node.Name.Value, &object.Constant{Value: val})
+	} else {
+		env.Set(node.Name.Value, val)
+	}
 	return val
 }
 
@@ -1757,20 +1759,60 @@ func evalTaskDeclaration(taskDecl *ast.TaskDeclaration, env *object.Environment)
 // evalConfigurationDeclaration evaluates a CONFIGURATION block, setting up the
 // environments for its resources, tasks, and program instances.
 func evalConfigurationDeclaration(config *ast.ConfigurationDeclaration, env *object.Environment) object.Object {
-	// Create a new environment for the configuration to hold its resources and globals.
-	configEnv := object.NewEnclosedEnvironment(env)
-
 	// 1. Evaluate Global Vars first, so they are available to resources.
 	for _, globalVarBlock := range config.GlobalVars {
-		Eval(globalVarBlock, configEnv)
+		Eval(globalVarBlock, env)
 	}
 
 	// 2. Evaluate each resource.
 	for _, resNode := range config.Resources {
-		evalResourceDeclaration(resNode, configEnv)
+		evalResourceDeclaration(resNode, env)
+	}
+
+	// 3. Evaluate VAR_ACCESS blocks to create aliases.
+	for _, accessVarBlock := range config.AccessVars {
+		err := evalAccessVarDeclaration(accessVarBlock, env)
+		if isError(err) {
+			return err
+		}
+	}
+
+	// 4. Evaluate VAR_CONFIG blocks to link variables to hardware addresses.
+	for _, varConfigBlock := range config.VarConfigs {
+		err := evalVarConfigDeclaration(varConfigBlock, env)
+		if isError(err) {
+			return err
+		}
 	}
 
 	// In a real runtime, the configuration object would be returned and managed by a scheduler.
+	return NULL
+}
+
+// evalAccessVarDeclaration evaluates a VAR_ACCESS block, creating pointers
+// (aliases) in the current environment that point to variables elsewhere in the
+// configuration.
+func evalAccessVarDeclaration(node *ast.AccessVarDeclaration, env *object.Environment) object.Object {
+	for _, decl := range node.Vars {
+		// decl.Name is the local alias (e.g., BAKER)
+		// decl.AccessPath is the path to the target (e.g., STATION_1.P1.x2)
+
+		targetEnv, varName, err := resolveAccessPath(decl.AccessPath, env)
+		if err != nil {
+			return err
+		}
+
+		// Check if the target variable exists in the resolved environment.
+		if _, ok := targetEnv.Get(varName); !ok {
+			return newError(decl, "variable '%s' in VAR_ACCESS path not found in instance", varName)
+		}
+
+		// Create a pointer to the target variable.
+		ptr := &object.Pointer{Name: varName, Env: targetEnv}
+
+		// Set the local alias in the current (configuration) environment to be this pointer.
+		env.Set(decl.Name.Value, ptr)
+	}
 	return NULL
 }
 
@@ -1779,6 +1821,11 @@ func evalConfigurationDeclaration(config *ast.ConfigurationDeclaration, env *obj
 func evalResourceDeclaration(res *ast.ResourceDeclaration, configEnv *object.Environment) object.Object {
 	// Each resource has its own scope within the configuration.
 	resourceEnv := object.NewEnclosedEnvironment(configEnv)
+
+	// Evaluate resource-scoped global variables.
+	for _, globalVarBlock := range res.GlobalVars {
+		Eval(globalVarBlock, resourceEnv)
+	}
 
 	// Evaluate task declarations within the resource.
 	for _, taskDecl := range res.Tasks {
@@ -1801,6 +1848,82 @@ func evalResourceDeclaration(res *ast.ResourceDeclaration, configEnv *object.Env
 	return NULL
 }
 
+// evalVarConfigDeclaration evaluates a VAR_CONFIG block, linking unlocated
+// variables within program instances to specific hardware addresses.
+func evalVarConfigDeclaration(config *ast.ConfigVarDeclaration, env *object.Environment) object.Object {
+	for _, decl := range config.Declarations {
+		targetEnv, varName, err := resolveAccessPath(decl.AccessPath, env)
+		if err != nil {
+			return err
+		}
+
+		// The variable should exist in the target environment, but might be uninitialized (nil)
+		if _, ok := targetEnv.Get(varName); !ok {
+			return newError(decl, "variable '%s' in VAR_CONFIG path not found in instance", varName)
+		}
+
+		address := decl.Location.Location.String()
+		locatedObj := &object.Pointer{Name: address, Env: nil} // Pointer to I/O map
+
+		// Replace the variable in the target environment with the I/O pointer
+		targetEnv.Set(varName, locatedObj)
+
+		// Initialize the I/O map if not present
+		if _, ok := ioMap[address]; !ok {
+			ioMap[address] = NULL
+		}
+	}
+	return NULL
+}
+
+// resolveAccessPath traverses an AST member access path (e.g., `Res1.P1.Sensor`)
+// to find the environment of the final instance and the name of the member variable.
+func resolveAccessPath(node ast.Expression, startEnv *object.Environment) (*object.Environment, string, *object.Error) {
+	pathParts := []string{}
+	curr := node
+	for {
+		member, ok := curr.(*ast.MemberAccessExpression)
+		if !ok {
+			ident, ok := curr.(*ast.Identifier)
+			if !ok {
+				return nil, "", newError(node, "invalid access path in VAR_CONFIG: must be a chain of identifiers")
+			}
+			pathParts = append(pathParts, ident.Value)
+			break
+		}
+		pathParts = append(pathParts, member.Member.Value)
+		curr = member.Struct
+	}
+
+	// Reverse the path parts to get the correct order (e.g., from ["c", "b", "a"] to ["a", "b", "c"])
+	for i, j := 0, len(pathParts)-1; i < j; i, j = i+1, j-1 {
+		pathParts[i], pathParts[j] = pathParts[j], pathParts[i]
+	}
+
+	finalVarName := pathParts[len(pathParts)-1]
+	pathPrefix := pathParts[:len(pathParts)-1]
+
+	currentEnv := startEnv
+	for _, part := range pathPrefix {
+		obj, ok := currentEnv.Get(part)
+		if !ok {
+			return nil, "", newError(node, "name '%s' not found in VAR_CONFIG path", part)
+		}
+
+		// The object must be an instance with its own environment.
+		switch instance := obj.(type) {
+		case *object.FunctionBlockInstance: // For resources
+			currentEnv = instance.Env
+		case *object.ProgramInstance:
+			currentEnv = instance.Env
+		default:
+			return nil, "", newError(node, "path element '%s' is not a configurable instance (got %s)", part, obj.Type())
+		}
+	}
+
+	return currentEnv, finalVarName, nil
+}
+
 // evalProgramConfiguration evaluates a program instance declaration within a
 // resource, creating a ProgramInstance object with its own environment and applying configured parameters.
 func evalProgramConfiguration(progConfig *ast.ProgramConfiguration, resourceEnv *object.Environment) object.Object {
@@ -1818,9 +1941,11 @@ func evalProgramConfiguration(progConfig *ast.ProgramConfiguration, resourceEnv 
 	instanceEnv := object.NewEnclosedEnvironment(progDef.Env)
 	progInstance := &object.ProgramInstance{
 		Definition: progDef,
-		// Store the task name on the instance itself.
-		TaskName: progConfig.TaskName.Value,
-		Env:      instanceEnv,
+		Env:        instanceEnv,
+	}
+	// Store the task name on the instance itself, if it exists.
+	if progConfig.TaskName != nil {
+		progInstance.TaskName = progConfig.TaskName.Value
 	}
 
 	// 3. Initialize default values for all variables in the instance.
@@ -2144,6 +2269,141 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		}
 		return returnValue
 
+	case *object.Program:
+		// Treat a program call like a function call.
+		// The program `fn` has its own persistent environment `fn.Env` where static VARs live.
+		// We create a new temporary environment for this specific call, enclosing the program's persistent one.
+		// This gives access to static VARs but provides a clean scope for VAR_INPUT and VAR_TEMP.
+		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+
+		// Pre-declare the program name as a variable in the local scope for the return value.
+		extendedEnv.Set(fn.Name.Value, NULL)
+
+		// Programs can have VAR_INPUT, so we should handle arguments.
+		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, extendedEnv)
+		if err != nil {
+			return err
+		}
+
+		// Initialize only VAR_TEMP variables for this specific call. Static VARs are already in fn.Env.
+		for _, tempBlock := range fn.VarTemp {
+			for _, tempVar := range tempBlock.Vars {
+				if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+					return err
+				}
+			}
+		}
+
+		// Execute the program body.
+		var evaluated object.Object
+		if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
+			sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
+			if !isSFC {
+				return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
+			}
+			// If it's an SFC program, a "call" means running one cycle.
+			evaluated = evalSFCCycle(sfcInstance, extendedEnv)
+		} else {
+			// For ST/IL programs, evaluate the whole body.
+			evaluated = Eval(fn.Body, extendedEnv)
+		}
+		if isError(evaluated) {
+			return evaluated
+		}
+
+		// Handle output arguments (=>).
+		for _, mapping := range outputMappings {
+			val, ok := extendedEnv.Get(mapping.SourceParamName)
+			if !ok {
+				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in program scope", mapping.SourceParamName)
+			}
+			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
+				callEnv.Set(targetIdent.Value, val)
+			} else {
+				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			}
+		}
+
+		// Check if the body was IL. If so, the result is the accumulator from that run.
+		if block, isBlock := fn.Body.(*ast.BlockStatement); isBlock {
+			if len(block.Statements) > 0 {
+				if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL {
+					// For IL, the result of the call is the last value of the accumulator.
+					// The accumulator's value is the result of the last instruction, which is `evaluated`.
+					return evaluated
+				}
+			}
+		}
+
+		// The return value is the value assigned to the program's name.
+		returnValue, _ := extendedEnv.Get(fn.Name.Value)
+		return returnValue
+
+	case *object.ProgramInstance:
+		// A program instance is being called.
+		// Its environment `fn.Env` is already an enclosed environment that holds its state.
+		// We create a new temporary environment for this specific call, enclosing the instance's persistent one.
+		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+
+		// Pre-declare the program name as a variable in the local scope for the return value.
+		extendedEnv.Set(fn.Definition.Name.Value, NULL)
+
+		// Handle arguments.
+		_, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, extendedEnv)
+		if err != nil {
+			return err
+		}
+
+		// Initialize only VAR_TEMP variables for this specific call. Static VARs are already in fn.Env.
+		for _, tempBlock := range fn.Definition.VarTemp {
+			for _, tempVar := range tempBlock.Vars {
+				if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+					return err
+				}
+			}
+		}
+
+		// Execute the program body.
+		var evaluated object.Object
+		if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
+			sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
+			if !isSFC {
+				return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
+			}
+			evaluated = evalSFCCycle(sfcInstance, extendedEnv)
+		} else {
+			evaluated = Eval(fn.Definition.Body, extendedEnv)
+		}
+		if isError(evaluated) {
+			return evaluated
+		}
+
+		// Handle output arguments (=>).
+		for _, mapping := range outputMappings {
+			val, ok := extendedEnv.Get(mapping.SourceParamName)
+			if !ok {
+				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in program scope", mapping.SourceParamName)
+			}
+			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
+				callEnv.Set(targetIdent.Value, val)
+			} else {
+				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			}
+		}
+
+		// Check if the body was IL. If so, the result is the accumulator from that run.
+		if block, isBlock := fn.Definition.Body.(*ast.BlockStatement); isBlock {
+			if len(block.Statements) > 0 {
+				if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL {
+					return evaluated
+				}
+			}
+		}
+
+		// The return value is the value assigned to the program's name.
+		returnValue, _ := extendedEnv.Get(fn.Definition.Name.Value)
+		return returnValue
+
 	case *object.BuiltinFunctionBlock:
 		// This case is hit when a variable is declared with a standard FB type, e.g., `MyTimer : TON;`
 		// We need to create an instance of it.
@@ -2304,6 +2564,8 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 		paramDecls = fbDef.VarInputs
 	} else if fDef, ok := def.(*object.Function); ok && fDef != nil {
 		paramDecls = fDef.VarInputs
+	} else if pDef, ok := def.(*object.Program); ok && pDef != nil {
+		paramDecls = pDef.VarInputs
 	}
 	// If def is nil, it's a built-in FB, and we just write to the targetEnv.
 
@@ -2400,6 +2662,8 @@ func isInOutParam(paramName string, def object.Object) bool {
 		inOutDecls = fbDef.VarInOuts
 	} else if fDef, ok := def.(*object.Function); ok && fDef != nil {
 		inOutDecls = fDef.VarInOuts
+	} else if pDef, ok := def.(*object.Program); ok && pDef != nil {
+		inOutDecls = pDef.VarInOuts
 	}
 
 	for _, decl := range inOutDecls {

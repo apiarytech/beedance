@@ -82,6 +82,24 @@ func TestExpandMacros(t *testing.T) {
 			reverse(2 + 2, 10 - 5);`,
 			`((10 - 5) - (2 + 2));`,
 		},
+		{
+			// Test case for when macro evaluation results in an error.
+			// The macro should not be expanded, and the original call is returned.
+			`VAR errorMacro : MACRO := macro() { 1 + TRUE; }; END_VAR errorMacro();`,
+			`errorMacro();`,
+		},
+		{
+			// Test case for a non-macro function call, which should not be expanded.
+			// This covers the `if !ok` in `isMacroCall`.
+			`LEN("test");`,
+			`LEN("test");`,
+		},
+		{
+			// Test case for a call expression where the function is not a simple identifier.
+			// This covers the `if !ok` in `isMacroCall` for `exp.Function.(*ast.Identifier)`.
+			`get_macro()();`,
+			`get_macro()();`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -97,6 +115,87 @@ func TestExpandMacros(t *testing.T) {
 				expected.String(), expanded.String())
 		}
 	}
+}
+
+func TestExpandMacrosOnNonMacroCall(t *testing.T) {
+	input := `myNonMacro();`
+	expected := `myNonMacro();`
+
+	program := testParseProgram(input)
+	env := object.NewEnvironment()
+
+	// Manually add a non-macro object to the environment to simulate a function
+	// or other variable being present. This is to specifically test the
+	// `macro, ok := obj.(*object.Macro)` type assertion inside `isMacroCall`.
+	env.Set("myNonMacro", &object.LInt{Value: 123}) // Any non-macro object will do.
+
+	// DefineMacros won't find any macros to define.
+	DefineMacros(program, env)
+
+	// ExpandMacros should ignore the call to `myNonMacro` because it's not a macro.
+	expanded := ExpandMacros(program, env)
+
+	if expanded.String() != expected {
+		t.Errorf("macro expansion failed. want=%q, got=%q",
+			expected, expanded.String())
+	}
+}
+
+func TestIsMacroDefinition(t *testing.T) {
+	t.Run("Valid Macro Definition", func(t *testing.T) {
+		input := `VAR mymacro : MACRO := MACRO() { EXPR(1); }; END_VAR`
+		program := testParseProgram(input)
+		varBlock := program.Statements[0].(*ast.VarBlockDeclaration)
+		decl := varBlock.Declarations[0]
+
+		if !isMacroDefinition(decl) {
+			t.Errorf("isMacroDefinition() returned false for a valid macro definition")
+		}
+	})
+
+	t.Run("Not a Macro (regular var)", func(t *testing.T) {
+		input := `VAR myvar : INT := 5; END_VAR`
+		program := testParseProgram(input)
+		varBlock := program.Statements[0].(*ast.VarBlockDeclaration)
+		decl := varBlock.Declarations[0]
+
+		if isMacroDefinition(decl) {
+			t.Errorf("isMacroDefinition() returned true for a regular variable definition")
+		}
+	})
+
+	t.Run("Not a VarDeclStatement", func(t *testing.T) {
+		// This test case specifically covers the `if !ok` branch in isMacroDefinition.
+		input := `5 + 5;`
+		program := testParseProgram(input)
+		stmt := program.Statements[0] // This will be an *ast.ExpressionStatement
+
+		if isMacroDefinition(stmt) {
+			t.Errorf("isMacroDefinition() returned true for a non-VarDeclStatement")
+		}
+	})
+}
+
+func TestExpandMacrosPanicsOnNonQuoteReturn(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("ExpandMacros should have panicked but did not")
+		} else {
+			// Optionally check the panic message to be more specific.
+			msg, ok := r.(string)
+			if !ok || msg != "we only support returning AST-nodes from macros" {
+				t.Errorf("unexpected panic message: got %v, want %q", r, "we only support returning AST-nodes from macros")
+			}
+		}
+	}()
+
+	// This macro's body evaluates to an Integer object, not a Quote object,
+	// which should trigger the panic.
+	input := `VAR nonQuoteMacro : MACRO := macro() { 1 + 2; }; END_VAR nonQuoteMacro();`
+	program := testParseProgram(input)
+	env := object.NewEnvironment()
+	DefineMacros(program, env)
+	ExpandMacros(program, env) // This line is expected to panic.
 }
 
 func testParseProgram(input string) *ast.Program {

@@ -35,11 +35,8 @@ func evalUnquoteCalls(quoted ast.Node, env *object.Environment) ast.Node {
 			return node
 		}
 
-		call, ok := node.(*ast.CallExpression)
-		if !ok {
-			return node
-		}
-
+		// isEvalCall ensures this is a *ast.CallExpression, so a direct assertion is safe.
+		call := node.(*ast.CallExpression)
 		if len(call.Arguments) != 1 {
 			return node
 		}

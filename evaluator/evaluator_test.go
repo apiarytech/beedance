@@ -40,6 +40,38 @@ func TestEvalIntegerExpression(t *testing.T) {
 	}
 }
 
+func TestEvalUnsignedIntegerExpression(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected uint64
+	}{
+		{"USINT#255;", 255},
+		{"UINT#65535;", 65535},
+		{"UDINT#4294967295;", 4294967295},
+		{"ULINT#18446744073709551615;", 18446744073709551615},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(t, tt.input)
+		ul, ok := evaluated.(*object.ULInt)
+		if !ok {
+			// It might be evaluated as a different integer type that gets promoted.
+			// Let's use the helper to check the value.
+			val, _, ok := object.GetIntegerObjectValue(evaluated)
+			if !ok {
+				t.Fatalf("object is not an integer type. got=%T (%+v)", evaluated, evaluated)
+			}
+			if uint64(val) != tt.expected {
+				t.Errorf("object has wrong value. got=%d, want=%d", val, tt.expected)
+			}
+			continue
+		}
+		if ul.Value != tt.expected {
+			t.Errorf("object has wrong value. got=%d, want=%d", ul.Value, tt.expected)
+		}
+	}
+}
+
 func TestEvalBooleanExpression(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -119,11 +151,11 @@ func TestBangOperator(t *testing.T) {
 		{"NOT NOT FALSE;", false},
 		{"!TRUE;", false},
 		// Error cases for non-boolean/non-bitstring types
-		{"NOT 5;", "ERROR (1:1): unknown operator: NOTLINT"},
-		{"NOT 3.14;", "ERROR (1:1): unknown operator: NOTLREAL"},
-		//{`NOT "hello";`, "ERROR (1:1): unknown operator: NOTSTRING"},
+		{"NOT 5;", "unknown operator: NOTLINT"},
+		{"NOT 3.14;", "unknown operator: NOTLREAL"},
+		{`NOT 'hello';`, "unknown operator: NOTSTRING"},
 		// Nested NOT on invalid type should also error
-		{"NOT NOT 5;", "ERROR (1:5): unknown operator: NOTLINT"},
+		{"NOT NOT 5;", "unknown operator: NOTLINT"},
 	}
 
 	for _, tt := range tests {
@@ -132,14 +164,7 @@ func TestBangOperator(t *testing.T) {
 		case bool:
 			testBooleanObject(t, evaluated, "bool", expected) // Assuming testBooleanObject is in helper
 		case string:
-			errObj, ok := evaluated.(*object.Error)
-			if !ok {
-				t.Errorf("object is not Error. got=%T(%+v)", evaluated, evaluated)
-				continue
-			}
-			if errObj.Message != expected {
-				t.Errorf("wrong error message. expected=%q, got=%q", expected, errObj.Message)
-			}
+			testErrorObjectContains(t, evaluated, expected)
 		case uint64:
 			bs, ok := evaluated.(*object.BitString)
 			if !ok {
@@ -702,6 +727,7 @@ func TestSFCExecution(t *testing.T) {
 
 	// We need to manage the environment manually for this test to check variables across cycles.
 	env := object.NewEnvironment()
+	// This evaluates the PROGRAM declaration, which now returns the created SFC object.
 	sfcObj := testEvalWithEnv(t, input, env)
 
 	sfc, ok := sfcObj.(*object.SFC)
@@ -709,33 +735,38 @@ func TestSFCExecution(t *testing.T) {
 		t.Fatalf("TestSFC is not an SFC object, got %T", sfcObj)
 	}
 
+	// Get the program's internal environment where its variables live.
+	progObj, _ := env.Get("TestSFC")
+	progEnv := progObj.(*object.Program).Env
+
 	// Ensure transition conditions are false initially to control the test flow.
-	env.Set("cond1", FALSE)
-	env.Set("cond2", FALSE)
+	progEnv.Set("cond1", FALSE)
+	progEnv.Set("cond2", FALSE)
 
 	// --- Cycle 1: Initial state ---
 	// S1 is active. The action "x := 1" should execute.
-	evalSFCCycle(sfc, env)
+	evalSFCCycle(sfc, progEnv)
 	if !sfc.Steps["S1"].IsActive {
 		t.Fatal("S1 should be active initially")
 	}
-	testIntegerObjectInEnv(t, env, "x", 1)
+	testIntegerObjectInEnv(t, progEnv, "x", 1)
 
 	// --- Cycle 2: Transition to S2 ---
 	// Set the condition and run the cycle. The transition should clear,
 	// S1 should deactivate, and S2 should activate and execute its action.
-	env.Set("cond1", TRUE)
-	evalSFCCycle(sfc, env)
+	progEnv.Set("cond1", TRUE)
+	evalSFCCycle(sfc, progEnv)
 	if sfc.Steps["S1"].IsActive || !sfc.Steps["S2"].IsActive {
-		t.Fatal("Should have transitioned to S2")
+		t.Fatalf("Should have transitioned to S2. Active steps: %v", sfc.ActiveSteps)
 	}
-	testIntegerObjectInEnv(t, env, "x", 11) // S1's action ran in cycle 1 (x=1). S2's action runs in cycle 2 (x=1+10).
+	testIntegerObjectInEnv(t, progEnv, "x", 11)
 
 	// --- Cycle 3: Still in S2 ---
 	// The transition condition `cond2` is FALSE. S2 remains active.
 	// The action "x := x + 10" executes again.
-	evalSFCCycle(sfc, env)
-	testIntegerObjectInEnv(t, env, "x", 21) // S2's action runs again: 11 + 10
+	progEnv.Set("cond1", FALSE) // Reset condition
+	evalSFCCycle(sfc, progEnv)
+	testIntegerObjectInEnv(t, progEnv, "x", 21)
 }
 
 func TestSFCActionQualifiers(t *testing.T) {
@@ -770,50 +801,53 @@ func TestSFCActionQualifiers(t *testing.T) {
 	`
 
 	env := object.NewEnvironment()
-	progInstance := testEvalWithEnv(t, input, env)
-	sfc, ok := progInstance.(*object.SFC)
+	sfcObj := testEvalWithEnv(t, input, env)
+	sfc, ok := sfcObj.(*object.SFC)
 	if !ok {
-		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfcObj)
 	}
 
+	progObj, _ := env.Get("TestSFCQualifiers")
+	progEnv := progObj.(*object.Program).Env
+
 	// Initialize all action variables to FALSE before starting the test cycles.
-	initializeActionVars(sfc, env)
+	initializeActionVars(sfc, progEnv)
 
 	// --- Cycle 1: Initial state ---
 	// S1 is active. ActionN and ActionS should be TRUE. ActionP and ActionR_S are FALSE.
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionN", true)
-	testBooleanObjectInEnv(t, env, "ActionS", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionN", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionS", true)
 	// testBooleanObjectInEnv(t, env, "ActionR_S", false) // This variable does not exist in the program.
-	testBooleanObjectInEnv(t, env, "ActionP", false)
+	testBooleanObjectInEnv(t, progEnv, "ActionP", false)
 
 	// --- Cycle 2: Transition from S1 to S2 ---
 	// Set condition and cycle. S1 becomes inactive, S2 becomes active.
-	env.Set("GoToS2", TRUE)
-	evalSFCCycle(sfc, env)
+	progEnv.Set("GoToS2", TRUE)
+	evalSFCCycle(sfc, progEnv)
 	// ActionN (Non-stored) becomes FALSE as S1 is no longer active.
 	// ActionS (Set) remains TRUE.
 	// ActionP (Pulse) becomes TRUE for this one cycle.
-	testBooleanObjectInEnv(t, env, "ActionN", false) // N action deactivates with step
-	testBooleanObjectInEnv(t, env, "ActionS", true)
-	testBooleanObjectInEnv(t, env, "ActionP", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionN", false) // N action deactivates with step
+	testBooleanObjectInEnv(t, progEnv, "ActionS", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionP", true)
 
 	// --- Cycle 3: S2 is active ---
 	// Reset condition. Cycle again.
-	env.Set("GoToS2", FALSE)
-	evalSFCCycle(sfc, env)
+	progEnv.Set("GoToS2", FALSE)
+	evalSFCCycle(sfc, progEnv)
 	// ActionP (Pulse) should now be FALSE again.
 	// ActionS remains TRUE.
-	testBooleanObjectInEnv(t, env, "ActionP", false) // P action is only active for one cycle
-	testBooleanObjectInEnv(t, env, "ActionS", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionP", false) // P action is only active for one cycle
+	testBooleanObjectInEnv(t, progEnv, "ActionS", true)
 
 	// --- Cycle 4: Transition from S2 to S3 ---
 	// Set condition and cycle. S2 becomes inactive, S3 becomes active.
-	env.Set("GoToS3", TRUE)
-	evalSFCCycle(sfc, env)
+	progEnv.Set("GoToS3", TRUE)
+	evalSFCCycle(sfc, progEnv)
 	// S3 is now active. It has an 'R' qualifier for 'ActionS'.
 	// This should force 'ActionS' to become FALSE immediately in this cycle.
-	testBooleanObjectInEnv(t, env, "ActionS", false)
+	testBooleanObjectInEnv(t, progEnv, "ActionS", false)
 }
 
 func TestSFCTimedQualifier_SD(t *testing.T) {
@@ -833,29 +867,31 @@ func TestSFCTimedQualifier_SD(t *testing.T) {
 	env := object.NewEnvironment()
 	sfcObj := testEvalWithEnv(t, input, env)
 	sfc, _ := sfcObj.(*object.SFC)
-	initializeActionVars(sfc, env)
+	progObj, _ := env.Get("TestSD")
+	progEnv := progObj.(*object.Program).Env
+	initializeActionVars(sfc, progEnv)
 
 	// Cycle 1 (t=1s): S1 active, timer starts, output is FALSE
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSD", false)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSD", false)
 
 	// Cycle 2 (t=2s): 1s elapsed, output is still FALSE
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSD", false)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSD", false)
 
 	// Cycle 3 (t=3s): 2s elapsed, timer is met, output becomes TRUE
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSD", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSD", true)
 
 	// Cycle 4 (t=4s): Transition to S2, S1 becomes inactive
-	env.Set("GoToS2", TRUE)
+	progEnv.Set("GoToS2", TRUE)
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
+	evalSFCCycle(sfc, progEnv)
 	// Action is "Stored", so it should remain TRUE even though S1 is inactive
-	testBooleanObjectInEnv(t, env, "ActionSD", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionSD", true)
 }
 
 func TestSFCTimedQualifier_DS(t *testing.T) {
@@ -875,7 +911,9 @@ func TestSFCTimedQualifier_DS(t *testing.T) {
 	env := object.NewEnvironment()
 	sfcObj := testEvalWithEnv(t, input, env)
 	sfc, _ := sfcObj.(*object.SFC)
-	initializeActionVars(sfc, env)
+	progObj, _ := env.Get("TestDS")
+	progEnv := progObj.(*object.Program).Env
+	initializeActionVars(sfc, progEnv)
 
 	cycle := 1
 
@@ -883,38 +921,38 @@ func TestSFCTimedQualifier_DS(t *testing.T) {
 	t.Logf("--- Cycle %d ---", cycle)
 	cycle++
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionDS", false)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionDS", false)
 
 	// Cycle 2 (t=2s): 1s elapsed, output is still FALSE
 	t.Logf("--- Cycle %d ---", cycle)
 	cycle++
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionDS", false)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionDS", false)
 
 	// Cycle 3 (t=3s): 2s elapsed, output is still FALSE
 	t.Logf("--- Cycle %d ---", cycle)
 	cycle++
 	advanceMockTime(1001 * time.Millisecond) // Total elapsed since timer start: 2.002s
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionDS", false) // 2.002s is less than 3s, so it must be false.
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionDS", false) // 2.002s is less than 3s, so it must be false.
 
 	// Cycle 4 (t=4s): 3s elapsed, timer is met, output becomes TRUE
 	t.Logf("--- Cycle %d ---", cycle)
 	cycle++
 	advanceMockTime(1001 * time.Millisecond) // Total elapsed since timer start: 3.003s
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionDS", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionDS", true)
 
 	// Cycle 5 (t=5s): Transition to S2, S1 becomes inactive
 	t.Logf("--- Cycle %d ---", cycle)
 	cycle++
-	env.Set("GoToS2", TRUE)
+	progEnv.Set("GoToS2", TRUE)
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
+	evalSFCCycle(sfc, progEnv)
 	// Action is "Stored", so it should remain TRUE even though S1 is inactive
-	testBooleanObjectInEnv(t, env, "ActionDS", true)
+	testBooleanObjectInEnv(t, progEnv, "ActionDS", true)
 }
 
 func TestSFCTimedQualifier_SL(t *testing.T) {
@@ -934,34 +972,36 @@ func TestSFCTimedQualifier_SL(t *testing.T) {
 	env := object.NewEnvironment()
 	sfcObj := testEvalWithEnv(t, input, env)
 	sfc, _ := sfcObj.(*object.SFC)
-	initializeActionVars(sfc, env)
+	progObj, _ := env.Get("TestSL")
+	progEnv := progObj.(*object.Program).Env
+	initializeActionVars(sfc, progEnv)
 
 	// Cycle 1 (t=1s): S1 active, output becomes TRUE immediately, timer starts
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSL", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSL", true)
 
 	// Cycle 2 (t=3s): 2s elapsed, output is still TRUE
 	advanceMockTime(2002 * time.Millisecond)
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSL", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSL", true)
 
 	// Cycle 3 (t=4.004s): 3.003s elapsed, output is still TRUE
 	advanceMockTime(1001 * time.Millisecond) // Total elapsed since timer start: 3.003s
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSL", true)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSL", true)
 
 	// Cycle 4 (t=5.005s): 4.004s elapsed, time limit is met, output becomes FALSE
 	advanceMockTime(1001 * time.Millisecond) // Total elapsed since timer start: 4.004s
-	evalSFCCycle(sfc, env)
-	testBooleanObjectInEnv(t, env, "ActionSL", false)
+	evalSFCCycle(sfc, progEnv)
+	testBooleanObjectInEnv(t, progEnv, "ActionSL", false)
 
 	// Cycle 5 (t=6s): Transition to S2, S1 becomes inactive
-	env.Set("GoToS2", TRUE)
+	progEnv.Set("GoToS2", TRUE)
 	advanceMockTime(1001 * time.Millisecond)
-	evalSFCCycle(sfc, env)
+	evalSFCCycle(sfc, progEnv)
 	// Action is "Stored", its timer logic continues. It should remain FALSE.
-	testBooleanObjectInEnv(t, env, "ActionSL", false)
+	testBooleanObjectInEnv(t, progEnv, "ActionSL", false)
 }
 
 // initializeActionVars sets all action-related boolean variables in the environment to FALSE.
@@ -1247,26 +1287,30 @@ func TestSFCActionWithSTBody(t *testing.T) {
 	`
 
 	env := object.NewEnvironment()
-	// This will parse the program, declare the POU and its variables, and return the SFC instance.
-	progInstance := testEvalWithEnv(t, input, env)
-	sfc, ok := progInstance.(*object.SFC)
-	if !ok {
-		t.Fatalf("Evaluation did not return an SFC object. got=%T", progInstance)
+	sfcObj := testEvalWithEnv(t, input, env)
+	if _, ok := sfcObj.(*object.SFC); !ok {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfcObj)
+	}
+	progObj, _ := env.Get("TestSFC_ST_Action")
+	progEnv := progObj.(*object.Program).Env
+
+	runScan := func() {
+		testEvalWithEnv(t, `TestSFC_ST_Action();`, env)
 	}
 
 	// --- Cycle 1: Initial state (S1 active) ---
-	evalSFCCycle(sfc, env)
-	testIntegerObjectInEnv(t, env, "Counter", 0) // Action body should not have run
+	runScan()
+	testIntegerObjectInEnv(t, progEnv, "Counter", 0) // Action body should not have run
 
 	// --- Cycle 2: Transition to S2 ---
-	env.Set("GoToStep2", TRUE)
-	evalSFCCycle(sfc, env)
-	testIntegerObjectInEnv(t, env, "Counter", 1) // Action body runs for the first time
+	progEnv.Set("GoToStep2", TRUE)
+	runScan()
+	testIntegerObjectInEnv(t, progEnv, "Counter", 1) // Action body runs for the first time
 
 	// --- Cycle 3: Still in S2 ---
-	env.Set("GoToStep2", FALSE) // Prevent immediate re-transition
-	evalSFCCycle(sfc, env)
-	testIntegerObjectInEnv(t, env, "Counter", 2) // Action body runs again
+	progEnv.Set("GoToStep2", FALSE) // Prevent immediate re-transition
+	runScan()
+	testIntegerObjectInEnv(t, progEnv, "Counter", 2) // Action body runs again
 }
 
 func TestFunctionObject(t *testing.T) {
@@ -3157,54 +3201,53 @@ func TestTrafficLightProgram(t *testing.T) {
 	}
 
 	// Setup environment and parse the program
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestTrafficLightProgram", input)
-
 	env := object.NewEnvironment()
 	// Evaluating the program will declare the POU and its variables.
-	Eval(program, env)
+	testEvalWithEnv(t, input, env)
 
-	// The body of the program needs to be evaluated repeatedly to simulate scans.
-	progBody := program.Statements[0].(*ast.ProgramDeclaration).Body
+	// Get the program object and its internal environment
+	progObj, ok := env.Get("TrafficLight")
+	if !ok {
+		t.Fatalf("Program 'TrafficLight' not found in environment")
+	}
+	progEnv := progObj.(*object.Program).Env
 
 	runScan := func() {
-		Eval(progBody, env)
+		testEvalWithEnv(t, `TrafficLight();`, env)
 	}
 
 	// --- Cycle 1: Initial State (t=0s) ---
 	runScan()
-	testIntegerObjectInEnv(t, env, "State", 0)
-	testBooleanObjectInEnv(t, env, "Green_Light", true)
-	testBooleanObjectInEnv(t, env, "Yellow_Light", false)
-	testBooleanObjectInEnv(t, env, "Red_Light", false)
-	stateTimer, _ := env.Get("StateTimer")
+	testIntegerObjectInEnv(t, progEnv, "State", 0)
+	testBooleanObjectInEnv(t, progEnv, "Green_Light", true)
+	testBooleanObjectInEnv(t, progEnv, "Yellow_Light", false)
+	testBooleanObjectInEnv(t, progEnv, "Red_Light", false)
+	stateTimer, _ := progEnv.Get("StateTimer")
 	timerEnv := stateTimer.(*object.FunctionBlockInstance).Env
 	testBooleanObjectInEnv(t, timerEnv, "Q", false)
 
 	// --- Cycle 2: During Green State (t=4s) ---
 	advanceTime(4 * time.Second)
 	runScan()
-	testIntegerObjectInEnv(t, env, "State", 0) // Still in state 0
-	testBooleanObjectInEnv(t, env, "Green_Light", true)
+	testIntegerObjectInEnv(t, progEnv, "State", 0) // Still in state 0
+	testBooleanObjectInEnv(t, progEnv, "Green_Light", true)
 	testTimeObjectInEnv(t, timerEnv, "ET", 4*time.Second)
 	testBooleanObjectInEnv(t, timerEnv, "Q", false)
 
 	// --- Cycle 3: Transition to Yellow State (t=5s) ---
 	advanceTime(1 * time.Second) // Total time is 5s
 	runScan()
-	testIntegerObjectInEnv(t, env, "State", 1)
-	testBooleanObjectInEnv(t, env, "Green_Light", true) // Light changes on next scan
-	testBooleanObjectInEnv(t, timerEnv, "Q", false)     // Timer was reset
+	testIntegerObjectInEnv(t, progEnv, "State", 1)
+	testBooleanObjectInEnv(t, progEnv, "Green_Light", true) // Light changes on next scan
+	testBooleanObjectInEnv(t, timerEnv, "Q", false)         // Timer was reset
 	testTimeObjectInEnv(t, timerEnv, "ET", 0)
 
 	// --- Cycle 4: Yellow State (t=5s + 1 scan) ---
 	runScan()
-	testIntegerObjectInEnv(t, env, "State", 1)
-	testBooleanObjectInEnv(t, env, "Green_Light", false)
-	testBooleanObjectInEnv(t, env, "Yellow_Light", true)
-	testBooleanObjectInEnv(t, env, "Red_Light", false)
+	testIntegerObjectInEnv(t, progEnv, "State", 1)
+	testBooleanObjectInEnv(t, progEnv, "Green_Light", false)
+	testBooleanObjectInEnv(t, progEnv, "Yellow_Light", true)
+	testBooleanObjectInEnv(t, progEnv, "Red_Light", false)
 }
 
 func TestStandardFunctionBlocks(t *testing.T) {
@@ -3236,48 +3279,51 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		// First, evaluate the whole program to set up the environment
 		testEvalWithEnv(t, input, env)
 
+		progObj, _ := env.Get("TestTON")
+		progEnv := progObj.(*object.Program).Env
+
 		// Helper to run one "scan"
 		runScan := func() {
 			// In a real app, you'd re-evaluate the program body.
 			// For this test, we just need to evaluate the FB call.
-			testEvalWithEnv(t, `MyTimer(IN := Start, PT := T#5s, Q => TimerDone, ET => ET);`, env)
+			testEvalWithEnv(t, `TestTON();`, env)
 		}
 
 		// --- Cycle 1: Initial state ---
-		env.Set("Start", FALSE)
+		progEnv.Set("Start", FALSE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", false)
-		testTimeObjectInEnv(t, env, "ET", 0)
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", false)
+		testTimeObjectInEnv(t, progEnv, "ET", 0)
 
 		// --- Cycle 2: Rising edge on IN ---
-		env.Set("Start", TRUE)
+		progEnv.Set("Start", TRUE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q is still false
-		testTimeObjectInEnv(t, env, "ET", 0)               // ET is still 0 on the first scan
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", false) // Q is still false
+		testTimeObjectInEnv(t, progEnv, "ET", 0)               // ET is still 0 on the first scan
 
 		// --- Cycle 3: Time advances (3s) ---
 		advanceTime(3 * time.Second)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q is still false
-		testTimeObjectInEnv(t, env, "ET", 3*time.Second)
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", false) // Q is still false
+		testTimeObjectInEnv(t, progEnv, "ET", 3*time.Second)
 
 		// --- Cycle 4: Time reaches PT (5s) ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", true) // Q is now true
-		testTimeObjectInEnv(t, env, "ET", 5*time.Second)  // ET is capped at PT
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", true) // Q is now true
+		testTimeObjectInEnv(t, progEnv, "ET", 5*time.Second)  // ET is capped at PT
 
 		// --- Cycle 5: IN is still true, time advances further ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", true) // Q remains true
-		testTimeObjectInEnv(t, env, "ET", 5*time.Second)  // ET remains capped at PT
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", true) // Q remains true
+		testTimeObjectInEnv(t, progEnv, "ET", 5*time.Second)  // ET remains capped at PT
 
 		// --- Cycle 6: Falling edge on IN ---
-		env.Set("Start", FALSE)
+		progEnv.Set("Start", FALSE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerDone", false) // Q resets to false
-		testTimeObjectInEnv(t, env, "ET", 0)               // ET resets to 0
+		testBooleanObjectInEnv(t, progEnv, "TimerDone", false) // Q resets to false
+		testTimeObjectInEnv(t, progEnv, "ET", 0)               // ET resets to 0
 	})
 
 	t.Run("CTU - Counter Up", func(t *testing.T) {
@@ -3296,60 +3342,62 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		`
 		env := object.NewEnvironment()
 		testEvalWithEnv(t, input, env)
+		progObj, _ := env.Get("TestCTU")
+		progEnv := progObj.(*object.Program).Env
 
 		runScan := func() {
-			testEvalWithEnv(t, `MyCounter(CU := CountUp, R := Reset, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
+			testEvalWithEnv(t, `TestCTU();`, env)
 		}
 
 		// --- Cycle 1: Initial state ---
-		env.Set("CountUp", FALSE)
-		env.Set("Reset", FALSE)
+		progEnv.Set("CountUp", FALSE)
+		progEnv.Set("Reset", FALSE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "IsDone", false)
-		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", false)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 0)
 
 		// --- Cycle 2: First rising edge on CU ---
-		env.Set("CountUp", TRUE)
+		progEnv.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
-		testBooleanObjectInEnv(t, env, "IsDone", false)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 1)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", false)
 
 		// --- Cycle 3: CU is still high (no change) ---
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 1)
 
 		// --- Cycle 4: Falling edge on CU ---
-		env.Set("CountUp", FALSE)
+		progEnv.Set("CountUp", FALSE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 1)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 1)
 
 		// --- Cycle 5: Second rising edge ---
-		env.Set("CountUp", TRUE)
+		progEnv.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 2)
-		env.Set("CountUp", FALSE)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 2)
+		progEnv.Set("CountUp", FALSE)
 		runScan()
 
 		// --- Cycle 6: Third rising edge (reaches PV) ---
-		env.Set("CountUp", TRUE)
+		progEnv.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 3)
-		testBooleanObjectInEnv(t, env, "IsDone", true) // Q is now true
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 3)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", true) // Q is now true
 
 		// --- Cycle 7: Fourth rising edge (CV does not exceed PV in this implementation) ---
-		env.Set("CountUp", FALSE)
+		progEnv.Set("CountUp", FALSE)
 		runScan()
-		env.Set("CountUp", TRUE)
+		progEnv.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 3) // CV is capped
-		testBooleanObjectInEnv(t, env, "IsDone", true)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 3) // CV is capped
+		testBooleanObjectInEnv(t, progEnv, "IsDone", true)
 
 		// --- Cycle 8: Reset ---
-		env.Set("CountUp", FALSE)
-		env.Set("Reset", TRUE)
+		progEnv.Set("CountUp", FALSE)
+		progEnv.Set("Reset", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
-		testBooleanObjectInEnv(t, env, "IsDone", false)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 0)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", false)
 	})
 
 	t.Run("TOF - Timer Off-Delay", func(t *testing.T) {
@@ -3367,34 +3415,36 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		`
 		env := object.NewEnvironment()
 		testEvalWithEnv(t, input, env)
+		progObj, _ := env.Get("TestTOF")
+		progEnv := progObj.(*object.Program).Env
 
 		runScan := func() {
-			testEvalWithEnv(t, `MyTimer(IN := Input, PT := T#5s, Q => TimerActive, ET => ET);`, env)
+			testEvalWithEnv(t, `TestTOF();`, env)
 		}
 
 		// --- Cycle 1: IN is high ---
-		env.Set("Input", TRUE)
+		progEnv.Set("Input", TRUE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerActive", true)
-		testTimeObjectInEnv(t, env, "ET", 0)
+		testBooleanObjectInEnv(t, progEnv, "TimerActive", true)
+		testTimeObjectInEnv(t, progEnv, "ET", 0)
 
 		// --- Cycle 2: Falling edge on IN ---
-		env.Set("Input", FALSE)
+		progEnv.Set("Input", FALSE)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerActive", true) // Q remains true
-		testTimeObjectInEnv(t, env, "ET", 0)
+		testBooleanObjectInEnv(t, progEnv, "TimerActive", true) // Q remains true
+		testTimeObjectInEnv(t, progEnv, "ET", 0)
 
 		// --- Cycle 3: Time advances (3s) ---
 		advanceTime(3 * time.Second)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerActive", true) // Q still true
-		testTimeObjectInEnv(t, env, "ET", 3*time.Second)
+		testBooleanObjectInEnv(t, progEnv, "TimerActive", true) // Q still true
+		testTimeObjectInEnv(t, progEnv, "ET", 3*time.Second)
 
 		// --- Cycle 4: Time reaches PT (5s) ---
 		advanceTime(2 * time.Second)
 		runScan()
-		testBooleanObjectInEnv(t, env, "TimerActive", false) // Q is now false
-		testTimeObjectInEnv(t, env, "ET", 5*time.Second)     // ET is capped
+		testBooleanObjectInEnv(t, progEnv, "TimerActive", false) // Q is now false
+		testTimeObjectInEnv(t, progEnv, "ET", 5*time.Second)     // ET is capped
 	})
 
 	t.Run("CTD - Counter Down", func(t *testing.T) {
@@ -3413,34 +3463,36 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		`
 		env := object.NewEnvironment()
 		testEvalWithEnv(t, input, env)
+		progObj, _ := env.Get("TestCTD")
+		progEnv := progObj.(*object.Program).Env
 
 		runScan := func() {
-			testEvalWithEnv(t, `MyCounter(CD := CountDown, LD := Load, PV := 3, Q => IsDone, CV => CurrentValue);`, env)
+			testEvalWithEnv(t, `TestCTD();`, env)
 		}
 
 		// --- Cycle 1: Load the counter ---
-		env.Set("Load", TRUE)
+		progEnv.Set("Load", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 3)
-		testBooleanObjectInEnv(t, env, "IsDone", false)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 3)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", false)
 
 		// --- Cycle 2: First rising edge on CD ---
-		env.Set("Load", FALSE)
-		env.Set("CountDown", TRUE)
+		progEnv.Set("Load", FALSE)
+		progEnv.Set("CountDown", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, env, "CurrentValue", 2)
-		env.Set("CountDown", FALSE)
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 2)
+		progEnv.Set("CountDown", FALSE)
 		runScan()
 
 		// --- Cycle 3: Count down to 0 ---
-		env.Set("CountDown", TRUE)
+		progEnv.Set("CountDown", TRUE)
 		runScan() // CV = 1
-		env.Set("CountDown", FALSE)
+		progEnv.Set("CountDown", FALSE)
 		runScan()
-		env.Set("CountDown", TRUE)
+		progEnv.Set("CountDown", TRUE)
 		runScan() // CV = 0
-		testIntegerObjectInEnv(t, env, "CurrentValue", 0)
-		testBooleanObjectInEnv(t, env, "IsDone", true) // Q is now true
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 0)
+		testBooleanObjectInEnv(t, progEnv, "IsDone", true) // Q is now true
 	})
 }
 
@@ -3470,41 +3522,43 @@ func TestTP_PulseTimer(t *testing.T) {
 	`
 	env := object.NewEnvironment()
 	testEvalWithEnv(t, input, env)
+	progObj, _ := env.Get("TestTP")
+	progEnv := progObj.(*object.Program).Env
 
 	runScan := func() {
-		testEvalWithEnv(t, `MyPulse(IN := Trigger, PT := T#5s, Q => PulseOut, ET => ET);`, env)
+		testEvalWithEnv(t, `TestTP();`, env)
 	}
 
 	// --- Cycle 1: Initial state ---
-	env.Set("Trigger", FALSE)
+	progEnv.Set("Trigger", FALSE)
 	runScan()
-	testBooleanObjectInEnv(t, env, "PulseOut", false)
-	testTimeObjectInEnv(t, env, "ET", 0)
+	testBooleanObjectInEnv(t, progEnv, "PulseOut", false)
+	testTimeObjectInEnv(t, progEnv, "ET", 0)
 
 	// --- Cycle 2: Rising edge on IN, pulse starts ---
-	env.Set("Trigger", TRUE)
+	progEnv.Set("Trigger", TRUE)
 	runScan()
-	testBooleanObjectInEnv(t, env, "PulseOut", true)
-	testTimeObjectInEnv(t, env, "ET", 0)
+	testBooleanObjectInEnv(t, progEnv, "PulseOut", true)
+	testTimeObjectInEnv(t, progEnv, "ET", 0)
 
 	// --- Cycle 3: IN goes low, but pulse continues ---
 	advanceTime(2 * time.Second)
-	env.Set("Trigger", FALSE)
+	progEnv.Set("Trigger", FALSE)
 	runScan()
-	testBooleanObjectInEnv(t, env, "PulseOut", true)
-	testTimeObjectInEnv(t, env, "ET", 2*time.Second)
+	testBooleanObjectInEnv(t, progEnv, "PulseOut", true)
+	testTimeObjectInEnv(t, progEnv, "ET", 2*time.Second)
 
 	// --- Cycle 4: Time reaches PT, pulse ends ---
 	advanceTime(3 * time.Second) // Total elapsed time is now 5s
 	runScan()
-	testBooleanObjectInEnv(t, env, "PulseOut", false)
-	testTimeObjectInEnv(t, env, "ET", 5*time.Second)
+	testBooleanObjectInEnv(t, progEnv, "PulseOut", false)
+	testTimeObjectInEnv(t, progEnv, "ET", 5*time.Second)
 
 	// --- Cycle 5: State after pulse completion ---
 	advanceTime(1 * time.Second)
 	runScan()
-	testBooleanObjectInEnv(t, env, "PulseOut", false)
-	testTimeObjectInEnv(t, env, "ET", 0)
+	testBooleanObjectInEnv(t, progEnv, "PulseOut", false)
+	testTimeObjectInEnv(t, progEnv, "ET", 0)
 }
 
 func TestFunctionBlockWithSFCBody_EdgeCases(t *testing.T) {
@@ -3571,62 +3625,50 @@ func TestFunctionBlockWithSFCBody_EdgeCases(t *testing.T) {
 		END_PROGRAM
 	`
 
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-
 	env := object.NewEnvironment()
 	// First, evaluate the whole program to set up the environment and FB instance.
-	// This performs the first scan cycle.
-	Eval(program, env)
+	testEvalWithEnv(t, input, env)
 
-	// To simulate subsequent scan cycles, we re-evaluate only the program's body.
-	var progDecl *ast.ProgramDeclaration
-	for _, stmt := range program.Statements {
-		if pd, ok := stmt.(*ast.ProgramDeclaration); ok {
-			progDecl = pd
-			break
-		}
-	}
-	if progDecl == nil {
-		t.Fatalf("No PROGRAM declaration found in test input")
-	}
+	progObj, _ := env.Get("TestSFCinFB_Edges")
+	progEnv := progObj.(*object.Program).Env
+
 	runScan := func() {
-		Eval(progDecl.Body, env)
+		testEvalWithEnv(t, `TestSFCinFB_Edges();`, env)
 	}
 
 	// --- Cycle 1: Initial State ---
 	// The initial Eval() call already executed the first scan.
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
+	runScan()
+	testIntegerObjectInEnv(t, progEnv, "currentActiveStep", 1)
 
 	// --- Cycle 2: Set transition condition to TRUE ---
-	env.Set("doTransitionToS2", TRUE)
+	progEnv.Set("doTransitionToS2", TRUE)
 	runScan()
 	advanceTime(1 * time.Second)
 	// The transition should have occurred. We are now in S2.
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
+	testIntegerObjectInEnv(t, progEnv, "currentActiveStep", 2)
 
 	// --- Cycle 3: Transition condition remains TRUE ---
 	// The SFC should remain in S2. A cleared transition should not re-fire
 	// just because the condition is still true.
 	runScan()
 	advanceTime(1 * time.Second)
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
+	testIntegerObjectInEnv(t, progEnv, "currentActiveStep", 2)
 
 	// --- Cycle 4: Reset condition and transition back to S1 ---
-	env.Set("doTransitionToS2", FALSE)
-	env.Set("doTransitionToS1", TRUE)
+	progEnv.Set("doTransitionToS2", FALSE)
+	progEnv.Set("doTransitionToS1", TRUE)
 	runScan()
 	advanceTime(1 * time.Second)
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 1)
+	testIntegerObjectInEnv(t, progEnv, "currentActiveStep", 1)
 
 	// --- Cycle 5: Both transition conditions are TRUE ---
 	// Since the active step is S1, only the S1->S2 transition should be evaluated.
-	env.Set("doTransitionToS2", TRUE)
-	env.Set("doTransitionToS1", TRUE)
+	progEnv.Set("doTransitionToS2", TRUE)
+	progEnv.Set("doTransitionToS1", TRUE)
 	runScan()
 	advanceTime(1 * time.Second)
-	testIntegerObjectInEnv(t, env, "currentActiveStep", 2)
+	testIntegerObjectInEnv(t, progEnv, "currentActiveStep", 2)
 }
 
 func TestNestedInOutVarPassing(t *testing.T) {
@@ -3669,13 +3711,19 @@ func TestNestedInOutVarPassing(t *testing.T) {
 		t.Fatalf("Evaluator error: %s", err.Message)
 	}
 
+	// Execute the program to run its logic
+	testEvalWithEnv(t, "TestProg();", env)
+
+	progObj, _ := env.Get("TestProg")
+	progEnv := progObj.(*object.Program).Env
+
 	// After the first call `OuterFunc(OuterVar := OriginalVar)`:
 	// OriginalVar starts at 5.
 	// OuterFunc passes it to InnerFunc.
 	// InnerFunc modifies it to 5 * 2 = 10.
 	// The program then calls InnerFunc again, making OriginalVar 20.
 	// So, after the entire program evaluation, OriginalVar should be 20.
-	testIntegerObjectInEnv(t, env, "OriginalVar", 20)
+	testIntegerObjectInEnv(t, progEnv, "OriginalVar", 20)
 }
 
 func TestPumpControlSFC(t *testing.T) {
@@ -3769,6 +3817,37 @@ func TestPumpControlSFC(t *testing.T) {
 	testBooleanObjectInEnv(t, env, "PumpMotor", false)
 }
 
+func TestEvalSFCProgram(t *testing.T) {
+	input := `
+		PROGRAM TestSFC
+			VAR
+				x : INT;
+			END_VAR
+			ACTION A1: x := 1; END_ACTION
+			INITIAL_STEP S1: A1(); END_STEP
+			TRANSITION FROM S1 TO S1 := TRUE; END_TRANSITION
+		END_PROGRAM
+	`
+	evaluated := testEval(t, input)
+	sfc, ok := evaluated.(*object.SFC)
+	if !ok {
+		t.Fatalf("Expected *object.SFC, got %T", evaluated)
+	}
+
+	if sfc.InitialStepName != "S1" {
+		t.Errorf("Expected initial step 'S1', got %q", sfc.InitialStepName)
+	}
+	if _, ok := sfc.Steps["S1"]; !ok {
+		t.Errorf("Expected step 'S1' to be defined")
+	}
+	if _, ok := sfc.Actions["A1"]; !ok {
+		t.Errorf("Expected action 'A1' to be defined")
+	}
+	if len(sfc.Transitions) != 1 {
+		t.Errorf("Expected 1 transition, got %d", len(sfc.Transitions))
+	}
+}
+
 func TestTypedLiteralEvaluation(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -3830,5 +3909,624 @@ func TestTypedLiteralEvaluation(t *testing.T) {
 				t.Fatalf("unhandled expected type: %T", tt.expected)
 			}
 		})
+	}
+}
+
+func TestIlProgramEvaluation(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{`
+			PROGRAM TestIL
+				VAR
+					myVar : INT;
+				END_VAR
+
+				LD 10
+				ADD 5
+				ST myVar
+			END_PROGRAM
+		`, 15},
+		{`
+			PROGRAM TestIL2
+				VAR
+					a : INT := 10;
+					b : INT := 20;
+					c : INT;
+				END_VAR
+
+				LD a
+				ADD b
+				ST c
+			END_PROGRAM
+		`, 30},
+		{`
+			PROGRAM TestIL3
+				VAR
+					a : BOOL := TRUE;
+					b : INT;
+				END_VAR
+
+				LD a
+				JMPC set_b
+				LD 0
+				ST b
+				JMP end_jmp
+			set_b:
+				LD 1
+				ST b
+			end_jmp:
+				LD b
+			END_PROGRAM
+		`, 1},
+		{`
+			PROGRAM TestIL4
+				VAR
+					a : BOOL := FALSE;
+					b : INT;
+				END_VAR
+
+				LD a
+				JMPC set_b
+				LD 0
+				ST b
+				JMP end_jmp
+			set_b:
+				LD 1
+				ST b
+			end_jmp:
+				LD b
+			END_PROGRAM
+		`, 1},
+		{`
+			PROGRAM TestIL5
+				VAR
+					a : BOOL := TRUE;
+					b : INT;
+				END_VAR
+
+				LD a
+				JMPCN set_b
+				LD 1
+				ST b
+				JMP end_jmp
+			set_b:
+				LD 0
+				ST b
+			end_jmp:
+				LD b
+			END_PROGRAM
+		`, 0},
+	}
+
+	for _, tt := range tests {
+		// Parse to get program name
+		l := lexer.New(tt.input)
+		p := parser.New(l)
+		programAST := p.ParseProgram()
+		checkParserErrors(t, p, "TestIlProgramEvaluation", tt.input)
+		progName := programAST.Statements[0].(*ast.ProgramDeclaration).Name.Value
+
+		// Setup env and define the program
+		env := object.NewEnvironment()
+		testEvalWithEnv(t, tt.input, env)
+
+		// Call the program and get the result (which should be the accumulator for IL)
+		result := testEvalWithEnv(t, progName+"();", env)
+
+		testIntegerObject(t, result, "result", tt.expected)
+	}
+}
+
+func TestLocatedVariables(t *testing.T) {
+	input := `
+		PROGRAM TestLocatedVars
+			VAR
+				myInput AT %IX0.1 : BOOL;
+				myOutput AT %QX0.2 : BOOL;
+			END_VAR
+
+			myOutput := myInput;
+		END_PROGRAM
+	`
+	ioMap = make(map[string]object.Object) // Reset for clean test
+	env := object.NewEnvironment()
+	// Manually set a value in the I/O map to simulate hardware input
+	ioMap["%IX0.1"] = TRUE
+
+	// Evaluate the program
+	testEvalWithEnv(t, input, env) // Defines the program
+	// Execute the program to run its logic
+	testEvalWithEnv(t, "TestLocatedVars();", env)
+
+	// Check the I/O map to see if the output was set correctly
+	outputVal, ok := ioMap["%QX0.2"]
+	if !ok {
+		t.Fatalf("Output %%QX0.2 not found in I/O map")
+	}
+
+	if outputVal != TRUE {
+		t.Errorf("Expected output to be TRUE, got %v", outputVal)
+	}
+
+	// Test reading back
+	progObj, ok := env.Get("TestLocatedVars")
+	if !ok {
+		t.Fatalf("Program 'TestLocatedVars' not found in environment")
+	}
+	progEnv := progObj.(*object.Program).Env
+
+	myInputObj, _ := progEnv.Get("myInput")
+	if myInputObj.(*object.Pointer).Env != nil { // Located vars have nil Env
+		t.Errorf("Expected myInput to be a located variable pointer")
+	}
+	// We need to evaluate the identifier to get the value from ioMap
+	readVal := testEvalWithEnv(t, "myInput;", progEnv)
+	if readVal != TRUE {
+		t.Errorf("Expected reading myInput to be TRUE, got %v", readVal)
+	}
+}
+
+func TestAssignmentToConstantError(t *testing.T) {
+	input := `
+		VAR CONSTANT MyConst : INT := 5; END_VAR
+		MyConst := 10;
+	`
+	evaluated := testEval(t, input)
+	testErrorObjectContains(t, evaluated, "cannot assign to constant variable 'MyConst'")
+}
+
+func TestMinusPrefixOnUnsigned(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{"-USINT#10;", -10},
+		{"-UINT#1000;", -1000},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(t, tt.input)
+		// Negating an unsigned results in a signed integer of at least the same size.
+		// The evaluator promotes to SInt/Int which are then handled as LInt in tests.
+		testIntegerObject(t, evaluated, tt.input, tt.expected)
+	}
+}
+
+func TestOtherVarBlocks(t *testing.T) {
+	t.Run("VAR_GLOBAL", func(t *testing.T) {
+		input := `
+			VAR_GLOBAL
+				g_var : INT := 99;
+			END_VAR
+			g_var + 1;
+		`
+		evaluated := testEval(t, input)
+		testIntegerObject(t, evaluated, "g_var + 1", 100)
+	})
+
+	t.Run("VAR_EXTERNAL", func(t *testing.T) {
+		// External vars are just declarations. The evaluator creates a placeholder.
+		// We can't resolve them without a global context, but we can test assignment.
+		input := `
+			VAR_EXTERNAL g_var : INT; END_VAR
+			g_var := 123;
+		`
+		env := object.NewEnvironment()
+		testEvalWithEnv(t, input, env)
+		// Check that the variable was created in the environment and assigned to.
+		testIntegerObjectInEnv(t, env, "g_var", 123)
+	})
+
+	t.Run("VAR_ACCESS", func(t *testing.T) {
+		// Access vars are for linking to other programs. The evaluator treats them
+		// like placeholders.
+		input := `
+			VAR_ACCESS MyAccess : Other.Var; END_VAR
+			MyAccess := 456;
+		`
+		env := object.NewEnvironment()
+		testEvalWithEnv(t, input, env)
+		testIntegerObjectInEnv(t, env, "MyAccess", 456)
+	})
+
+	t.Run("VAR_TEMP in a single pass", func(t *testing.T) {
+		// VAR_TEMP are re-initialized every cycle. In a single eval pass, they act like VAR.
+		input := `
+			PROGRAM TestTemp
+				VAR_TEMP
+					temp_var : INT := 5;
+				END_VAR
+				TestTemp := temp_var * 2;
+			END_PROGRAM
+			TestTemp();
+		`
+		evaluated := testEval(t, input)
+		testIntegerObject(t, evaluated, "TestTemp", 10)
+	})
+
+	t.Run("VAR_TEMP re-initialization", func(t *testing.T) {
+		input := `
+			PROGRAM TestTempReinit
+				VAR_TEMP
+					temp_var : INT := 0;
+				END_VAR
+				temp_var := temp_var + 1;
+				TestTempReinit := temp_var;
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		// First, evaluate the program definition
+		testEvalWithEnv(t, input, env)
+
+		// First call
+		evaluated1 := testEvalWithEnv(t, "TestTempReinit();", env)
+		testIntegerObject(t, evaluated1, "first call", 1)
+
+		// Second call - temp_var should be re-initialized to 0, then incremented to 1 again.
+		evaluated2 := testEvalWithEnv(t, "TestTempReinit();", env)
+		testIntegerObject(t, evaluated2, "second call", 1)
+	})
+
+	t.Run("VAR in PROGRAM should be static", func(t *testing.T) {
+		input := `
+			PROGRAM TestStaticVar
+				VAR
+					static_var : INT := 0;
+				END_VAR
+				static_var := static_var + 1;
+				TestStaticVar := static_var;
+			END_PROGRAM
+		`
+		env := object.NewEnvironment()
+		// First, evaluate the program definition
+		testEvalWithEnv(t, input, env)
+
+		// First call
+		evaluated1 := testEvalWithEnv(t, "TestStaticVar();", env)
+		testIntegerObject(t, evaluated1, "first call", 1)
+
+		// Second call - static_var should retain its value and be incremented to 2.
+		evaluated2 := testEvalWithEnv(t, "TestStaticVar();", env)
+		testIntegerObject(t, evaluated2, "second call", 2)
+	})
+}
+
+func TestConfigurationAndResourceEvaluation(t *testing.T) {
+	input := `
+		PROGRAM P1
+			VAR_INPUT 
+				Sensor : BOOL; 
+			END_VAR
+			VAR x : INT; END_VAR
+			IF Sensor THEN
+				x := 1;
+			ELSE
+				x := 0;
+			END_IF
+		END_PROGRAM
+
+		CONFIGURATION MyConfig
+			VAR_GLOBAL
+				GlobalFlag : BOOL := TRUE;
+			END_VAR
+
+			RESOURCE Res1 ON PLC
+				VAR_GLOBAL
+					ResourceFlag : BOOL := TRUE;
+				END_VAR
+
+				TASK T1 (INTERVAL := T#100ms, PRIORITY := 1);
+				TASK T2 (PRIORITY := 2);
+				
+				PROGRAM P1_inst1 WITH T1: P1;
+				PROGRAM P1_inst2 WITH T2: P1;
+			END_RESOURCE
+
+			VAR_CONFIG
+				Res1.P1_inst1.Sensor AT %IX0.5 : BOOL;
+			END_CONFIG
+		END_CONFIGURATION
+`
+	// Simulate hardware input being ON for the test
+	ioMap = make(map[string]object.Object) // Reset I/O map
+	ioMap["%IX0.5"] = TRUE
+
+	env := object.NewEnvironment()
+	result := testEvalWithEnv(t, input, env)
+
+	if !isError(result) && result != NULL {
+		t.Fatalf("Expected configuration evaluation to return NULL or an error, got %T", result)
+	}
+
+	// Check config-level global variable
+	testBooleanObjectInEnv(t, env, "GlobalFlag", true)
+
+	// After evaluation, the environment should contain the configured resource.
+	resObj, ok := env.Get("Res1")
+	if !ok {
+		t.Fatalf("Resource 'Res1' not found in environment after configuration evaluation")
+	}
+
+	resInstance, ok := resObj.(*object.FunctionBlockInstance)
+	if !ok {
+		t.Fatalf("Resource object is not a FunctionBlockInstance, got %T", resObj)
+	}
+	resEnv := resInstance.Env
+
+	// Check resource-level global variable
+	testBooleanObjectInEnv(t, resEnv, "ResourceFlag", true)
+
+	// Check that the task was created correctly
+	task1Obj, ok := resEnv.Get("T1")
+	if !ok {
+		t.Fatalf("Task 'T1' not found in resource environment")
+	}
+	if _, ok := task1Obj.(*object.Task); !ok {
+		t.Fatalf("Task object T1 is not an object.Task, got %T", task1Obj)
+	}
+
+	// Check that task T2 was created correctly
+	task2Obj, ok := resEnv.Get("T2")
+	if !ok {
+		t.Fatalf("Task 'T2' not found in resource environment")
+	}
+	if _, ok := task2Obj.(*object.Task); !ok {
+		t.Fatalf("Task object T2 is not an object.Task, got %T", task2Obj)
+	}
+
+	// Check program instance 1 and its configured var from VAR_CONFIG
+	progInstObj1, ok := resEnv.Get("P1_inst1")
+	if !ok {
+		t.Fatalf("Program instance 'P1_inst1' not found in resource environment")
+	}
+	progInstance1, ok := progInstObj1.(*object.ProgramInstance)
+	if !ok {
+		t.Fatalf("Program instance object is not an object.ProgramInstance, got %T", progInstObj1)
+	}
+	instEnv1 := progInstance1.Env
+
+	sensorObj, _ := instEnv1.Get("Sensor")
+	sensorPtr, ok := sensorObj.(*object.Pointer)
+	if !ok {
+		t.Fatalf("Sensor should be a pointer after VAR_CONFIG, got %T", sensorObj)
+	}
+	if sensorPtr.Env != nil || sensorPtr.Name != "%IX0.5" {
+		t.Errorf("Sensor pointer is incorrect. Got Name=%s, Env=%v", sensorPtr.Name, sensorPtr.Env)
+	}
+
+	// Check program instance 2
+	progInstObj2, ok := resEnv.Get("P1_inst2")
+	if !ok {
+		t.Fatalf("Program instance 'P1_inst2' not found in resource environment")
+	}
+	if _, ok := progInstObj2.(*object.ProgramInstance); !ok {
+		t.Fatalf("Program instance object is not an object.ProgramInstance, got %T", progInstObj2)
+	}
+
+	// Now, execute the program instance to see if the mapping works
+	testEvalWithEnv(t, "P1_inst1();", resEnv) // Execute in resource env
+
+	// Check the result inside the program instance
+	xVar, _ := instEnv1.Get("x")
+	if !testIntegerObject(t, xVar, "x", 1) {
+		t.Errorf("Expected x to be 1 because Sensor was TRUE via VAR_CONFIG")
+	}
+}
+
+func TestConfigurationWithVarAccess(t *testing.T) {
+	input := `
+		PROGRAM P1
+			VAR_INPUT
+				InVar : INT;
+			END_VAR
+			VAR
+				InternalVar : INT;
+			END_VAR
+			InternalVar := InVar * 2;
+		END_PROGRAM
+
+		CONFIGURATION MyConfig
+			VAR_GLOBAL
+				GlobalInput : INT := 10;
+			END_VAR
+
+			RESOURCE Res1 ON PLC
+				TASK T1 (INTERVAL := T#100ms, PRIORITY := 1);
+				PROGRAM P1_inst WITH T1 : P1(InVar := GlobalInput);
+			END_RESOURCE
+
+			VAR_ACCESS
+				AliasForInternal : Res1.P1_inst.InternalVar : INT READ_ONLY;
+			END_VAR
+		END_CONFIGURATION
+	`
+	env := object.NewEnvironment()
+	// 1. Evaluate the configuration. This should set up everything, including the VAR_ACCESS alias.
+	result := testEvalWithEnv(t, input, env)
+	if isError(result) {
+		t.Fatalf("Configuration evaluation failed: %s", result.Inspect())
+	}
+
+	// 2. Check that the alias exists in the config environment and is a pointer.
+	aliasObj, ok := env.Get("AliasForInternal")
+	if !ok {
+		t.Fatalf("VAR_ACCESS alias 'AliasForInternal' not found in environment")
+	}
+	if _, ok := aliasObj.(*object.Pointer); !ok {
+		t.Fatalf("Alias is not a pointer, got %T", aliasObj)
+	}
+
+	// 3. Get the resource environment to execute the program instance.
+	resObj, _ := env.Get("Res1")
+	resEnv := resObj.(*object.FunctionBlockInstance).Env
+
+	// 4. Execute the program instance. This should run `InternalVar := 10 * 2`.
+	testEvalWithEnv(t, "P1_inst();", resEnv)
+
+	// 5. Read the value through the alias from the top-level environment.
+	// The evalIdentifier logic should dereference the pointer.
+	finalValue := testEvalWithEnv(t, "AliasForInternal;", env)
+	testIntegerObject(t, finalValue, "AliasForInternal", 20)
+}
+
+func TestConfigurationProgramWithoutTask(t *testing.T) {
+	input := `
+		PROGRAM P1
+			VAR x : INT := 1; END_VAR
+		END_PROGRAM
+
+		CONFIGURATION MyConfig
+			RESOURCE Res1 ON PLC
+				PROGRAM P1_inst : P1;
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	env := object.NewEnvironment()
+	result := testEvalWithEnv(t, input, env)
+	if isError(result) {
+		t.Fatalf("Configuration evaluation failed: %s", result.Inspect())
+	}
+
+	// Get the resource environment
+	resObj, ok := env.Get("Res1")
+	if !ok {
+		t.Fatalf("Resource 'Res1' not found in environment")
+	}
+	resEnv := resObj.(*object.FunctionBlockInstance).Env
+
+	// Check that the program instance exists
+	progInstObj, ok := resEnv.Get("P1_inst")
+	if !ok {
+		t.Fatalf("Program instance 'P1_inst' not found in resource environment")
+	}
+
+	// Check that the task name is empty
+	progInstance, _ := progInstObj.(*object.ProgramInstance)
+	if progInstance.TaskName != "" {
+		t.Errorf("Expected program instance to have no task association, but TaskName is %q", progInstance.TaskName)
+	}
+}
+
+func TestMultiResourceConfiguration(t *testing.T) {
+	input := `
+		PROGRAM P_A
+			VAR x : INT; END_VAR
+			x := 1;
+		END_PROGRAM
+
+		PROGRAM P_B
+			VAR y : BOOL; END_VAR
+			y := TRUE;
+		END_PROGRAM
+
+		CONFIGURATION MultiResConfig
+			RESOURCE Res_A ON CPU1
+				TASK Task_A (INTERVAL := T#10ms);
+				PROGRAM PA_inst WITH Task_A : P_A;
+			END_RESOURCE
+
+			RESOURCE Res_B ON CPU2
+				TASK Task_B (PRIORITY := 1);
+				PROGRAM PB_inst WITH Task_B : P_B;
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	env := object.NewEnvironment()
+	result := testEvalWithEnv(t, input, env)
+	if isError(result) {
+		t.Fatalf("Configuration evaluation failed: %s", result.Inspect())
+	}
+
+	// --- Check Resource A ---
+	resA_Obj, ok := env.Get("Res_A")
+	if !ok {
+		t.Fatalf("Resource 'Res_A' not found in environment")
+	}
+	resA_Instance, ok := resA_Obj.(*object.FunctionBlockInstance)
+	if !ok {
+		t.Fatalf("Resource object Res_A is not a FunctionBlockInstance, got %T", resA_Obj)
+	}
+	resA_Env := resA_Instance.Env
+
+	if _, ok := resA_Env.Get("Task_A"); !ok {
+		t.Errorf("Task 'Task_A' not found in environment for Res_A")
+	}
+	if _, ok := resA_Env.Get("PA_inst"); !ok {
+		t.Errorf("Program instance 'PA_inst' not found in environment for Res_A")
+	}
+
+	// --- Check Resource B ---
+	resB_Obj, ok := env.Get("Res_B")
+	if !ok {
+		t.Fatalf("Resource 'Res_B' not found in environment")
+	}
+	resB_Instance, ok := resB_Obj.(*object.FunctionBlockInstance)
+	if !ok {
+		t.Fatalf("Resource object Res_B is not a FunctionBlockInstance, got %T", resB_Obj)
+	}
+	resB_Env := resB_Instance.Env
+
+	if _, ok := resB_Env.Get("Task_B"); !ok {
+		t.Errorf("Task 'Task_B' not found in environment for Res_B")
+	}
+	if _, ok := resB_Env.Get("PB_inst"); !ok {
+		t.Errorf("Program instance 'PB_inst' not found in environment for Res_B")
+	}
+}
+
+func TestFunctionLiteralApplication(t *testing.T) {
+	// This test assumes the parser supports the `fn(...)` syntax for anonymous functions,
+	// which has been removed in favor of standard FUNCTION declarations.
+	// The test is updated to reflect the standard syntax.
+	input := `
+		FUNCTION add : INT VAR_INPUT x, y : INT; END_VAR
+			add := x + y;
+		END_FUNCTION
+		add(5, 10);
+	`
+	evaluated := testEval(t, input)
+	testIntegerObject(t, evaluated, "add(5, 10)", 15)
+}
+
+func TestHashLiteralEvaluation(t *testing.T) {
+	input := `{"one": 10 - 9, "two": 1 + 1, "three": 6 / 2};`
+
+	evaluated := testEval(t, input)
+	result, ok := evaluated.(*object.Hash)
+	if !ok {
+		t.Fatalf("Eval didn't return Hash. got=%T (%+v)", evaluated, evaluated)
+	}
+
+	expected := map[object.HashKey]int64{
+		(&object.String{Value: "one"}).HashKey():   1,
+		(&object.String{Value: "two"}).HashKey():   2,
+		(&object.String{Value: "three"}).HashKey(): 3,
+	}
+
+	if len(result.Pairs) != len(expected) {
+		t.Fatalf("Hash has wrong num of pairs. want=%d, got=%d",
+			len(expected), len(result.Pairs))
+	}
+
+	// Create a map of string keys to expected values for easier lookup.
+	expectedValues := map[string]int64{
+		"one":   1,
+		"two":   2,
+		"three": 3,
+	}
+
+	for _, pair := range result.Pairs {
+		key, ok := pair.Key.(*object.String)
+		if !ok {
+			t.Errorf("key is not *object.String. got=%T", pair.Key)
+			continue
+		}
+		expectedValue, ok := expectedValues[key.Value]
+		if !ok {
+			t.Errorf("unexpected key in hash: %s", key.Value)
+		}
+		testIntegerObject(t, pair.Value, key.Value, expectedValue)
 	}
 }
