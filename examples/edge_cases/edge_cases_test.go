@@ -1,7 +1,7 @@
-package parser
+package main
 
 import (
-	"io/ioutil"
+	"os"
 	"testing"
 
 	"beedance/evaluator"
@@ -10,8 +10,8 @@ import (
 	"beedance/parser"
 )
 
-func TestPitfalls(t *testing.T) {
-	input, err := ioutil.ReadFile("pitfalls.st")
+func TestEdgeCases(t *testing.T) {
+	input, err := os.ReadFile("edge_cases.st")
 	if err != nil {
 		t.Fatalf("could not read test file: %v", err)
 	}
@@ -95,7 +95,9 @@ func testIntegerObject(t *testing.T, env *object.Environment, name string, expec
 		t.Errorf("variable %s not found in environment", name)
 		return
 	}
-
+	if obj == nil {
+		return
+	}
 	val, _, ok := object.GetIntegerObjectValue(obj)
 	if !ok {
 		t.Errorf("object for %s is not an integer. got=%T (%+v)", name, obj, obj)
@@ -113,6 +115,9 @@ func testStringObject(t *testing.T, env *object.Environment, name string, expect
 	obj, ok := env.Get(name)
 	if !ok {
 		t.Errorf("variable %s not found in environment", name)
+		return
+	}
+	if obj == nil {
 		return
 	}
 

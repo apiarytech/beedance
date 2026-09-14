@@ -1,14 +1,14 @@
 (*
- * This file tests the beedance parser and evaluator against known
- * pitfalls discovered during the development of other IEC 61131-3 compilers,
- * such as matiec.
+ * This file tests the beedance parser and evaluator against known edge cases
+ * and complex language constructs discovered during the development of other
+ * IEC 61131-3 compilers, such as matiec.
  *)
 
 (*
  * =============================================================================
- * Pitfall 1: Symbol Disambiguation
+ * Edge Case 1: Symbol Disambiguation
  *
- * The same identifier 'Ambiguous' is used as a TYPE, FUNCTION, and VARIABLE name.
+ * The same identifier 'Ambiguous' is used as a TYPE, FUNCTION, and VARIABLE.
  * The parser should create a valid AST, and the evaluator should resolve the
  * correct symbol based on the context of its usage.
  * =============================================================================
@@ -46,10 +46,10 @@ END_PROGRAM
 
 (*
  * =============================================================================
- * Pitfall 2: IL Operators as Variable Names in Structured Text (ST)
+ * Edge Case 2: IL Operators as Variable Names in Structured Text (ST)
  *
  * The IEC standard allows IL mnemonics like LD, ST, ADD to be used as
- * variable names. The parser should not treat them as reserved keywords in ST.
+ * variable names. The parser should not treat them as reserved keywords.
  * =============================================================================
  *)
 
@@ -69,10 +69,10 @@ END_PROGRAM
 
 (*
  * =============================================================================
- * Pitfall 3: Ambiguous Grammar for TYPE declarations
+ * Edge Case 3: Complex Grammar for TYPE declarations
  *
  * A TYPE declaration with an initial value, especially for STRINGs, caused
- * issues for LALR(1) parsers. Beedance's Pratt parser should handle this.
+ * issues for older LALR(1) parsers. Beedance's Pratt parser handles this.
  * =============================================================================
  *)
 

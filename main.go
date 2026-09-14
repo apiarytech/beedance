@@ -288,8 +288,15 @@ func transpileFile(inputFile, outputFile string, out io.Writer) {
 		formatted = buf.Bytes()
 	}
 
-	// 4. Write the final, formatted code to the output file.
-	err = os.WriteFile(outputFile, formatted, 0644)
+	// 4. Create and write the final, formatted code to the output file.
+	outFile, err := os.Create(outputFile)
+	if err != nil {
+		fmt.Fprintf(out, "Error creating output file: %s\n", err)
+		return
+	}
+	defer outFile.Close()
+
+	_, err = outFile.Write(formatted)
 	if err != nil {
 		fmt.Fprintf(out, "Error writing to output file: %s\n", err)
 		return
