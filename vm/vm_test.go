@@ -549,6 +549,23 @@ func TestVMMacroExpansion(t *testing.T) {
 			// The VM should receive bytecode for `6`.
 			expected: 6,
 		},
+		// {
+		// 	input: `
+		// 	VAR
+		// 		unless : MACRO := macro(condition, consequence, alternative) {
+		// 			EXPR(IF NOT (EVAL(condition)) THEN EVAL(consequence); ELSE EVAL(alternative); END_IF);
+		// 		};
+		// 	END_VAR
+
+		// 	unless(1 > 5, 10, 20);
+		// 	`,
+		// 	// The macro expands to `IF NOT (1 > 5) THEN 10; ELSE 20; END_IF`, which evaluates to 10.
+		// 	expected: 10,
+		// },
+		{
+			input:    `VAR a : MACRO := macro() { EXPR(1); }; END_VAR VAR b : MACRO := macro() { EXPR(2); }; END_VAR a() + b();`,
+			expected: 3,
+		},
 	}
 
 	runVmTestsWithMacros(t, tests)

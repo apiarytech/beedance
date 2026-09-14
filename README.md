@@ -17,8 +17,8 @@
 
 *   **Program Organization Units (POUs):**
     *   `PROGRAM`, `FUNCTION`, and `FUNCTION_BLOCK` declarations.
-    *   `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT`, `VAR`, and `VAR_TEMP` blocks.
     *   `EN`/`ENO` (Enable/Enable Out) mechanism for function blocks.
+    *   `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT`, `VAR`, `VAR_GLOBAL`, `VAR_EXTERNAL`, `VAR_ACCESS`, and `VAR_TEMP` blocks.
 
 *   **Data Types:**
     *   **Elementary Types:** Full range of `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`, `BOOL`, `STRING`.
@@ -30,6 +30,10 @@
 *   **Standard Library:**
     *   **Function Blocks:** `TON`, `TOF`, `TP`, `CTU`, `CTD`, `CTUD`, `R_TRIG`, `F_TRIG`, `SR`, `RS`.
     *   **Built-in Functions:** A rich library including type conversions (`INT_TO_REAL`), arithmetic (`ADD`, `SQRT`, `ABS`), string manipulation (`LEFT`, `MID`, `FIND`, `CONCAT`), array functions (`INSERT`, `DELETE`), and more.
+*   **System Configuration:**
+    *   Full support for `CONFIGURATION`, `RESOURCE`, and `TASK` blocks.
+    *   Program instantiation with task assignment (`WITH`).
+    *   Instance-specific parameterization via `VAR_CONFIG`.
 
 ## Core Features & Design Philosophy
 
@@ -37,6 +41,7 @@ The design of `beedance` is centered around creating a high-quality, maintainabl
 
 ### Advanced Parser Design
 The project is built upon a **Pratt (Top-Down Operator Precedence) parser**. This modern parsing technique is exceptionally well-suited for handling the complexities of computer language grammars. It allows for a clean, efficient, and easily extensible implementation that can gracefully handle operator precedence, prefix operators, and infix expressions.
+The parser also features a robust **panic-and-recover** error handling strategy. This allows it to log detailed syntax errors without halting, synchronize to the next valid statement, and continue parsing the rest of the file. This makes it highly resilient to errors in source code and provides better feedback to the developer.
 
 ### Clean & Modular Architecture
 
@@ -54,6 +59,23 @@ A core principle of `beedance` is a clean, modular architecture with a clear sep
 *   **`transpiler`:** A source-to-source compiler that translates the iec61131 AST into human-readable and efficient Go code. This enables integration with Go-native runtimes and compilation to native binaries or WebAssembly.
 
 This modular design allows components like the compiler and VM to operate without any dependency on the evaluator, enabling the creation of lightweight, high-performance tools.
+### Powerful Macro Engine
+
+`beedance` includes a powerful, Lisp-inspired macro engine that operates as a pure compile-time pre-processing step. Macros are defined using `MACRO` syntax and allow developers to perform advanced code generation before the program is compiled, transpiled, or evaluated.
+
+Key features of the macro system include:
+*   **AST-to-AST Transformation:** Macros take code (as AST nodes) for their arguments and produce new AST nodes.
+*   **Unquoting with `EVAL`:** The `EVAL` function allows arguments to be evaluated within the macro's expansion context.
+*   **Code Generation with `EXPR`:** The `EXPR` function "quotes" a block of code, turning it into an AST fragment that can be injected back into the program.
+*   **Seamless Integration:** The macro expansion pass is integrated into all backends (evaluator, compiler/VM, and transpiler), ensuring that macros can be used to generate code for any target.
+
+```iecst
+(* Example of a macro expands to `(2 + 4)` at compile time.*)
+VAR
+	my_macro : MACRO := macro(a, b) { EXPR(EVAL(a) + EVAL(b)); };
+END_VAR
+my_macro(1 + 1, 2 + 2);
+```
 ### Standards Compliance
 ### Extensible Backend Architecture
 

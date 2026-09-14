@@ -1319,24 +1319,23 @@ func (p *AccessTest) Logic(now time.Time) {
 
 func TestVarTempAndExternalTranspilation(t *testing.T) {
 	input := `VAR_GLOBAL
-	Global_Var : INT := 100;
-END_VAR
+	Global_Var : INT := 100; END_VAR
 
-PROGRAM TempAndExternalTest
-	VAR_EXTERNAL
-		Global_Var : INT;
-	END_VAR
-	VAR_TEMP
-		Temp_Var : INT := 5;
-	END_VAR
-	VAR
-		Result : INT;
-	END_VAR
+	PROGRAM TempAndExternalTest
+		VAR_EXTERNAL
+			Global_Var : INT;
+		END_VAR
+		VAR_TEMP
+			Temp_Var : INT := 5;
+		END_VAR
+		VAR
+			Result : INT;
+		END_VAR
 
-	Temp_Var := Temp_Var + 1;
-	Result := Global_Var + Temp_Var;
-END_PROGRAM
-`
+		Temp_Var := Temp_Var + 1;
+		Result := Global_Var + Temp_Var;
+	END_PROGRAM
+	`
 	expected := `// --- VAR_GLOBAL ---
 var Global_Var iec.INT = 100
 
@@ -1366,16 +1365,16 @@ func (p *TempAndExternalTest) Logic(now time.Time) {
 
 func TestArrayRepetitionTranspilation(t *testing.T) {
 	input := `
-PROGRAM ArrayRepTest
-	VAR
-		myArray : ARRAY[1..5] OF INT := [2(10), 3(20)];
-		anotherArray : ARRAY[1..7] OF INT := [1, 2, 3(0), 4, 5];
-	END_VAR
+	PROGRAM ArrayRepTest
+		VAR
+			myArray : ARRAY[1..5] OF INT := [2(10), 3(20)];
+			anotherArray : ARRAY[1..7] OF INT := [1, 2, 3(0), 4, 5];
+		END_VAR
 
-	myArray[0] := 0;
+		myArray[0] := 0;
 
-END_PROGRAM
-`
+	END_PROGRAM
+	`
 	expected := `
 type ArrayRepTest struct {
 	myArray      []iec.INT
@@ -1400,4 +1399,39 @@ func (p *ArrayRepTest) Logic(now time.Time) {
 }
 `
 	transpileAndCheck(t, "TestArrayRepetitionTranspilation", input, expected)
+}
+
+func TestMacroTranspilation(t *testing.T) {
+	input := `
+		PROGRAM MacroTestProgram
+			VAR
+				twice : MACRO := macro(a) { EXPR(EVAL(a) * 2); };
+				result : INT;
+			END_VAR
+
+			result := twice(10 + 5);
+		END_PROGRAM
+		`
+	// The macro `twice(10 + 5)` should be expanded to `((10 + 5) * 2)`
+	// before being transpiled.
+	expected := `type MacroTestProgram struct {
+	result iec.INT
+}
+
+// NewMacroTestProgramFactory creates a new instance of the MacroTestProgram program.
+func NewMacroTestProgramFactory(params map[string]string) (func(time.Time), error) {
+	instance := &MacroTestProgram{}
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *MacroTestProgram) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *MacroTestProgram) Logic(now time.Time) {
+	p.result = p.twice((10 + 5))
+}
+`
+	transpileAndCheck(t, "TestMacroTranspilation", input, expected)
 }

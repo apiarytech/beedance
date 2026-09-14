@@ -508,6 +508,11 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	// Transpile initial values from VAR declarations
 	//t.write("\t// Apply initial values from ST code\n")
 	for _, varDecl := range prog.Vars {
+		// Skip macro definitions, as they have no runtime initial value.
+		if _, ok := varDecl.Value.(*ast.MacroLiteral); ok {
+			continue
+		}
+
 		if varDecl.Value != nil {
 			t.write("\tinstance.%s = ", varDecl.Name.Value)
 			// Use a temporary transpiler with the receiver unset to transpile the value expression
@@ -1502,6 +1507,12 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 // into a Go struct field. It handles located variables by making them pointers.
 func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	// Transpile any leading comments associated with this variable declaration.
+	// If the variable is a macro definition, skip it entirely as it has no
+	// runtime equivalent in the transpiled code.
+	if _, ok := varDecl.Value.(*ast.MacroLiteral); ok {
+		return
+	}
+
 	t.transpileLeadingComments(varDecl.LeadingComments)
 
 	// Get the variable name.

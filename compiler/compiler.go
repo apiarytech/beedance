@@ -629,6 +629,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A VarDeclStatement defines a symbol and compiles its initial value (or null).
 	// It then emits an instruction to store that value in the correct scope.
 	case *ast.VarDeclStatement:
+		// If the variable is a macro definition, skip it entirely as it has no
+		// runtime equivalent in the compiled code.
+		if _, ok := node.Value.(*ast.MacroLiteral); ok {
+			return nil
+		}
+
 		// Handle located variables (AT %) by treating them as external symbols.
 		// The VM will be responsible for mapping the address string to physical I/O.
 		if node.Location != nil {

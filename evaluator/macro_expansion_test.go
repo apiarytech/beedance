@@ -22,14 +22,15 @@ func TestDefineMacros(t *testing.T) {
 
 	DefineMacros(program, env)
 
-	// After defining the macros, the VAR block should still exist but only contain 'number'.
+	// After defining the macros, the AST should NOT be modified. The VAR block
+	// should still contain all three original declarations.
 	if len(program.Statements) != 1 {
 		t.Fatalf("Program should have 1 statement (the VAR block). got=%d",
 			len(program.Statements))
 	}
 	varBlock, ok := program.Statements[0].(*ast.VarBlockDeclaration)
-	if !ok || len(varBlock.Declarations) != 1 {
-		t.Fatalf("VAR block should contain exactly one declaration ('number') after macro removal.")
+	if !ok || len(varBlock.Declarations) != 3 {
+		t.Fatalf("VAR block should still contain all 3 declarations. got=%d", len(varBlock.Declarations))
 	}
 
 	// Check that the macros were added to the environment.
@@ -110,9 +111,20 @@ func TestExpandMacros(t *testing.T) {
 		DefineMacros(program, env)
 		expanded := ExpandMacros(program, env)
 
-		if expanded.String() != expected.String() {
-			t.Errorf("not equal. want=%q, got=%q",
-				expected.String(), expanded.String())
+		// The expanded AST is a full *ast.Program. We need to compare the
+		// last statement of the expanded program with the first (and only)
+		// statement of the expected program.
+		expandedProg, ok := expanded.(*ast.Program)
+		if !ok {
+			t.Fatalf("expanded is not *ast.Program. got=%T", expanded)
+		}
+
+		lastExpandedStmt := expandedProg.Statements[len(expandedProg.Statements)-1]
+		expectedStmt := expected.Statements[0]
+
+		if lastExpandedStmt.String() != expectedStmt.String() {
+			t.Errorf("macro expansion incorrect. want=%q, got=%q",
+				expectedStmt.String(), lastExpandedStmt.String())
 		}
 	}
 }

@@ -4,7 +4,16 @@ This document provides a brief overview of the `beedance` project, suitable for 
 
 ---
 
-## 1. Architecture: Two Paths to Execution
+## 1. A Robust Foundation: The Parser
+
+At the core of `beedance` is a modern **Pratt (Top-Down Operator Precedence) parser**.
+
+*   **Clean & Extensible:** Easily handles complex operator precedence and grammar rules.
+*   **Resilient by Design:** Features a **panic-and-recover** error handling strategy. It can log detailed syntax errors and synchronize to the next valid statement, allowing it to parse an entire file even if it contains errors.
+
+---
+
+## 2. Architecture: Two Paths to Execution
 
 `beedance` offers a flexible backend architecture with two primary execution engines, allowing users to choose between simplicity and performance.
 
@@ -22,7 +31,7 @@ This dual-engine design makes `beedance` adaptable to a wide range of use cases,
 
 ---
 
-## 2. The Transpiler: IEC to Native Go
+## 3. The Transpiler: IEC to Native Go
 
 One of the most powerful features of `beedance` is its source-to-source compiler, or "transpiler."
 
@@ -30,6 +39,7 @@ One of the most powerful features of `beedance` is its source-to-source compiler
 *   **Why it's useful:** This allows industrial automation logic to be integrated directly into modern software applications, compiled into native binaries, or even run in a web browser via WebAssembly.
 *   **How to use it:** The transpiler is invoked via command-line flags.
 
+    It can also transpile `CONFIGURATION` blocks into a complete `main.go` file, bootstrapping the entire runtime environment.
     ```sh
     # Transpile a .st file to a .go file
     go run . -iec /path/to/your/program.st -go /path/to/transpiled.go
@@ -39,7 +49,28 @@ The transpiler is the bridge from the world of industrial automation to the broa
 
 ---
 
-## 3. The Runtime: `royaljelly`
+## 4. The Macro Engine: Compile-Time Code Generation
+
+`beedance` includes a powerful, Lisp-inspired macro engine that operates as a pure compile-time pre-processing step. This allows developers to perform advanced code generation before the program is compiled or transpiled.
+
+*   **What it does:** Macros perform AST-to-AST (Abstract Syntax Tree) transformations, allowing you to write code that writes other code.
+
+*   **How it works:**
+    *   `EXPR(...)`: "Quotes" a block of code, treating it as a template.
+    *   `EVAL(...)`: "Unquotes" an argument, evaluating it within the macro's context and injecting the result into the template.
+
+*   **Why it's useful:** Create custom DSLs, abstract away boilerplate, and enforce coding patterns at compile time.
+
+```iecst
+(* The macro expands to `(2 + 4)` at compile time.*)
+VAR
+	my_macro : MACRO := macro(a, b) { EXPR(EVAL(a) + EVAL(b)); };
+END_VAR
+my_macro(1 + 1, 2 + 2);
+```
+---
+
+## 5. The Runtime: `royaljelly`
 
 The transpiled Go code needs a special environment to run correctly, and that's what `github.com/apiarytech/royaljelly` provides.
 
@@ -54,22 +85,25 @@ In short, `beedance` translates the *what* (the logic), and `royaljelly` provide
 
 ---
 
-## 4. Core Advantage: Why Transpile to Go?
+## 6. Core Advantage: Why Transpile to Go?
 
-The combination of `beedance` and `royaljelly` offers several major advantages over traditional PLC environments by moving industrial logic into a modern, high-performance software ecosystem.
+The combination of `beedance` and `royaljelly` offers major advantages over traditional PLC environments by moving industrial logic into a modern, high-performance software ecosystem.
 
-### Deeper Dive: Native Performance
+### Deeper Dive: Two Paths to Native Performance
 
-Transpiling to Go isn't just a conversion; it's a direct path to high performance. Unlike interpreted systems that add overhead, the `beedance` workflow is:
+Transpiling to Go isn't just a conversion; it's a direct path to high performance. The `beedance` workflow opens up two powerful compilation paths:
 
-**IEC 61131-3 Source → Go Code → Go Compiler → Native Machine Code**
+1.  **Standard Go Compiler (`gc`):**
+    **IEC 61131-3 Source → Go Code → `gc` → Native Machine Code**
+    *   **Direct CPU Execution:** The final output is a native binary for servers and desktops. Instructions are executed directly by the processor without any intermediate interpretation layer, resulting in maximum speed.
+    *   **Advanced Compiler Optimizations:** The standard Go compiler applies sophisticated optimizations like function inlining, dead code elimination, and efficient register allocation.
 
-This provides several key benefits:
+2.  **TinyGo Compiler:**
+    **IEC 61131-3 Source → Go Code → `tinygo` → Optimized Native/WASM**
+    *   **Microcontroller & Embedded:** Creates highly-optimized, small binaries ideal for resource-constrained environments like industrial PCs and embedded devices.
+    *   **WebAssembly (WASM):** Produces extremely small `.wasm` files, enabling industrial logic to run efficiently in a web browser.
 
-*   **Direct CPU Execution:** The final output is a native binary. Instructions are executed directly by the processor without any intermediate interpretation layer, resulting in maximum speed.
-*   **Advanced Compiler Optimizations:** The standard Go compiler (`gc`) applies sophisticated optimizations like function inlining, dead code elimination, and efficient register allocation. This produces code that is significantly faster and more efficient than what a simple interpreter or VM can achieve.
-*   **Reduced Resource Footprint:** Compiled Go binaries are self-contained and have a low memory and CPU overhead. This makes them ideal for resource-constrained environments like industrial PCs and embedded devices.
-*   **Predictable Execution:** Native code execution generally leads to more deterministic and predictable cycle times, a critical requirement for real-time control applications.
+This flexibility allows you to target everything from powerful servers to tiny microcontrollers with the same IEC 61131-3 source code.
 
 ---
 

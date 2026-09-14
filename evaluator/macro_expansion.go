@@ -18,33 +18,35 @@ import (
 // to the given macro environment, and then removes them from the AST. This
 // prevents macros from being evaluated as regular variables and prepares them
 // for the expansion phase.
-func DefineMacros(program *ast.Program, env *object.Environment) {
-	var newStmts []ast.Statement
+func DefineMacros(rootNode ast.Node, env *object.Environment) {
+	var walk func(node ast.Node)
+	walk = func(node ast.Node) {
+		if node == nil {
+			return
+		}
 
-	for _, stmt := range program.Statements {
-		if varBlock, ok := stmt.(*ast.VarBlockDeclaration); ok {
-			var newDecls []*ast.VarDeclStatement
-			// Iterate over declarations within the VAR block
-			for _, decl := range varBlock.Declarations {
-				if isMacroDefinition(decl) {
-					addMacro(decl, env)
-					// Do not add the macro declaration to the new list
-				} else {
-					newDecls = append(newDecls, decl)
-				}
+		// Recursively walk through the children of the node.
+		switch n := node.(type) {
+		case *ast.Program:
+			for _, stmt := range n.Statements {
+				walk(stmt)
 			}
-			// If the VAR block is not empty after removing macros, keep it.
-			if len(newDecls) > 0 {
-				varBlock.Declarations = newDecls
-				newStmts = append(newStmts, varBlock)
+		case *ast.VarBlockDeclaration:
+			for _, decl := range n.Declarations {
+				walk(decl) // Recurse into each declaration
 			}
-			// If the VAR block becomes empty, it is effectively removed.
-		} else {
-			// Keep non-VAR block statements
-			newStmts = append(newStmts, stmt)
+		case *ast.VarDeclStatement:
+			if isMacroDefinition(n) {
+				addMacro(n, env)
+			}
+		case *ast.ProgramDeclaration:
+			for _, varDecl := range n.Vars {
+				walk(varDecl)
+			}
+			walk(n.Body)
 		}
 	}
-	program.Statements = newStmts
+	walk(rootNode)
 }
 
 // isMacroDefinition checks if a given AST statement is a variable declaration
