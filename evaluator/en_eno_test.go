@@ -24,9 +24,11 @@ func TestFunctionBlock_EN_ENO(t *testing.T) {
 				MyTimer : TON;
 				EnableExecution : BOOL := TRUE;
 				Start : BOOL;
+			END_VAR
+			VAR_OUTPUT
 				TimerDone : BOOL;
-				EnableOut : BOOL;
 				ElapsedTime : TIME;
+				EnableOut : BOOL;
 			END_VAR
 
 			MyTimer(

@@ -31,6 +31,9 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	// Loop to parse all variable declaration blocks
 var_loop:
 	for {
+		// Consume any comments before the next var block.
+		p.consumeLeadingComments()
+
 		// This switch handles the various types of variable blocks that can appear
 		// at the start of a function block declaration.
 		switch p.curToken.Type {

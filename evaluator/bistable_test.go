@@ -76,6 +76,8 @@ func TestRS_FunctionBlock(t *testing.T) {
 				MyLatch : RS;
 				SetInput : BOOL;
 				ResetInput : BOOL;
+			END_VAR
+			VAR_OUTPUT
 				OutputQ1 : BOOL;
 			END_VAR
 
@@ -133,6 +135,8 @@ func TestSR_FunctionBlock_EN_ENO(t *testing.T) {
 				EnableExecution : BOOL := TRUE;
 				SetInput : BOOL;
 				ResetInput : BOOL;
+			END_VAR
+			VAR_OUTPUT
 				OutputQ1 : BOOL;
 				EnableOut : BOOL;
 			END_VAR
@@ -189,6 +193,8 @@ func TestRS_FunctionBlock_EN_ENO(t *testing.T) {
 				EnableExecution : BOOL := TRUE;
 				SetInput : BOOL;
 				ResetInput : BOOL;
+			END_VAR
+			VAR_OUTPUT
 				OutputQ1 : BOOL;
 				EnableOut : BOOL;
 			END_VAR

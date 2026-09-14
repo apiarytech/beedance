@@ -61,6 +61,9 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 
 	p.nextToken() // Consume return type
 
+	// Consume any comments between the header and the variable blocks.
+	p.consumeLeadingComments()
+
 	// Loop to parse all variable declaration blocks allowed within a FUNCTION.
 	// Loop to parse all variable declaration blocks
 	for !p.curTokenIs(token.END_FUNCTION) && !p.curTokenIs(token.EOF) {

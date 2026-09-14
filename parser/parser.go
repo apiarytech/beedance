@@ -167,6 +167,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.MAX, p.parseIdentifier)
 	p.registerPrefix(token.MOVE, p.parseIdentifier)
 
+	// Register other IL mnemonics that are keywords to allow them as identifiers in ST
+	p.registerPrefix(token.LD, p.parseIdentifier)
+	p.registerPrefix(token.ST, p.parseIdentifier)
 	p.registerPrefix(token.S, p.parseIdentifier)
 	p.registerPrefix(token.R, p.parseIdentifier)
 	p.registerPrefix(token.TIME_OF_DAY, p.parseDataTypeKeyword)
@@ -303,6 +306,12 @@ func (p *Parser) peekError(t token.TokenType) {
 // isIlInstruction provides a heuristic check to determine if the current token sequence represents an Instruction List (IL) instruction rather than a Structured Text (ST) expression.
 func (p *Parser) isIlInstruction() bool {
 	if !p.isIlMnemonic() {
+		return false
+	}
+
+	// If a mnemonic is followed by ':=', it's an ST assignment, not an IL instruction.
+	// This is the primary way to resolve the `ST := ...` ambiguity.
+	if p.peekTokenIs(token.ASSIGN) {
 		return false
 	}
 
@@ -455,6 +464,14 @@ func (p *Parser) parseStatement() ast.Statement {
 	// and attached to the AST node by the specific parsing function.
 	p.consumeLeadingComments()
 
+	// Prioritize assignment statements if the current token is an IDENT and the next is ASSIGN.
+	// Also handle cases where an IL mnemonic is used as a variable name (e.g., ST := ...).
+	// The isIlMnemonic() check is broad but safe here because it's guarded by peekTokenIs(token.ASSIGN),
+	// which is unambiguous for ST.
+	if (p.curTokenIs(token.IDENT) || p.isIlMnemonic()) && p.peekTokenIs(token.ASSIGN) {
+		return p.parseAssignmentStatement()
+	}
+
 	// Handle empty statements (just a semicolon).
 	if p.curTokenIs(token.SEMICOLON) {
 		return nil // The main parsing loop will advance the token.
@@ -518,10 +535,6 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
-		// isIlInstruction() was already checked and returned false, so this IDENT is not an IL mnemonic.
-		if p.peekTokenIs(token.ASSIGN) {
-			return p.parseAssignmentStatement()
-		}
 		return p.parseExpressionStatement()
 	default:
 		// Any other token that can start an expression.
@@ -755,6 +768,12 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 
 	declarations := []*ast.VarDeclStatement{}
 	for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
+		// Allow comments between declarations
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
 		// Each line is an instance-specific assignment.
 		// e.g., Station_1.P1.COUNT : INT := 1;
 		// Add a check for a valid start of a declaration.
@@ -830,6 +849,10 @@ func (p *Parser) parseTypeBlockDeclaration() *ast.TypeBlockDeclaration {
 	for !p.curTokenIs(token.END_TYPE) && !p.curTokenIs(token.EOF) {
 		// Consume any comments before the next declaration.
 		p.consumeLeadingComments()
+		// If consuming comments landed us on END_TYPE, break the loop.
+		if p.curTokenIs(token.END_TYPE) {
+			break
+		}
 
 		decl := p.parseTypeDeclaration()
 		if decl != nil {
@@ -1144,6 +1167,8 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 			if cfgVar != nil {
 				stmt.VarConfigs = append(stmt.VarConfigs, cfgVar)
 			}
+		case token.COMMENT:
+			p.nextToken()
 		default:
 			// If we encounter a token we don't recognize at this level, we advance past it to avoid an infinite loop.
 			p.nextToken()
@@ -1187,6 +1212,9 @@ func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 				// This assumes ast.ResourceDeclaration has a GlobalVars field.
 				stmt.GlobalVars = append(stmt.GlobalVars, globalVar)
 			}
+			// parseGlobalVarDeclStatement consumes its own end token (END_VAR),
+			// so we continue to the next loop iteration immediately.
+			continue
 		case token.TASK:
 			task := p.parseTaskDeclaration()
 			if task != nil {
@@ -1204,10 +1232,15 @@ func (p *Parser) parseResourceDeclaration() *ast.ResourceDeclaration {
 			// The correct syntax is `PROGRAM <instance> ...`
 			p.currentError("unexpected identifier '%s' in resource block, use PROGRAM keyword for instantiation", p.curToken.Literal)
 			p.nextToken() // Skip to recover
+			continue
+		case token.COMMENT:
+			p.nextToken()
+			continue
 
 		default:
 			p.currentError("unexpected token '%s' in resource block", p.curToken.Type)
 			p.nextToken() // Skip to recover
+			continue
 		}
 		p.nextToken()
 	}
@@ -1319,6 +1352,9 @@ func (p *Parser) parseTaskDeclaration() *ast.TaskDeclaration {
 			}
 			p.nextToken()
 			stmt.Priority = p.parseExpression(LOWEST)
+		case token.COMMENT:
+			p.nextToken()
+			continue
 		default:
 			p.currentError("unexpected token in task configuration: %s", p.curToken.Type)
 			// Synchronize to the end of the task declaration to allow parsing to continue.

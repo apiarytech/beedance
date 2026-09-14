@@ -38,6 +38,12 @@ type Expression interface {
 	expressionNode()
 }
 
+// Visitor defines the interface for a visitor pattern that walks the AST.
+// The `Visit` method is called for each node encountered.
+type Visitor interface {
+	Visit(node Node) (w Visitor)
+}
+
 // TypeSpecifier represents a data type in the language, e.g., INT, BOOL.
 type TypeSpecifier struct {
 	Token token.Token // The type token, e.g., token.INT
@@ -1047,6 +1053,7 @@ type FunctionLiteral struct {
 	Token      token.Token          // The 'fn' token
 	Parameters []*FunctionParameter // Changed from []*Identifier
 	ReturnType Expression           // New field for return type
+	VarInputs  []*VarDeclStatement
 	Body       *BlockStatement
 	Name       string
 }
@@ -1064,9 +1071,15 @@ func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
 func (fl *FunctionLiteral) String() string {
 	var out bytes.Buffer
 
-	params := []string{} // Now fl.Parameters is []*FunctionParameter
-	for _, p := range fl.Parameters {
-		params = append(params, p.String())
+	params := []string{}
+	if fl.VarInputs != nil {
+		for _, p := range fl.VarInputs {
+			params = append(params, p.String())
+		}
+	} else { // Fallback for older AST structures if needed
+		for _, p := range fl.Parameters {
+			params = append(params, p.String())
+		}
 	}
 
 	out.WriteString(fl.TokenLiteral())

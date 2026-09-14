@@ -86,3 +86,8 @@ func (e *Environment) Names() []string {
 	}
 	return names
 }
+
+// Outer returns the enclosing environment.
+func (e *Environment) Outer() *Environment {
+	return e.outer
+}

@@ -308,6 +308,8 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 	}
 	if IsBooleanType(toType) {
 		switch input.(type) {
+		case *Boolean:
+			return input // It's already a boolean, no conversion needed.
 		case *LInt, *SInt, *Int, *DInt, *USInt, *UInt, *UDInt, *ULInt:
 			iVal, _, _ := GetIntegerObjectValue(input)
 			return nativeBoolToBooleanObject(iVal != 0)

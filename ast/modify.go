@@ -119,6 +119,9 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		for i, _ := range node.Parameters {
 			node.Parameters[i], _ = Modify(node.Parameters[i], modifier).(*FunctionParameter)
 		}
+		for i, _ := range node.VarInputs {
+			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
+		}
 		if node.ReturnType != nil {
 			node.ReturnType, _ = Modify(node.ReturnType, modifier).(Expression)
 		}
@@ -175,7 +178,27 @@ func Modify(node Node, modifier ModifierFunc) Node {
 	case *FbTaskAssociation:
 		node.FbName, _ = Modify(node.FbName, modifier).(*Identifier)
 		node.TaskName, _ = Modify(node.TaskName, modifier).(*Identifier)
-	}
 
+	case *FunctionDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.ReturnType != nil {
+			node.ReturnType, _ = Modify(node.ReturnType, modifier).(*TypeSpecifier)
+		}
+		for i := range node.VarInputs {
+			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarOutputs {
+			node.VarOutputs[i], _ = Modify(node.VarOutputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarInOuts {
+			node.VarInOuts[i], _ = Modify(node.VarInOuts[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.Vars {
+			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(Statement)
+		}
+	}
 	return modifier(node)
 }
