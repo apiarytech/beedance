@@ -174,7 +174,7 @@ var_loop:
 		stmt.Body = p.parseBlockStatementUntil(token.END_PROGRAM)
 	}
 
-	if !p.curTokenIs(token.END_PROGRAM) || (p.peekTokenIs(token.EOF) && p.curTokenIs(token.EOF)) {
+	if !p.curTokenIs(token.END_PROGRAM) {
 		p.currentError("expected next token to be %s, got %s instead", token.END_PROGRAM, p.curToken.Type)
 	} else {
 		p.nextToken() // Consume END_PROGRAM

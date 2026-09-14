@@ -1892,9 +1892,10 @@ func (ad *ArrayDefinition) String() string {
 
 // ActionStatement represents an ACTION block in an SFC.
 type ActionStatement struct {
-	Token token.Token // The 'ACTION' token
-	Name  *Identifier
-	Body  Statement
+	Token           token.Token // The 'ACTION' token
+	LeadingComments []string
+	Name            *Identifier
+	Body            Statement
 }
 
 // statementNode marks ActionStatement as a statement node.
@@ -1902,6 +1903,9 @@ func (as *ActionStatement) statementNode() {}
 
 // Pos returns the position of the ACTION token.
 func (as *ActionStatement) Pos() (int, int) { return as.Token.Row, as.Token.Column }
+
+// GetLeadingComments returns the leading comments for the statement.
+func (as *ActionStatement) GetLeadingComments() []string { return as.LeadingComments }
 
 // TokenLiteral returns the literal value of the token.
 func (as *ActionStatement) TokenLiteral() string { return as.Token.Literal }

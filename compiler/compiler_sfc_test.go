@@ -10,24 +10,27 @@ func TestActionDeclaration(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
-			ACTION MyAction
+			ACTION MyAction:
 				VAR a : INT := 1; END_VAR
 				a := a + 1;
 			END_ACTION
 			`,
-			expectedConstants: []interface{}{ // Constants for the flattened global compilation
-				1, // for 'a := 1'
-				1, // for 'a + 1'
+			expectedConstants: []interface{}{
+				1, // for 'a := 1' and 'a + 1'
+				[]code.Instructions{ // The compiled function for the action body
+					code.Make(code.OpConstant, 0), // Push 1 for initial value
+					code.Make(code.OpSetLocal, 0), // Set local 'a'
+					code.Make(code.OpGetLocal, 0), // Get 'a'
+					code.Make(code.OpConstant, 0), // Push 1 for addition
+					code.Make(code.OpAdd),         // Add
+					code.Make(code.OpSetLocal, 0), // Set 'a' again
+					code.Make(code.OpReturn),      // Implicit return
+				},
 			},
 			expectedInstructions: []code.Instructions{
-				// The parser flattens top-level ACTIONs, so the compiler generates global code.
-				code.Make(code.OpConstant, 0),  // Push 1 (for 'a := 1')
-				code.Make(code.OpSetGlobal, 0), // Set global 'a'
-				code.Make(code.OpGetGlobal, 0), // Get global 'a'
-				code.Make(code.OpConstant, 1),  // Push 1 (for 'a + 1')
-				code.Make(code.OpAdd),          // Add
-				code.Make(code.OpSetGlobal, 0), // Set global 'a' to result
-				code.Make(code.OpPop),          // Pop result of the assignment expression
+				// The action is compiled into a closure and stored in a global variable.
+				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpSetGlobal, 0),
 			},
 		},
 	}

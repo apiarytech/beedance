@@ -70,7 +70,7 @@ var_loop:
 		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
 	}
 
-	if !p.curTokenIs(token.END_FUNCTION_BLOCK) || (p.peekTokenIs(token.EOF) && p.curTokenIs(token.EOF)) {
+	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
 		p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
 	} else {
 		p.nextToken() // Consume END_FUNCTION_BLOCK

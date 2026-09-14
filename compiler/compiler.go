@@ -169,9 +169,6 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	for _, b := range node.VarAccess {
 		varDecls = append(varDecls, b)
 	}
-	for _, b := range node.VarTemp {
-		varDecls = append(varDecls, b)
-	}
 
 	for _, decl := range varDecls {
 		if err := c.Compile(decl); err != nil {
@@ -184,6 +181,14 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	// Create a new, clean compiler for the cyclic part to ensure it doesn't
 	// re-declare variables. It shares the same symbol table and constants.
 	cyclicCompiler := NewWithState(c.symbolTable, c.constants)
+
+	// Compile VAR_TEMP at the start of the cyclic code so they are re-initialized on each scan.
+	for _, tempBlock := range node.VarTemp {
+		if err := cyclicCompiler.Compile(tempBlock); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := cyclicCompiler.Compile(node.Body); err != nil {
 		return nil, err
 	}

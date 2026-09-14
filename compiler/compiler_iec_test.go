@@ -10,7 +10,7 @@ func TestIecCompilerOperators(t *testing.T) {
 	tests := []compilerTestCase{
 		// Arithmetic
 		{
-			input:             "10 MOD 3",
+			input:             "10 MOD 3;",
 			expectedConstants: []interface{}{10, 3},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -20,7 +20,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "2 ** 10",
+			input:             "2 ** 10;",
 			expectedConstants: []interface{}{2, 10},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -31,7 +31,7 @@ func TestIecCompilerOperators(t *testing.T) {
 		},
 		// Comparison
 		{
-			input:             "1 < 2",
+			input:             "1 < 2;",
 			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -41,7 +41,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "1 <= 2",
+			input:             "1 <= 2;",
 			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -51,7 +51,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "1 >= 2",
+			input:             "1 >= 2;",
 			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -61,7 +61,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "1 = 2",
+			input:             "1 = 2;",
 			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -71,7 +71,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "1 <> 2",
+			input:             "1 <> 2;",
 			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
@@ -82,7 +82,7 @@ func TestIecCompilerOperators(t *testing.T) {
 		},
 		// Logical
 		{
-			input:             "true AND false",
+			input:             "true AND false;",
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
@@ -92,7 +92,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "true OR false",
+			input:             "true OR false;",
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
@@ -102,7 +102,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "true XOR false",
+			input:             "true XOR false;",
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
@@ -112,7 +112,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "true NAND false",
+			input:             "true NAND false;",
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
@@ -122,7 +122,7 @@ func TestIecCompilerOperators(t *testing.T) {
 			},
 		},
 		{
-			input:             "true NOR false",
+			input:             "true NOR false;",
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),

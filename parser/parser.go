@@ -2140,7 +2140,8 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	stmt.Expression = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.SEMICOLON) {
-		return nil
+		// Even if the semicolon is missing, return the parsed expression statement for better recovery.
+		return stmt
 	}
 
 	return stmt
@@ -2210,10 +2211,22 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		// top-level POU or a VAR block, it's a strong signal that the current block
 		// was not closed correctly. We stop parsing this block and let the calling
 		// function handle the error.
-		isTopLevelOrVarKeyword := func(t token.TokenType) bool {
-			return t == token.PROGRAM || t == token.FUNCTION || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION || t == token.VAR
+		isTopLevelKeyword := func(t token.TokenType) bool {
+			return t == token.PROGRAM || t == token.FUNCTION || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION
 		}
-		if isTopLevelOrVarKeyword(p.curToken.Type) {
+
+		// A VAR block is only allowed inside an ACTION body. For all other blocks
+		// (IF, FOR, POU bodies), encountering a VAR keyword indicates the previous
+		// block was not closed.
+		isParsingActionBody := false
+		for _, et := range end {
+			if et == token.END_ACTION {
+				isParsingActionBody = true
+				break
+			}
+		}
+
+		if isTopLevelKeyword(p.curToken.Type) || (p.curToken.Type == token.VAR && !isParsingActionBody) {
 			break
 		}
 
