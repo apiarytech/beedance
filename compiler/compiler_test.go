@@ -1290,62 +1290,86 @@ func TestRecursiveFunctions(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
-			FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR countDown := countDown(x - 1); END_FUNCTION
+			FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR;
+						IF x = 0 THEN
+							countDown := 0;
+						ELSE
+							countDown := countDown(x - 1);
+						END_IF
+					END_FUNCTION;
 			countDown(1);`,
 			expectedConstants: []interface{}{
+				0, // for the IF and assignment
 				1,
-				[]code.Instructions{ // The body of countDown
-					code.Make(code.OpNull),        // Initialize return var 'countDown'
-					code.Make(code.OpSetLocal, 1), // x is 0, countDown is 1
-					code.Make(code.OpCurrentClosure),
+				[]code.Instructions{
+					code.Make(code.OpNull),
+					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
+					code.Make(code.OpEqual),
+					code.Make(code.OpJumpNotTruthy, 19),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpReturnValue),
+					code.Make(code.OpJump, 29),
+					code.Make(code.OpCurrentClosure),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
 					code.Make(code.OpSub),
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 0), // Reuse constant 1
+				code.Make(code.OpConstant, 1), // The '1' from countDown(1)
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
 			},
 		},
 		{
 			input: `
-			FUNCTION wrapper : INT
-				FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR countDown := countDown(x-1); END_FUNCTION
-				countDown(1);
-			END_FUNCTION
+			FUNCTION wrapper : INT;
+				FUNCTION countDown : INT VAR_INPUT x:INT; END_VAR;
+					IF x = 0 THEN countDown := 0; ELSE countDown := countDown(x - 1); END_IF
+				END_FUNCTION;
+				wrapper := countDown(1);
+			END_FUNCTION;
 			wrapper();`,
 			expectedConstants: []interface{}{
+				0,
 				1,
 				[]code.Instructions{ // Body of inner countDown
-					code.Make(code.OpNull),        // Initialize return var 'countDown'
-					code.Make(code.OpSetLocal, 1), // x is 0, countDown is 1
-					code.Make(code.OpCurrentClosure),
+					code.Make(code.OpNull),
+					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
+					code.Make(code.OpEqual),
+					code.Make(code.OpJumpNotTruthy, 19),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpReturnValue),
+					code.Make(code.OpJump, 29),
+					code.Make(code.OpCurrentClosure),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
 					code.Make(code.OpSub),
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
 				},
-				[]code.Instructions{
+				[]code.Instructions{ // Body of outer wrapper
 					code.Make(code.OpNull),        // Initialize return var 'wrapper'
 					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpClosure, 1, 0),
+					code.Make(code.OpClosure, 2, 0),
 					code.Make(code.OpSetLocal, 1), // Store 'countDown' closure
 					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
-					code.Make(code.OpConstant, 0), // Reuse constant 1
+					code.Make(code.OpConstant, 1), // Call with constant 1
 					code.Make(code.OpCall, 1),     // Call countDown(1)
 					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpCall, 0),

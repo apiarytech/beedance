@@ -3,6 +3,7 @@ package vm
 import (
 	"beedance/ast"
 	"beedance/compiler"
+	"beedance/evaluator"
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
@@ -227,50 +228,81 @@ func TestFunctionsWithoutReturnValue(t *testing.T) {
 func TestCallingFunctionsWithBindings(t *testing.T) {
 	tests := []vmTestCase{
 		{
-			input: `FUNCTION one : INT VAR one_local : INT := 1; END_VAR one := one_local; END_FUNCTION;
-					one();`,
+			input: `
+			FUNCTION one : INT
+				VAR one_local : INT := 1;END_VAR
+				one := one_local;
+			END_FUNCTION;
+			PROGRAM TestProgram
+				one();
+			END_PROGRAM;`,
 			expected: 1,
 		},
 		{
 			input: `
-			FUNCTION oneAndTwo : INT;
+			FUNCTION oneAndTwo : INT
 				VAR one: INT := 1; two: INT := 2; END_VAR
 				oneAndTwo := one + two;
 			END_FUNCTION;
-			oneAndTwo();`,
+			PROGRAM TestProgram
+				oneAndTwo();
+			END_PROGRAM;`,
 			expected: 3,
 		},
 		{
-			input: `FUNCTION oneAndTwo : INT VAR one:INT:=1; two:INT:=2; END_VAR oneAndTwo := one + two; END_FUNCTION;
-			FUNCTION threeAndFour : INT VAR three:INT:=3; four:INT:=4; END_VAR threeAndFour := three + four; END_FUNCTION;
-			oneAndTwo() + threeAndFour();`,
+			input: `
+			FUNCTION oneAndTwo : INT
+				VAR one:INT:=1; two:INT:=2; END_VAR
+				oneAndTwo := one + two;
+			END_FUNCTION;
+			FUNCTION threeAndFour : INT
+				VAR three:INT:=3; four:INT:=4; END_VAR
+				threeAndFour := three + four;
+			END_FUNCTION;
+			PROGRAM TestProgram
+				oneAndTwo() + threeAndFour();
+			END_PROGRAM;`,
 			expected: 10,
 		},
 		{
 			input: `
-			FUNCTION firstFoobar : INT;
+			FUNCTION firstFoobar : INT
 				VAR foobar : INT := 50; END_VAR
 				firstFoobar := foobar;
 			END_FUNCTION;
-			FUNCTION secondFoobar : INT;
+			FUNCTION secondFoobar : INT
 				VAR foobar : INT := 100; END_VAR
 				secondFoobar := foobar;
 			END_FUNCTION;
-			firstFoobar() + secondFoobar();`,
+			PROGRAM TestProgram
+				firstFoobar() + secondFoobar();
+			END_PROGRAM;`,
 			expected: 150,
 		},
 		{
 			input: `
 			VAR_GLOBAL globalSeed : INT := 50; END_VAR;
-			FUNCTION minusOne : INT;
-				VAR num : INT := 1; END_VAR
+			FUNCTION minusOne : INT
+				VAR_EXTERNAL
+					globalSeed : INT;
+				END_VAR
+				VAR
+					num : INT := 1;
+				END_VAR
 				minusOne := globalSeed - num;
 			END_FUNCTION;
-			FUNCTION minusTwo : INT;
-				VAR num : INT := 2; END_VAR
+			FUNCTION minusTwo : INT
+				VAR_EXTERNAL
+					globalSeed : INT;
+				END_VAR
+				VAR
+					num : INT := 2;
+				END_VAR
 				minusTwo := globalSeed - num;
 			END_FUNCTION;
-			minusOne() + minusTwo();`,
+			PROGRAM TestProgram
+				minusOne() + minusTwo();
+			END_PROGRAM;`,
 			expected: 97,
 		},
 	}
@@ -503,6 +535,25 @@ func TestRecursiveFunctions(t *testing.T) {
 	runVmTests(t, tests)
 }
 
+func TestVMMacroExpansion(t *testing.T) {
+	tests := []vmTestCase{
+		{
+			input: `
+			VAR
+				my_macro : MACRO := macro(a, b) { EXPR(EVAL(a) + EVAL(b)); };
+			END_VAR
+
+			my_macro(1 + 1, 2 + 2);
+			`,
+			// The macro expands to `(2 + 4)` at compile time.
+			// The VM should receive bytecode for `6`.
+			expected: 6,
+		},
+	}
+
+	runVmTestsWithMacros(t, tests)
+}
+
 func TestRecursiveFibonacci(t *testing.T) {
 	tests := []vmTestCase{
 		{
@@ -526,6 +577,46 @@ func TestRecursiveFibonacci(t *testing.T) {
 type vmTestCase struct {
 	input    string
 	expected interface{}
+}
+
+func runVmTestsWithMacros(t *testing.T, tests []vmTestCase) {
+	t.Helper()
+
+	object.FinalizeBuiltins()
+	builtinEntries := object.Builtins
+
+	maxIndex := -1
+	for _, entry := range builtinEntries {
+		if entry.Index > maxIndex {
+			maxIndex = entry.Index
+		}
+	}
+	vmBuiltins := make([]*object.Builtin, maxIndex+1)
+	for _, entry := range builtinEntries {
+		vmBuiltins[entry.Index] = entry.Builtin
+	}
+
+	for i, tt := range tests {
+		program := parse(tt.input)
+		env := object.NewEnvironment()
+		evaluator.DefineMacros(program, env)
+		expanded := evaluator.ExpandMacros(program, env)
+
+		comp := compiler.NewCompilerWithBuiltins(builtinEntries)
+		err := comp.Compile(expanded)
+		if err != nil {
+			t.Fatalf("test #%d/%d on input '%s': compiler error: %s", i, len(tests), tt.input, err)
+		}
+
+		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
+		err = vm.Run()
+		if err != nil {
+			t.Fatalf("test #%d/%d on input '%s': vm error: %s", i, len(tests), tt.input, err)
+		}
+
+		stackElem := vm.LastPoppedStackElem()
+		testExpectedObject(t, i, tt.expected, stackElem)
+	}
 }
 
 func runVmTests(t *testing.T, tests []vmTestCase) {

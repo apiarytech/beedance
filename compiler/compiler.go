@@ -498,18 +498,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// an assignment to the function name, which is compiled as a return),
 		// we add an implicit return of the function's return variable.
 		if !c.lastInstructionIs(code.OpReturnValue) {
-			if len(outputNames) > 0 {
-				c.loadSymbol(returnSymbol) // Load primary return value onto stack
-				c.emit(code.OpReturnValueMulti)
-			} else {
-				returnSymbol, ok := c.symbolTable.Resolve(node.Name.Value)
-				if !ok {
-					// This should not happen if we defined it above.
-					return fmt.Errorf("internal compiler error: could not resolve function return variable %s", node.Name.Value)
-				}
-				c.loadSymbol(returnSymbol)
-				c.emit(code.OpReturnValue)
-			}
+			// If the function "falls off the end" without an explicit return,
+			// implicitly return NULL.
+			c.emit(code.OpReturn)
 		}
 
 		freeSymbols := c.symbolTable.FreeSymbols
@@ -517,7 +508,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		instructions := c.leaveScope()
 
 		c.popFunction()
-
 		compiledFn := &object.CompiledFunction{
 			Instructions:   instructions,
 			NumLocals:      numLocals,
@@ -571,6 +561,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Left.(*ast.Identifier).Value)
 		}
+
+		// Check if assigning to the current function's return variable, which is a special case.
+		if currentFn := c.currentFunction(); currentFn != nil && symbol.Scope == LocalScope && symbol.Name == currentFn.Name.Value {
+			// We have the value on the stack. Instead of setting a local and then
+			// potentially returning it later, we just emit OpReturnValue directly.
+			c.emit(code.OpReturnValue)
+			// This is a return, so we don't pop the value.
+			return nil // The statement is fully handled.
+		}
+
 		err = c.setSymbol(symbol)
 		if err != nil {
 			return err
@@ -1148,11 +1148,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// A ReturnStatement compiles the return value and emits OpReturnValue.
 	case *ast.ReturnStatement:
-		err := c.Compile(node.ReturnValue)
-		if err != nil {
+		if node.ReturnValue == nil {
+			c.emit(code.OpReturn)
+			return nil
+		}
+		if err := c.Compile(node.ReturnValue); err != nil {
 			return err
 		}
-
 		c.emit(code.OpReturnValue)
 
 	// A CallExpression compiles the function/callable and all arguments, then
