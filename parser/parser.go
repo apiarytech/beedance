@@ -2139,9 +2139,10 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 
 	stmt.Expression = p.parseExpression(LOWEST)
 
-	if !p.expectPeek(token.SEMICOLON) {
-		// Even if the semicolon is missing, return the parsed expression statement for better recovery.
-		return stmt
+	// If the next token is a semicolon, consume it. This makes semicolons optional
+	// for the last statement in a block, which is common in expression-based languages.
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
 	}
 
 	return stmt
@@ -2212,7 +2213,7 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		// was not closed correctly. We stop parsing this block and let the calling
 		// function handle the error.
 		isTopLevelKeyword := func(t token.TokenType) bool {
-			return t == token.PROGRAM || t == token.FUNCTION || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION
+			return t == token.PROGRAM || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION
 		}
 
 		// A VAR block is only allowed inside an ACTION body. For all other blocks

@@ -652,14 +652,14 @@ func TestIndexExpressions(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input:             "[1, 2, 3][1 + 1]",
-			expectedConstants: []interface{}{1, 2, 3, 1, 1},
+			expectedConstants: []interface{}{1, 2, 3},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpConstant, 1),
 				code.Make(code.OpConstant, 2),
 				code.Make(code.OpArray, 3),
-				code.Make(code.OpConstant, 3),
-				code.Make(code.OpConstant, 4),
+				code.Make(code.OpConstant, 0), // Reuse constant 1
+				code.Make(code.OpConstant, 0), // Reuse constant 1
 				code.Make(code.OpAdd),
 				code.Make(code.OpIndex),
 				code.Make(code.OpPop),
@@ -667,13 +667,13 @@ func TestIndexExpressions(t *testing.T) {
 		},
 		{
 			input:             "{1: 2}[2 - 1]",
-			expectedConstants: []interface{}{1, 2, 2, 1},
+			expectedConstants: []interface{}{1, 2},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpConstant, 1),
 				code.Make(code.OpHash, 2),
-				code.Make(code.OpConstant, 2),
-				code.Make(code.OpConstant, 3),
+				code.Make(code.OpConstant, 1), // Reuse constant 2
+				code.Make(code.OpConstant, 0), // Reuse constant 1
 				code.Make(code.OpSub),
 				code.Make(code.OpIndex),
 				code.Make(code.OpPop),
@@ -920,60 +920,61 @@ func TestConfigurationCompilation(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `
+			PROGRAM ProgType VAR END_VAR END_PROGRAM
             CONFIGURATION MyConfig
                 RESOURCE Res1 ON PLC1
                     TASK T1 (INTERVAL := T#100ms, PRIORITY := 1);
                     PROGRAM P1 WITH T1 : ProgType;
                 END_RESOURCE
-                VAR_CONFIG P1
+                VAR_CONFIG P1 
                     Input1 : INT := 42;
                 END_VAR
             END_CONFIGURATION
             `,
 			expectedConstants: []interface{}{
-				"name", "T1", "interval", 100 * time.Millisecond, "priority", 1, // Task constants
-				"instance", "P1", "task", "T1", "type", "ProgType", // Program constants
-				"params", "Input1", 42, // VAR_CONFIG constants
-				"name", "Res1", "type", "PLC1", "programs", "tasks", // Resource constants
-				"name", "MyConfig", "resources", // Configuration constants
+				"name", "T1", "interval", 100 * time.Millisecond, "priority", 1, // Task
+				"instance", "P1", "task", "type", "ProgType", // Program
+				"params", "Input1", 42, // VAR_CONFIG
+				"Res1", "PLC1", "programs", "tasks", // Resource
+				"MyConfig", "resources", // Configuration
 			},
 			expectedInstructions: []code.Instructions{
-				// Task T1
+				// Task T1 Hash
 				code.Make(code.OpConstant, 0), // "name"
 				code.Make(code.OpConstant, 1), // "T1"
 				code.Make(code.OpConstant, 2), // "interval"
-				code.Make(code.OpConstant, 3), // T#100ms (as object.Time)
+				code.Make(code.OpConstant, 3), // T#100ms
 				code.Make(code.OpConstant, 4), // "priority"
 				code.Make(code.OpConstant, 5), // 1
 				code.Make(code.OpHash, 6),     // Task hash
 				code.Make(code.OpArray, 1),    // Tasks array
-				// Program P1
+				// Program P1 Hash
 				code.Make(code.OpConstant, 6),  // "instance"
 				code.Make(code.OpConstant, 7),  // "P1"
 				code.Make(code.OpConstant, 8),  // "task"
-				code.Make(code.OpConstant, 9),  // "T1" // cspell:disable-line
-				code.Make(code.OpConstant, 10), // "type" // cspell:disable-line
-				code.Make(code.OpConstant, 11), // "ProgType" // cspell:disable-line
-				code.Make(code.OpConstant, 12), // "params"
-				code.Make(code.OpConstant, 13), // "Input1"
-				code.Make(code.OpConstant, 14), // 42
+				code.Make(code.OpConstant, 1),  // "T1" (reused)
+				code.Make(code.OpConstant, 9),  // "type"
+				code.Make(code.OpConstant, 10), // "ProgType"
+				code.Make(code.OpConstant, 11), // "params"
+				code.Make(code.OpConstant, 12), // "Input1"
+				code.Make(code.OpConstant, 13), // 42
 				code.Make(code.OpHash, 2),      // Params hash
 				code.Make(code.OpHash, 8),      // Program hash
 				code.Make(code.OpArray, 1),     // Programs array
-				// Resource Res1
-				code.Make(code.OpConstant, 15), // "name"
-				code.Make(code.OpConstant, 16), // "Res1"
-				code.Make(code.OpConstant, 17), // "type"
-				code.Make(code.OpConstant, 18), // "PLC1"
-				code.Make(code.OpConstant, 19), // "programs"
+				// Resource Res1 Hash
+				code.Make(code.OpConstant, 0),  // "name" (reused)
+				code.Make(code.OpConstant, 14), // "Res1"
+				code.Make(code.OpConstant, 9),  // "type" (reused)
+				code.Make(code.OpConstant, 15), // "PLC1"
+				code.Make(code.OpConstant, 16), // "programs"
 				code.Make(code.OpSwap),
-				code.Make(code.OpConstant, 20), // "tasks"
+				code.Make(code.OpConstant, 17), // "tasks"
 				code.Make(code.OpHash, 8),      // Resource hash // cspell:disable-line
 				code.Make(code.OpArray, 1),     // Resources array
-				// Configuration MyConfig
-				code.Make(code.OpConstant, 21), // "name"
-				code.Make(code.OpConstant, 22), // "MyConfig"
-				code.Make(code.OpConstant, 23), // "resources"
+				// Configuration MyConfig Hash
+				code.Make(code.OpConstant, 0),  // "name" (reused)
+				code.Make(code.OpConstant, 18), // "MyConfig"
+				code.Make(code.OpConstant, 19), // "resources"
 				code.Make(code.OpHash, 4),      // Config hash
 				code.Make(code.OpSetGlobal, 0), // Store config
 			},
@@ -1303,13 +1304,12 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
 				},
-				1,
 			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpClosure, 1, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 2),
+				code.Make(code.OpConstant, 0), // Reuse constant 1
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
 			},
@@ -1333,20 +1333,19 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpCall, 1),
 					code.Make(code.OpReturnValue),
 				},
-				1, // For the `1` in `countDown(1)`
 				[]code.Instructions{
 					code.Make(code.OpNull),        // Initialize return var 'wrapper'
 					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpClosure, 1, 0),
 					code.Make(code.OpSetLocal, 1), // Store 'countDown' closure
 					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
-					code.Make(code.OpConstant, 2), // Now correctly refers to the second `1` constant
+					code.Make(code.OpConstant, 0), // Reuse constant 1
 					code.Make(code.OpCall, 1),     // Call countDown(1)
 					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 3, 0), // Now correctly refers to the wrapper body at index 3
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpCall, 0),

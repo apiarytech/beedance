@@ -1247,6 +1247,13 @@ func (c *Compiler) Bytecode() *Bytecode {
 
 // addConstant adds an object to the compiler's constant pool and returns its index.
 func (c *Compiler) addConstant(obj object.Object) int {
+	// Check if an equal constant already exists to avoid duplicates.
+	// This is important for efficiency and for stable test results.
+	for i, constant := range c.constants {
+		if object.IsEqual(constant, obj) {
+			return i
+		}
+	}
 	c.constants = append(c.constants, obj)
 	return len(c.constants) - 1
 }
@@ -1650,7 +1657,11 @@ func (c *Compiler) compileProgramConfig(prog *ast.ProgramConfiguration, varConfi
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: prog.InstanceName.Value}))
 
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "task"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: prog.TaskName.Value}))
+	taskName := ""
+	if prog.TaskName != nil {
+		taskName = prog.TaskName.Value
+	}
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: taskName}))
 
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "type"}))
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: prog.TypeName.Value}))
@@ -1659,7 +1670,10 @@ func (c *Compiler) compileProgramConfig(prog *ast.ProgramConfiguration, varConfi
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "params"}))
 	if varConfig != nil {
 		for _, decl := range varConfig.Declarations {
-			c.emit(code.OpConstant, c.addConstant(&object.String{Value: decl.Name.Value}))
+			// The parser for VAR_CONFIG puts the variable path into AccessPath.
+			// We use its string representation as the key.
+			paramName := decl.AccessPath.String()
+			c.emit(code.OpConstant, c.addConstant(&object.String{Value: paramName}))
 			if err := c.Compile(decl.Value); err != nil {
 				return err
 			}
