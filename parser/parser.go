@@ -2139,10 +2139,14 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 
 	stmt.Expression = p.parseExpression(LOWEST)
 
-	// If the next token is a semicolon, consume it. This makes semicolons optional
-	// for the last statement in a block, which is common in expression-based languages.
+	// Semicolons are optional only if the statement is the last one in a block.
+	// We can check if the next token is a block-ending token.
 	if p.peekTokenIs(token.SEMICOLON) {
 		p.nextToken()
+	} else if !isBlockEndingToken(p.peekToken.Type) && !p.peekTokenIs(token.EOF) {
+		// If it's not a semicolon and not a token that can legally end a block,
+		// then a semicolon was required.
+		p.peekError(token.SEMICOLON)
 	}
 
 	return stmt
@@ -2290,6 +2294,29 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 		p.currentError("missing 'UNTIL' for REPEAT statement")
 	}
 	return block
+}
+
+// isBlockEndingToken checks if a token type signifies the end of a statement block,
+// where an optional semicolon is permissible for the last statement.
+func isBlockEndingToken(tok token.TokenType) bool {
+	switch tok {
+	case token.RBRACE, // For anonymous functions `fn() { ... }`
+		token.END_IF,
+		token.END_FOR,
+		token.END_WHILE,
+		token.END_REPEAT,
+		token.END_CASE,
+		token.END_PROGRAM,
+		token.END_FUNCTION,
+		token.END_FUNCTION_BLOCK,
+		token.END_ACTION,
+		token.UNTIL, // For REPEAT loops
+		token.ELSE,  // For IF and CASE statements
+		token.ELSIF: // For IF statements
+		return true
+	default:
+		return false
+	}
 }
 
 // isStatementEndToken checks if a token type marks the end of a block statement.
