@@ -22,7 +22,6 @@ func TestErrorLexing(t *testing.T) {
 		{"@", token.ILLEGAL, "@", 1, 1},
 		{"$", token.ILLEGAL, "$", 1, 1},
 		{"%", token.ILLEGAL, "%", 1, 1},
-		{"^", token.ILLEGAL, "^", 1, 1},
 		{"&", token.AMPERSAND, "&", 1, 1},
 		{"|", token.ILLEGAL, "|", 1, 1},
 	}

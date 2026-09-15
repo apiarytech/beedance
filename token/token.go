@@ -72,6 +72,7 @@ const (
 	LBRACKET  = "["
 	PERCENT   = "%"
 	RBRACKET  = "]"
+	CARET     = "^"
 	HASH      = "#"
 
 	// Keywords
@@ -147,6 +148,14 @@ const (
 	END_RESOURCE      = "END_RESOURCE"
 	ON                = "ON"
 	WITH              = "WITH"
+	EXTENDS           = "EXTENDS"
+	IMPLEMENTS        = "IMPLEMENTS"
+	METHOD            = "METHOD"
+	END_METHOD        = "END_METHOD"
+	INTERFACE         = "INTERFACE"
+	END_INTERFACE     = "END_INTERFACE"
+	THIS              = "THIS"
+	SUPER             = "SUPER"
 
 	// Program Organization Unit Keywords
 	PROGRAM            = "PROGRAM"
@@ -289,6 +298,14 @@ var keywords = map[string]TokenType{
 	"RESOURCE":           RESOURCE,
 	"END_RESOURCE":       END_RESOURCE,
 	"REFERENCE":          REFERENCE,
+	"EXTENDS":            EXTENDS,
+	"IMPLEMENTS":         IMPLEMENTS,
+	"INTERFACE":          INTERFACE,
+	"END_INTERFACE":      END_INTERFACE,
+	"METHOD":             METHOD,
+	"THIS":               THIS,
+	"SUPER":              SUPER,
+	"END_METHOD":         END_METHOD,
 	"ON":                 ON,
 	"WITH":               WITH,
 	"TASK":               TASK,

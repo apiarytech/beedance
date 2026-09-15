@@ -41,7 +41,6 @@ const (
 
 // precedences maps token types to their precedence level.
 var precedences = map[token.TokenType]int{
-	token.ASSIGN:    ASSIGN,
 	token.OR:        LOGICAL_OR,
 	token.NOR:       LOGICAL_OR,
 	token.XOR:       LOGICAL_XOR,
@@ -65,6 +64,7 @@ var precedences = map[token.TokenType]int{
 	token.LPAREN:    CALL,
 	token.LBRACKET:  INDEX,
 	token.DOT:       MEMBER,
+	token.CARET:     CALL,   // Give it the same high precedence
 	token.WITH:      MEMBER, // Give WITH similar precedence for program config
 	token.HASH:      MEMBER, // Typed literals have similar precedence to member access.
 }
@@ -191,6 +191,8 @@ func New(l *lexer.Lexer) *Parser {
 	// Bit-string literals
 	p.registerPrefix(token.BYTE, p.parseIdentifier)
 	p.registerPrefix(token.WORD, p.parseIdentifier)
+	p.registerPrefix(token.THIS, p.parseThisExpression)
+	p.registerPrefix(token.SUPER, p.parseSuperExpression)
 	p.registerPrefix(token.DWORD, p.parseIdentifier)
 	p.registerPrefix(token.LWORD, p.parseIdentifier)
 	p.registerPrefix(token.SR, p.parseIdentifier)
@@ -223,11 +225,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.RANGE, p.parseInfixExpression)
 	p.registerInfix(token.MOD, p.parseInfixExpression)
 
-	p.registerInfix(token.ASSIGN, p.parseInfixExpression)
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccessExpression)
 	p.registerInfix(token.HASH, p.parseTypedLiteralExpression)
+	p.registerInfix(token.CARET, p.parseDereferenceExpression)
 	p.registerInfix(token.WITH, p.parseInfixExpression)
 	// // Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
@@ -464,14 +466,6 @@ func (p *Parser) parseStatement() ast.Statement {
 	// and attached to the AST node by the specific parsing function.
 	p.consumeLeadingComments()
 
-	// Prioritize assignment statements if the current token is an IDENT and the next is ASSIGN.
-	// Also handle cases where an IL mnemonic is used as a variable name (e.g., ST := ...).
-	// The isIlMnemonic() check is broad but safe here because it's guarded by peekTokenIs(token.ASSIGN),
-	// which is unambiguous for ST.
-	if (p.curTokenIs(token.IDENT) || p.isIlMnemonic()) && p.peekTokenIs(token.ASSIGN) {
-		return p.parseAssignmentStatement()
-	}
-
 	// Handle empty statements (just a semicolon).
 	if p.curTokenIs(token.SEMICOLON) {
 		return nil // The main parsing loop will advance the token.
@@ -532,6 +526,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseActionStatement()
 	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
 		return p.parsePoulDeclaration()
+	case token.INTERFACE:
+		return p.parseInterfaceDeclaration()
+	case token.METHOD:
+		return p.parseMethodImplementation()
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
@@ -1766,14 +1764,23 @@ func (p *Parser) parseBoolean() ast.Expression {
 // parseGroupedExpression parses an expression enclosed in parentheses.
 func (p *Parser) parseGroupedExpression() ast.Expression {
 	defer untrace(trace("parseGroupedExpression"))
-	p.nextToken()
+	startToken := p.curToken // This is '('
 
+	// Heuristic for struct literals: if it starts with `IDENT :=` inside the parens,
+	// or if it's an empty `()`, which could be an empty struct literal.
+	if (p.peekTokenIs(token.IDENT) && p.peek2TokenIs(token.ASSIGN)) || p.peekTokenIs(token.RPAREN) {
+		lit := &ast.StructLiteral{Token: startToken}
+		// We can reuse parseExpressionList, which handles named arguments.
+		// It expects to be called when the curToken is '('.
+		lit.Initializers = p.parseExpressionList(token.RPAREN)
+		return lit
+	}
+
+	p.nextToken() // consume '('
 	exp := p.parseExpression(LOWEST)
-
 	if !p.expectPeek(token.RPAREN) {
 		return nil
 	}
-
 	return exp
 }
 
@@ -2057,27 +2064,6 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	return block
 }
 
-// parseAssignmentStatement parses a standalone assignment statement (e.g., `x := 5;`).
-func (p *Parser) parseAssignmentStatement() *ast.AssignmentStatement {
-	defer untrace(trace("parseAssignmentStatement"))
-	// This function is called for standalone assignments, so it should attach the leading comments.
-	stmt := &ast.AssignmentStatement{
-		Token: p.curToken, LeadingComments: p.leadingComments,
-		Left: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
-	}
-
-	if !p.expectPeek(token.ASSIGN) {
-		return nil
-	}
-	// curToken is now ASSIGN
-
-	p.nextToken() // Move to the start of the value expression
-	stmt.Value = p.parseExpression(LOWEST)
-
-	p.expectPeek(token.SEMICOLON) // Consume semicolon
-	return stmt
-}
-
 // isTimeDateKeyword checks if a string is a keyword for a time or date literal type.
 func isTimeDateKeyword(name string) bool {
 	upper := strings.ToUpper(name)
@@ -2252,19 +2238,39 @@ func (p *Parser) parseRealOrType() ast.Expression {
 }
 
 // parseExpressionStatement parses a statement that consists of a single expression followed by a semicolon.
-func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+// It also handles assignment statements, which are syntactically similar.
+func (p *Parser) parseExpressionStatement() ast.Statement {
 	defer untrace(trace("parseExpressionStatement"))
-	stmt := &ast.ExpressionStatement{Token: p.curToken, LeadingComments: p.leadingComments}
+	startToken := p.curToken
+	leftExp := p.parseExpression(LOWEST)
 
-	stmt.Expression = p.parseExpression(LOWEST)
+	// After parsing the left-hand side, check if it's an assignment.
+	if p.peekTokenIs(token.ASSIGN) {
+		p.nextToken() // consume leftExp, curToken is now ASSIGN
+		stmt := &ast.AssignmentStatement{
+			Token:           p.curToken, // The := token
+			Left:            leftExp,
+			LeadingComments: p.leadingComments,
+		}
+		p.nextToken() // consume ASSIGN
+		stmt.Value = p.parseExpression(LOWEST)
 
-	// Semicolons are optional only if the statement is the last one in a block.
-	// We can check if the next token is a block-ending token.
+		if p.peekTokenIs(token.SEMICOLON) {
+			p.nextToken()
+		}
+		return stmt
+	}
+
+	// If not an assignment, it's a regular expression statement.
+	stmt := &ast.ExpressionStatement{
+		Token:           startToken,
+		Expression:      leftExp,
+		LeadingComments: p.leadingComments,
+	}
+
 	if p.peekTokenIs(token.SEMICOLON) {
 		p.nextToken()
 	} else if !isBlockEndingToken(p.peekToken.Type) && !p.peekTokenIs(token.EOF) {
-		// If it's not a semicolon and not a token that can legally end a block,
-		// then a semicolon was required.
 		p.peekError(token.SEMICOLON)
 	}
 
@@ -2489,8 +2495,11 @@ func isStatementStartKeyword(tok token.TokenType) bool {
 		token.PROGRAM,
 		token.FUNCTION,
 		token.FUNCTION_BLOCK,
+		token.INTERFACE,
 		token.ACTION,
 		token.TRANSITION,
+		token.THIS,
+		token.SUPER,
 		token.STEP:
 		return true
 	default:
@@ -2915,4 +2924,25 @@ func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {
 // registerInfix registers an infix parsing function for a given token type.
 func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
 	p.infixParseFns[tokenType] = fn
+}
+
+// parseThisExpression parses the THIS keyword into an ast.ThisExpression node.
+func (p *Parser) parseThisExpression() ast.Expression {
+	defer untrace(trace("parseThisExpression"))
+	return &ast.ThisExpression{Token: p.curToken}
+}
+
+// parseSuperExpression parses the SUPER keyword into an ast.SuperExpression node.
+func (p *Parser) parseSuperExpression() ast.Expression {
+	defer untrace(trace("parseSuperExpression"))
+	return &ast.SuperExpression{Token: p.curToken}
+}
+
+// parseDereferenceExpression parses the pointer dereference operator `^`.
+func (p *Parser) parseDereferenceExpression(left ast.Expression) ast.Expression {
+	defer untrace(trace("parseDereferenceExpression"))
+	return &ast.DereferenceExpression{
+		Token:   p.curToken, // The '^' token
+		Pointer: left,
+	}
 }

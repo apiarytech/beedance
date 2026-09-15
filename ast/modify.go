@@ -83,9 +83,6 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		if node.StringLength != nil {
 			node.StringLength, _ = Modify(node.StringLength, modifier).(Expression)
 		}
-		if node.StringLength != nil {
-			node.StringLength, _ = Modify(node.StringLength, modifier).(Expression)
-		}
 
 	case *ForLoopStatement:
 		node.ControlVar, _ = Modify(node.ControlVar, modifier).(*AssignmentStatement)
@@ -210,6 +207,86 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 	case *ReferenceType:
 		node.BaseType, _ = Modify(node.BaseType, modifier).(Expression)
+
+	case *FunctionBlockDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.Extends != nil {
+			node.Extends, _ = Modify(node.Extends, modifier).(*Identifier)
+		}
+		for i := range node.Implements {
+			node.Implements[i], _ = Modify(node.Implements[i], modifier).(*Identifier)
+		}
+		for i := range node.VarInputs {
+			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarOutputs {
+			node.VarOutputs[i], _ = Modify(node.VarOutputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarInOuts {
+			node.VarInOuts[i], _ = Modify(node.VarInOuts[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.Vars {
+			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(Statement)
+		}
+
+	case *InterfaceDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		for i := range node.Methods {
+			node.Methods[i], _ = Modify(node.Methods[i], modifier).(*MethodDeclaration)
+		}
+
+	case *MethodDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.ReturnType != nil {
+			node.ReturnType, _ = Modify(node.ReturnType, modifier).(*TypeSpecifier)
+		}
+		for i := range node.VarInputs {
+			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarOutputs {
+			node.VarOutputs[i], _ = Modify(node.VarOutputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarInOuts {
+			node.VarInOuts[i], _ = Modify(node.VarInOuts[i], modifier).(*VarDeclStatement)
+		}
+
+	case *DereferenceExpression:
+		node.Pointer, _ = Modify(node.Pointer, modifier).(Expression)
+
+	case *MethodImplementation:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.ReturnType != nil {
+			node.ReturnType, _ = Modify(node.ReturnType, modifier).(*TypeSpecifier)
+		}
+		for i := range node.VarInputs {
+			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarOutputs {
+			node.VarOutputs[i], _ = Modify(node.VarOutputs[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.VarInOuts {
+			node.VarInOuts[i], _ = Modify(node.VarInOuts[i], modifier).(*VarDeclStatement)
+		}
+		for i := range node.Vars {
+			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+		}
+
+	case *ThisExpression:
+		// No children to modify
+
+	case *SuperExpression:
+		// No children to modify
+
+	case *StructLiteral:
+		for i := range node.Initializers {
+			node.Initializers[i], _ = Modify(node.Initializers[i], modifier).(Expression)
+		}
 
 	}
 	return modifier(node)

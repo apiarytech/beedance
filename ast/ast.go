@@ -1468,6 +1468,8 @@ func (ml *MacroLiteral) String() string {
 type FunctionBlockDeclaration struct {
 	Token           token.Token // The 'FUNCTION_BLOCK' token
 	Name            *Identifier
+	Extends         *Identifier // For FB inheritance
+	Implements      []*Identifier
 	VarInputs       []*VarDeclStatement
 	VarOutputs      []*VarDeclStatement
 	VarInOuts       []*VarDeclStatement
@@ -1496,6 +1498,17 @@ func (fbd *FunctionBlockDeclaration) String() string {
 	out.WriteString("FUNCTION_BLOCK ")
 	if fbd.Name != nil {
 		out.WriteString(fbd.Name.String())
+	}
+	if fbd.Extends != nil {
+		out.WriteString(" EXTENDS " + fbd.Extends.String())
+	}
+	if len(fbd.Implements) > 0 {
+		out.WriteString(" IMPLEMENTS ")
+		impls := []string{}
+		for _, i := range fbd.Implements {
+			impls = append(impls, i.String())
+		}
+		out.WriteString(strings.Join(impls, ", "))
 	}
 	out.WriteString("\n")
 	// Simplified string representation for now
@@ -2199,5 +2212,201 @@ func (rt *ReferenceType) TokenLiteral() string { return rt.Token.Literal }
 func (rt *ReferenceType) String() string {
 	var out bytes.Buffer
 	out.WriteString("REFERENCE TO " + rt.BaseType.String())
+	return out.String()
+}
+
+// MethodDeclaration represents a method signature within an INTERFACE.
+type MethodDeclaration struct {
+	Token      token.Token // The 'METHOD' token
+	Name       *Identifier
+	ReturnType *TypeSpecifier
+	VarInputs  []*VarDeclStatement
+	VarOutputs []*VarDeclStatement
+	VarInOuts  []*VarDeclStatement
+}
+
+// statementNode marks MethodDeclaration as a statement node.
+func (md *MethodDeclaration) statementNode() {}
+
+// Pos returns the position of the METHOD token.
+func (md *MethodDeclaration) Pos() (int, int) { return md.Token.Row, md.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (md *MethodDeclaration) TokenLiteral() string { return md.Token.Literal }
+
+// String returns the string representation of the method declaration.
+func (md *MethodDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("METHOD ")
+	if md.Name != nil {
+		out.WriteString(md.Name.String())
+	}
+	if md.ReturnType != nil {
+		out.WriteString(" : ")
+		out.WriteString(md.ReturnType.String())
+	}
+	out.WriteString("\n")
+	for _, v := range md.VarInputs {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	for _, v := range md.VarOutputs {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	for _, v := range md.VarInOuts {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	out.WriteString("END_METHOD")
+	return out.String()
+}
+
+// InterfaceDeclaration represents an INTERFACE ... END_INTERFACE block.
+type InterfaceDeclaration struct {
+	Token           token.Token // The 'INTERFACE' token
+	Name            *Identifier
+	Methods         []*MethodDeclaration
+	LeadingComments []string
+}
+
+// statementNode marks InterfaceDeclaration as a statement node.
+func (id *InterfaceDeclaration) statementNode() {}
+
+// GetLeadingComments returns the leading comments for the statement.
+func (id *InterfaceDeclaration) GetLeadingComments() []string { return id.LeadingComments }
+
+// Pos returns the position of the INTERFACE token.
+func (id *InterfaceDeclaration) Pos() (int, int) { return id.Token.Row, id.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (id *InterfaceDeclaration) TokenLiteral() string { return id.Token.Literal }
+
+// String returns the string representation of the interface declaration.
+func (id *InterfaceDeclaration) String() string {
+	var out bytes.Buffer
+	out.WriteString("INTERFACE ")
+	if id.Name != nil {
+		out.WriteString(id.Name.String())
+	}
+	out.WriteString("\n")
+	for _, method := range id.Methods {
+		out.WriteString("\t" + method.String() + "\n")
+	}
+	out.WriteString("END_INTERFACE")
+	return out.String()
+}
+
+// MethodImplementation represents a method implementation within a FUNCTION_BLOCK.
+type MethodImplementation struct {
+	Token      token.Token // The 'METHOD' token
+	Name       *Identifier
+	ReturnType *TypeSpecifier
+	VarInputs  []*VarDeclStatement
+	VarOutputs []*VarDeclStatement
+	VarInOuts  []*VarDeclStatement
+	Vars       []*VarDeclStatement
+	Body       *BlockStatement
+}
+
+// statementNode marks MethodImplementation as a statement node.
+func (mi *MethodImplementation) statementNode() {}
+
+// Pos returns the position of the METHOD token.
+func (mi *MethodImplementation) Pos() (int, int) { return mi.Token.Row, mi.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (mi *MethodImplementation) TokenLiteral() string { return mi.Token.Literal }
+
+// String returns the string representation of the method implementation.
+func (mi *MethodImplementation) String() string {
+	var out bytes.Buffer
+	out.WriteString("METHOD ")
+	if mi.Name != nil {
+		out.WriteString(mi.Name.String())
+	}
+	if mi.ReturnType != nil {
+		out.WriteString(" : ")
+		out.WriteString(mi.ReturnType.String())
+	}
+	out.WriteString("\n")
+	for _, v := range mi.VarInputs {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	for _, v := range mi.VarOutputs {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	for _, v := range mi.VarInOuts {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	for _, v := range mi.Vars {
+		out.WriteString("\t" + v.String() + "\n")
+	}
+	if mi.Body != nil {
+		out.WriteString(mi.Body.String())
+	}
+	out.WriteString("\nEND_METHOD")
+	return out.String()
+}
+
+// ThisExpression represents the 'THIS' keyword, a pointer to the current FB instance.
+type ThisExpression struct {
+	Token token.Token // The 'THIS' token
+}
+
+// expressionNode marks ThisExpression as an expression node.
+func (te *ThisExpression) expressionNode() {}
+
+// Pos returns the position of the THIS token.
+func (te *ThisExpression) Pos() (int, int) { return te.Token.Row, te.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (te *ThisExpression) TokenLiteral() string { return te.Token.Literal }
+
+// String returns the string representation of the THIS expression.
+func (te *ThisExpression) String() string { return "THIS" }
+
+// SuperExpression represents the 'SUPER' keyword for calling parent methods.
+type SuperExpression struct {
+	Token token.Token // The 'SUPER' token
+}
+
+func (se *SuperExpression) expressionNode()      {}
+func (se *SuperExpression) Pos() (int, int)      { return se.Token.Row, se.Token.Column }
+func (se *SuperExpression) TokenLiteral() string { return se.Token.Literal }
+func (se *SuperExpression) String() string       { return "SUPER" }
+
+// DereferenceExpression represents dereferencing a pointer (e.g., MyPointer^).
+type DereferenceExpression struct {
+	Token   token.Token // The '^' token
+	Pointer Expression  // The expression being dereferenced (e.g., THIS, SUPER, a REFERENCE TO variable)
+}
+
+func (de *DereferenceExpression) expressionNode()      {}
+func (de *DereferenceExpression) Pos() (int, int)      { return de.Token.Row, de.Token.Column }
+func (de *DereferenceExpression) TokenLiteral() string { return de.Token.Literal }
+func (de *DereferenceExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(de.Pointer.String())
+	out.WriteString("^)")
+	return out.String()
+}
+
+// StructLiteral represents a struct initialization, e.g., (Field1 := 1, Field2 := TRUE).
+type StructLiteral struct {
+	Token        token.Token  // The '(' token
+	Initializers []Expression // Should be []*NamedArgument
+}
+
+func (sl *StructLiteral) expressionNode()      {}
+func (sl *StructLiteral) Pos() (int, int)      { return sl.Token.Row, sl.Token.Column }
+func (sl *StructLiteral) TokenLiteral() string { return sl.Token.Literal }
+func (sl *StructLiteral) String() string {
+	var out bytes.Buffer
+	inits := []string{}
+	for _, i := range sl.Initializers {
+		inits = append(inits, i.String())
+	}
+	out.WriteString("(")
+	out.WriteString(strings.Join(inits, ", "))
+	out.WriteString(")")
 	return out.String()
 }

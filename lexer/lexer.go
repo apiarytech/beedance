@@ -170,6 +170,8 @@ func (l *Lexer) NextToken() token.Token {
 		tok.Pos = startPos
 	case '[':
 		tok = newToken(token.LBRACKET, l.ch, startLine, startCol, startPos)
+	case '^':
+		tok = newToken(token.CARET, l.ch, startLine, startCol, startPos)
 	case ']':
 		tok = newToken(token.RBRACKET, l.ch, startLine, startCol, startPos)
 	case 0:

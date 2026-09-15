@@ -968,18 +968,22 @@ func TestParseVarConfigComplex(t *testing.T) {
 	if decl2.DataType.String() != "TON" {
 		t.Errorf("decl2.DataType not 'TON'. got=%s", decl2.DataType.String())
 	}
-	infixExpr, ok := decl2.Value.(*ast.InfixExpression)
+	structLit, ok := decl2.Value.(*ast.StructLiteral)
 	if !ok {
-		t.Fatalf("decl2.Value is not an InfixExpression (for struct literal). got=%T", decl2.Value)
+		t.Fatalf("decl2.Value is not a StructLiteral. got=%T", decl2.Value)
 	}
-	if !testIdentifier(t, infixExpr.Left, "PT") {
-		t.Errorf("Infix left side is not 'PT'.")
+	if len(structLit.Initializers) != 1 {
+		t.Fatalf("Expected 1 initializer in struct literal, got %d", len(structLit.Initializers))
 	}
-	if infixExpr.Operator != ":=" {
-		t.Errorf("Infix operator is not ':='. got=%s", infixExpr.Operator)
+	namedArg, ok := structLit.Initializers[0].(*ast.NamedArgument)
+	if !ok {
+		t.Fatalf("Initializer is not a NamedArgument. got=%T", structLit.Initializers[0])
 	}
-	if !testTypedLiteral(t, infixExpr.Right, "T", "2.5s") {
-		t.Errorf("Infix right side is not T#2.5s.")
+	if namedArg.Name.Value != "PT" {
+		t.Errorf("Argument name not 'PT'. got=%s", namedArg.Name.Value)
+	}
+	if !testTypedLiteral(t, namedArg.Value, "T", "2.5s") {
+		t.Errorf("Argument value is not T#2.5s.")
 	}
 	if decl2.Location != nil {
 		t.Errorf("decl2.Location should be nil.")
@@ -1038,7 +1042,94 @@ func TestTempVarDeclarations(t *testing.T) {
 	}
 }
 
-func TestParseVarAccess(t *testing.T) {
+func TestVarAccessDeclarations1(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string // Just the content of the VAR_ACCESS block
+		expectedError string
+		check         func(t *testing.T, decls []*ast.VarDeclStatement)
+	}{
+		{
+			name:  "Valid symbolic path",
+			input: `MyAlias : MyProgram.MyVar : INT;`,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				if len(decls) != 1 {
+					t.Fatalf("Expected 1 declaration, got %d", len(decls))
+				}
+				decl := decls[0]
+				if decl.Name.Value != "MyAlias" {
+					t.Errorf("Name not 'MyAlias', got %s", decl.Name.Value)
+				}
+				if _, ok := decl.AccessPath.(*ast.MemberAccessExpression); !ok {
+					t.Errorf("AccessPath is not MemberAccessExpression, got %T", decl.AccessPath)
+				}
+				if decl.DataType.String() != "INT" {
+					t.Errorf("DataType not 'INT', got %s", decl.DataType.String())
+				}
+			},
+		},
+		{
+			name:  "Valid direct variable path",
+			input: `MyAlias : %IX1.0 : BOOL;`,
+			check: func(t *testing.T, decls []*ast.VarDeclStatement) {
+				if len(decls) != 1 {
+					t.Fatalf("Expected 1 declaration, got %d", len(decls))
+				}
+				decl := decls[0]
+				if decl.Name.Value != "MyAlias" {
+					t.Errorf("Name not 'MyAlias', got %s", decl.Name.Value)
+				}
+				dv, ok := decl.AccessPath.(*ast.DirectVariable)
+				if !ok {
+					t.Errorf("AccessPath is not DirectVariable, got %T", decl.AccessPath)
+				} else if dv.Address != "IX1.0" {
+					t.Errorf("Address not 'IX1.0', got %s", dv.Address)
+				}
+				if decl.DataType.String() != "BOOL" {
+					t.Errorf("DataType not 'BOOL', got %s", decl.DataType.String())
+				}
+			},
+		},
+		{
+			name:          "Invalid AT with direct variable",
+			input:         `HMI_Sensor AT %IW0 : INT;`,
+			expectedError: "expected next token to be :, got AT instead",
+		},
+		{
+			name:          "Invalid AT with symbolic path",
+			input:         `HMI_Sensor AT MainInstance.PressureSensor : INT;`,
+			expectedError: "expected next token to be :, got AT instead",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fullInput := fmt.Sprintf("VAR_ACCESS\n%s\nEND_VAR", tt.input)
+			l := lexer.New(fullInput)
+			p := New(l)
+			program := p.ParseProgram()
+
+			if tt.expectedError != "" {
+				assertErrorContains(t, p.Errors(), tt.expectedError)
+			} else {
+				checkParserErrors(t, p, tt.name, fullInput)
+			}
+
+			if tt.check != nil {
+				if len(program.Statements) == 0 {
+					t.Fatal("No statements parsed")
+				}
+				stmt, ok := program.Statements[0].(*ast.AccessVarDeclaration)
+				if !ok {
+					t.Fatalf("Expected ast.AccessVarDeclaration, got %T", program.Statements[0])
+				}
+				tt.check(t, stmt.Vars)
+			}
+		})
+	}
+}
+
+func TestExternalVarDeclarations2(t *testing.T) {
 	input := `
 		VAR_ACCESS
 			ExternalName1 : ResourceName.ProgInstance.InternalVar1 : INT READ_WRITE;
@@ -1049,7 +1140,7 @@ func TestParseVarAccess(t *testing.T) {
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram() // cspell:disable-line
-	checkParserErrors(t, p, "TestParseVarAccess", input)
+	checkParserErrors(t, p, "TestExternalVarDeclarations2", input)
 
 	if len(program.Statements) != 1 {
 		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
@@ -1110,7 +1201,7 @@ func TestParseVarAccess(t *testing.T) {
 	}
 }
 
-func TestExternalVarDeclarations(t *testing.T) {
+func TestExternalVarDeclarations3(t *testing.T) {
 	input := `
 		VAR_EXTERNAL
 			External1 : INT;           // Standard external variable (read/write)
@@ -1123,7 +1214,7 @@ func TestExternalVarDeclarations(t *testing.T) {
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()
-	checkParserErrors(t, p, "TestExternalVarDeclarations", input)
+	checkParserErrors(t, p, "TestExternalVarDeclarations3", input)
 
 	if len(program.Statements) != 2 {
 		t.Fatalf("program.Statements does not contain 2 statements. got=%d", len(program.Statements))
@@ -6109,5 +6200,262 @@ func TestReferenceToTypeDeclaration(t *testing.T) {
 
 	if refType.BaseType.String() != "BigDataStructure" {
 		t.Errorf("Expected reference base type to be 'BigDataStructure', got %s", refType.BaseType.String())
+	}
+}
+
+func TestFunctionBlockExtends(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK DerivedFB EXTENDS BaseFB
+			VAR_INPUT
+				NewInput : BOOL;
+			END_VAR
+		END_FUNCTION_BLOCK
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockExtends", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if fb.Name.Value != "DerivedFB" {
+		t.Errorf("Function block name is not 'DerivedFB'. got=%s", fb.Name.Value)
+	}
+
+	if fb.Extends == nil {
+		t.Fatal("fb.Extends is nil, expected a base FB name")
+	}
+
+	if fb.Extends.Value != "BaseFB" {
+		t.Errorf("Expected Extends name to be 'BaseFB', got %s", fb.Extends.Value)
+	}
+
+	if len(fb.VarInputs) != 1 || fb.VarInputs[0].Name.Value != "NewInput" {
+		t.Errorf("Failed to parse VAR_INPUT block in derived FB.")
+	}
+}
+
+func TestFunctionBlockImplements(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(t *testing.T, fb *ast.FunctionBlockDeclaration)
+	}{
+		{
+			name: "Implements single interface",
+			input: `
+				FUNCTION_BLOCK MyFB IMPLEMENTS IMyInterface
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, fb *ast.FunctionBlockDeclaration) {
+				if fb.Name.Value != "MyFB" {
+					t.Errorf("Name not 'MyFB', got %s", fb.Name.Value)
+				}
+				if len(fb.Implements) != 1 {
+					t.Fatalf("Expected 1 implemented interface, got %d", len(fb.Implements))
+				}
+				if fb.Implements[0].Value != "IMyInterface" {
+					t.Errorf("Expected interface 'IMyInterface', got %s", fb.Implements[0].Value)
+				}
+				if fb.Extends != nil {
+					t.Errorf("Extends should be nil")
+				}
+			},
+		},
+		{
+			name: "Implements multiple interfaces",
+			input: `
+				FUNCTION_BLOCK MyFB IMPLEMENTS IMyInterface1, IMyInterface2
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, fb *ast.FunctionBlockDeclaration) {
+				if len(fb.Implements) != 2 {
+					t.Fatalf("Expected 2 implemented interfaces, got %d", len(fb.Implements))
+				}
+				if fb.Implements[0].Value != "IMyInterface1" || fb.Implements[1].Value != "IMyInterface2" {
+					t.Errorf("Incorrect interfaces parsed")
+				}
+			},
+		},
+		{
+			name: "Extends and Implements",
+			input: `
+				FUNCTION_BLOCK DerivedFB EXTENDS BaseFB IMPLEMENTS IMyInterface
+				END_FUNCTION_BLOCK
+			`,
+			check: func(t *testing.T, fb *ast.FunctionBlockDeclaration) {
+				if fb.Extends == nil || fb.Extends.Value != "BaseFB" {
+					t.Errorf("Expected Extends 'BaseFB', got %v", fb.Extends)
+				}
+				if len(fb.Implements) != 1 || fb.Implements[0].Value != "IMyInterface" {
+					t.Errorf("Expected Implements 'IMyInterface', got %v", fb.Implements)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p, tt.name, tt.input)
+			fb := program.Statements[0].(*ast.FunctionBlockDeclaration)
+			tt.check(t, fb)
+		})
+	}
+}
+
+func TestOOPFeaturesThisAndSuper(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK Derived EXTENDS Base
+			METHOD DoIt : INT
+				// CORRECT: Use THIS^. to dereference and access own member
+				THIS^.y := 10;
+				// CORRECT: Use SUPER^.MethodName() to call the parent's logic
+				DoIt := SUPER^.DoIt() + THIS^.y;
+			END_METHOD
+		END_FUNCTION_BLOCK
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestOOPFeaturesThisAndSuper", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	// The body of a FB is a BlockStatement containing methods, etc.
+	body, ok := fb.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("FB body is not a BlockStatement. got=%T", fb.Body)
+	}
+
+	if len(body.Statements) != 1 {
+		t.Fatalf("Expected 1 method in FB body, got %d", len(body.Statements))
+	}
+
+	methodImpl, ok := body.Statements[0].(*ast.MethodImplementation)
+	if !ok {
+		t.Fatalf("Statement 0 is not a MethodImplementation. got=%T", body.Statements[0])
+	}
+
+	if len(methodImpl.Body.Statements) != 2 {
+		t.Fatalf("Expected 2 statements in method body, got %d", len(methodImpl.Body.Statements))
+	}
+
+	// Check the assignment to THIS^.y
+	assign1, ok := methodImpl.Body.Statements[0].(*ast.AssignmentStatement)
+	if !ok {
+		t.Fatalf("Statement 0 is not an AssignmentStatement. got=%T", methodImpl.Body.Statements[0])
+	}
+	memberAccess, ok := assign1.Left.(*ast.MemberAccessExpression)
+	if !ok {
+		t.Fatalf("LHS of first assignment is not MemberAccessExpression. got=%T", assign1.Left)
+	}
+	derefExp, ok := memberAccess.Struct.(*ast.DereferenceExpression)
+	if !ok {
+		t.Fatalf("Struct part of member access is not DereferenceExpression. got=%T", memberAccess.Struct)
+	}
+	if _, ok := derefExp.Pointer.(*ast.ThisExpression); !ok {
+		t.Errorf("Pointer of dereference is not ThisExpression. got=%T", derefExp.Pointer)
+	}
+
+	// Check the call to SUPER^.DoIt()
+	assign2 := methodImpl.Body.Statements[1].(*ast.AssignmentStatement)
+	infix, _ := assign2.Value.(*ast.InfixExpression)
+	call, _ := infix.Left.(*ast.CallExpression)
+	memberAccess2, ok := call.Function.(*ast.MemberAccessExpression)
+	if !ok {
+		t.Fatalf("Function in call is not MemberAccessExpression. got=%T", call.Function)
+	}
+	derefExp2, ok := memberAccess2.Struct.(*ast.DereferenceExpression)
+	if !ok {
+		t.Fatalf("Struct part of member access is not DereferenceExpression. got=%T", memberAccess2.Struct)
+	}
+	if _, ok := derefExp2.Pointer.(*ast.SuperExpression); !ok {
+		t.Errorf("Pointer of dereference is not SuperExpression. got=%T", derefExp2.Pointer)
+	}
+}
+
+func TestInterfaceDeclaration(t *testing.T) {
+	input := `
+		INTERFACE IMyInterface
+			METHOD MyMethod1 : BOOL
+				VAR_INPUT
+					In1 : INT;
+				END_VAR
+			END_METHOD
+
+			METHOD MyMethod2 : REAL
+				VAR_IN_OUT
+					InOut1 : LREAL;
+				END_VAR
+			END_METHOD
+		END_INTERFACE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestInterfaceDeclaration", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	iface, ok := program.Statements[0].(*ast.InterfaceDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.InterfaceDeclaration. got=%T", program.Statements[0])
+	}
+
+	if iface.Name.Value != "IMyInterface" {
+		t.Errorf("Interface name is not 'IMyInterface'. got=%s", iface.Name.Value)
+	}
+
+	if len(iface.Methods) != 2 {
+		t.Fatalf("Expected 2 methods, got %d", len(iface.Methods))
+	}
+
+	// Check first method
+	method1 := iface.Methods[0]
+	if method1.Name.Value != "MyMethod1" {
+		t.Errorf("Method 1 name is not 'MyMethod1'. got=%s", method1.Name.Value)
+	}
+	if method1.ReturnType == nil || method1.ReturnType.String() != "BOOL" {
+		t.Errorf("Method 1 return type is not 'BOOL'. got=%v", method1.ReturnType)
+	}
+	if len(method1.VarInputs) != 1 {
+		t.Fatalf("Expected 1 VAR_INPUT for method 1, got %d", len(method1.VarInputs))
+	}
+	if method1.VarInputs[0].Name.Value != "In1" {
+		t.Errorf("Failed to parse VAR_INPUT for method 1.")
+	}
+
+	// Check second method
+	method2 := iface.Methods[1]
+	if method2.Name.Value != "MyMethod2" {
+		t.Errorf("Method 2 name is not 'MyMethod2'. got=%s", method2.Name.Value)
+	}
+	if method2.ReturnType == nil || method2.ReturnType.String() != "REAL" {
+		t.Errorf("Method 2 return type is not 'REAL'. got=%v", method2.ReturnType)
+	}
+	if len(method2.VarInOuts) != 1 {
+		t.Fatalf("Expected 1 VAR_IN_OUT for method 2, got %d", len(method2.VarInOuts))
+	}
+	if method2.VarInOuts[0].Name.Value != "InOut1" {
+		t.Errorf("Failed to parse VAR_IN_OUT for method 2.")
 	}
 }

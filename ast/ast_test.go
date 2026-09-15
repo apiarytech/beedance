@@ -931,6 +931,9 @@ func TestStatementNodes(t *testing.T) {
 		&TransitionStatement{},
 		&SFCProgram{},
 		&ActionBlockStatement{},
+		&InterfaceDeclaration{},
+		&MethodDeclaration{},
+		&MethodImplementation{},
 	}
 
 	// The loop simply iterates to prevent the compiler from optimizing away
@@ -984,6 +987,9 @@ func TestExpressionNodes(t *testing.T) {
 		&FbTaskAssociation{},
 		&ArrayDefinition{},
 		// BlockStatement can also be an expression in some contexts (like IL)
+		&ThisExpression{},
+		&SuperExpression{},
+		&DereferenceExpression{},
 		&BlockStatement{},
 	}
 

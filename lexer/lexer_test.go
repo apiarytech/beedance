@@ -186,7 +186,7 @@ func TestEnumeratedValueLexing(t *testing.T) {
 }
 
 func TestNextToken(t *testing.T) {
-	input := `=+(){},;[]<,>:**`
+	input := `=+(){},;[]<,>:^**`
 
 	tests := []struct {
 		expectedType    token.TokenType
@@ -206,6 +206,7 @@ func TestNextToken(t *testing.T) {
 		{token.COMMA, ","},
 		{token.GT, ">"},
 		{token.COLON, ":"},
+		{token.CARET, "^"},
 		{token.EXPONENT, "**"},
 		{token.EOF, ""},
 	}

@@ -26,6 +26,22 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	// Check for optional EXTENDS clause for inheritance
+	if p.peekTokenIs(token.EXTENDS) {
+		p.nextToken() // consume name, move to EXTENDS
+		if !p.expectPeek(token.IDENT) {
+			return nil // Expected base function block name
+		}
+		stmt.Extends = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+
+	// Check for optional IMPLEMENTS clause for interfaces
+	if p.peekTokenIs(token.IMPLEMENTS) {
+		p.nextToken() // consume name or extends, move to IMPLEMENTS
+		p.nextToken() // consume IMPLEMENTS
+		stmt.Implements = p.parseIdentifierList()
+	}
+
 	p.nextToken()
 
 	// Loop to parse all variable declaration blocks
@@ -60,13 +76,35 @@ var_loop:
 			break var_loop
 		}
 	}
-	// After var blocks, we have the body. Check if it's IL or ST.
-	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
+
+	// After var blocks, we have the body.
+	// The body can be a list of methods, or a list of ST/IL/SFC statements.
+	body := &ast.BlockStatement{Token: p.curToken}
+	body.Statements = []ast.Statement{}
+
+	// Heuristic: If the first thing after VAR blocks is METHOD, we assume the body consists of methods.
+	if p.curTokenIs(token.METHOD) {
+		for !p.curTokenIs(token.END_FUNCTION_BLOCK) && !p.curTokenIs(token.EOF) {
+			if p.curTokenIs(token.METHOD) {
+				method := p.parseMethodImplementation()
+				if method != nil {
+					body.Statements = append(body.Statements, method)
+				}
+			} else if p.curTokenIs(token.COMMENT) {
+				p.nextToken()
+				continue
+			} else {
+				p.currentError("unexpected token in FUNCTION_BLOCK body: %s", p.curToken.Type)
+				p.nextToken() // Skip to recover
+			}
+		}
+		stmt.Body = body
+	} else if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
 		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
 	} else {
+		// Otherwise, it's a regular ST body.
 		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
 	}
 

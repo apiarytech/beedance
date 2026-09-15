@@ -23,6 +23,8 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 		return p.parseFunctionDeclaration()
 	case token.FUNCTION_BLOCK:
 		return p.parseFunctionBlockDeclaration()
+	case token.INTERFACE:
+		return p.parseInterfaceDeclaration()
 	case token.PROGRAM:
 		return p.parseProgramDeclaration()
 	}
@@ -287,3 +289,157 @@ func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDe
 
 // 	return stmt
 // }
+
+// parseMethodImplementation parses a METHOD ... END_METHOD block with a body, within a FUNCTION_BLOCK.
+func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
+	defer untrace(trace("parseMethodImplementation"))
+	stmt := &ast.MethodImplementation{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected method name
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Optional return type
+	if p.peekTokenIs(token.COLON) {
+		p.nextToken() // consume name
+		p.nextToken() // consume ':'
+		returnType := p.parseTypeSpecifier()
+		if returnType == nil {
+			return nil // Error already logged
+		}
+		ts, ok := returnType.(*ast.TypeSpecifier)
+		if !ok {
+			p.currentError("method return type cannot be a complex type like ARRAY or STRUCT, got %T", returnType)
+			return nil
+		}
+		stmt.ReturnType = ts
+	}
+
+	p.nextToken() // Consume name or return type
+
+	// Loop to parse VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT, VAR blocks
+var_loop:
+	for !p.curTokenIs(token.END_METHOD) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.VAR_INPUT:
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
+		case token.VAR_OUTPUT:
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
+		case token.VAR_IN_OUT:
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		case token.VAR:
+			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
+		case token.COMMENT:
+			p.nextToken()
+			continue
+		default:
+			// No more VAR blocks, break the loop to parse the body
+			break var_loop
+		}
+	}
+
+	// After var blocks, we have the body
+	stmt.Body = p.parseBlockStatementUntil(token.END_METHOD)
+
+	if !p.curTokenIs(token.END_METHOD) {
+		p.currentError("expected END_METHOD, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_METHOD
+	}
+
+	return stmt
+}
+
+// parseInterfaceDeclaration parses an INTERFACE ... END_INTERFACE block.
+func (p *Parser) parseInterfaceDeclaration() ast.Statement {
+	defer untrace(trace("parseInterfaceDeclaration"))
+	stmt := &ast.InterfaceDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected interface name
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	p.nextToken() // Consume name
+
+	// Loop to parse all METHOD declarations
+	for !p.curTokenIs(token.END_INTERFACE) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.METHOD) {
+			method := p.parseMethodDeclaration()
+			if method != nil {
+				stmt.Methods = append(stmt.Methods, method)
+			}
+		} else if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		} else {
+			p.currentError("unexpected token in INTERFACE block: %s", p.curToken.Type)
+			p.nextToken() // Skip to recover
+		}
+	}
+
+	if !p.curTokenIs(token.END_INTERFACE) {
+		p.currentError("expected END_INTERFACE, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_INTERFACE
+	}
+
+	return stmt
+}
+
+// parseMethodDeclaration parses a METHOD ... END_METHOD block within an INTERFACE.
+func (p *Parser) parseMethodDeclaration() *ast.MethodDeclaration {
+	defer untrace(trace("parseMethodDeclaration"))
+	stmt := &ast.MethodDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected method name
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Optional return type
+	if p.peekTokenIs(token.COLON) {
+		p.nextToken() // consume name
+		p.nextToken() // consume ':'
+		returnType := p.parseTypeSpecifier()
+		if returnType == nil {
+			return nil // Error already logged
+		}
+		ts, ok := returnType.(*ast.TypeSpecifier)
+		if !ok {
+			p.currentError("method return type cannot be a complex type like ARRAY or STRUCT, got %T", returnType)
+			return nil
+		}
+		stmt.ReturnType = ts
+	}
+
+	p.nextToken() // Consume name or return type
+
+	// Loop to parse VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT blocks
+var_loop:
+	for !p.curTokenIs(token.END_METHOD) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.VAR_INPUT:
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
+		case token.VAR_OUTPUT:
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
+		case token.VAR_IN_OUT:
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		case token.COMMENT:
+			p.nextToken()
+			continue
+		default:
+			// No more VAR blocks, break the loop
+			break var_loop
+		}
+	}
+
+	if !p.curTokenIs(token.END_METHOD) {
+		p.currentError("expected END_METHOD, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_METHOD
+	}
+
+	return stmt
+}
