@@ -1468,9 +1468,11 @@ func (ml *MacroLiteral) String() string {
 type FunctionBlockDeclaration struct {
 	Token           token.Token // The 'FUNCTION_BLOCK' token
 	Name            *Identifier
+	IsAbstract      bool
 	Extends         *Identifier // For FB inheritance
 	Implements      []*Identifier
 	VarInputs       []*VarDeclStatement
+	Properties      []*PropertyDeclaration
 	VarOutputs      []*VarDeclStatement
 	VarInOuts       []*VarDeclStatement
 	VarExternal     []*ExternalVarDeclaration
@@ -1495,6 +1497,9 @@ func (fbd *FunctionBlockDeclaration) TokenLiteral() string { return fbd.Token.Li
 // String returns the string representation of the function block declaration.
 func (fbd *FunctionBlockDeclaration) String() string {
 	var out bytes.Buffer
+	if fbd.IsAbstract {
+		out.WriteString("ABSTRACT ")
+	}
 	out.WriteString("FUNCTION_BLOCK ")
 	if fbd.Name != nil {
 		out.WriteString(fbd.Name.String())
@@ -2297,6 +2302,7 @@ func (id *InterfaceDeclaration) String() string {
 // MethodImplementation represents a method implementation within a FUNCTION_BLOCK.
 type MethodImplementation struct {
 	Token      token.Token // The 'METHOD' token
+	IsAbstract bool
 	Name       *Identifier
 	ReturnType *TypeSpecifier
 	VarInputs  []*VarDeclStatement
@@ -2318,6 +2324,9 @@ func (mi *MethodImplementation) TokenLiteral() string { return mi.Token.Literal 
 // String returns the string representation of the method implementation.
 func (mi *MethodImplementation) String() string {
 	var out bytes.Buffer
+	if mi.IsAbstract {
+		out.WriteString("ABSTRACT ")
+	}
 	out.WriteString("METHOD ")
 	if mi.Name != nil {
 		out.WriteString(mi.Name.String())
@@ -2387,6 +2396,75 @@ func (de *DereferenceExpression) String() string {
 	out.WriteString("(")
 	out.WriteString(de.Pointer.String())
 	out.WriteString("^)")
+	return out.String()
+}
+
+// PropertyGetter represents the GET block of a PROPERTY.
+type PropertyGetter struct {
+	Token token.Token // The 'GET' token
+	Body  *BlockStatement
+}
+
+func (pg *PropertyGetter) expressionNode()      {}
+func (pg *PropertyGetter) Pos() (int, int)      { return pg.Token.Row, pg.Token.Column }
+func (pg *PropertyGetter) TokenLiteral() string { return pg.Token.Literal }
+func (pg *PropertyGetter) String() string {
+	return fmt.Sprintf("GET\n%s\nEND_GET", pg.Body.String())
+}
+
+// PropertySetter represents the SET block of a PROPERTY.
+type PropertySetter struct {
+	Token token.Token // The 'SET' token
+	Body  *BlockStatement
+}
+
+func (ps *PropertySetter) expressionNode()      {}
+func (ps *PropertySetter) Pos() (int, int)      { return ps.Token.Row, ps.Token.Column }
+func (ps *PropertySetter) TokenLiteral() string { return ps.Token.Literal }
+func (ps *PropertySetter) String() string {
+	return fmt.Sprintf("SET\n%s\nEND_SET", ps.Body.String())
+}
+
+// PropertyDeclaration represents a PROPERTY ... END_PROPERTY block.
+type PropertyDeclaration struct {
+	Token      token.Token // The 'PROPERTY' token
+	IsAbstract bool
+	Name       *Identifier
+	DataType   *TypeSpecifier
+	Getter     *PropertyGetter
+	Setter     *PropertySetter
+}
+
+func (pd *PropertyDeclaration) statementNode() {}
+
+// Pos returns the position of the PROPERTY token.
+func (pd *PropertyDeclaration) Pos() (int, int) { return pd.Token.Row, pd.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (pd *PropertyDeclaration) TokenLiteral() string { return pd.Token.Literal }
+
+// String returns the string representation of the property declaration.
+func (pd *PropertyDeclaration) String() string {
+	var out bytes.Buffer
+	if pd.IsAbstract {
+		out.WriteString("ABSTRACT ")
+	}
+	out.WriteString("PROPERTY ")
+	if pd.Name != nil {
+		out.WriteString(pd.Name.String())
+	}
+	if pd.DataType != nil {
+		out.WriteString(" : ")
+		out.WriteString(pd.DataType.String())
+	}
+	out.WriteString("\n")
+	if pd.Getter != nil {
+		out.WriteString("\t" + pd.Getter.String() + "\n")
+	}
+	if pd.Setter != nil {
+		out.WriteString("\t" + pd.Setter.String() + "\n")
+	}
+	out.WriteString("END_PROPERTY")
 	return out.String()
 }
 

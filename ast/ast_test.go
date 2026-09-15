@@ -934,6 +934,7 @@ func TestStatementNodes(t *testing.T) {
 		&InterfaceDeclaration{},
 		&MethodDeclaration{},
 		&MethodImplementation{},
+		&PropertyDeclaration{},
 	}
 
 	// The loop simply iterates to prevent the compiler from optimizing away
@@ -989,7 +990,6 @@ func TestExpressionNodes(t *testing.T) {
 		// BlockStatement can also be an expression in some contexts (like IL)
 		&ThisExpression{},
 		&SuperExpression{},
-		&DereferenceExpression{},
 		&BlockStatement{},
 	}
 

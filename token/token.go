@@ -156,6 +156,13 @@ const (
 	END_INTERFACE     = "END_INTERFACE"
 	THIS              = "THIS"
 	SUPER             = "SUPER"
+	PROPERTY          = "PROPERTY"
+	END_PROPERTY      = "END_PROPERTY"
+	GET               = "GET"
+	SET               = "SET"
+	END_GET           = "END_GET"
+	END_SET           = "END_SET"
+	ABSTRACT          = "ABSTRACT"
 
 	// Program Organization Unit Keywords
 	PROGRAM            = "PROGRAM"
@@ -305,6 +312,13 @@ var keywords = map[string]TokenType{
 	"METHOD":             METHOD,
 	"THIS":               THIS,
 	"SUPER":              SUPER,
+	"ABSTRACT":           ABSTRACT,
+	"PROPERTY":           PROPERTY,
+	"END_PROPERTY":       END_PROPERTY,
+	"GET":                GET,
+	"SET":                SET,
+	"END_GET":            END_GET,
+	"END_SET":            END_SET,
 	"END_METHOD":         END_METHOD,
 	"ON":                 ON,
 	"WITH":               WITH,

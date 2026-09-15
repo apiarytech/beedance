@@ -19,7 +19,21 @@ import (
 // and its body, which can be written in ST, IL, or SFC.
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	defer untrace(trace("parseFunctionBlockDeclaration"))
-	stmt := &ast.FunctionBlockDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
+
+	isAbstract := false
+	var fbToken token.Token
+
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		if !p.expectPeek(token.FUNCTION_BLOCK) {
+			return nil // Expected FUNCTION_BLOCK after ABSTRACT
+		}
+		fbToken = p.curToken // This is now FUNCTION_BLOCK
+	} else {
+		fbToken = p.curToken // This is FUNCTION_BLOCK
+	}
+
+	stmt := &ast.FunctionBlockDeclaration{Token: fbToken, IsAbstract: isAbstract, LeadingComments: p.leadingComments}
 
 	if !p.expectPeek(token.IDENT) {
 		return nil // Expected function block name
@@ -82,10 +96,16 @@ var_loop:
 	body := &ast.BlockStatement{Token: p.curToken}
 	body.Statements = []ast.Statement{}
 
-	// Heuristic: If the first thing after VAR blocks is METHOD, we assume the body consists of methods.
-	if p.curTokenIs(token.METHOD) {
+	// Heuristic: If the first thing after VAR blocks is METHOD, PROPERTY, or ABSTRACT, we assume an OO-style body.
+	if p.curTokenIs(token.METHOD) || p.curTokenIs(token.PROPERTY) || p.curTokenIs(token.ABSTRACT) {
 		for !p.curTokenIs(token.END_FUNCTION_BLOCK) && !p.curTokenIs(token.EOF) {
-			if p.curTokenIs(token.METHOD) {
+			if p.curTokenIs(token.ABSTRACT) && !stmt.IsAbstract {
+				p.currentError("abstract members are not allowed in a non-abstract function block")
+				p.synchronize(token.END_METHOD, token.END_PROPERTY, token.END_FUNCTION_BLOCK) // Skip to end of member or FB
+				continue
+			}
+
+			if p.curTokenIs(token.METHOD) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.METHOD)) {
 				method := p.parseMethodImplementation()
 				if method != nil {
 					body.Statements = append(body.Statements, method)
@@ -93,6 +113,11 @@ var_loop:
 			} else if p.curTokenIs(token.COMMENT) {
 				p.nextToken()
 				continue
+			} else if p.curTokenIs(token.PROPERTY) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.PROPERTY)) {
+				prop := p.parsePropertyDeclaration()
+				if prop != nil {
+					stmt.Properties = append(stmt.Properties, prop)
+				}
 			} else {
 				p.currentError("unexpected token in FUNCTION_BLOCK body: %s", p.curToken.Type)
 				p.nextToken() // Skip to recover

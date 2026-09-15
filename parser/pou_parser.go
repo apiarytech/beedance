@@ -18,6 +18,10 @@ import (
 // (Program Organization Unit), which can be a FUNCTION, FUNCTION_BLOCK, or PROGRAM.
 func (p *Parser) parsePoulDeclaration() ast.Statement {
 	defer untrace(trace("parsePoulDeclaration"))
+	if p.curTokenIs(token.ABSTRACT) {
+		return p.parseFunctionBlockDeclaration()
+	}
+
 	switch p.curToken.Type {
 	case token.FUNCTION:
 		return p.parseFunctionDeclaration()
@@ -293,7 +297,14 @@ func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDe
 // parseMethodImplementation parses a METHOD ... END_METHOD block with a body, within a FUNCTION_BLOCK.
 func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
 	defer untrace(trace("parseMethodImplementation"))
-	stmt := &ast.MethodImplementation{Token: p.curToken}
+
+	isAbstract := false
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
+
+	stmt := &ast.MethodImplementation{Token: p.curToken, IsAbstract: isAbstract}
 
 	if !p.expectPeek(token.IDENT) {
 		return nil // Expected method name
@@ -329,6 +340,9 @@ var_loop:
 		case token.VAR_IN_OUT:
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR:
+			if isAbstract {
+				p.currentError("abstract method cannot have VAR declarations")
+			}
 			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
 		case token.COMMENT:
 			p.nextToken()
@@ -340,7 +354,13 @@ var_loop:
 	}
 
 	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_METHOD)
+	if !isAbstract {
+		stmt.Body = p.parseBlockStatementUntil(token.END_METHOD)
+	} else {
+		if !p.curTokenIs(token.END_METHOD) {
+			p.currentError("abstract method cannot have a body")
+		}
+	}
 
 	if !p.curTokenIs(token.END_METHOD) {
 		p.currentError("expected END_METHOD, got %s", p.curToken.Type)
@@ -442,4 +462,98 @@ var_loop:
 	}
 
 	return stmt
+}
+
+// parsePropertyDeclaration parses a PROPERTY ... END_PROPERTY block.
+func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
+	defer untrace(trace("parsePropertyDeclaration"))
+
+	isAbstract := false
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
+
+	stmt := &ast.PropertyDeclaration{Token: p.curToken, IsAbstract: isAbstract}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected property name
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.COLON) {
+		return nil // Expected ':' after property name
+	}
+
+	p.nextToken() // Consume ':', move to data type
+	returnType := p.parseTypeSpecifier()
+	if returnType == nil {
+		return nil // Error already logged
+	}
+	ts, ok := returnType.(*ast.TypeSpecifier)
+	if !ok {
+		p.currentError("property return type cannot be a complex type like ARRAY or STRUCT, got %T", returnType)
+		return nil
+	}
+	stmt.DataType = ts
+
+	p.nextToken() // Consume data type
+
+	// Loop to parse GET and SET blocks
+	for !p.curTokenIs(token.END_PROPERTY) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.GET:
+			if stmt.Getter != nil {
+				p.currentError("property can only have one GET block")
+			}
+			stmt.Getter = p.parsePropertyGetter()
+		case token.SET:
+			if stmt.Setter != nil {
+				p.currentError("property can only have one SET block")
+			}
+			stmt.Setter = p.parsePropertySetter()
+		case token.COMMENT:
+			p.nextToken()
+			continue
+		default:
+			p.currentError("unexpected token in PROPERTY block: %s", p.curToken.Type)
+			p.synchronize(token.END_PROPERTY)
+		}
+	}
+
+	if isAbstract && (stmt.Getter != nil || stmt.Setter != nil) {
+		p.currentError("abstract property cannot have GET or SET implementations")
+	}
+
+	if !p.curTokenIs(token.END_PROPERTY) {
+		p.currentError("expected END_PROPERTY, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_PROPERTY
+	}
+
+	return stmt
+}
+
+func (p *Parser) parsePropertyGetter() *ast.PropertyGetter {
+	getter := &ast.PropertyGetter{Token: p.curToken}
+	p.nextToken() // consume GET
+	getter.Body = p.parseBlockStatementUntil(token.END_GET)
+	if !p.curTokenIs(token.END_GET) {
+		p.currentError("expected END_GET, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // consume END_GET
+	}
+	return getter
+}
+
+func (p *Parser) parsePropertySetter() *ast.PropertySetter {
+	setter := &ast.PropertySetter{Token: p.curToken}
+	p.nextToken() // consume SET
+	setter.Body = p.parseBlockStatementUntil(token.END_SET)
+	if !p.curTokenIs(token.END_SET) {
+		p.currentError("expected END_SET, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // consume END_SET
+	}
+	return setter
 }

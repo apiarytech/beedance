@@ -288,6 +288,23 @@ func Modify(node Node, modifier ModifierFunc) Node {
 			node.Initializers[i], _ = Modify(node.Initializers[i], modifier).(Expression)
 		}
 
+	case *PropertyDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
+		if node.DataType != nil {
+			node.DataType, _ = Modify(node.DataType, modifier).(*TypeSpecifier)
+		}
+		if node.Getter != nil {
+			node.Getter, _ = Modify(node.Getter, modifier).(*PropertyGetter)
+		}
+		if node.Setter != nil {
+			node.Setter, _ = Modify(node.Setter, modifier).(*PropertySetter)
+		}
+
+	case *PropertyGetter:
+		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+	case *PropertySetter:
+		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+
 	}
 	return modifier(node)
 }

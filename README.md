@@ -20,6 +20,8 @@
     *   `EN`/`ENO` (Enable/Enable Out) mechanism for function blocks.
     *   `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT`, `VAR`, `VAR_GLOBAL`, `VAR_EXTERNAL`, `VAR_ACCESS`, and `VAR_TEMP` blocks.
 
+*   **Object-Oriented Programming (OOP):** Full support for object-oriented principles, enabling more modular and reusable code. This includes `INTERFACE` definitions, `FUNCTION_BLOCK` inheritance via `EXTENDS`, interface adherence with `IMPLEMENTS`, and `ABSTRACT` function blocks, methods, and properties. Methods can access their own instance via the `THIS^` pointer and call parent implementations using `SUPER^`.
+
 *   **Data Types:**
     *   **Elementary Types:** Full range of `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`, `BOOL`, `STRING`.
     *   **Time & Date Types:** `TIME`, `DATE`, `TIME_OF_DAY` (TOD), and `DATE_AND_TIME` (DT).

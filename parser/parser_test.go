@@ -6459,3 +6459,203 @@ func TestInterfaceDeclaration(t *testing.T) {
 		t.Errorf("Failed to parse VAR_IN_OUT for method 2.")
 	}
 }
+
+func TestAbstractFunctionBlock(t *testing.T) {
+	input := `
+		ABSTRACT FUNCTION_BLOCK MyAbstractFB
+			ABSTRACT METHOD DoIt : INT
+				VAR_INPUT
+					In : BOOL;
+				END_VAR
+			END_METHOD
+
+			ABSTRACT PROPERTY Value : REAL
+			END_PROPERTY
+
+			PROPERTY ConcreteValue : INT
+				GET
+					ConcreteValue := 10;
+				END_GET
+			END_PROPERTY
+		END_FUNCTION_BLOCK
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestAbstractFunctionBlock", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if !fb.IsAbstract {
+		t.Errorf("Function block should be abstract")
+	}
+	if fb.Name.Value != "MyAbstractFB" {
+		t.Errorf("Function block name is not 'MyAbstractFB'. got=%s", fb.Name.Value)
+	}
+
+	body, ok := fb.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("FB body is not a BlockStatement. got=%T", fb.Body)
+	}
+
+	if len(body.Statements) != 1 {
+		t.Fatalf("Expected 1 method in FB body, got %d", len(body.Statements))
+	}
+
+	// Check abstract method
+	method, ok := body.Statements[0].(*ast.MethodImplementation)
+	if !ok {
+		t.Fatalf("Statement 0 is not a MethodImplementation. got=%T", body.Statements[0])
+	}
+	if !method.IsAbstract {
+		t.Errorf("Method 'DoIt' should be abstract")
+	}
+	if method.Name.Value != "DoIt" {
+		t.Errorf("Method name is not 'DoIt'. got=%s", method.Name.Value)
+	}
+	if method.Body != nil {
+		t.Errorf("Abstract method should not have a body")
+	}
+	if len(method.VarInputs) != 1 {
+		t.Errorf("Abstract method should have its VAR_INPUTs parsed")
+	}
+
+	// Check properties
+	if len(fb.Properties) != 2 {
+		t.Fatalf("Expected 2 properties, got %d", len(fb.Properties))
+	}
+
+	// Check abstract property
+	prop1 := fb.Properties[0]
+	if !prop1.IsAbstract {
+		t.Errorf("Property 'Value' should be abstract")
+	}
+	if prop1.Name.Value != "Value" {
+		t.Errorf("Property 1 name is not 'Value'. got=%s", prop1.Name.Value)
+	}
+	if prop1.Getter != nil || prop1.Setter != nil {
+		t.Errorf("Abstract property should not have GET or SET blocks")
+	}
+
+	// Check concrete property
+	prop2 := fb.Properties[1]
+	if prop2.IsAbstract {
+		t.Errorf("Property 'ConcreteValue' should not be abstract")
+	}
+	if prop2.Getter == nil {
+		t.Errorf("Concrete property should have a GET block")
+	}
+}
+
+func TestAbstractErrorCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name:          "Abstract function",
+			input:         `ABSTRACT FUNCTION MyFunc : INT; END_FUNCTION`,
+			expectedError: "expected next token to be FUNCTION_BLOCK, got FUNCTION instead",
+		},
+		{
+			name:          "Abstract method in concrete FB",
+			input:         `FUNCTION_BLOCK MyFB ABSTRACT METHOD MyMethod : INT; END_METHOD END_FUNCTION_BLOCK`,
+			expectedError: "abstract members are not allowed in a non-abstract function block",
+		},
+		{
+			name:          "Abstract method with body",
+			input:         `ABSTRACT FUNCTION_BLOCK MyFB ABSTRACT METHOD MyMethod : INT MyMethod := 1; END_METHOD END_FUNCTION_BLOCK`,
+			expectedError: "abstract method cannot have a body",
+		},
+		{
+			name:          "Abstract property with GET block",
+			input:         `ABSTRACT FUNCTION_BLOCK MyFB ABSTRACT PROPERTY MyProp : INT GET END_GET END_PROPERTY END_FUNCTION_BLOCK`,
+			expectedError: "abstract property cannot have GET or SET implementations",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			p.ParseProgram()
+			assertErrorContains(t, p.Errors(), tt.expectedError)
+		})
+	}
+}
+
+func TestFunctionBlockProperty(t *testing.T) {
+	input := `
+		FUNCTION_BLOCK MyFB
+			VAR
+				internal : INT;
+			END_VAR
+
+			PROPERTY MyProp : INT
+				GET
+					MyProp := internal;
+				END_GET
+				SET
+					internal := MyProp;
+				END_SET
+			END_PROPERTY
+		END_FUNCTION_BLOCK
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockProperty", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(fb.Properties) != 1 {
+		t.Fatalf("Expected 1 property, got %d", len(fb.Properties))
+	}
+
+	prop := fb.Properties[0]
+	if prop.Name.Value != "MyProp" {
+		t.Errorf("Property name is not 'MyProp'. got=%s", prop.Name.Value)
+	}
+	if prop.DataType.String() != "INT" {
+		t.Errorf("Property data type is not 'INT'. got=%s", prop.DataType.String())
+	}
+
+	// Check GET block
+	if prop.Getter == nil {
+		t.Fatal("Property getter is nil")
+	}
+	if len(prop.Getter.Body.Statements) != 1 {
+		t.Fatalf("Expected 1 statement in GET body, got %d", len(prop.Getter.Body.Statements))
+	}
+	getStmt, ok := prop.Getter.Body.Statements[0].(*ast.AssignmentStatement)
+	if !ok || getStmt.Left.String() != "MyProp" || getStmt.Value.String() != "internal" {
+		t.Errorf("Incorrect statement in GET body")
+	}
+
+	// Check SET block
+	if prop.Setter == nil {
+		t.Fatal("Property setter is nil")
+	}
+	if len(prop.Setter.Body.Statements) != 1 {
+		t.Fatalf("Expected 1 statement in SET body, got %d", len(prop.Setter.Body.Statements))
+	}
+	setStmt, ok := prop.Setter.Body.Statements[0].(*ast.AssignmentStatement)
+	if !ok || setStmt.Left.String() != "internal" || setStmt.Value.String() != "MyProp" {
+		t.Errorf("Incorrect statement in SET body")
+	}
+}

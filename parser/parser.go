@@ -524,7 +524,7 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseConfigurationDeclaration() // No semicolon expected after this block
 	case token.ACTION:
 		return p.parseActionStatement()
-	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
+	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK, token.ABSTRACT:
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
