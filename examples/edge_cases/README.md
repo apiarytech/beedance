@@ -25,7 +25,7 @@ A significant challenge for many parsers is distinguishing between the same iden
 
 The IEC 61131-3 standard does not reserve Instruction List (IL) mnemonics as keywords in Structured Text (ST).
 
-*   **The Pitfall:** A compiler might incorrectly treat IL operators like `ST`, `LD`, or `ADD` as reserved keywords, making it impossible to declare a variable with that name (e.g., `VAR ST : INT; END_VAR`).
+*   **The Scenario:** A compiler might incorrectly treat IL operators like `ST`, `LD`, or `ADD` as reserved keywords, making it impossible to declare a variable with that name (e.g., `VAR ST : INT; END_VAR`).
 *   **`beedance`'s Solution:** The `Test_IL_Operators_As_Vars` sub-test confirms that `beedance`'s context-aware parser correctly allows these names to be used as variables in ST, adhering more closely to the standard.
  
 ### 3. Complex Grammar in `TYPE` Declarations

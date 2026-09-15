@@ -29,7 +29,7 @@ func TestParserErrorHandling(t *testing.T) {
 		},
 		{
 			name:          "Missing UNTIL in REPEAT",
-			input:         `PROGRAM Test; VAR x: INT; END_VAR REPEAT x := x + 1; END_REPEAT`,
+			input:         `REPEAT x := x + 1; END_REPEAT`,
 			expectedError: "expected UNTIL, got END_REPEAT",
 		},
 		{

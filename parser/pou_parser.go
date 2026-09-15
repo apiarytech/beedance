@@ -87,7 +87,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 			case token.VAR_GLOBAL:
 				p.parseGlobalVarDeclStatement()
 			case token.VAR_ACCESS:
-				p.parseAccessVarDeclStatement()
+				p.parseAccessVarDeclStatement() // cspell:disable-line
 			case token.VAR_TEMP:
 				p.parseTempVarDeclStatement()
 			}
@@ -157,7 +157,7 @@ var_loop:
 				stmt.VarAccess = append(stmt.VarAccess, accessBlock)
 			}
 		case token.VAR_TEMP:
-			stmt.VarTemp = append(stmt.VarTemp, p.parseVarTempBlock(token.VAR_TEMP))
+			stmt.VarTemp = append(stmt.VarTemp, p.parseTempVarDeclStatement())
 
 		default:
 			// No more VAR blocks, break the loop to parse the body
@@ -194,7 +194,7 @@ func (p *Parser) parseVarGlobalBlock(blockType token.TokenType) *ast.GlobalVarDe
 
 	p.nextToken() // Consume VAR_GLOBAL
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, blockType)
 
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken()
@@ -213,7 +213,7 @@ func (p *Parser) parseVarExternalBlock(blockType token.TokenType) *ast.ExternalV
 
 	p.nextToken() // Consume VAR_EXTERNAL
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, blockType)
 
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken()

@@ -112,6 +112,7 @@ const (
 	RETAIN            = "RETAIN"
 	NON_RETAIN        = "NON_RETAIN"
 	CONSTANT          = "CONSTANT"
+	REFERENCE         = "REFERENCE"
 	READ_ONLY         = "READ_ONLY"
 	READ_WRITE        = "READ_WRITE"
 	IF                = "IF"
@@ -287,6 +288,7 @@ var keywords = map[string]TokenType{
 	"END_CONFIGURATION":  END_CONFIGURATION,
 	"RESOURCE":           RESOURCE,
 	"END_RESOURCE":       END_RESOURCE,
+	"REFERENCE":          REFERENCE,
 	"ON":                 ON,
 	"WITH":               WITH,
 	"TASK":               TASK,

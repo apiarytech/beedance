@@ -98,6 +98,8 @@ type VarDeclStatement struct {
 	Location        *AtDeclaration
 	AccessPath      Expression
 	DataType        Expression
+	Subrange        Expression
+	StringLength    Expression
 	Value           Expression // Initial value
 	IsConstant      bool
 	IsRetain        bool
@@ -140,8 +142,24 @@ func (vds *VarDeclStatement) String() string {
 
 	if vds.DataType != nil {
 		out.WriteString(" : ")
+		if vds.IsRisingEdge {
+			out.WriteString("R_EDGE ")
+		}
+		if vds.IsFallingEdge {
+			out.WriteString("F_EDGE ")
+		}
 		out.WriteString(vds.DataType.String())
 	}
+	if vds.Subrange != nil {
+		out.WriteString(" ")
+		out.WriteString(vds.Subrange.String())
+	}
+	if vds.StringLength != nil {
+		out.WriteString("(")
+		out.WriteString(vds.StringLength.String())
+		out.WriteString(")")
+	}
+
 	if vds.Value != nil {
 		out.WriteString(" := ")
 		out.WriteString(vds.Value.String())
@@ -1708,6 +1726,7 @@ type TypeDeclaration struct {
 	Name            *Identifier
 	DataType        Expression
 	Subrange        Expression // For subrange types, e.g., (0..100)
+	StringLength    Expression // For string length, e.g., (10)
 	InitialValue    Expression // For initialized types, e.g., := 10
 }
 
@@ -1732,6 +1751,11 @@ func (td *TypeDeclaration) String() string {
 	if td.Subrange != nil {
 		out.WriteString(" ")
 		out.WriteString(td.Subrange.String())
+	}
+	if td.StringLength != nil {
+		out.WriteString("(")
+		out.WriteString(td.StringLength.String())
+		out.WriteString(")")
 	}
 	if td.InitialValue != nil {
 		out.WriteString(" := ")
@@ -2153,5 +2177,27 @@ func (abs *ActionBlockStatement) String() string {
 		out.WriteString(abs.Qualifier.String())
 	}
 	out.WriteString(");")
+	return out.String()
+}
+
+// ReferenceType represents a REFERENCE TO <data_type> specifier.
+type ReferenceType struct {
+	Token    token.Token // The 'REFERENCE' token
+	BaseType Expression  // The data type being referenced
+}
+
+// expressionNode marks ReferenceType as an expression node.
+func (rt *ReferenceType) expressionNode() {}
+
+// Pos returns the position of the REFERENCE token.
+func (rt *ReferenceType) Pos() (int, int) { return rt.Token.Row, rt.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (rt *ReferenceType) TokenLiteral() string { return rt.Token.Literal }
+
+// String returns the string representation of the reference type.
+func (rt *ReferenceType) String() string {
+	var out bytes.Buffer
+	out.WriteString("REFERENCE TO " + rt.BaseType.String())
 	return out.String()
 }

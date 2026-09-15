@@ -412,15 +412,13 @@ func (p *Parser) ParseProgram() *ast.Program {
 	lastPosition := -1 // Track the last token position to detect infinite loops
 
 	for !p.curTokenIs(token.EOF) {
-		tracePrint(fmt.Sprintf("Current Token: %s (%s) at %d:%d", p.curToken.Literal, p.curToken.Type, p.curToken.Row, p.curToken.Column))
-
-		// Infinite loop detection: if the token position hasn't changed since the last iteration, we're stuck.
+		// Infinite loop detection: if the token position hasn't changed since the
+		// last iteration, we're stuck. This is the primary recovery mechanism.
 		if p.curToken.Pos == lastPosition {
-			// If we are stuck, log an error and force the parser to advance
-			// to the next token to prevent hanging. This is a recovery mechanism.
-			p.currentError("parser stuck on token %s (%s), forcing advance to recover", p.curToken.Type, p.curToken.Literal)
+			// Log an error and force the parser to advance to the next token.
+			p.currentError("parser stuck on token %s (%s), forcing advance to recover", p.curToken.Literal, p.curToken.Type)
 			p.nextToken()
-			continue // Continue to the next iteration of the loop with the new token.
+			continue // Restart the loop with the new token to prevent double-parsing.
 		}
 		lastPosition = p.curToken.Pos
 
@@ -439,14 +437,16 @@ func (p *Parser) ParseProgram() *ast.Program {
 				}
 			}()
 
+			tracePrint(fmt.Sprintf("Current Token: %s (%s) at %d:%d", p.curToken.Literal, p.curToken.Type, p.curToken.Row, p.curToken.Column))
+
+			errorCountBefore := len(p.errors)
 			stmt := p.parseStatement()
 			if stmt != nil {
 				program.Statements = append(program.Statements, stmt)
 			}
-			// After a successful parse, advance to the next token.
-			// Block statements manage their own token consumption, so we only
-			// advance if it's not a block statement.
-			if !isBlockStatement(stmt) {
+			// Only advance the token if the statement was parsed without adding new errors.
+			// This prevents the loop from skipping past a token that a recovery function needs to see.
+			if !isBlockStatement(stmt) && len(p.errors) == errorCountBefore {
 				p.nextToken()
 			}
 		}()
@@ -563,7 +563,7 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 
 	p.nextToken() // Consume VAR
 
-	stmt.Declarations = p.parseVarDeclarations(token.END_VAR)
+	stmt.Declarations = p.parseVarDeclarations(token.END_VAR, token.VAR)
 
 	// After parsing the declarations, we must be at the END_VAR token.
 	if !p.curTokenIs(token.END_VAR) {
@@ -625,7 +625,7 @@ func (p *Parser) parseGlobalVarDeclStatement() *ast.GlobalVarDeclaration {
 
 	p.nextToken() // Consume VAR_GLOBAL
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, token.VAR_GLOBAL)
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken()
 	}
@@ -640,7 +640,7 @@ func (p *Parser) parseExternalVarDeclStatement() *ast.ExternalVarDeclaration {
 
 	p.nextToken() // Consume VAR_EXTERNAL
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, token.VAR_EXTERNAL)
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken()
 	}
@@ -742,7 +742,7 @@ func (p *Parser) parseTempVarDeclStatement() *ast.TempVarDeclaration {
 
 	p.nextToken() // consume VAR_TEMP
 
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, token.VAR_TEMP)
 	if p.curTokenIs(token.END_VAR) {
 		p.nextToken() // Consume END_VAR
 	}
@@ -900,8 +900,19 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	// After the base type, check for optional subrange or initialization.
 	if p.peekTokenIs(token.LPAREN) {
 		// This is a subrange declaration, e.g., INT (0..100)
+		// Or a string length declaration, e.g., STRING(10)
+		isString := false
+		if ts, ok := decl.DataType.(*ast.TypeSpecifier); ok {
+			if ts.Token.Type == token.STRING || ts.Token.Type == token.WSTRING {
+				isString = true
+			}
+		}
 		p.nextToken() // consume type, curToken is now '('
-		decl.Subrange = p.parseGroupedExpression()
+		if isString {
+			decl.StringLength = p.parseGroupedExpression()
+		} else {
+			decl.Subrange = p.parseGroupedExpression()
+		}
 	}
 
 	if p.peekTokenIs(token.ASSIGN) {
@@ -977,11 +988,11 @@ func (p *Parser) parseEnumDefinition() ast.Expression {
 }
 
 // parseVarDeclarations parses a list of variable declarations within a block, until a specified end token is found.
-func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclStatement {
+func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.TokenType) []*ast.VarDeclStatement {
 	defer untrace(trace(fmt.Sprintf("parseVarDeclarations (until %s)", endToken)))
 	varDecls := []*ast.VarDeclStatement{}
 
-	var isConstant, isRetain, isNonRetain bool
+	var isConstant, isRetain, isNonRetain, isRisingEdge, isFallingEdge bool
 
 	// Loop to parse multiple qualifiers like CONSTANT, RETAIN, NON_RETAIN in any order.
 	for {
@@ -1000,8 +1011,28 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			p.nextToken()
 			continue
 		}
+		if p.curTokenIs(token.R_EDGE) {
+			isRisingEdge = true
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.F_EDGE) {
+			isFallingEdge = true
+			p.nextToken()
+			continue
+		}
 		// If no more qualifiers are found, break the loop.
 		break
+	}
+
+	// After parsing qualifiers, perform validation.
+	if isRisingEdge && isFallingEdge {
+		// This error is reported at the block level, which is fine.
+		p.currentError("cannot use R_EDGE and F_EDGE on the same variable")
+	}
+	if (isRisingEdge || isFallingEdge) && blockType != token.VAR_INPUT {
+		// This error is also reported at the block level.
+		p.currentError("R_EDGE and F_EDGE qualifiers can only be used in VAR_INPUT blocks")
 	}
 
 	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) && !p.peekTokenIs(token.EOF) {
@@ -1050,6 +1081,11 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 		if dataType == nil {
 			return nil
 		}
+		// Validate that edge qualifiers are only used with BOOL.
+		if (isRisingEdge || isFallingEdge) && dataType.String() != "BOOL" {
+			// This error is reported at the line of the declaration.
+			p.currentError("R_EDGE and F_EDGE qualifiers can only be applied to BOOL variables")
+		}
 
 		// Check for AT clause *after* the data type.
 		if atDecl == nil && p.peekTokenIs(token.AT) {
@@ -1057,6 +1093,24 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 			atDecl = p.parseAtDeclaration()
 		}
 		// After parsing the type, we should be on the type token.
+
+		var subrange, stringLength ast.Expression
+		if p.peekTokenIs(token.LPAREN) {
+			isString := false
+			if ts, ok := dataType.(*ast.TypeSpecifier); ok {
+				if ts.Token.Type == token.STRING || ts.Token.Type == token.WSTRING {
+					isString = true
+				}
+			}
+
+			p.nextToken() // consume data type or AT, curToken is now LPAREN
+			if isString {
+				stringLength = p.parseGroupedExpression()
+			} else {
+				subrange = p.parseGroupedExpression()
+			}
+		}
+
 		// Now we advance to check for initialization or semicolon.
 
 		var initialValue ast.Expression // cspell:disable-line
@@ -1080,10 +1134,14 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType) []*ast.VarDeclSt
 				Name:            name,
 				Location:        atDecl,
 				DataType:        dataType,
+				StringLength:    stringLength,
+				Subrange:        subrange,
 				Value:           initialValue,
 				IsConstant:      isConstant, // Apply the block-level qualifier
 				IsRetain:        isRetain,
 				IsNonRetain:     isNonRetain,
+				IsRisingEdge:    isRisingEdge,
+				IsFallingEdge:   isFallingEdge,
 				LeadingComments: p.leadingComments,
 			}
 			varDecls = append(varDecls, decl)
@@ -1403,6 +1461,8 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 	defer untrace(trace("parseTypeSpecifier"))
 	if p.curTokenIs(token.ARRAY) {
 		return p.parseArrayDefinition()
+	} else if p.curTokenIs(token.REFERENCE) {
+		return p.parseReferenceType()
 	}
 	if p.isDataTypeToken(p.curToken) {
 		return &ast.TypeSpecifier{Token: p.curToken}
@@ -1410,6 +1470,24 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 
 	p.errors = append(p.errors, fmt.Sprintf("expected a data type, got %s", p.curToken.Type))
 	return nil
+}
+
+// parseReferenceType parses a `REFERENCE TO <data_type>` specifier.
+func (p *Parser) parseReferenceType() ast.Expression {
+	defer untrace(trace("parseReferenceType"))
+	refType := &ast.ReferenceType{Token: p.curToken}
+
+	if !p.expectPeek(token.TO) {
+		return nil // Error already logged
+	}
+
+	p.nextToken() // Consume 'TO', move to the base data type
+
+	refType.BaseType = p.parseTypeSpecifier()
+	if refType.BaseType == nil {
+		return nil // Error already logged
+	}
+	return refType
 }
 
 // parseArrayDefinition parses an `ARRAY [...] OF ...` type definition.
@@ -1550,21 +1628,12 @@ func (p *Parser) parseDataTypeKeyword() ast.Expression {
 // parseIntegerLiteral parses an integer literal, handling different bases (2, 8, 10, 16) and distinguishing between signed and unsigned types.
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	defer untrace(trace("parseIntegerLiteral"))
-	lit := &ast.IntegerLiteral{Token: p.curToken}
 	literal := strings.ReplaceAll(p.curToken.Literal, "_", "")
+
+	// This function now only handles simple base-10 integers.
+	// Based literals are handled by parseIntOrType.
 	base := 10
 	valueStr := literal
-
-	if strings.Contains(literal, "#") {
-		parts := strings.SplitN(literal, "#", 2)
-		if len(parts) == 2 {
-			parsedBase, err := strconv.Atoi(parts[0])
-			if err == nil && (parsedBase == 2 || parsedBase == 8 || parsedBase == 10 || parsedBase == 16) {
-				base = parsedBase
-				valueStr = parts[1]
-			}
-		}
-	}
 
 	// Distinguish between signed and unsigned parsing
 	switch p.curToken.Type {
@@ -1579,6 +1648,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 		return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
 	default:
 		// Parse as signed integer
+		lit := &ast.IntegerLiteral{Token: p.curToken}
 		value, err := strconv.ParseInt(valueStr, base, 64)
 		if err != nil {
 			msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
@@ -1724,7 +1794,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		p.nextToken() // Consume THEN
 	}
 
-	ifStmt.Consequence = p.parseBlockStatementUntil(token.ELSIF, token.ELSE, token.END_IF)
+	ifStmt.Consequence = p.parseBlockStatementForIf()
 
 	// Keep track of the current statement for chaining ELSIF
 	current := ifStmt
@@ -1739,7 +1809,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			p.specificError("missing 'THEN' in ELSIF statement, got %s instead", p.peekToken.Type)
 		}
 		p.nextToken() // consume THEN
-		newIf.Consequence = p.parseBlockStatementUntil(token.ELSIF, token.ELSE, token.END_IF)
+		newIf.Consequence = p.parseBlockStatementForIf()
 
 		current.Alternative = newIf
 		current = newIf
@@ -1878,7 +1948,7 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 	stmt := &ast.RepeatStatement{Token: p.curToken, LeadingComments: p.leadingComments}
 
 	p.nextToken() // consume REPEAT
-	stmt.Body = p.parseBlockStatementUntil(token.UNTIL, token.END_REPEAT)
+	stmt.Body = p.parseBlockStatementRepeatLoop()
 
 	if !p.curTokenIs(token.UNTIL) {
 		p.currentError("expected UNTIL, got %s", p.curToken.Type)
@@ -1894,10 +1964,13 @@ func (p *Parser) parseRepeatStatement() ast.Statement {
 
 	// After parsing the expression, the current token is the last token of the expression.
 	// We need to advance to the END_REPEAT token.
-	if !p.expectPeek(token.END_REPEAT) {
-		return stmt // Error reported, return for recovery
+	if !p.peekTokenIs(token.END_REPEAT) {
+		p.peekError(token.END_REPEAT)
+		// Don't return, allow recovery by just returning the statement
+	} else {
+		p.nextToken() // consume expression's last token
+		p.nextToken() // consume END_REPEAT
 	}
-	p.nextToken()
 
 	return stmt
 }
@@ -1964,13 +2037,21 @@ func (p *Parser) parseBlockStatementForIf() *ast.BlockStatement {
 	block.Statements = []ast.Statement{}
 
 	for !p.curTokenIs(token.ELSIF) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.END_IF) && !p.curTokenIs(token.EOF) {
+		// Handle comments inside the block before calling parseStatement
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
 		// The main loop in ParseProgram now handles the nextToken call,
 		// so we don't need special logic here.
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		p.nextToken()
+		if !isBlockStatement(stmt) {
+			p.nextToken()
+		}
 	}
 
 	return block
@@ -2116,11 +2197,49 @@ end_loop:
 
 // parseIntOrType disambiguates between an integer literal and a type keyword (like 'INT').
 func (p *Parser) parseIntOrType() ast.Expression {
-	// If the literal can be parsed as an integer, it's an integer literal.
-	if _, err := strconv.ParseInt(p.curToken.Literal, 10, 64); err == nil {
+	literal := strings.ReplaceAll(p.curToken.Literal, "_", "")
+
+	// Check for based literals first (e.g., 16#FF, 2#1010).
+	if strings.Contains(literal, "#") {
+		parts := strings.SplitN(literal, "#", 2)
+		if len(parts) == 2 {
+			base, err := strconv.Atoi(parts[0])
+			if err == nil && (base == 2 || base == 8 || base == 10 || base == 16) {
+				valueStr := parts[1]
+				// It's a valid based literal. Parse it as such.
+				switch p.curToken.Type {
+				case token.USINT, token.UINT, token.UDINT, token.ULINT:
+					uValue, err := strconv.ParseUint(valueStr, base, 64)
+					if err != nil {
+						p.currentError("could not parse %q as unsigned integer with base %d", valueStr, base)
+						return nil
+					}
+					return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
+				default:
+					value, err := strconv.ParseInt(valueStr, base, 64)
+					if err != nil {
+						p.currentError("could not parse %q as integer with base %d", valueStr, base)
+						return nil
+					}
+					return &ast.IntegerLiteral{Token: p.curToken, Value: value}
+				}
+			}
+		}
+		// If it contains '#' but isn't a valid based literal, it's likely a type like `COLOR#RED`.
+		// Treat it as an identifier to be handled by the infix '#' parser.
+		return p.parseIdentifier()
+	}
+
+	// If it's a simple number without a base, try to parse it as base-10.
+	if _, err := strconv.ParseInt(literal, 10, 64); err == nil {
 		return p.parseIntegerLiteral()
 	}
-	// Otherwise, it's a type keyword like 'INT', so treat it as an identifier.
+	// Also check for simple unsigned numbers.
+	if _, err := strconv.ParseUint(literal, 10, 64); err == nil {
+		return p.parseIntegerLiteral()
+	}
+
+	// If it's not a recognizable number, it must be a type keyword like 'INT'.
 	// This allows it to be the start of a typed literal expression (e.g., INT#10).
 	return p.parseIdentifier()
 }
@@ -2162,7 +2281,7 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 	p.nextToken() // Consume the block type token (e.g., VAR_INPUT)
 
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
-	decls := p.parseVarDeclarations(token.END_VAR)
+	decls := p.parseVarDeclarations(token.END_VAR, blockType)
 
 	// After parsing declarations, we should be on the END_VAR token.
 	// We consume it here so the caller doesn't have to.
@@ -2185,7 +2304,7 @@ func (p *Parser) parseVarTempBlock(blockType token.TokenType) *ast.TempVarDeclar
 	p.nextToken() // Consume the block type token (e.g., VAR_TEMP)
 
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
-	stmt.Vars = p.parseVarDeclarations(token.END_VAR)
+	stmt.Vars = p.parseVarDeclarations(token.END_VAR, token.VAR_TEMP)
 
 	// After parsing declarations, we should be on the END_VAR token.
 	// We consume it here so the caller doesn't have to.
@@ -2281,7 +2400,12 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
 
-	for !p.curTokenIs(token.UNTIL) && !p.curTokenIs(token.EOF) {
+	for !p.curTokenIs(token.UNTIL) && !p.curTokenIs(token.EOF) && !p.curTokenIs(token.END_REPEAT) {
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -2290,9 +2414,7 @@ func (p *Parser) parseBlockStatementRepeatLoop() *ast.BlockStatement {
 			p.nextToken()
 		}
 	}
-	if !p.curTokenIs(token.UNTIL) {
-		p.currentError("missing 'UNTIL' for REPEAT statement")
-	}
+	// Let the caller (parseRepeatStatement) handle the error for missing UNTIL.
 	return block
 }
 

@@ -44,7 +44,7 @@ var_loop:
 		case token.VAR_IN_OUT:
 			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR_TEMP:
-			stmt.VarTemp = append(stmt.VarTemp, p.parseVarTempBlock(token.VAR_TEMP))
+			stmt.VarTemp = append(stmt.VarTemp, p.parseTempVarDeclStatement())
 		case token.VAR_EXTERNAL:
 			stmt.VarExternal = append(stmt.VarExternal, p.parseExternalVarDeclStatement())
 		case token.VAR:

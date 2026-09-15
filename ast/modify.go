@@ -77,6 +77,15 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		if node.Location != nil {
 			node.Location, _ = Modify(node.Location, modifier).(*AtDeclaration)
 		}
+		if node.Subrange != nil {
+			node.Subrange, _ = Modify(node.Subrange, modifier).(Expression)
+		}
+		if node.StringLength != nil {
+			node.StringLength, _ = Modify(node.StringLength, modifier).(Expression)
+		}
+		if node.StringLength != nil {
+			node.StringLength, _ = Modify(node.StringLength, modifier).(Expression)
+		}
 
 	case *ForLoopStatement:
 		node.ControlVar, _ = Modify(node.ControlVar, modifier).(*AssignmentStatement)
@@ -199,6 +208,9 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		if node.Body != nil {
 			node.Body, _ = Modify(node.Body, modifier).(Statement)
 		}
+	case *ReferenceType:
+		node.BaseType, _ = Modify(node.BaseType, modifier).(Expression)
+
 	}
 	return modifier(node)
 }
