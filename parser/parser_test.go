@@ -1251,6 +1251,78 @@ func TestExternalVarDeclarations3(t *testing.T) {
 	}
 }
 
+func TestNestedNamespaceDeclaration(t *testing.T) {
+	input := `
+		NAMESPACE MyCompany.MyLibrary
+			FUNCTION MyFunc : INT
+				MyFunc := 1;
+			END_FUNCTION
+		END_NAMESPACE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestNestedNamespaceDeclaration", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	ns, ok := program.Statements[0].(*ast.NamespaceDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.NamespaceDeclaration. got=%T", program.Statements[0])
+	}
+
+	// Check the name
+	if ns.Name.String() != "MyCompany.MyLibrary" {
+		t.Errorf("namespace name is not 'MyCompany.MyLibrary'. got=%s", ns.Name.String())
+	}
+
+	// Check the structure of the name expression
+	_, ok = ns.Name.(*ast.MemberAccessExpression)
+	if !ok {
+		t.Fatalf("namespace name is not a MemberAccessExpression. got=%T", ns.Name)
+	}
+
+	if len(ns.Statements) != 1 {
+		t.Fatalf("namespace should contain 1 statement. got=%d", len(ns.Statements))
+	}
+}
+
+func TestNamespaceDeclaration(t *testing.T) {
+	input := `
+		NAMESPACE MyLibrary
+			// A function inside the namespace
+			FUNCTION MyFunc : INT
+				MyFunc := 1;
+			END_FUNCTION
+
+			TYPE MyStruct : STRUCT Field : BOOL; END_STRUCT; END_TYPE
+		END_NAMESPACE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestNamespaceDeclaration", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	ns, ok := program.Statements[0].(*ast.NamespaceDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.NamespaceDeclaration. got=%T", program.Statements[0])
+	}
+
+	if ns.Name.String() != "MyLibrary" {
+		t.Errorf("namespace name is not 'MyLibrary'. got=%s", ns.Name.String())
+	}
+
+	if len(ns.Statements) != 2 {
+		t.Fatalf("namespace should contain 2 statements. got=%d", len(ns.Statements))
+	}
+}
+
 func TestMixedExternalVarDeclarations(t *testing.T) {
 	input := `
 		VAR_EXTERNAL CONSTANT

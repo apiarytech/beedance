@@ -1400,44 +1400,41 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 						val = &object.DateAndTime{Value: time.Time{}}
 					}
 				} else {
-					// It's not a primitive, so it could be an FB instance.
-					typeIdentifier := &ast.Identifier{Token: typeSpec.Token, Value: typeName}
-					typeObj := Eval(typeIdentifier, env)
+					// It's not a primitive, so it could be a user-defined FB instance.
+					typeObj := evalIdentifier(
+						&ast.Identifier{Token: typeSpec.Token, Value: typeName},
+						env,
+					)
 					if isError(typeObj) {
 						return typeObj
 					}
 
-					switch typeDef := typeObj.(type) {
-					case *object.FunctionBlock:
-						instanceEnv := object.NewEnclosedEnvironment(typeDef.Env)
-						val = &object.FunctionBlockInstance{Definition: typeDef, Env: instanceEnv}
-						for _, varDecl := range typeDef.VarInputs {
-							if err := evalVarDeclStatement(varDecl, instanceEnv); isError(err) {
-								return err
+					if fbDef, ok := typeObj.(*object.FunctionBlock); ok {
+						// This is where we instantiate a derived FB. We need to
+						// recursively populate its environment with all inherited variables.
+						instanceEnv := object.NewEnclosedEnvironment(fbDef.Env)
+						val = &object.FunctionBlockInstance{Definition: fbDef, Env: instanceEnv}
+
+						var populateInheritedVars func(d *ast.FunctionBlockDeclaration) *object.Error
+						populateInheritedVars = func(d *ast.FunctionBlockDeclaration) *object.Error {
+							if d.Extends != nil {
+								parentDef := t.getFunctionBlockDefinitionFromTypeInfo(d.Extends.Value, env)
+								if parentDef == nil {
+									return newError(d, "parent function block '%s' not found", d.Extends.Value)
+								}
+								populateInheritedVars(parentDef)
 							}
+							evalGenericVarBlock(d.VarInputs, instanceEnv)
+							evalGenericVarBlock(d.VarOutputs, instanceEnv)
+							evalGenericVarBlock(d.VarInOuts, instanceEnv)
+							evalGenericVarBlock(d.Vars, instanceEnv)
+							return nil
 						}
-						for _, varDecl := range typeDef.VarOutputs {
-							if err := evalVarDeclStatement(varDecl, instanceEnv); isError(err) {
-								return err
-							}
-						}
-						for _, varDecl := range typeDef.VarInOuts {
-							if err := evalVarDeclStatement(varDecl, instanceEnv); isError(err) {
-								return err
-							}
-						}
-						for _, varDecl := range typeDef.Vars {
-							if err := evalVarDeclStatement(varDecl, instanceEnv); isError(err) {
-								return err
-							}
-						}
-						if sfcAST, isSFC := typeDef.Body.(*ast.SFCProgram); isSFC {
-							sfcObj := evalSFCProgram(sfcAST, instanceEnv)
-							instanceEnv.Set("__sfc_instance__", sfcObj)
-						}
-					case *object.BuiltinFunctionBlock:
+						populateInheritedVars(fbDef.Definition)
+
+					} else if builtinFB, ok := typeObj.(*object.BuiltinFunctionBlock); ok {
 						instanceEnv := object.NewEnclosedEnvironment(env)
-						instanceEnv.Set("__fb_logic__", typeDef)
+						instanceEnv.Set("__fb_logic__", builtinFB)
 						val = &object.FunctionBlockInstance{Definition: nil, Env: instanceEnv}
 					}
 				}

@@ -92,45 +92,62 @@ var_loop:
 	}
 
 	// After var blocks, we have the body.
-	// The body can be a list of methods, or a list of ST/IL/SFC statements.
+	// The body can contain methods, properties, and then a main logic block.
 	body := &ast.BlockStatement{Token: p.curToken}
 	body.Statements = []ast.Statement{}
 
-	// Heuristic: If the first thing after VAR blocks is METHOD, PROPERTY, or ABSTRACT, we assume an OO-style body.
-	if p.curTokenIs(token.METHOD) || p.curTokenIs(token.PROPERTY) || p.curTokenIs(token.ABSTRACT) {
-		for !p.curTokenIs(token.END_FUNCTION_BLOCK) && !p.curTokenIs(token.EOF) {
-			if p.curTokenIs(token.ABSTRACT) && !stmt.IsAbstract {
-				p.currentError("abstract members are not allowed in a non-abstract function block")
-				p.synchronize(token.END_METHOD, token.END_PROPERTY, token.END_FUNCTION_BLOCK) // Skip to end of member or FB
-				continue
-			}
+	// Loop for methods and properties
+	for {
+		p.consumeLeadingComments()
 
-			if p.curTokenIs(token.METHOD) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.METHOD)) {
-				method := p.parseMethodImplementation()
-				if method != nil {
-					body.Statements = append(body.Statements, method)
-				}
-			} else if p.curTokenIs(token.COMMENT) {
-				p.nextToken()
-				continue
-			} else if p.curTokenIs(token.PROPERTY) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.PROPERTY)) {
-				prop := p.parsePropertyDeclaration()
-				if prop != nil {
-					stmt.Properties = append(stmt.Properties, prop)
-				}
-			} else {
-				p.currentError("unexpected token in FUNCTION_BLOCK body: %s", p.curToken.Type)
-				p.nextToken() // Skip to recover
-			}
+		isAbstractMember := p.curTokenIs(token.ABSTRACT)
+		if isAbstractMember && !stmt.IsAbstract {
+			p.currentError("abstract members are not allowed in a non-abstract function block")
+			p.synchronize(token.END_METHOD, token.END_PROPERTY, token.END_FUNCTION_BLOCK)
+			continue
 		}
-		stmt.Body = body
-	} else if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
-		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
-	} else if p.isSFC() {
-		stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
+
+		isMethod := p.curTokenIs(token.METHOD) || (isAbstractMember && p.peekTokenIs(token.METHOD))
+		isProperty := p.curTokenIs(token.PROPERTY) || (isAbstractMember && p.peekTokenIs(token.PROPERTY))
+		isComment := p.curTokenIs(token.COMMENT)
+
+		if isMethod {
+			method := p.parseMethodImplementation()
+			if method != nil {
+				body.Statements = append(body.Statements, method)
+			}
+		} else if isProperty {
+			prop := p.parsePropertyDeclaration()
+			if prop != nil {
+				stmt.Properties = append(stmt.Properties, prop)
+			}
+		} else if isComment {
+			p.nextToken()
+			continue
+		} else {
+			// No more methods or properties, break to parse the main body
+			break
+		}
+	}
+
+	// Now, parse the main body of ST/IL/SFC statements if any exist.
+	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
+		// If methods were parsed, the main body can only be ST statements.
+		// If no methods were parsed, we detect the language of the body.
+		if len(body.Statements) == 0 && p.isSFC() {
+			stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
+		} else if len(body.Statements) == 0 && (p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON))) {
+			stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
+		} else {
+			// It's an ST body, or an ST body following methods.
+			mainBody := p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
+			if mainBody != nil {
+				body.Statements = append(body.Statements, mainBody.Statements...)
+			}
+			stmt.Body = body
+		}
 	} else {
-		// Otherwise, it's a regular ST body.
-		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
+		stmt.Body = body
 	}
 
 	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {

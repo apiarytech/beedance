@@ -390,6 +390,11 @@ func (p *Parser) parseInterfaceDeclaration() ast.Statement {
 			if method != nil {
 				stmt.Methods = append(stmt.Methods, method)
 			}
+		} else if p.curTokenIs(token.PROPERTY) {
+			prop := p.parsePropertyDeclaration()
+			if prop != nil {
+				stmt.Properties = append(stmt.Properties, prop)
+			}
 		} else if p.curTokenIs(token.COMMENT) {
 			p.nextToken()
 			continue

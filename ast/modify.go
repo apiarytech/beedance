@@ -237,6 +237,9 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		for i := range node.Methods {
 			node.Methods[i], _ = Modify(node.Methods[i], modifier).(*MethodDeclaration)
 		}
+		for i := range node.Properties {
+			node.Properties[i], _ = Modify(node.Properties[i], modifier).(*PropertyDeclaration)
+		}
 
 	case *MethodDeclaration:
 		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
@@ -304,6 +307,12 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
 	case *PropertySetter:
 		node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+
+	case *NamespaceDeclaration:
+		node.Name, _ = Modify(node.Name, modifier).(Expression)
+		for i := range node.Statements {
+			node.Statements[i], _ = Modify(node.Statements[i], modifier).(Statement)
+		}
 
 	}
 	return modifier(node)

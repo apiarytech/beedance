@@ -2268,6 +2268,7 @@ func (md *MethodDeclaration) String() string {
 type InterfaceDeclaration struct {
 	Token           token.Token // The 'INTERFACE' token
 	Name            *Identifier
+	Properties      []*PropertyDeclaration
 	Methods         []*MethodDeclaration
 	LeadingComments []string
 }
@@ -2294,6 +2295,9 @@ func (id *InterfaceDeclaration) String() string {
 	out.WriteString("\n")
 	for _, method := range id.Methods {
 		out.WriteString("\t" + method.String() + "\n")
+	}
+	for _, prop := range id.Properties {
+		out.WriteString("\t" + prop.String() + "\n")
 	}
 	out.WriteString("END_INTERFACE")
 	return out.String()

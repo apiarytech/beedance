@@ -530,6 +530,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseInterfaceDeclaration()
 	case token.METHOD:
 		return p.parseMethodImplementation()
+	case token.NAMESPACE:
+		return p.parseNamespaceDeclaration()
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
@@ -539,6 +541,38 @@ func (p *Parser) parseStatement() ast.Statement {
 		// isIlInstruction() was already checked and returned false.
 		return p.parseExpressionStatement()
 	}
+}
+
+// parseNamespaceDeclaration parses a NAMESPACE ... END_NAMESPACE block.
+func (p *Parser) parseNamespaceDeclaration() ast.Statement {
+	defer untrace(trace("parseNamespaceDeclaration"))
+	stmt := &ast.NamespaceDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
+
+	p.nextToken() // consume NAMESPACE
+	// A namespace name can be a simple identifier or a qualified one (a.b.c).
+	// We can parse it as an expression with low precedence to capture member access.
+	stmt.Name = p.parseExpression(LOWEST)
+	if stmt.Name == nil {
+		p.currentError("expected a name for the namespace")
+		return nil
+	}
+
+	// After parseExpression, curToken is the last token of the expression.
+	// The next token should be the start of the body or END_NAMESPACE.
+	p.nextToken()
+	// The body of a namespace is just a block of statements.
+	body := p.parseBlockStatementUntil(token.END_NAMESPACE)
+	if body != nil {
+		stmt.Statements = body.Statements
+	}
+
+	if !p.curTokenIs(token.END_NAMESPACE) {
+		p.currentError("expected END_NAMESPACE, got %s", p.curToken.Type)
+	} else {
+		p.nextToken() // Consume END_NAMESPACE
+	}
+
+	return stmt
 }
 
 // parseExitStatement parses an EXIT statement, which is used to terminate a loop.
@@ -2471,7 +2505,7 @@ func isBlockStatement(stmt ast.Statement) bool {
 	switch stmt.(type) {
 	case *ast.IfStatement, *ast.ForLoopStatement, *ast.WhileStatement,
 		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration, *ast.StepStatement, *ast.TransitionStatement,
-		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration,
+		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration, *ast.NamespaceDeclaration,
 		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement, *ast.AccessVarDeclaration,
 		*ast.ConfigVarDeclaration, *ast.ExternalVarDeclaration, *ast.TempVarDeclaration:
 		return true

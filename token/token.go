@@ -163,6 +163,8 @@ const (
 	END_GET           = "END_GET"
 	END_SET           = "END_SET"
 	ABSTRACT          = "ABSTRACT"
+	NAMESPACE         = "NAMESPACE"
+	END_NAMESPACE     = "END_NAMESPACE"
 
 	// Program Organization Unit Keywords
 	PROGRAM            = "PROGRAM"
@@ -320,6 +322,8 @@ var keywords = map[string]TokenType{
 	"END_GET":            END_GET,
 	"END_SET":            END_SET,
 	"END_METHOD":         END_METHOD,
+	"NAMESPACE":          NAMESPACE,
+	"END_NAMESPACE":      END_NAMESPACE,
 	"ON":                 ON,
 	"WITH":               WITH,
 	"TASK":               TASK,

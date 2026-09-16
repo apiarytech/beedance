@@ -113,18 +113,19 @@ var standardFBPrimaryOutputs = map[string]struct {
 
 // Transpiler holds the state of the code generation process.
 type Transpiler struct {
-	w               io.Writer
-	programVarName  string // The name of the receiver for program methods, e.g., "p"
-	currentFunc     *ast.FunctionDeclaration
-	varInfo         map[string]*ast.TypeDeclaration // Maps var names in current scope to their type declaration
-	inOutVars       map[string]bool                 // Set of VAR_IN_OUT variable names in the current function scope
-	accessVars      map[string]bool                 // Set of VAR_ACCESS variable names in the current scope
-	tempVars        map[string]bool                 // Set of VAR_TEMP variable names in the current scope
-	ilCurrentCRType string                          // The data type of the IL Current Result
-	locatedVars     map[string]bool                 // Set of VARs with an AT % location
-	mainGenerated   bool                            // Flag to ensure main is only generated once
-	globalVars      map[string]bool                 // Set of global variable names
-	typeInfo        map[string]ast.Node
+	w                io.Writer
+	programVarName   string // The name of the receiver for program methods, e.g., "p"
+	currentFunc      *ast.FunctionDeclaration
+	currentFuncBlock *ast.FunctionBlockDeclaration   // The current FB being transpiled
+	varInfo          map[string]*ast.TypeDeclaration // Maps var names in current scope to their type declaration
+	inOutVars        map[string]bool                 // Set of VAR_IN_OUT variable names in the current function scope
+	accessVars       map[string]bool                 // Set of VAR_ACCESS variable names in the current scope
+	tempVars         map[string]bool                 // Set of VAR_TEMP variable names in the current scope
+	ilCurrentCRType  string                          // The data type of the IL Current Result
+	locatedVars      map[string]bool                 // Set of VARs with an AT % location
+	mainGenerated    bool                            // Flag to ensure main is only generated once
+	globalVars       map[string]bool                 // Set of global variable names
+	typeInfo         map[string]ast.Node
 }
 
 // New creates a new Transpiler instance with the given io.Writer.
@@ -217,6 +218,8 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		return t.transpileExpression(node.Expression) // This will call transpileNode recursively
 	case *ast.FunctionBlockDeclaration:
 		return t.transpileFunctionBlockDeclaration(node) // This will call transpileNode recursively
+	case *ast.InterfaceDeclaration:
+		return t.transpileInterfaceDeclaration(node)
 	case *ast.TypeBlockDeclaration:
 		return t.transpileTypeBlockDeclaration(node) // This will call transpileNode recursively
 	case *ast.ConfigurationDeclaration:
@@ -295,6 +298,8 @@ func (t *Transpiler) buildTypeInfo(program *ast.Program) {
 		case *ast.FunctionBlockDeclaration:
 			t.typeInfo[node.Name.Value] = node
 		case *ast.FunctionDeclaration:
+			t.typeInfo[node.Name.Value] = node
+		case *ast.InterfaceDeclaration:
 			t.typeInfo[node.Name.Value] = node
 		case *ast.TypeBlockDeclaration:
 			for _, decl := range node.Declarations {
@@ -1235,10 +1240,20 @@ func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *as
 // and a `Logic` method. The struct holds the FB's internal and I/O variables, and the `Logic` method
 // contains the FB's executable code, including EN/ENO handling.
 func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDeclaration) error {
+	// Set context for the current function block to handle SUPER calls.
+	originalFuncBlock := t.currentFuncBlock
+	t.currentFuncBlock = fb
+	defer func() { t.currentFuncBlock = originalFuncBlock }()
+
 	// 1. Generate the struct for the Function Block.
 	t.write("// %s is the transpiled struct for the FUNCTION_BLOCK of the same name.\n", fb.Name.Value)
 
 	t.write("type %s struct {\n", fb.Name.Value)
+
+	// If the FB extends another, embed the parent struct.
+	if fb.Extends != nil {
+		t.write("\t%s\n", fb.Extends.Value)
+	}
 
 	originalVarInfo := t.varInfo
 	t.varInfo = make(map[string]*ast.TypeDeclaration)
@@ -1256,9 +1271,12 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	defer func() { t.varInfo = originalVarInfo }()
 
-	// --- Add implicit EN and ENO fields ---
-	t.write("\tEN  iec.BOOL\n")
-	t.write("\tENO iec.BOOL\n")
+	// --- Add implicit EN and ENO fields if not extending ---
+	// If extending, the parent FB is expected to provide these.
+	if fb.Extends == nil {
+		t.write("\tEN  iec.BOOL\n")
+		t.write("\tENO iec.BOOL\n")
+	}
 
 	// Transpile VAR_INPUT, VAR_OUTPUT, and VAR into struct fields.
 	for _, varDecl := range fb.VarInputs {
@@ -1307,7 +1325,114 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	t.write("}\n\n")
 
+	// 3. Generate methods for the Function Block.
+	for _, method := range fb.Methods {
+		if err := t.transpileMethodDeclaration(fb, method); err != nil {
+			return err
+		}
+	}
+
+	// 4. Add static checks to ensure it implements the specified interfaces.
+	for _, iface := range fb.Implements {
+		t.write("// Statically assert that %s implements %s.\n", fb.Name.Value, iface.Value)
+		t.write("var _ %s = (*%s)(nil)\n\n", iface.Value, fb.Name.Value)
+	}
+
 	t.programVarName = originalProgramVarName // Restore context
+	return nil
+}
+
+// transpileInterfaceDeclaration transpiles an IEC 61131-3 INTERFACE into a Go interface.
+func (t *Transpiler) transpileInterfaceDeclaration(iface *ast.InterfaceDeclaration) error {
+	t.write("// %s is the transpiled Go interface for the IEC 61131-3 INTERFACE of the same name.\n", iface.Name.Value)
+	t.write("type %s interface {\n", iface.Name.Value)
+
+	for _, method := range iface.Methods {
+		// Build parameter list string
+		params := []string{}
+		for _, p := range method.Parameters {
+			goType := t.mapIecTypeToGo(p.DataType)
+			params = append(params, fmt.Sprintf("%s %s", p.Name.Value, goType))
+		}
+		paramStr := strings.Join(params, ", ")
+
+		// Build return type string
+		returnStr := ""
+		if method.ReturnType != nil {
+			// Check if return type is VOID, if so, it's an empty return string
+			if typeSpec, ok := method.ReturnType.(*ast.TypeSpecifier); !ok || strings.ToUpper(typeSpec.Token.Literal) != "VOID" {
+				returnStr = " " + t.mapIecTypeToGo(method.ReturnType)
+			}
+		}
+
+		t.write("\t%s(%s)%s\n", method.Name.Value, paramStr, returnStr)
+	}
+
+	t.write("}\n\n")
+	return nil
+}
+
+// transpileMethodDeclaration transpiles an IEC 61131-3 METHOD into a Go method on the FB's struct.
+func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration, method *ast.MethodDeclaration) error {
+	// Do not generate any code for abstract methods, as they have no body.
+	// The Go compiler will enforce implementation through interface satisfaction checks.
+	if method.IsAbstract {
+		return nil
+	}
+
+	// The receiver name is already set in t.programVarName by the caller (transpileFunctionBlockDeclaration).
+	receiverName := t.programVarName
+
+	// Track VAR_IN_OUT for this method's scope to handle dereferencing.
+	originalInOutVars := t.inOutVars
+	t.inOutVars = make(map[string]bool)
+	defer func() { t.inOutVars = originalInOutVars }()
+
+	// Build the method signature.
+	t.write("// %s is a method on the %s FUNCTION_BLOCK.\n", method.Name.Value, fb.Name.Value)
+	t.write("func (%s *%s) %s(", receiverName, fb.Name.Value, method.Name.Value)
+
+	// Transpile parameters (VAR_INPUT, VAR_IN_OUT).
+	params := []string{}
+	for _, p := range method.VarInputs {
+		goType := t.mapIecTypeToGo(p.DataType)
+		params = append(params, fmt.Sprintf("%s %s", p.Name.Value, goType))
+	}
+	for _, p := range method.VarInOuts {
+		goType := t.mapIecTypeToGo(p.DataType)
+		params = append(params, fmt.Sprintf("%s *%s", p.Name.Value, goType))
+		t.inOutVars[p.Name.Value] = true
+	}
+	t.write("%s", strings.Join(params, ", "))
+	t.write(") ")
+
+	// Transpile return type.
+	if method.ReturnType != nil {
+		// Check for VOID return type, which means no return value in Go.
+		if typeSpec, ok := method.ReturnType.(*ast.TypeSpecifier); !ok || strings.ToUpper(typeSpec.Token.Literal) != "VOID" {
+			t.write("%s", t.mapIecTypeToGo(method.ReturnType))
+		}
+	}
+	t.write(" {\n")
+
+	// Transpile local variables (VAR_TEMP).
+	for _, tempBlock := range method.VarTemp {
+		for _, decl := range tempBlock.Vars {
+			t.transpileVarDeclAsLocal(decl)
+		}
+	}
+
+	// Transpile the method body.
+	// Set a temporary function context so that `MyMethod := ...` is treated as a return.
+	originalFunc := t.currentFunc
+	t.currentFunc = &ast.FunctionDeclaration{Name: method.Name, ReturnType: method.ReturnType}
+	defer func() { t.currentFunc = originalFunc }()
+
+	if err := t.transpileNode(method.Body); err != nil {
+		return err
+	}
+
+	t.write("}\n\n")
 	return nil
 }
 
@@ -1506,6 +1631,29 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 // transpileVarDecl transpiles a single variable declaration (VAR, VAR_INPUT, VAR_OUTPUT, VAR_TEMP)
 // into a Go struct field. It handles located variables by making them pointers.
 func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
+	// Check if we are trying to instantiate an abstract function block.
+	var getBaseTypeName func(dt ast.Expression) string
+	getBaseTypeName = func(dt ast.Expression) string {
+		if arrayDef, ok := dt.(*ast.ArrayDefinition); ok {
+			return getBaseTypeName(arrayDef.DataType)
+		} else if typeSpec, ok := dt.(*ast.TypeSpecifier); ok {
+			return typeSpec.Token.Literal
+		} else if typeIdent, ok := dt.(*ast.Identifier); ok {
+			return typeIdent.Value
+		}
+		return ""
+	}
+	typeName := getBaseTypeName(varDecl.DataType)
+
+	if typeName != "" {
+		if typeDef, ok := t.typeInfo[typeName]; ok {
+			if fbDef, isFB := typeDef.(*ast.FunctionBlockDeclaration); isFB && fbDef.IsAbstract {
+				log.Printf("ERROR: Cannot instantiate abstract function block '%s' for variable '%s'", typeName, varDecl.Name.Value)
+				t.write("\t// ERROR: Cannot instantiate abstract function block %s\n", typeName)
+				return
+			}
+		}
+	}
 	// Transpile any leading comments associated with this variable declaration.
 	// If the variable is a macro definition, skip it entirely as it has no
 	// runtime equivalent in the transpiled code.
@@ -1991,6 +2139,24 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 		return t.transpileInfixExpression(exp)
 	case *ast.PrefixExpression:
 		return t.transpilePrefixExpression(exp)
+	case *ast.SuperCallExpression:
+		if t.currentFuncBlock == nil || t.currentFuncBlock.Extends == nil {
+			return fmt.Errorf("SUPER call used outside of a derived FUNCTION_BLOCK")
+		}
+		parentTypeName := t.currentFuncBlock.Extends.Value
+		receiverName := t.programVarName
+		// The call is receiver.ParentType.Method(args...)
+		t.write("%s.%s.%s(", receiverName, parentTypeName, exp.Method.Value)
+		// Transpile arguments
+		for i, arg := range exp.Arguments {
+			if i > 0 {
+				t.write(", ")
+			}
+			if err := t.transpileExpression(arg); err != nil {
+				return err
+			}
+		}
+		t.write(")")
 	case *ast.CallExpression:
 		return t.transpileCallExpression(exp)
 	case *ast.MemberAccessExpression:

@@ -172,6 +172,12 @@ func TestStringMethods(t *testing.T) {
 		{&IlInstructionStatement{Label: &Identifier{Value: "Loop"}, Operator: "LD", Operand: &Identifier{Value: "myVar"}}, "Loop: LD myVar"},
 		{&IlInstructionStatement{Operator: "RET"}, "RET"},
 		{&ActionBlockStatement{ActionName: &Identifier{Value: "Action1"}, Qualifier: &Identifier{Value: "N"}}, "Action1(N);"},
+		{&NamespaceDeclaration{
+			Name: &MemberAccessExpression{
+				Struct: &Identifier{Value: "MyCompany"},
+				Member: &Identifier{Value: "MyLibrary"},
+			},
+			Statements: []Statement{&FunctionDeclaration{Name: &Identifier{Value: "MyFunc"}}}}, "NAMESPACE MyCompany.MyLibrary\nFUNCTION MyFunc : \n\nEND_FUNCTION\nEND_NAMESPACE"},
 
 		// Declarations
 		{&VarDeclStatement{Token: token.Token{Type: token.IDENT, Literal: "myVar"}, Name: &Identifier{Value: "myVar"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}, Value: &IntegerLiteral{Token: token.Token{Type: token.INT, Literal: "5"}, Value: 5}}, "myVar : INT := 5;"},
@@ -935,6 +941,7 @@ func TestStatementNodes(t *testing.T) {
 		&MethodDeclaration{},
 		&MethodImplementation{},
 		&PropertyDeclaration{},
+		&NamespaceDeclaration{},
 	}
 
 	// The loop simply iterates to prevent the compiler from optimizing away
