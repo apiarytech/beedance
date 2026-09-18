@@ -1252,39 +1252,86 @@ func applyNegationToOperand(operand object.Object, modifier string, isConditiona
 // evalAssignmentStatement evaluates an assignment by first evaluating the right-hand
 // side value, and then setting it in the environment for the left-hand side identifier.
 func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environment) object.Object {
-	val := Eval(node.Value, env) // Evaluate the right side
+	val := Eval(node.Value, env)
 	if isError(val) {
 		return val
 	}
 
-	if ident, ok := node.Left.(*ast.Identifier); ok {
-		// When assigning, we must check if the target is a pointer-like object
-		// (for VAR_IN_OUT or VAR ... AT) to update the underlying value correctly.
-		// We use Get to find the variable, which may be in an outer scope (e.g.,
-		// when executing a POU body in an enclosed environment).
-		if existing, ok := env.Get(ident.Value); ok {
+	switch target := node.Left.(type) {
+	case *ast.Identifier:
+		if existing, ok := env.Get(target.Value); ok {
 			switch v := existing.(type) {
 			case *object.Constant:
-				// It's a constant. Assignment is not allowed.
-				return newError(node, "cannot assign to constant variable '%s'", ident.Value)
-
+				return newError(node, "cannot assign to constant variable '%s'", target.Value)
 			case *object.Pointer:
-				if v.Env == nil { // This signifies a located variable.
-					// It's a located variable. The assignment updates the I/O map.
-					ioMap[v.Name] = val // v.Name holds the address string.
+				if v.Env == nil {
+					ioMap[v.Name] = val
 				} else {
-					// It's a regular VAR_IN_OUT pointer.
 					v.Env.Assign(v.Name, val)
 				}
 				return val
 			}
 		}
-		// It's not a pointer in the local scope, so it's a regular assignment.
-		// Use Assign to update the variable in the current or an outer scope.
-		env.Assign(ident.Value, val)
+		env.Assign(target.Value, val)
 
-	} else {
-		return newError(node, "assignment target must be an identifier")
+	case *ast.IndexExpression:
+		left := Eval(target.Left, env)
+		if isError(left) {
+			return left
+		}
+		index := Eval(target.Index, env)
+		if isError(index) {
+			return index
+		}
+
+		switch {
+		case left.Type() == object.ARRAY_OBJ && object.IsNumeric(index):
+			arrayObject := left.(*object.Array)
+			idx, _, _ := object.GetIntegerObjectValue(index)
+			if idx < 0 || idx >= int64(len(arrayObject.Elements)) {
+				return newError(target, "index out of bounds: %d", idx)
+			}
+			arrayObject.Elements[idx] = val
+		case left.Type() == object.HASH_OBJ:
+			hashObject := left.(*object.Hash)
+			key, ok := index.(object.Hashable)
+			if !ok {
+				return newError(target, "unusable as hash key: %s", index.Type())
+			}
+			hashed := key.HashKey()
+			hashObject.Pairs[hashed] = object.HashPair{Key: index, Value: val}
+		default:
+			return newError(target, "index operator not supported for assignment: %s", left.Type())
+		}
+
+	case *ast.MemberAccessExpression:
+		instanceObj := Eval(target.Struct, env)
+		if isError(instanceObj) {
+			return instanceObj
+		}
+		fbInstance, ok := instanceObj.(*object.FunctionBlockInstance)
+		if !ok {
+			return newError(target, "left side of member assignment is not a function block instance, got %s", instanceObj.Type())
+		}
+
+		// Check if it's a property write (SET).
+		if propDef := findPropertyOnFBChain(fbInstance.Definition, target.Member.Value); propDef != nil {
+			if propDef.Setter == nil {
+				return newError(target, "property '%s' is read-only", propDef.Name.Value)
+			}
+			setterEnv := object.NewEnclosedEnvironment(fbInstance.Env)
+			setterEnv.Set("value", val) // The implicit 'value' variable for the setter
+			if evalResult := Eval(propDef.Setter.Body, setterEnv); isError(evalResult) {
+				return evalResult
+			}
+			return val // Assignment evaluates to the assigned value.
+		}
+
+		// It's a regular member variable assignment.
+		fbInstance.Env.Set(target.Member.Value, val)
+
+	default:
+		return newError(node.Left, "invalid assignment target: %T", node.Left)
 	}
 	return val // Assignment statements evaluate to the assigned value.
 }
@@ -1436,6 +1483,16 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 					}
 
 					if fbDef, ok := typeObj.(*object.FunctionBlock); ok {
+						// Check if the function block is abstract.
+						if fbDef.Definition.IsAbstract {
+							return newError(node, "cannot instantiate abstract function block '%s'", fbDef.Name.Value)
+						}
+
+						// Check if the function block correctly implements its interfaces.
+						if err := checkInterfaceImplementation(fbDef, env); err != nil {
+							return err
+						}
+
 						// This is where we instantiate a derived FB. We need to
 						// recursively populate its environment with all inherited variables.
 						instanceEnv := object.NewEnclosedEnvironment(fbDef.Env)
@@ -1491,60 +1548,6 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 	}
 	return val
 }
-
-// // evalTypeBlockDeclaration evaluates a `TYPE ... END_TYPE` block, creating runtime
-// // objects for user-defined types like ENUMs and subranges and storing them in the environment.
-// func evalTypeBlockDeclaration(block *ast.TypeBlockDeclaration, env *object.Environment) object.Object {
-// 	for _, decl := range block.Declarations {
-// 		// We are interested in enumerated type declarations here.
-// 		// The parser creates an EnumDefinition for `(VAL1, VAL2, ...)`
-// 		if enumDef, ok := decl.DataType.(*ast.EnumDefinition); ok {
-// 			// Create an EnumeratedType object
-// 			enumType := &object.EnumeratedType{
-// 				Name:   decl.Name.Value,
-// 				Values: make(map[string]*object.EnumeratedValue),
-// 			}
-
-// 			// Populate the values
-// 			for _, valIdent := range enumDef.Values {
-// 				enumValue := &object.EnumeratedValue{
-// 					TypeName: decl.Name.Value,
-// 					Value:    valIdent.Value,
-// 				}
-// 				enumType.Values[valIdent.Value] = enumValue
-// 			}
-// 			env.Set(decl.Name.Value, enumType)
-// 		} else if subrange, ok := decl.Subrange.(*ast.InfixExpression); ok && subrange.Operator == ".." {
-// 			// Validate that the base type is an integer type before evaluating bounds.
-// 			baseTypeStr := decl.DataType.String()
-// 			if !object.IsIntegerType(baseTypeStr) {
-// 				return newError(decl, "subrange base type must be an integer type, got %s", baseTypeStr)
-// 			}
-
-// 			lower := Eval(subrange.Left, env)
-// 			if isError(lower) {
-// 				return lower
-// 			}
-// 			upper := Eval(subrange.Right, env)
-// 			if isError(upper) {
-// 				return upper
-// 			}
-// 			lowerIntVal, _, okL := object.GetIntegerObjectValue(lower)
-// 			upperIntVal, _, okU := object.GetIntegerObjectValue(upper)
-// 			if !okL || !okU {
-// 				return newError(decl, "subrange bounds must be integers, got %s and %s", lower.Type(), upper.Type())
-// 			}
-// 			enumType := &object.SubrangeType{
-// 				Name:       decl.Name.Value,
-// 				BaseType:   object.ObjectType(strings.ToUpper(baseTypeStr)),
-// 				LowerBound: lowerIntVal,
-// 				UpperBound: upperIntVal,
-// 			}
-// 			env.Set(decl.Name.Value, enumType)
-// 		}
-// 	}
-// 	return NULL // Type declarations don't produce a value themselves.
-// }
 
 // applyTimeDateConversion parses a string value for a time or date literal and
 // creates the corresponding runtime object (Time, Date, etc.).
@@ -2707,15 +2710,13 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 	case *object.Program:
 		// Treat a program call like a function call.
 		// The program `fn` has its own persistent environment `fn.Env` where static VARs live.
-		// We create a new temporary environment for this specific call, enclosing the program's persistent one.
-		// This gives access to static VARs but provides a clean scope for VAR_INPUT and VAR_TEMP.
-		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+		// Unlike a function, a program call modifies its own state, so we execute directly in its environment.
 
 		// Pre-declare the program name as a variable in the local scope for the return value.
-		extendedEnv.Set(fn.Name.Value, NULL)
+		fn.Env.Set(fn.Name.Value, NULL)
 
 		// Programs can have VAR_INPUT, so we should handle arguments.
-		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, extendedEnv, callNode)
+		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, fn.Env, callNode)
 		if err != nil {
 			return err
 		}
@@ -2723,7 +2724,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// Initialize only VAR_TEMP variables for this specific call. Static VARs are already in fn.Env.
 		for _, tempBlock := range fn.VarTemp {
 			for _, tempVar := range tempBlock.Vars {
-				if err := evalVarDeclStatement(tempVar, extendedEnv); isError(err) {
+				if err := evalVarDeclStatement(tempVar, fn.Env); isError(err) {
 					return err
 				}
 			}
@@ -2734,23 +2735,23 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		isILProgram := false
 		// Check for IL first, as it has a special execution context.
 		if block, isBlock := fn.Body.(*ast.BlockStatement); isBlock && len(block.Statements) > 0 {
-			if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL {
+			if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL { // cspell:disable-line
 				isILProgram = true
-				evaluated = evalIlProgram(block.Statements, extendedEnv)
+				evaluated = evalIlProgram(block.Statements, fn.Env)
 			}
 		}
 
 		if !isILProgram {
 			// If not IL, check for SFC.
-			if sfcInstanceObj, ok := extendedEnv.Get("__sfc_instance__"); ok {
+			if sfcInstanceObj, ok := fn.Env.Get("__sfc_instance__"); ok {
 				sfcInstance, isSFC := sfcInstanceObj.(*object.SFC)
 				if !isSFC {
 					return newError(nil, "internal error: __sfc_instance__ is not an SFC object")
 				}
-				evaluated = evalSFCCycle(sfcInstance, extendedEnv)
+				evaluated = evalSFCCycle(sfcInstance, fn.Env)
 			} else {
 				// For ST programs, evaluate the whole body in the temporary call environment.
-				evaluated = Eval(fn.Body, extendedEnv)
+				evaluated = Eval(fn.Body, fn.Env)
 			}
 		}
 		if isError(evaluated) {
@@ -2759,7 +2760,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Handle output arguments (=>).
 		for _, mapping := range outputMappings {
-			val, ok := extendedEnv.Get(mapping.SourceParamName)
+			val, ok := fn.Env.Get(mapping.SourceParamName)
 			if !ok {
 				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in program scope", mapping.SourceParamName)
 			}
@@ -2774,7 +2775,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			return evaluated
 		}
 		// For ST/SFC, the return value is the value assigned to the program's name.
-		returnValue, _ := extendedEnv.Get(fn.Name.Value)
+		returnValue, _ := fn.Env.Get(fn.Name.Value)
 		return returnValue
 
 	case *object.ProgramInstance:
@@ -3023,6 +3024,34 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		return result
 
+	case *object.Method:
+		// A method is being called. Create a new environment for its execution that
+		// encloses the function block instance's environment. This gives the method
+		// access to all of the instance's variables.
+		methodEnv := object.NewEnclosedEnvironment(fn.Instance.Env)
+
+		// Inject 'THIS' into the method's environment, pointing to the instance itself.
+		methodEnv.Set("THIS", fn.Instance)
+
+		// Handle arguments for the method call.
+		// We need to get the method's parameter declarations from its AST definition.
+		paramDecls := fn.Definition.VarInputs
+		positionalParamIndex := 0
+		for _, argNode := range args {
+			if namedArg, ok := argNode.(*ast.NamedArgument); ok {
+				val := Eval(namedArg.Value, callEnv)
+				if isError(val) {
+					return val
+				}
+				methodEnv.Set(namedArg.Name.Value, val)
+			} else { // Positional argument
+				val := Eval(argNode, callEnv)
+				methodEnv.Set(paramDecls[positionalParamIndex].Name.Value, val)
+				positionalParamIndex++
+			}
+		}
+		return Eval(fn.Definition.Body, methodEnv)
+
 	case *object.Builtin:
 		// For built-in functions, we evaluate all arguments first.
 		evaluatedArgs := evalExpressions(args, callEnv)
@@ -3059,15 +3088,7 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 	outputMappings := []outputArgMapping{}
 	positionalParamIndex := 0 // Index for positional parameters in paramDecls
 
-	var paramDecls []*ast.VarDeclStatement
-	if fbDef, ok := def.(*object.FunctionBlock); ok && fbDef != nil {
-		paramDecls = fbDef.VarInputs
-	} else if fDef, ok := def.(*object.Function); ok && fDef != nil {
-		paramDecls = fDef.VarInputs
-	} else if pDef, ok := def.(*object.Program); ok && pDef != nil {
-		paramDecls = pDef.VarInputs
-	}
-	// If def is nil, it's a built-in FB, and we just write to the targetEnv.
+	paramDecls := getParamDecls(def)
 
 	for _, argNode := range args {
 		switch arg := argNode.(type) {
@@ -3274,9 +3295,61 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		member := node.Member.Value
 		val, ok := l.Env.Get(member)
 		if !ok {
+			// If not a variable, check if it's a property read (GET).
+			if propDef := findPropertyOnFBChain(l.Definition, member); propDef != nil {
+				if propDef.Getter == nil {
+					return newError(node, "property '%s' is write-only", member)
+				}
+				// Evaluate the GET block in the instance's context.
+				getterEnv := object.NewEnclosedEnvironment(l.Env)
+				// The getter body needs access to THIS.
+				getterEnv.Set("THIS", l)
+				// The return value is implicitly assigned to a variable with the property's name.
+				getterEnv.Set(propDef.Name.Value, NULL)
+
+				Eval(propDef.Getter.Body, getterEnv)
+
+				// The result is the final value of that implicit variable.
+				result, _ := getterEnv.Get(propDef.Name.Value)
+				return result
+			}
+
+			// If the member is not a variable, check if it's a method.
+			if l.Definition != nil && l.Definition.Body != nil {
+				if body, ok := l.Definition.Body.(*ast.BlockStatement); ok {
+					for _, stmt := range body.Statements {
+						if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
+							if method.Name.Value == member {
+								// It's a method. Return a new Method object that binds the
+								// method's definition to this specific FB instance.
+								return &object.Method{Definition: method, Instance: l}
+							}
+						}
+					}
+				}
+			}
+
 			return newError(node, "member '%s' not found in function block instance '%s'", member, l.Definition.Name.Value)
 		}
 		return val
+
+	case *object.SuperContext:
+		// This handles SUPER^.MyMethod() calls.
+		methodName := node.Member.Value
+		currentInstance := l.Instance
+
+		// Start the search from the immediate parent.
+		parentFBDef := currentInstance.Definition.Definition.Extends
+		if parentFBDef == nil {
+			return newError(node, "SUPER call on a function block that does not extend another")
+		}
+
+		methodDef := findMethodOnFBChain(parentFBDef.Value, methodName, env)
+		if methodDef == nil {
+			return newError(node, "method '%s' not found in any parent function block", methodName)
+		}
+
+		return &object.Method{Definition: methodDef, Instance: currentInstance}
 	case *object.Step:
 		member := node.Member.Value
 		switch member {
@@ -3740,4 +3813,168 @@ func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.
 		return &object.Int{Value: -int16(val.Value)}
 	}
 	return newError(node, "unknown operator: -%s", right.Type())
+}
+
+// getParamDecls is a helper function to get all parameter declarations (VAR_INPUT)
+// from a POU definition object.
+func getParamDecls(def object.Object) []*ast.VarDeclStatement {
+	switch d := def.(type) {
+	case *object.FunctionBlock:
+		if d == nil {
+			return nil
+		}
+		return d.VarInputs
+	case *object.Function:
+		if d == nil {
+			return nil
+		}
+		return d.VarInputs
+	case *object.Program:
+		if d == nil {
+			return nil
+		}
+		return d.VarInputs
+	default:
+		return nil
+	}
+}
+
+// findMethodOnFBChain recursively searches for a method definition starting from a given
+// function block name and traversing up its inheritance chain.
+func findMethodOnFBChain(fbName string, methodName string, env *object.Environment) *ast.MethodImplementation {
+	fbObj, ok := env.Get(fbName)
+	if !ok {
+		return nil // Base case: FB definition not found.
+	}
+
+	fbDef, ok := fbObj.(*object.FunctionBlock)
+	if !ok {
+		return nil // Not a function block.
+	}
+
+	// Search for the method in the current FB's body.
+	if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
+		for _, stmt := range body.Statements {
+			if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
+				if method.Name.Value == methodName {
+					return method // Found it.
+				}
+			}
+		}
+	}
+
+	// If not found, recurse to the parent.
+	if fbDef.Definition != nil && fbDef.Definition.Extends != nil {
+		return findMethodOnFBChain(fbDef.Definition.Extends.Value, methodName, env)
+	}
+
+	return nil // Reached the top of the chain without finding the method.
+}
+
+// findPropertyOnFBChain recursively searches for a property definition starting from a given
+// function block and traversing up its inheritance chain.
+func findPropertyOnFBChain(fbDef *object.FunctionBlock, propName string) *ast.PropertyDeclaration {
+	if fbDef == nil {
+		return nil
+	}
+
+	// Search for the property in the current FB's body.
+	if fbDef.Body != nil {
+		if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
+			for _, stmt := range body.Statements {
+				if prop, isProp := stmt.(*ast.PropertyDeclaration); isProp {
+					if prop.Name.Value == propName {
+						return prop // Found it.
+					}
+				}
+			}
+		}
+	}
+
+	// If not found, recurse to the parent.
+	if fbDef.Definition != nil && fbDef.Definition.Extends != nil {
+		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		if ok {
+			if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
+				return findPropertyOnFBChain(parentDef, propName)
+			}
+		}
+	}
+
+	return nil // Reached the top of the chain without finding the property.
+}
+
+// evalInterfaceDeclaration evaluates an INTERFACE declaration and stores its
+// definition in the environment.
+func evalInterfaceDeclaration(node *ast.InterfaceDeclaration, env *object.Environment) object.Object {
+	ifaceDef := &object.InterfaceDefinition{
+		Name:       node.Name,
+		Methods:    node.Methods,
+		Properties: node.Properties,
+	}
+	env.Set(node.Name.Value, ifaceDef)
+	return NULL
+}
+
+// checkInterfaceImplementation verifies that a concrete function block provides
+// implementations for all methods and properties required by the interfaces it implements.
+func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Environment) *object.Error {
+	// Collect all interfaces implemented by this FB and its parents.
+	allInterfaces := []*ast.Identifier{}
+	currentDef := fbDef.Definition
+	for currentDef != nil {
+		allInterfaces = append(allInterfaces, currentDef.Implements...)
+		if currentDef.Extends == nil {
+			break
+		}
+		parentObj, ok := env.Get(currentDef.Extends.Value)
+		if !ok {
+			return newError(currentDef, "parent function block '%s' not found during interface check", currentDef.Extends.Value)
+		}
+		parentFb, ok := parentObj.(*object.FunctionBlock)
+		if !ok {
+			return newError(currentDef, "parent '%s' is not a function block", currentDef.Extends.Value)
+		}
+		currentDef = parentFb.Definition
+	}
+
+	uniqueInterfaces := make(map[string]*ast.Identifier)
+	for _, iface := range allInterfaces {
+		uniqueInterfaces[iface.Value] = iface
+	}
+
+	for _, ifaceIdent := range uniqueInterfaces {
+		ifaceObj, ok := env.Get(ifaceIdent.Value)
+		if !ok {
+			return newError(ifaceIdent, "interface '%s' not found", ifaceIdent.Value)
+		}
+		ifaceDef, ok := ifaceObj.(*object.InterfaceDefinition)
+		if !ok {
+			return newError(ifaceIdent, "'%s' is not an interface", ifaceIdent.Value)
+		}
+
+		// Check methods
+		for _, requiredMethod := range ifaceDef.Methods {
+			foundMethod := findMethodOnFBChain(fbDef.Name.Value, requiredMethod.Name.Value, env)
+			if foundMethod == nil {
+				return newError(fbDef.Definition, "function block '%s' does not implement method '%s' from interface '%s'", fbDef.Name.Value, requiredMethod.Name.Value, ifaceDef.Name.Value)
+			}
+			if foundMethod.IsAbstract {
+				return newError(fbDef.Definition, "function block '%s' implements method '%s' from interface '%s' with an abstract method", fbDef.Name.Value, requiredMethod.Name.Value, ifaceDef.Name.Value)
+			}
+		}
+
+		// Check properties
+		for _, requiredProp := range ifaceDef.Properties {
+			foundProp := findPropertyOnFBChain(fbDef, requiredProp.Name.Value)
+			if foundProp == nil {
+				return newError(fbDef.Definition, "function block '%s' does not implement property '%s' from interface '%s'", fbDef.Name.Value, requiredProp.Name.Value, ifaceDef.Name.Value)
+			}
+			if foundProp.IsAbstract {
+				return newError(fbDef.Definition, "function block '%s' implements property '%s' from interface '%s' with an abstract property", fbDef.Name.Value, requiredProp.Name.Value, ifaceDef.Name.Value)
+			}
+		}
+	}
+
+	return nil
 }

@@ -81,6 +81,9 @@ const (
 	CLOSURE_OBJ                 = "CLOSURE"                 // A function that captures its environment
 	NAMED_ARGUMENT_OBJ          = "NAMED_ARGUMENT"          // A named argument for a function call
 	CONSTANT_OBJ                = "CONSTANT"                // A wrapper for a constant value
+	SUPER_CONTEXT_OBJ           = "SUPER_CONTEXT"           // A context for a SUPER call
+	METHOD_OBJ                  = "METHOD"                  // A method bound to a function block instance
+	INTERFACE_DEFINITION_OBJ    = "INTERFACE_DEFINITION"    // The definition of an interface
 )
 
 // Generic ANY types
@@ -418,9 +421,7 @@ func (uli *ULInt) Inspect() string { return fmt.Sprintf("%d", uli.Value) }
 func (uli *ULInt) HashKey() HashKey { return HashKey{Type: uli.Type(), Value: uli.Value} }
 
 func (r *Real) HashKey() HashKey {
-	h := fnv.New64a()
-	h.Write([]byte(fmt.Sprintf("%f", r.Value)))
-	return HashKey{Type: r.Type(), Value: h.Sum64()}
+	return HashKey{Type: r.Type(), Value: math.Float64bits(r.Value)}
 }
 
 func (lr *LReal) HashKey() HashKey {
@@ -923,6 +924,54 @@ func (fbi *FunctionBlockInstance) Inspect() string {
 	return fmt.Sprintf("FUNCTION_BLOCK_INSTANCE(%s)", fbi.Definition.Name.Value)
 }
 
+// Method represents a method bound to a specific function block instance.
+// It holds the method's definition (from the AST) and a reference to the
+// instance it's being called on, which provides the context (the instance's environment).
+type Method struct {
+	Definition *ast.MethodImplementation
+	Instance   *FunctionBlockInstance
+}
+
+// Type returns the object's type.
+func (m *Method) Type() ObjectType { return METHOD_OBJ }
+
+// Inspect returns a string representation of the method.
+func (m *Method) Inspect() string {
+	if m.Definition != nil && m.Definition.Name != nil {
+		return fmt.Sprintf("METHOD(%s)", m.Definition.Name.Value)
+	}
+	return "METHOD(<unnamed>)"
+}
+
+// SuperContext represents the context for a SUPER call, holding a reference
+// to the current function block instance.
+type SuperContext struct {
+	Instance *FunctionBlockInstance
+}
+
+// Type returns the object's type.
+func (sc *SuperContext) Type() ObjectType { return SUPER_CONTEXT_OBJ }
+
+// Inspect returns a string representation of the super context.
+func (sc *SuperContext) Inspect() string {
+	return fmt.Sprintf("SUPER_CONTEXT(%s)", sc.Instance.Inspect())
+}
+
+// InterfaceDefinition represents the definition of an INTERFACE POU.
+type InterfaceDefinition struct {
+	Name       *ast.Identifier
+	Methods    []*ast.MethodDeclaration
+	Properties []*ast.PropertyDeclaration
+}
+
+// Type returns the object's type.
+func (id *InterfaceDefinition) Type() ObjectType { return INTERFACE_DEFINITION_OBJ }
+
+// Inspect returns a string representation of the interface definition.
+func (id *InterfaceDefinition) Inspect() string {
+	return fmt.Sprintf("INTERFACE %s", id.Name.Value)
+}
+
 // Program represents the definition of a PROGRAM POU.
 // It's a template for creating program instances.
 type Program struct {
@@ -1128,7 +1177,9 @@ func (sd *StructDefinition) Inspect() string {
 	out.WriteString(sd.Name.String())
 	out.WriteString(" : STRUCT\n")
 	for _, m := range sd.Members {
-		out.WriteString("\t" + m.String() + "\n")
+		out.WriteString("\t")
+		out.WriteString(m.String())
+		out.WriteString("\n")
 	}
 	out.WriteString("END_STRUCT")
 	return out.String()
