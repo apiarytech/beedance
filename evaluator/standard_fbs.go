@@ -48,10 +48,12 @@ func evalTON(instanceEnv, callEnv *object.Environment) object.Object {
 		}
 	} else {
 		// IN is FALSE: reset the timer
-		instanceEnv.Set("__timerActive", FALSE)
-		instanceEnv.Set("__startTime", nil)
-		et = 0
-		q = FALSE
+		if timerActive { // Only reset if it was previously active
+			instanceEnv.Set("__timerActive", FALSE)
+			instanceEnv.Set("__startTime", nil)
+			et = 0
+			q = FALSE
+		}
 	}
 
 	// 4. Set outputs in the instance environment

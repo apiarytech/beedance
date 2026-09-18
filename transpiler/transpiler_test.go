@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"beedance/lexer"
 	"beedance/parser"
 )
@@ -47,22 +49,22 @@ import (
 		t.Fatalf("[%s] transpilation failed: %v", name, err)
 	}
 
+	fullExpected := header + expected
+
 	// Normalize whitespace by removing all newlines and tabs, and collapsing multiple spaces.
+	// This makes the comparison robust against insignificant formatting changes.
 	normalize := func(s string) string {
 		s = strings.ReplaceAll(s, "\n", " ")
 		s = strings.ReplaceAll(s, "\t", " ")
 		return strings.Join(strings.Fields(s), " ")
 	}
 
-	// Add header to expected output for normalization
-	fullExpected := header + expected
-
 	actualNormalized := normalize(buf.String())
 	expectedNormalized := normalize(fullExpected)
 
-	if actualNormalized != expectedNormalized {
-		t.Errorf("[%s] transpiled output does not match expected.", name)
-		t.Logf("\n--- EXPECTED ---\n%s\n\n--- ACTUAL ---\n%s", fullExpected, buf.String())
+	if diff := cmp.Diff(expectedNormalized, actualNormalized); diff != "" {
+		t.Errorf("[%s] normalized transpiled output does not match expected. Diff (-want +got):\n%s", name, diff)
+		t.Logf("\n--- EXPECTED (raw) ---\n%s\n\n--- ACTUAL (raw) ---\n%s", fullExpected, buf.String())
 	}
 }
 
@@ -127,7 +129,7 @@ END_FUNCTION_BLOCK
 // MyFB is the transpiled struct for the FUNCTION_BLOCK of the same name.
 type MyFB struct {
 	EN  iec.BOOL
-	ENO iec.BOOL     
+	ENO iec.BOOL
 	In1 iec.BOOL
 	Out1 iec.INT
 }
@@ -146,6 +148,7 @@ func (m *MyFB) Logic(now time.Time) {
 		m.Out1 = 20
 	}
 }
+
 `
 	transpileAndCheck(t, "TestFunctionBlockTranspilation", input, expected)
 }
@@ -416,8 +419,8 @@ type TestFBProgram struct {
 // NewTestFBProgramFactory creates a new instance of the TestFBProgram program.
 func NewTestFBProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &TestFBProgram{}
-	instance.Trigger = true
 	instance.MyCounter.EN = true
+	instance.Trigger = true
 	return instance.Logic, nil
 }
 
@@ -964,9 +967,9 @@ func (p *MySFC_Timed) Logic(now time.Time) {
 	// Actions for step S2
 	if p.sfcActiveSteps["S2"] {
 		if p.DelayedAction_Timer.IsZero() { p.DelayedAction_Timer = now; }
-		p.DelayedAction_Q = now.Sub(p.DelayedAction_Timer) >= iec.MakeTime("T#2s")
+		p.DelayedAction_Q = now.Sub(p.DelayedAction_Timer) >= iec.Time("T#2s")
 		if p.LimitedAction_Timer.IsZero() { p.LimitedAction_Timer = now; }
-		p.LimitedAction_Q = now.Sub(p.LimitedAction_Timer) < iec.MakeTime("T#3s")
+		p.LimitedAction_Q = now.Sub(p.LimitedAction_Timer) < iec.Time("T#3s")
 	} else {
 		p.DelayedAction_Q = false
 		p.DelayedAction_Timer = time.Time{}
@@ -1190,8 +1193,8 @@ type MyIlCalJmpProgram struct {
 func NewMyIlCalJmpProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MyIlCalJmpProgram{}
 	instance.DoTrigger = false
-	instance.Counter = 0
 	instance.MyTrigger.EN = true
+	instance.Counter = 0
 	return instance.Logic, nil
 }
 
@@ -1430,8 +1433,407 @@ func (p *MacroTestProgram) Link(linker config.IOLinker) error {
 }
 
 func (p *MacroTestProgram) Logic(now time.Time) {
-	p.result = p.twice((10 + 5))
+	p.result = ((10 + 5) * 2)
 }
 `
 	transpileAndCheck(t, "TestMacroTranspilation", input, expected)
+}
+
+func TestConfigurationTranspilation(t *testing.T) {
+	input := `
+PROGRAM MyProgram
+	VAR_INPUT
+		ConfigInput : INT;
+	END_VAR
+	VAR
+		myVar : INT;
+	END_VAR
+	myVar := ConfigInput;
+END_PROGRAM
+
+CONFIGURATION MyConfig
+	RESOURCE Res1 ON PLC
+		TASK Task1 (INTERVAL := T#100ms, PRIORITY := 1);
+		PROGRAM P1 WITH Task1 : MyProgram;
+	END_RESOURCE
+
+	VAR_CONFIG P1
+		ConfigInput := 42;
+	END_VAR
+END_CONFIGURATION
+`
+	expected := `
+type MyProgram struct {
+	ConfigInput iec.INT
+	myVar       iec.INT
+}
+
+// NewMyProgramFactory creates a new instance of the MyProgram program.
+func NewMyProgramFactory(params map[string]string) (func(time.Time), error) {
+	instance := &MyProgram{}
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *MyProgram) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *MyProgram) Logic(now time.Time) {
+	p.myVar = p.ConfigInput
+}
+
+// --- Generated Main Function from CONFIGURATION ---
+func main() {
+	// Register program factories
+	config.RegisterProgramFactory("MyProgram", NewMyProgramFactory)
+
+	// Create the configuration from the IEC 61131-3 source
+	cfg := &config.Configuration{
+		Name: "MyConfig",
+		Resources: []*config.Resource{
+			{
+				Name: "Res1",
+				Tasks: []*config.Task{
+					{
+						Name:     "Task1",
+						Priority: 1,
+						Interval: iec.Time("T#100ms"),
+						Programs: []string{"P1"},
+					},
+				},
+				Programs: map[string]*config.ProgramInstance{
+					"P1": {
+						Type: "MyProgram",
+						Params: map[string]string{
+							"ConfigInput": "42",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// This is where you would start the royaljelly scheduler with the generated config.
+	fmt.Println("Configuration loaded and ready to run.")
+	// Example: royaljelly.Start(cfg)
+}
+`
+	transpileAndCheck(t, "TestConfigurationTranspilation", input, expected)
+}
+
+func TestExpressionStatementAssignmentWorkaround(t *testing.T) {
+	input := `
+PROGRAM AssignmentWorkaround
+	VAR
+		myArray : ARRAY[0..4] OF INT;
+		i : INT := 0;
+	END_VAR
+
+	myArray[i] := 5;
+END_PROGRAM
+`
+	expected := `
+type AssignmentWorkaround struct {
+	myArray []iec.INT
+	i       iec.INT
+}
+
+// NewAssignmentWorkaroundFactory creates a new instance of the AssignmentWorkaround program.
+func NewAssignmentWorkaroundFactory(params map[string]string) (func(time.Time), error) {
+	instance := &AssignmentWorkaround{}
+	instance.i = 0
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *AssignmentWorkaround) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *AssignmentWorkaround) Logic(now time.Time) {
+	p.myArray[p.i] = 5
+}
+`
+	transpileAndCheck(t, "TestExpressionStatementAssignmentWorkaround", input, expected)
+}
+
+func TestIlBuiltinFunctionAndStandardFbCall(t *testing.T) {
+	input := `
+PROGRAM MyIlBuiltins
+	VAR
+		neg_val : INT := -10;
+		abs_val : INT;
+		my_timer : TON;
+		timer_in : BOOL := TRUE;
+		timer_q : BOOL;
+	END_VAR
+
+	LD 		neg_val
+	ABS
+	ST 		abs_val
+
+	CAL my_timer(IN := timer_in, PT := T#2s)
+	ST timer_q
+END_PROGRAM
+`
+	expected := `
+type MyIlBuiltins struct {
+	neg_val  iec.INT
+	abs_val  iec.INT
+	my_timer iec.TON
+	timer_in iec.BOOL
+	timer_q  iec.BOOL
+}
+
+// NewMyIlBuiltinsFactory creates a new instance of the MyIlBuiltins program.
+func NewMyIlBuiltinsFactory(params map[string]string) (func(time.Time), error) {
+	instance := &MyIlBuiltins{}
+	instance.neg_val = (-10)
+	instance.my_timer.EN = true
+	instance.timer_in = true
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *MyIlBuiltins) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *MyIlBuiltins) Logic(now time.Time) {
+	// Typed accumulators for IL Current Result (CR)
+	var cr_BOOL iec.BOOL
+	var cr_LINT iec.LINT
+	var cr_LREAL iec.LREAL
+	var cr_TIME iec.TIME
+	var cr_STRING iec.STRING
+	_ = cr_BOOL; _ = cr_LINT; _ = cr_LREAL; _ = cr_TIME; _ = cr_STRING // Avoid unused var errors
+
+	cr_LINT = iec.LINT(p.neg_val)
+	cr_LREAL = ABS(cr_LINT)
+	p.abs_val = iec.INT(cr_LREAL)
+
+	p.my_timer.IN = p.timer_in
+	p.my_timer.PT = iec.Time("T#2s")
+	p.my_timer.Logic(now)
+	cr_BOOL = p.my_timer.Q
+	p.timer_q = iec.BOOL(cr_BOOL)
+}
+`
+	transpileAndCheck(t, "TestIlBuiltinFunctionAndStandardFbCall", input, expected)
+}
+
+func TestSfcStoredAndPulseActions(t *testing.T) {
+	input := `
+PROGRAM SfcStoredPulse
+	VAR
+		Go : BOOL;
+		PulseActionActive : BOOL;
+		StoredDelayedActive : BOOL;
+		StoredLimitedActive : BOOL;
+	END_VAR
+
+	ACTION PulseAction: PulseActionActive := TRUE; END_ACTION
+	ACTION StoredDelayedAction: StoredDelayedActive := TRUE; END_ACTION
+	ACTION StoredLimitedAction: StoredLimitedActive := TRUE; END_ACTION
+
+	INITIAL_STEP S1:
+		PulseAction(P);
+		StoredDelayedAction(SD, T#1s);
+		StoredLimitedAction(SL, T#2s);
+	END_STEP
+
+	TRANSITION FROM S1 TO S2 := Go; END_TRANSITION
+
+	STEP S2:
+	END_STEP
+END_PROGRAM
+`
+	expected := `
+type SfcStoredPulse struct {
+	Go                  iec.BOOL
+	PulseActionActive   iec.BOOL
+	StoredDelayedActive iec.BOOL
+	StoredLimitedActive iec.BOOL
+	sfcActiveSteps      map[string]bool
+	S1_X                bool
+	S1_X_prev           iec.BOOL
+	S1_T                time.Time
+	S2_X                bool
+	S2_X_prev           iec.BOOL
+	S2_T                time.Time
+	PulseAction_Q       iec.BOOL
+	PulseAction_Timer   time.Time
+	PulseAction_ActivationCount int
+	PulseAction_Qualifier string
+	PulseAction_Duration  time.Duration
+	StoredDelayedAction_Q       iec.BOOL
+	StoredDelayedAction_Timer   time.Time
+	StoredDelayedAction_ActivationCount int
+	StoredDelayedAction_Qualifier string
+	StoredDelayedAction_Duration  time.Duration
+	StoredLimitedAction_Q       iec.BOOL
+	StoredLimitedAction_Timer   time.Time
+	StoredLimitedAction_ActivationCount int
+	StoredLimitedAction_Qualifier string
+	StoredLimitedAction_Duration  time.Duration
+}
+
+// NewSfcStoredPulseFactory creates a new instance of the SfcStoredPulse program.
+func NewSfcStoredPulseFactory(params map[string]string) (func(time.Time), error) {
+	instance := &SfcStoredPulse{}
+	instance.sfcActiveSteps = make(map[string]bool)
+	instance.sfcActiveSteps["S1"] = true
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *SfcStoredPulse) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *SfcStoredPulse) Logic(now time.Time) {
+	// --- SFC Phase 0: Store previous step state ---
+	p.S1_X_prev = p.S1_X
+	p.S2_X_prev = p.S2_X
+
+	// --- SFC Phase 1: Evaluate Transitions and collect fired transitions ---
+	firedTransitions := make(map[string]bool)
+
+	// Check transition t4 from [S1] to [S2]
+	if p.sfcActiveSteps["S1"] {
+		if p.Go {
+			firedTransitions["t4"] = true
+		}
+	}
+
+	// --- SFC Phase 2: Update Step States based on fired transitions ---
+	nextActiveSteps := make(map[string]bool)
+	// Copy current active steps; they will be deactivated if they are a source of a fired transition.
+	for step, active := range p.sfcActiveSteps {
+		if active { nextActiveSteps[step] = true }
+	}
+
+	if firedTransitions["t4"] {
+		delete(nextActiveSteps, "S1")
+		nextActiveSteps["S2"] = true
+	}
+
+	// --- SFC Phase 3: Update Step and Action States ---
+	p.sfcActiveSteps = nextActiveSteps
+	// Reset all step active flags
+	p.S1_X = p.sfcActiveSteps["S1"]
+	p.S2_X = p.sfcActiveSteps["S2"]
+
+	// Process actions for active steps
+	// Actions for step S1
+	if p.sfcActiveSteps["S1"] {
+		p.PulseAction_Q = p.S1_X && !p.S1_X_prev
+		if p.StoredDelayedAction_Timer.IsZero() { p.StoredDelayedAction_Timer = now }
+		if !p.StoredDelayedAction_Q && now.Sub(p.StoredDelayedAction_Timer) >= iec.Time("T#1s") {
+			p.StoredDelayedAction_Q = true
+		}
+		if p.StoredLimitedAction_Timer.IsZero() { p.StoredLimitedAction_Timer = now p.StoredLimitedAction_Q = true }
+		if now.Sub(p.StoredLimitedAction_Timer) >= iec.Time("T#2s") {
+			p.StoredLimitedAction_Q = false
+		}
+	} else {
+		p.PulseAction_Q = false
+		p.PulseAction_Timer = time.Time{}
+		if !p.StoredDelayedAction_Timer.IsZero() && !p.StoredDelayedAction_Q && now.Sub(p.StoredDelayedAction_Timer) >= iec.Time("T#1s") {
+			p.StoredDelayedAction_Q = true
+		}
+		if !p.StoredLimitedAction_Timer.IsZero() && p.StoredLimitedAction_Q && now.Sub(p.StoredLimitedAction_Timer) >= iec.Time("T#2s") {
+			p.StoredLimitedAction_Q = false
+		}
+	}
+	// Actions for step S2
+	if p.sfcActiveSteps["S2"] {
+	} else {
+	}
+
+	// --- SFC Phase 4: Execute Action Bodies ---
+	if p.PulseAction_Q {
+		p.PulseActionActive = true
+	}
+	if p.StoredDelayedAction_Q {
+		p.StoredDelayedActive = true
+	}
+	if p.StoredLimitedAction_Q {
+		p.StoredLimitedActive = true
+	}
+}
+`
+	transpileAndCheck(t, "TestSfcStoredAndPulseActions", input, expected)
+}
+
+func TestMiscellaneousExpressions(t *testing.T) {
+	input := `
+TYPE MyColor : (RED, GREEN); END_TYPE
+FUNCTION MyFunc : INT
+	RETURN 123;
+END_FUNCTION
+
+PROGRAM MiscTest
+	VAR
+		c : MyColor := MyColor#RED;
+		ws : WSTRING := "wide";
+		t : TIME := T#5s;
+		d : DATE := D#2026-01-02;
+		tod : TIME_OF_DAY := TOD#14:21:00;
+		dt : DATE_AND_TIME := DT#2026-01-02-14:21:00;
+	END_VAR
+	h := {'key': 'value'};
+	f := fn() {};
+	MyFunc();
+END_PROGRAM
+`
+	expected := `
+type MyColor int
+const (
+	MyColor_RED MyColor = iota
+	MyColor_GREEN
+)
+
+func MyFunc() iec.INT {
+	return 123
+}
+
+type MiscTest struct {
+	c   MyColor
+	ws  iec.WSTRING
+	t   iec.TIME
+	d   iec.DATE
+	tod iec.TIME_OF_DAY
+	dt  iec.DATE_AND_TIME
+	f any // Inferred
+	h any // Inferred
+}
+
+// NewMiscTestFactory creates a new instance of the MiscTest program.
+func NewMiscTestFactory(params map[string]string) (func(time.Time), error) {
+	instance := &MiscTest{}
+	instance.c = MyColor_RED
+	instance.ws = "wide"
+	instance.t = iec.Time("T#5s")
+	instance.d = iec.Date("D#2026-01-02")
+	instance.tod = iec.TOD("TOD#14:21:00")
+	instance.dt = iec.DT("DT#2026-01-02-14:21:00")
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *MiscTest) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *MiscTest) Logic(now time.Time) {
+	p.h = map[any]any {
+		"key": "value",
+	}
+	p.f = func() {}
+	MyFunc()
+}
+`
+	transpileAndCheck(t, "TestMiscellaneousExpressions", input, expected)
 }

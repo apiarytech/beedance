@@ -982,8 +982,12 @@ func TestParseVarConfigComplex(t *testing.T) {
 	if namedArg.Name.Value != "PT" {
 		t.Errorf("Argument name not 'PT'. got=%s", namedArg.Name.Value)
 	}
-	if !testTypedLiteral(t, namedArg.Value, "T", "2.5s") {
-		t.Errorf("Argument value is not T#2.5s.")
+	timeLit, ok := namedArg.Value.(*ast.TimeLiteral)
+	if !ok {
+		t.Fatalf("exp not *ast.TimeLiteral. got=%T", namedArg.Value)
+	}
+	if timeLit.Value != "2.5s" {
+		t.Errorf("Argument value is not '2.5s'. got=%q", timeLit.Value)
 	}
 	if decl2.Location != nil {
 		t.Errorf("decl2.Location should be nil.")
@@ -1582,18 +1586,42 @@ func TestTypedTimeDateLiterals(t *testing.T) {
 				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
 			}
 
-			typedLit, ok := stmt.Expression.(*ast.TypedLiteral)
-			if !ok {
-				t.Fatalf("stmt.Expression is not ast.TypedLiteral. got=%T for input %q", stmt.Expression, tt.input)
-			}
-
-			if typedLit.TypeName != tt.expectedType {
-				t.Errorf("TypeName not %q. got=%q", tt.expectedType, typedLit.TypeName)
-			}
-
-			valIdent, _ := typedLit.Value.(*ast.Identifier)
-			if valIdent.Value != tt.expectedVal {
-				t.Errorf("Value not %q. got=%q", tt.expectedVal, valIdent.Value)
+			// The parser now creates specific literal types for time/date, so we handle them here.
+			switch strings.ToUpper(tt.expectedType) {
+			case "T", "TIME":
+				lit, ok := stmt.Expression.(*ast.TimeLiteral)
+				if !ok {
+					t.Fatalf("stmt.Expression is not ast.TimeLiteral. got=%T for input %q", stmt.Expression, tt.input)
+				}
+				if lit.Value != tt.expectedVal {
+					t.Errorf("TimeLiteral value not %q. got=%q", tt.expectedVal, lit.Value)
+				}
+			case "D", "DATE":
+				lit, ok := stmt.Expression.(*ast.DateLiteral)
+				if !ok {
+					t.Fatalf("stmt.Expression is not ast.DateLiteral. got=%T for input %q", stmt.Expression, tt.input)
+				}
+				if lit.Value != tt.expectedVal {
+					t.Errorf("DateLiteral value not %q. got=%q", tt.expectedVal, lit.Value)
+				}
+			case "TOD", "TIME_OF_DAY":
+				lit, ok := stmt.Expression.(*ast.TimeOfDayLiteral)
+				if !ok {
+					t.Fatalf("stmt.Expression is not ast.TimeOfDayLiteral. got=%T for input %q", stmt.Expression, tt.input)
+				}
+				if lit.Value != tt.expectedVal {
+					t.Errorf("TimeOfDayLiteral value not %q. got=%q", tt.expectedVal, lit.Value)
+				}
+			case "DT", "DATE_AND_TIME":
+				lit, ok := stmt.Expression.(*ast.DateAndTimeLiteral)
+				if !ok {
+					t.Fatalf("stmt.Expression is not ast.DateAndTimeLiteral. got=%T for input %q", stmt.Expression, tt.input)
+				}
+				if lit.Value != tt.expectedVal {
+					t.Errorf("DateAndTimeLiteral value not %q. got=%q", tt.expectedVal, lit.Value)
+				}
+			default:
+				t.Fatalf("unhandled expected type in test table: %s", tt.expectedType)
 			}
 		})
 	}
@@ -5508,10 +5536,12 @@ func TestStepActionWithDuration(t *testing.T) {
 		t.Fatal("Action duration was not parsed.")
 	}
 
-	// The parser will parse T#5s as a TypedLiteral.
-	// Use the helper to verify its components.
-	if !testTypedLiteral(t, action.Duration, "T", "5s") {
-		t.Errorf("Duration was not parsed correctly.")
+	timeLit, ok := action.Duration.(*ast.TimeLiteral)
+	if !ok {
+		t.Fatalf("exp not *ast.TimeLiteral. got=%T", action.Duration)
+	}
+	if timeLit.Value != "5s" {
+		t.Errorf("Duration value not '5s'. got=%q", timeLit.Value)
 	}
 }
 

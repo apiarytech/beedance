@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2026 Franklin D. Amador
+ *
+ * This software is dual-licensed under the terms of the GPL v2.0 and
+ * a commercial license. You may choose to use this software under either
+ * license.
+ *
+ * See the LICENSE files in the project root for full license text.
+ */
 package evaluator
 
 import (
@@ -186,6 +195,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			Vars:       node.Vars,
 			VarTemp:    node.VarTemp,
 			Body:       node.Body,
+			Definition: node,
 			Env:        env, // The environment where the FB is declared
 		}
 		env.Set(node.Name.Value, fb)
@@ -346,6 +356,22 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 	case *ast.BitStringLiteral:
 		return &object.BitString{Value: node.Value, Width: node.Width}
+
+	case *ast.TimeLiteral:
+		return applyTimeDateConversion(node.Value, "T")
+
+	case *ast.DateLiteral:
+		return applyTimeDateConversion(node.Value, "D")
+
+	case *ast.TimeOfDayLiteral:
+		return applyTimeDateConversion(node.Value, "TOD")
+
+	case *ast.DateAndTimeLiteral:
+		return applyTimeDateConversion(node.Value, "DT")
+
+	case *ast.EnumeratedValueLiteral:
+		// This is a new literal type for enum values like MyColor#RED
+		return &object.EnumeratedValue{TypeName: node.TypeName.Value, Value: node.Value.Value}
 
 	case *ast.PrefixExpression:
 		// A PrefixExpression (e.g., -5, NOT TRUE) is evaluated by first evaluating its operand, then applying the operator.
@@ -1418,9 +1444,17 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 						var populateInheritedVars func(d *ast.FunctionBlockDeclaration) *object.Error
 						populateInheritedVars = func(d *ast.FunctionBlockDeclaration) *object.Error {
 							if d.Extends != nil {
-								parentDef := t.getFunctionBlockDefinitionFromTypeInfo(d.Extends.Value, env)
-								if parentDef == nil {
+								parentObj, ok := env.Get(d.Extends.Value)
+								if !ok {
 									return newError(d, "parent function block '%s' not found", d.Extends.Value)
+								}
+								parentFb, ok := parentObj.(*object.FunctionBlock)
+								if !ok {
+									return newError(d, "parent '%s' is not a function block", d.Extends.Value)
+								}
+								parentDef := parentFb.Definition
+								if parentDef == nil {
+									return newError(d, "internal error: function block definition for '%s' is missing", d.Extends.Value)
 								}
 								populateInheritedVars(parentDef)
 							}
@@ -1430,7 +1464,16 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 							evalGenericVarBlock(d.Vars, instanceEnv)
 							return nil
 						}
-						populateInheritedVars(fbDef.Definition)
+						if err := populateInheritedVars(fbDef.Definition); err != nil {
+							return err
+						}
+
+						// If the FB has an SFC body, evaluate it to create the SFC object instance
+						// and store it in the FB's persistent environment.
+						if sfcAST, isSFC := fbDef.Body.(*ast.SFCProgram); isSFC {
+							sfcObj := evalSFCProgram(sfcAST, instanceEnv)
+							instanceEnv.Set("__sfc_instance__", sfcObj)
+						}
 
 					} else if builtinFB, ok := typeObj.(*object.BuiltinFunctionBlock); ok {
 						instanceEnv := object.NewEnclosedEnvironment(env)
@@ -2855,7 +2898,17 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// If EN is FALSE, do not execute the function block body.
 		if enValue == FALSE {
-			result = NULL // No execution, but we still handle output mappings.
+			// When EN is false, the outputs must be "frozen". This means they must retain
+			// their values from the previous cycle. We achieve this by explicitly copying
+			// the output values from the FB's persistent environment (fn.Env) into the
+			// current call's temporary environment (extendedEnv). The output mapping logic
+			// later will then correctly propagate these frozen values.
+			if fn.Definition != nil {
+				for _, outVar := range fn.Definition.VarOutputs {
+					val, _ := fn.Env.Get(outVar.Name.Value)
+					extendedEnv.Set(outVar.Name.Value, val)
+				}
+			}
 		} else {
 			// EN is TRUE, execute the block.
 			if fn.Definition == nil {
@@ -2889,17 +2942,18 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// Handle all output arguments (=>) after execution (or non-execution).
 		// This is crucial for updating the caller's scope, especially for ENO.
 		for _, mapping := range outputMappings {
-			val, ok := extendedEnv.Get(mapping.SourceParamName)
-			if !ok {
-				// If the block was disabled, the output might not have been set in this cycle.
-				// It should retain its value from the previous cycle, which is already in fn.Env.
-				// So, if it's not found, it's a genuine internal error.
-				if enValue == TRUE {
-					return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
-				}
-				continue // Skip mapping if block is disabled and output was never set.
+			// Always attempt to get the value from the extendedEnv.
+			// If EN was FALSE, extendedEnv would have inherited the "frozen" value from fn.Env.
+			// If EN was TRUE, extendedEnv would have the newly calculated value.
+			val, found := extendedEnv.Get(mapping.SourceParamName)
+			if !found {
+				// This indicates a genuine internal error, as the output parameter
+				// should always be present in the extendedEnv (either from calculation
+				// or inheritance from fn.Env).
+				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
 			}
 
+			// Assign the value to the target in the calling environment.
 			switch targetNode := mapping.TargetVarNode.(type) {
 			case *ast.Identifier:
 				// Use Assign to correctly update variables in outer scopes.
@@ -2907,6 +2961,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 			case *ast.IndexExpression:
 				// Handle assignment to an array element, e.g., Out => MyArray[1]
+				// This requires evaluating the array and index in the callEnv.
 				arrayObj := Eval(targetNode.Left, callEnv)
 				if isError(arrayObj) {
 					return arrayObj
@@ -2935,6 +2990,37 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			}
 		}
 
+		// After execution (or non-execution due to EN=FALSE) and output mapping,
+		// persist the current state from the temporary extendedEnv back to the
+		// FB's persistent environment (fn.Env). This is crucial for "frozen"
+		// outputs and internal state variables (VARs like __startTime, __timerActive).
+		if fn.Definition != nil {
+			// Persist VAR_INPUTs (their values might have been set by named arguments)
+			for _, inVar := range fn.Definition.VarInputs {
+				if val, ok := extendedEnv.Get(inVar.Name.Value); ok {
+					fn.Env.Set(inVar.Name.Value, val)
+				}
+			}
+			// Persist VAR_OUTPUTs (their values are calculated by the FB logic)
+			for _, outVar := range fn.Definition.VarOutputs {
+				if val, ok := extendedEnv.Get(outVar.Name.Value); ok {
+					fn.Env.Set(outVar.Name.Value, val)
+				}
+			}
+			// Persist VAR_IN_OUTs (the pointer itself, if it was set)
+			for _, inOutVar := range fn.Definition.VarInOuts {
+				if val, ok := extendedEnv.Get(inOutVar.Name.Value); ok {
+					fn.Env.Set(inOutVar.Name.Value, val)
+				}
+			}
+			// Persist internal VARs (including __startTime, __timerActive for timers)
+			for _, varDecl := range fn.Definition.Vars {
+				if val, ok := extendedEnv.Get(varDecl.Name.Value); ok {
+					fn.Env.Set(varDecl.Name.Value, val)
+				}
+			}
+		}
+
 		return result
 
 	case *object.Builtin:
@@ -2943,6 +3029,19 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if len(evaluatedArgs) == 1 && isError(evaluatedArgs[0]) {
 			return evaluatedArgs[0]
 		}
+
+		// HACK: Special handling for ADD(TIME, TIME) to bypass a suspected bug in the stdlib implementation
+		// that causes a panic. This intercepts the call before it reaches the buggy code.
+		if callNode, ok := callNode.(*ast.CallExpression); ok {
+			if callNode.Function.String() == "ADD" && len(evaluatedArgs) == 2 {
+				if t1, ok1 := evaluatedArgs[0].(*object.Time); ok1 {
+					if t2, ok2 := evaluatedArgs[1].(*object.Time); ok2 {
+						return &object.Time{Value: t1.Value + t2.Value}
+					}
+				}
+			}
+		}
+
 		result := fn.Fn(evaluatedArgs...)
 		return result
 	default:

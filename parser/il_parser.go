@@ -84,6 +84,14 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 		return stmt
 	}
 
+	// Check for standard instructions that are known to have no operands.
+	// This prevents them from consuming the next instruction as an operand.
+	switch strings.ToUpper(baseOp) {
+	case "RET", "NOT", "ABS", "SQRT", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "LN", "LOG", "EXP":
+		// These instructions operate on the current result and have no operand.
+		return stmt
+	}
+
 	// 4. Parse the optional operand for non-deferred operators.
 	// The operand is an expression that follows the operator.
 	// Heuristic: An operand is present if the next token is not an end-of-block

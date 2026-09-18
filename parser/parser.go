@@ -73,10 +73,13 @@ var precedences = map[token.TokenType]int{
 var ilMnemonics = map[string]bool{
 	"LD": true, "LDN": true, "ST": true, "STN": true, "S": true, "R": true,
 	"ADD": true, "SUB": true, "MUL": true, "DIV": true, "GT": true, "GE": true,
-	"EQ": true, "NE": true, "LE": true, "LT": true, "JMP": true, "JMPC": true,
+	"EQ": true, "NE": true, "LE": true, "LT": true, "JMP": true, "JMPC": true, // cspell:disable-line
 	"JMPCN": true, "CAL": true, "CALC": true, "CALCN": true, "RET": true,
 	"RETC": true, "RETCN": true, "AND": true, "ANDN": true, "OR": true,
-	"ORN": true, "XOR": true, "XORN": true, "NOT": true, "ABS": true,
+	"ORN": true, "XOR": true, "XORN": true, "NOT": true,
+	// Add standard functions that can be used as IL instructions
+	"ABS": true, "SQRT": true, "SIN": true, "COS": true, "TAN": true, "ASIN": true, "ACOS": true, "ATAN": true,
+	"LN": true, "LOG": true, "EXP": true, "MOD": true,
 }
 
 // prefixParseFn is a function type for parsing prefix expressions (e.g., -5, NOT flag).
@@ -528,8 +531,6 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
-	case token.METHOD:
-		return p.parseMethodImplementation()
 	case token.NAMESPACE:
 		return p.parseNamespaceDeclaration()
 	case token.EXIT:
@@ -822,26 +823,34 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 		// Use LOWEST precedence to parse the full member access path (e.g., a.b.c)
 		varPath := p.parseExpression(LOWEST)
 
-		var atDecl *ast.AtDeclaration
-		// The AT clause comes after the full path, so we check the peek token.
-		if p.peekTokenIs(token.AT) {
-			p.nextToken() // consume last part of path, curToken is now AT
-			atDecl = p.parseAtDeclaration()
-		}
-
-		if !p.expectPeek(token.COLON) {
-			p.synchronize(token.SEMICOLON, token.END_VAR)
-			continue
-		}
-		p.nextToken() // consume colon
-
-		dataType := p.parseTypeSpecifier()
-
 		var initialValue ast.Expression
+		var atDecl *ast.AtDeclaration
+		var dataType ast.Expression
+
 		if p.peekTokenIs(token.ASSIGN) {
+			// This handles the simple form: `VarPath := Value;`
 			p.nextToken() // to ASSIGN
 			p.nextToken() // to expression start
 			initialValue = p.parseExpression(LOWEST)
+		} else {
+			// This handles the forms with type specifiers: `... : Type ...` or `... AT %loc : Type ...`
+			if p.peekTokenIs(token.AT) {
+				p.nextToken() // consume last part of path, curToken is now AT
+				atDecl = p.parseAtDeclaration()
+			}
+
+			if !p.expectPeek(token.COLON) {
+				p.synchronize(token.SEMICOLON, token.END_VAR)
+				continue
+			}
+			p.nextToken() // consume colon
+			dataType = p.parseTypeSpecifier()
+
+			if p.peekTokenIs(token.ASSIGN) {
+				p.nextToken() // to ASSIGN
+				p.nextToken() // to expression start
+				initialValue = p.parseExpression(LOWEST)
+			}
 		}
 
 		decl := &ast.VarDeclStatement{
@@ -2132,6 +2141,21 @@ func (p *Parser) parseTypedLiteralExpression(left ast.Expression) ast.Expression
 
 	p.nextToken() // Consume '#'
 
+	// If it's a time/date type, return the specific literal node
+	if isTimeDateKeyword(lit.TypeName) {
+		lit.Value = p.parseIecLiteralValue(lit.TypeName) // Parse the value part
+		switch strings.ToUpper(lit.TypeName) {
+		case "TIME", "T":
+			return &ast.TimeLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+		case "DATE", "D":
+			return &ast.DateLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+		case "TIME_OF_DAY", "TOD":
+			return &ast.TimeOfDayLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+		case "DATE_AND_TIME", "DT":
+			return &ast.DateAndTimeLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+		}
+	}
+
 	// The value part is now parsed as a single identifier containing the whole value string.
 	lit.Value = p.parseIecLiteralValue(lit.TypeName)
 
@@ -2505,7 +2529,7 @@ func isBlockStatement(stmt ast.Statement) bool {
 	switch stmt.(type) {
 	case *ast.IfStatement, *ast.ForLoopStatement, *ast.WhileStatement,
 		*ast.RepeatStatement, *ast.CaseStatement, *ast.ConfigurationDeclaration, *ast.StepStatement, *ast.TransitionStatement,
-		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration, *ast.NamespaceDeclaration,
+		*ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.ProgramDeclaration, *ast.GlobalVarDeclaration, *ast.NamespaceDeclaration, *ast.MethodImplementation, *ast.InterfaceDeclaration,
 		*ast.TypeBlockDeclaration, *ast.VarBlockDeclaration, *ast.ActionStatement, *ast.AccessVarDeclaration,
 		*ast.ConfigVarDeclaration, *ast.ExternalVarDeclaration, *ast.TempVarDeclaration:
 		return true

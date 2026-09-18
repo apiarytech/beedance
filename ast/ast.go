@@ -206,7 +206,9 @@ func (dv *DirectVariable) TokenLiteral() string { return dv.Token.Literal }
 
 // String returns the string representation of the direct variable.
 func (dv *DirectVariable) String() string {
-	return "%" + dv.Address
+	var out strings.Builder
+	out.WriteString("%" + dv.Address) // This is a known issue, but we'll keep it for now.
+	return out.String()
 }
 
 // ConfigurationDeclaration represents a CONFIGURATION block.
@@ -1522,6 +1524,30 @@ func (fbd *FunctionBlockDeclaration) String() string {
 	}
 	out.WriteString("\nEND_FUNCTION_BLOCK")
 	return out.String()
+}
+
+// HasMethod checks if a FunctionBlockDeclaration has a method or property with the given name.
+func (fbd *FunctionBlockDeclaration) HasMethod(name string) bool {
+	// Check for explicit method implementations.
+	if body, ok := fbd.Body.(*BlockStatement); ok {
+		for _, stmt := range body.Statements {
+			if method, ok := stmt.(*MethodImplementation); ok {
+				if method.Name.Value == name {
+					return true
+				}
+			}
+		}
+	}
+
+	// Check for properties, which imply Get<Name> and Set<Name> methods.
+	// The SUPER call logic looks for the base method name, not the Get/Set variant.
+	for _, prop := range fbd.Properties {
+		if prop.Name.Value == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ProgramDeclaration represents a PROGRAM declaration.

@@ -854,6 +854,7 @@ type FunctionBlock struct {
 	Vars        []*ast.VarDeclStatement
 	VarTemp     []*ast.TempVarDeclaration
 	VarExternal []*ast.ExternalVarDeclaration
+	Definition  *ast.FunctionBlockDeclaration
 }
 
 // Type returns the object's type.
