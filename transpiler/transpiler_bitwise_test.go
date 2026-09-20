@@ -68,3 +68,45 @@ func (p *BitwiseTest) Logic(now time.Time) {
 `
 	transpileAndCheck(t, "TestBitwiseOperationsTranspilation", input, expected)
 }
+
+func TestNestedBitwiseOperationsTranspilation(t *testing.T) {
+	input := `
+PROGRAM NestedBitwiseTest
+	VAR
+		w1 : WORD := 16#F0F0;
+		w2 : WORD := 16#0FF0;
+		w3 : WORD := 16#000F;
+		result : WORD;
+	END_VAR
+
+	result := (w1 AND w2) OR w3;
+END_PROGRAM
+`
+	expected := `
+type NestedBitwiseTest struct {
+	w1     iec.WORD
+	w2     iec.WORD
+	w3     iec.WORD
+	result iec.WORD
+}
+
+// NewNestedBitwiseTestFactory creates a new instance of the NestedBitwiseTest program.
+func NewNestedBitwiseTestFactory(params map[string]string) (func(time.Time), error) {
+	instance := &NestedBitwiseTest{}
+	instance.w1 = 61680
+	instance.w2 = 4080
+	instance.w3 = 15
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *NestedBitwiseTest) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *NestedBitwiseTest) Logic(now time.Time) {
+	p.result = ((p.w1 & p.w2) | p.w3)
+}
+`
+	transpileAndCheck(t, "TestNestedBitwiseOperationsTranspilation", input, expected)
+}

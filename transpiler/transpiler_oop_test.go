@@ -90,6 +90,8 @@ func (d *DerivedFB) Logic(now time.Time) {
 	}
 	d.ENO = true
 
+	d.BaseFB.Logic(now)
+
 }
 
 // MyMethod is a method on the DerivedFB FUNCTION_BLOCK.
@@ -127,17 +129,12 @@ func (p *OOP_Test) Logic(now time.Time) {
 func TestAdvancedOOPFeaturesTranspilation(t *testing.T) {
 	input := `
 INTERFACE IMotor
-    METHOD Start : BOOL
-    END_METHOD
-
-    METHOD Stop : BOOL
-    END_METHOD
-
-    PROPERTY Speed : LREAL
-    END_PROPERTY
+    METHOD Start : BOOL;
+    METHOD Stop : BOOL;
+    PROPERTY Speed : LREAL;
 END_INTERFACE
 
-ABSTRACT FUNCTION_BLOCK AbstractMotor IMPLEMENTS IMotor
+FUNCTION_BLOCK ABSTRACT AbstractMotor IMPLEMENTS IMotor
     VAR_OUTPUT
         IsRunning : BOOL;
     END_VAR
@@ -151,10 +148,10 @@ ABSTRACT FUNCTION_BLOCK AbstractMotor IMPLEMENTS IMotor
         Stop := TRUE;
     END_METHOD
 
-    ABSTRACT METHOD Start : BOOL
+    METHOD ABSTRACT Start : BOOL
     END_METHOD
 
-    ABSTRACT PROPERTY Speed : LREAL
+    PROPERTY ABSTRACT Speed : LREAL
     END_PROPERTY
 END_FUNCTION_BLOCK
 
@@ -246,6 +243,7 @@ func (d *DCMotor) Logic(now time.Time) {
 		return
 	}
 	d.ENO = true
+	d.AbstractMotor.Logic(now)
 	if d.IsRunning {
 		d.internalSpeed = (d.Voltage * 100.000000)
 	}
@@ -302,4 +300,110 @@ func (p *OopTestProgram) Logic(now time.Time) {
 }
 `
 	transpileAndCheck(t, "TestAdvancedOOPFeaturesTranspilation", input, expected)
+}
+
+func TestInterfaceWithPropertyTranspilation(t *testing.T) {
+	input := `
+INTERFACE ICounter
+	METHOD Increment : VOID;
+	PROPERTY Value : INT;
+END_INTERFACE
+
+FUNCTION_BLOCK Counter IMPLEMENTS ICounter
+	VAR
+		currentValue : INT;
+	END_VAR
+
+	METHOD Increment : VOID
+		currentValue := currentValue + 1;
+	END_METHOD
+
+	PROPERTY Value : INT
+		GET
+			Value := currentValue;
+		END_GET
+		SET
+			currentValue := Value;
+		END_SET
+	END_PROPERTY
+END_FUNCTION_BLOCK
+
+PROGRAM TestCounterProgram
+	VAR
+		C1 : Counter;
+		ReadValue : INT;
+	END_VAR
+
+	C1.Value := 10;
+	C1.Increment();
+	ReadValue := C1.Value;
+END_PROGRAM
+`
+	expected := `
+// ICounter is the transpiled Go interface for the IEC 61131-3 INTERFACE of the same name.
+type ICounter interface {
+	Increment()
+	GetValue() iec.INT
+	SetValue(value iec.INT)
+}
+
+// Counter is the transpiled struct for the FUNCTION_BLOCK of the same name.
+type Counter struct {
+	EN           iec.BOOL
+	ENO          iec.BOOL
+	currentValue iec.INT
+}
+
+// Logic executes the logic for the Counter FUNCTION_BLOCK.
+func (c *Counter) Logic(now time.Time) {
+	if !c.EN {
+		c.ENO = false
+		return
+	}
+	c.ENO = true
+
+}
+
+// Increment is a method on the Counter FUNCTION_BLOCK.
+func (c *Counter) Increment() {
+	c.currentValue = (c.currentValue + 1)
+}
+
+// GetValue is the getter for the Value property.
+func (c *Counter) GetValue() iec.INT {
+	return c.currentValue
+}
+
+// SetValue is the setter for the Value property.
+func (c *Counter) SetValue(value iec.INT) {
+	c.currentValue = value
+}
+
+// Statically assert that Counter implements ICounter.
+var _ ICounter = (*Counter)(nil)
+
+type TestCounterProgram struct {
+	C1        Counter
+	ReadValue iec.INT
+}
+
+// NewTestCounterProgramFactory creates a new instance of the TestCounterProgram program.
+func NewTestCounterProgramFactory(params map[string]string) (func(time.Time), error) {
+	instance := &TestCounterProgram{}
+	instance.C1.EN = true
+	return instance.Logic, nil
+}
+
+// Link connects the program's located variables to the runtime's I/O manager.
+func (p *TestCounterProgram) Link(linker config.IOLinker) error {
+	return nil
+}
+
+func (p *TestCounterProgram) Logic(now time.Time) {
+	p.C1.SetValue(10)
+	p.C1.Increment()
+	p.ReadValue = p.C1.GetValue()
+}
+`
+	transpileAndCheck(t, "TestInterfaceWithPropertyTranspilation", input, expected)
 }

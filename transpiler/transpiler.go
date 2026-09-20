@@ -1403,6 +1403,11 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	t.write("\t}\n")
 	t.write("\t%s.ENO = true\n\n", receiverName)
 
+	// If this FB extends another, call the parent's Logic method first.
+	if fb.Extends != nil {
+		t.write("\t%s.%s.Logic(now)\n\n", receiverName, fb.Extends.Value)
+	}
+
 	// Transpile VAR_TEMP as local variables inside the Logic method.
 	for _, tempBlock := range fb.VarTemp {
 		for _, decl := range tempBlock.Vars {
@@ -1421,13 +1426,6 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	}
 	// Create a new BlockStatement for the main logic.
 	mainLogicBody := &ast.BlockStatement{Statements: mainLogicStatements} // This will call transpileNode recursively
-
-	// Transpile VAR_TEMP as local variables inside the Logic method.
-	for _, tempBlock := range fb.VarTemp {
-		for _, decl := range tempBlock.Vars {
-			t.transpileVarDeclAsLocal(decl)
-		}
-	}
 
 	if err := t.transpileNode(mainLogicBody); err != nil {
 		t.programVarName = originalProgramVarName // Restore context on error
@@ -2083,17 +2081,23 @@ func (t *Transpiler) transpileCaseWithRanges(stmt *ast.CaseStatement) error {
 // isBitwiseType is a helper to infer if an expression is likely to be a bitwise type (WORD, BYTE, etc.).
 // This is a heuristic for the transpiler to differentiate between logical (&&) and bitwise (&) operators.
 func (t *Transpiler) isBitwiseType(expr ast.Expression) bool {
-	ident, ok := expr.(*ast.Identifier)
-	if !ok {
-		return false // Cannot infer type for complex expressions.
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		if typeDecl, ok := t.varInfo[e.Value]; ok {
+			typeStr := strings.ToUpper(typeDecl.DataType.String())
+			return typeStr == "BYTE" || typeStr == "WORD" || typeStr == "DWORD" || typeStr == "LWORD"
+		}
+		return false
+	case *ast.InfixExpression:
+		// If it's an infix expression, its "bitwiseness" depends on its operands.
+		// If either operand is bitwise, the operation is bitwise.
+		return t.isBitwiseType(e.Left) || t.isBitwiseType(e.Right)
+	case *ast.PrefixExpression:
+		// The "bitwiseness" of a prefix expression depends on its operand.
+		return t.isBitwiseType(e.Right)
+	default:
+		return false // Cannot infer type for other complex expressions.
 	}
-
-	if typeDecl, ok := t.varInfo[ident.Value]; ok {
-		typeStr := strings.ToUpper(typeDecl.DataType.String())
-		return typeStr == "BYTE" || typeStr == "WORD" || typeStr == "DWORD" || typeStr == "LWORD"
-	}
-
-	return false
 }
 
 // transpileAssignmentStatement transpiles an IEC 61131-3 assignment (`:=`) into a Go assignment (`=`).
@@ -2114,18 +2118,15 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 	// Check if the left-hand side is a property access, which requires a setter call.
 	if memberAccess, ok := stmt.Left.(*ast.MemberAccessExpression); ok {
 		if targetTypeDecl := t.resolveAssignmentTargetType(memberAccess.Struct); targetTypeDecl != nil {
-			typeName := targetTypeDecl.DataType.String()
-			if fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName); fbDef != nil {
-				for _, prop := range fbDef.Properties {
-					if prop.Name.Value == memberAccess.Member.Value {
-						// It's a property SET.
-						t.transpileExpression(memberAccess.Struct)
-						t.write(".Set%s(", prop.Name.Value)
-						t.transpileExpression(stmt.Value)
-						t.write(")\n")
-						return nil
-					}
-				}
+			typeName := targetTypeDecl.DataType.String() // e.g., "DCMotor"
+			fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName)
+			if prop := t.findPropertyOnFBChain(fbDef, memberAccess.Member.Value); prop != nil {
+				// It's a property SET.
+				t.transpileExpression(memberAccess.Struct)
+				t.write(".Set%s(", prop.Name.Value)
+				t.transpileExpression(stmt.Value)
+				t.write(")\n")
+				return nil
 			}
 		}
 	}
@@ -2184,6 +2185,29 @@ func (t *Transpiler) getFunctionBlockDefinitionFromTypeInfo(typeName string) *as
 		}
 	}
 	return nil
+}
+
+// findPropertyOnFBChain recursively searches for a property declaration starting from a given
+// function block and traversing up its inheritance chain.
+func (t *Transpiler) findPropertyOnFBChain(fbDef *ast.FunctionBlockDeclaration, propName string) *ast.PropertyDeclaration {
+	if fbDef == nil {
+		return nil
+	}
+
+	// Search for the property in the current FB's definition.
+	for _, prop := range fbDef.Properties {
+		if prop.Name.Value == propName {
+			return prop // Found it.
+		}
+	}
+
+	// If not found, recurse to the parent.
+	if fbDef.Extends != nil {
+		parentDef := t.getFunctionBlockDefinitionFromTypeInfo(fbDef.Extends.Value)
+		return t.findPropertyOnFBChain(parentDef, propName)
+	}
+
+	return nil // Reached the top of the chain without finding the property.
 }
 
 // resolveAssignmentTargetType recursively determines the `TypeDeclaration` of the target
@@ -2541,31 +2565,37 @@ func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration
 // mapIecTypeToGo converts an AST expression representing an IEC type
 // into the corresponding Go type string from the `iec` package.
 func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
-	// The DataType is an expression, which for simple types is an Identifier.
-	// The DataType is an expression. For simple types, it's an ast.TypeSpecifier.
-	if ts, ok := dataType.(*ast.TypeSpecifier); ok { // e.g., INT, or MyStruct
-		typeName := ts.Token.Literal
+	var typeName string
+	switch dt := dataType.(type) {
+	case *ast.Identifier:
+		typeName = dt.Value
+	case *ast.TypeSpecifier:
+		typeName = dt.Token.Literal
+	case *ast.ArrayDefinition:
+		dims := ""
+		for range dt.Ranges {
+			dims += "[]"
+		}
+		elemType := t.mapIecTypeToGo(dt.DataType)
+		return dims + elemType
+	case *ast.ReferenceType:
+		baseType := t.mapIecTypeToGo(dt.BaseType)
+		return "*" + baseType
+	default:
+		log.Printf("Warning: Unhandled data type expression in transpiler: %s", dataType.String())
+		return "any /* unhandled type */"
+	}
+
+	if typeName != "" {
 		// Check if it's a user-defined type (STRUCT, ENUM, etc.) we've registered.
 		if _, isUserDefined := t.typeInfo[typeName]; isUserDefined {
 			// It's a type we've defined in this package, so just use its name.
 			return typeName
 		}
-
 		// Convert to uppercase to match standard IEC types (e.g., 'int' -> 'INT').
 		iecType := strings.ToUpper(typeName)
 		// It's a standard built-in type, so prefix with the 'iec' package.
 		return "iec." + iecType
-	}
-	if arrayDef, ok := dataType.(*ast.ArrayDefinition); ok {
-		dims := ""
-		for range arrayDef.Ranges {
-			dims += "[]"
-		}
-		elemType := t.mapIecTypeToGo(arrayDef.DataType)
-		return dims + elemType
-	} else if refType, ok := dataType.(*ast.ReferenceType); ok {
-		baseType := t.mapIecTypeToGo(refType.BaseType)
-		return "*" + baseType
 	}
 	log.Printf("Warning: Unhandled data type expression in transpiler: %s", dataType.String())
 	return "any /* unhandled type */"
@@ -3068,15 +3098,12 @@ func (t *Transpiler) transpileMemberAccessExpression(exp *ast.MemberAccessExpres
 	if targetTypeDecl := t.resolveAssignmentTargetType(exp.Struct); targetTypeDecl != nil {
 		// This is a simplification. A robust solution would handle nested structs.
 		typeName := targetTypeDecl.DataType.String()
-		if fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName); fbDef != nil {
-			for _, prop := range fbDef.Properties {
-				if prop.Name.Value == exp.Member.Value {
-					// It's a property GET.
-					t.transpileExpression(exp.Struct)
-					t.write(".Get%s()", prop.Name.Value)
-					return nil
-				}
-			}
+		fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName)
+		if prop := t.findPropertyOnFBChain(fbDef, exp.Member.Value); prop != nil {
+			// It's a property GET.
+			t.transpileExpression(exp.Struct)
+			t.write(".Get%s()", prop.Name.Value)
+			return nil
 		}
 	}
 
