@@ -432,6 +432,30 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.Identifier:
 		return evalIdentifier(node, env)
 
+	case *ast.ThisExpression:
+		// 'THIS' is a special identifier that resolves to the current function block instance.
+		if val, ok := env.Get("THIS"); ok {
+			return val
+		}
+		// If 'THIS' is used outside of a method or property context, it's an error.
+		return newError(node, "THIS keyword used outside of a method or property context")
+
+	case *ast.SuperExpression:
+		// SUPER is only valid within a method or property context.
+		// We get the current FB instance from the 'THIS' variable in the environment.
+		thisObj, ok := env.Get("THIS")
+		if !ok {
+			return newError(node, "SUPER keyword used outside of a method or property context")
+		}
+		instance, ok := thisObj.(*object.FunctionBlockInstance)
+		if !ok {
+			return newError(node, "internal error: THIS is not a FunctionBlockInstance")
+		}
+		return &object.SuperContext{Instance: instance}
+
+	case *ast.DereferenceExpression:
+		return evalDereferenceExpression(node, env)
+
 	case *ast.FunctionLiteral:
 		// A FunctionLiteral is evaluated into a runtime Function object.
 		// The parser now provides VarInputs directly on the FunctionLiteral node.
@@ -912,7 +936,31 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
 	var result object.Object
 
+	// Reorder statements to process definitions (TYPE, FUNCTION_BLOCK, FUNCTION, INTERFACE)
+	// before usages (PROGRAM, VAR_GLOBAL, etc.). This is a simple two-pass approach
+	// to handle forward references, which are common in IEC 61131-3 projects.
+	var definitions []ast.Statement
+	var usages []ast.Statement
+
 	for _, statement := range program.Statements {
+		switch statement.(type) {
+		case *ast.TypeBlockDeclaration, *ast.FunctionDeclaration, *ast.FunctionBlockDeclaration, *ast.InterfaceDeclaration:
+			definitions = append(definitions, statement)
+		default:
+			usages = append(usages, statement)
+		}
+	}
+
+	// First pass: Evaluate all POU and TYPE definitions.
+	for _, statement := range definitions {
+		result = Eval(statement, env)
+		if isError(result) {
+			return result
+		}
+	}
+
+	// Second pass: Evaluate the rest of the statements (program logic, global vars, etc.).
+	for _, statement := range usages {
 		// Special handling for configuration blocks at the top level.
 		// They must be evaluated in the provided environment to correctly populate it.
 		config, ok := statement.(*ast.ConfigurationDeclaration)
@@ -1319,8 +1367,14 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 			if propDef.Setter == nil {
 				return newError(target, "property '%s' is read-only", propDef.Name.Value)
 			}
+			// Check access permission for the SET accessor
+			err := checkAccessPermission(propDef.Setter.AccessSpecifier, fbInstance, env)
+			if err != nil {
+				return newError(target, "cannot access setter for property '%s': %s", propDef.Name.Value, err.Message)
+			}
 			setterEnv := object.NewEnclosedEnvironment(fbInstance.Env)
-			setterEnv.Set("value", val) // The implicit 'value' variable for the setter
+			setterEnv.Set("value", val)       // The implicit 'value' variable for the setter
+			setterEnv.Set("THIS", fbInstance) // The setter body needs access to THIS.
 			if evalResult := Eval(propDef.Setter.Body, setterEnv); isError(evalResult) {
 				return evalResult
 			}
@@ -2491,6 +2545,34 @@ func evalIdentifier(
 	return newError(node, "identifier not found: %s", node.Value)
 }
 
+// evalDereferenceExpression handles the `^` operator. It evaluates the expression
+// being pointed to and then performs the dereference based on the object's type.
+func evalDereferenceExpression(node *ast.DereferenceExpression, env *object.Environment) object.Object {
+	// First, evaluate the expression that the caret is applied to.
+	// This could be THIS, SUPER, or a variable of type REFERENCE TO.
+	ptr := Eval(node.Pointer, env)
+	if isError(ptr) {
+		return ptr
+	}
+
+	// Now, handle the dereferencing based on the type of the object.
+	switch p := ptr.(type) {
+	case *object.FunctionBlockInstance:
+		// Dereferencing an instance (like THIS^) just returns the instance itself.
+		return p
+	case *object.SuperContext:
+		// Dereferencing SUPER^ also returns the context object itself.
+		// The actual logic for method calls is handled by evalMemberAccessExpression.
+		return p
+	case *object.Pointer:
+		// This is a VAR_IN_OUT or REFERENCE TO variable.
+		// We need to follow the pointer to get the underlying value.
+		return dereferencePointer(node, p)
+	default:
+		return newError(node, "dereference operator (^) not applicable to type %s", ptr.Type())
+	}
+}
+
 // dereferencePointer recursively follows a chain of Pointer objects (used for
 // VAR_IN_OUT) until it finds the final, non-pointer value. This is essential for
 // nested IN_OUT parameter passing.
@@ -2751,7 +2833,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				evaluated = evalSFCCycle(sfcInstance, fn.Env)
 			} else {
 				// For ST programs, evaluate the whole body in the temporary call environment.
-				evaluated = Eval(fn.Body, fn.Env)
+				// The body must be evaluated in the program's own persistent environment
+				// to ensure static variables are correctly updated.
+				evaluated = Eval(fn.Body, fn.Env) // This was correct, the issue is in the test setup.
 			}
 		}
 		if isError(evaluated) {
@@ -3050,7 +3134,17 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				positionalParamIndex++
 			}
 		}
-		return Eval(fn.Definition.Body, methodEnv)
+		// Pre-declare the method name as a variable for the return value.
+		methodEnv.Set(fn.Definition.Name.Value, NULL)
+
+		// Evaluate the method body.
+		evaluated := Eval(fn.Definition.Body, methodEnv)
+		if isError(evaluated) {
+			return evaluated
+		}
+		// The return value is the final value of the variable with the same name as the method.
+		returnValue, _ := methodEnv.Get(fn.Definition.Name.Value)
+		return returnValue
 
 	case *object.Builtin:
 		// For built-in functions, we evaluate all arguments first.
@@ -3300,6 +3394,11 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 				if propDef.Getter == nil {
 					return newError(node, "property '%s' is write-only", member)
 				}
+				// Check access permission for the GET accessor
+				err := checkAccessPermission(propDef.Getter.AccessSpecifier, l, env)
+				if err != nil {
+					return newError(node, "cannot access getter for property '%s': %s", member, err.Message)
+				}
 				// Evaluate the GET block in the instance's context.
 				getterEnv := object.NewEnclosedEnvironment(l.Env)
 				// The getter body needs access to THIS.
@@ -3338,13 +3437,32 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		methodName := node.Member.Value
 		currentInstance := l.Instance
 
+		// Add a nil check for safety. First check Definition, then Definition.Definition.
+		if currentInstance.Definition == nil {
+			return newError(node, "SUPER call on a function block with no definition (e.g., a built-in FB)")
+		}
+		if currentInstance.Definition.Definition == nil {
+			return newError(node, "SUPER call on a function block with no definition (e.g., a built-in FB)")
+		}
+
 		// Start the search from the immediate parent.
-		parentFBDef := currentInstance.Definition.Definition.Extends
-		if parentFBDef == nil {
+		parentFBIdentifier := currentInstance.Definition.Definition.Extends
+		if parentFBIdentifier == nil {
 			return newError(node, "SUPER call on a function block that does not extend another")
 		}
 
-		methodDef := findMethodOnFBChain(parentFBDef.Value, methodName, env)
+		// Resolve the parent function block definition from the identifier.
+		parentFBObj, ok := env.Get(parentFBIdentifier.Value)
+		if !ok {
+			return newError(node, "parent function block '%s' not found", parentFBIdentifier.Value)
+		}
+		parentFB, ok := parentFBObj.(*object.FunctionBlock)
+		if !ok {
+			return newError(node, "'%s' is not a function block", parentFBIdentifier.Value)
+		}
+
+		// Now, search for the method starting from the parent's definition.
+		methodDef := findMethodOnFBChain(parentFB, methodName, env)
 		if methodDef == nil {
 			return newError(node, "method '%s' not found in any parent function block", methodName)
 		}
@@ -3841,22 +3959,16 @@ func getParamDecls(def object.Object) []*ast.VarDeclStatement {
 
 // findMethodOnFBChain recursively searches for a method definition starting from a given
 // function block name and traversing up its inheritance chain.
-func findMethodOnFBChain(fbName string, methodName string, env *object.Environment) *ast.MethodImplementation {
-	fbObj, ok := env.Get(fbName)
-	if !ok {
-		return nil // Base case: FB definition not found.
-	}
-
-	fbDef, ok := fbObj.(*object.FunctionBlock)
-	if !ok {
-		return nil // Not a function block.
+func findMethodOnFBChain(fbDef *object.FunctionBlock, methodName string, env *object.Environment) *ast.MethodImplementation {
+	if fbDef == nil || fbDef.Definition == nil {
+		return nil
 	}
 
 	// Search for the method in the current FB's body.
-	if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
+	if body, ok := fbDef.Definition.Body.(*ast.BlockStatement); ok {
 		for _, stmt := range body.Statements {
 			if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
-				if method.Name.Value == methodName {
+				if method.Name != nil && method.Name.Value == methodName {
 					return method // Found it.
 				}
 			}
@@ -3864,8 +3976,13 @@ func findMethodOnFBChain(fbName string, methodName string, env *object.Environme
 	}
 
 	// If not found, recurse to the parent.
-	if fbDef.Definition != nil && fbDef.Definition.Extends != nil {
-		return findMethodOnFBChain(fbDef.Definition.Extends.Value, methodName, env)
+	if fbDef.Definition.Extends != nil {
+		parentObj, ok := env.Get(fbDef.Definition.Extends.Value)
+		if ok {
+			if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
+				return findMethodOnFBChain(parentDef, methodName, env)
+			}
+		}
 	}
 
 	return nil // Reached the top of the chain without finding the method.
@@ -3878,15 +3995,11 @@ func findPropertyOnFBChain(fbDef *object.FunctionBlock, propName string) *ast.Pr
 		return nil
 	}
 
-	// Search for the property in the current FB's body.
-	if fbDef.Body != nil {
-		if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
-			for _, stmt := range body.Statements {
-				if prop, isProp := stmt.(*ast.PropertyDeclaration); isProp {
-					if prop.Name.Value == propName {
-						return prop // Found it.
-					}
-				}
+	// Search for the property in the current FB's definition.
+	if fbDef.Definition != nil {
+		for _, prop := range fbDef.Definition.Properties {
+			if prop.Name.Value == propName {
+				return prop // Found it.
 			}
 		}
 	}
@@ -3955,7 +4068,7 @@ func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Envir
 
 		// Check methods
 		for _, requiredMethod := range ifaceDef.Methods {
-			foundMethod := findMethodOnFBChain(fbDef.Name.Value, requiredMethod.Name.Value, env)
+			foundMethod := findMethodOnFBChain(fbDef, requiredMethod.Name.Value, env)
 			if foundMethod == nil {
 				return newError(fbDef.Definition, "function block '%s' does not implement method '%s' from interface '%s'", fbDef.Name.Value, requiredMethod.Name.Value, ifaceDef.Name.Value)
 			}

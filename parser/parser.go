@@ -527,7 +527,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseConfigurationDeclaration() // No semicolon expected after this block
 	case token.ACTION:
 		return p.parseActionStatement()
-	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK, token.ABSTRACT:
+	case token.ABSTRACT:
+		// Only FUNCTION_BLOCK can be abstract at the POU level.
+		// If it's something else (like ABSTRACT FUNCTION), we want the "no prefix" error.
+		if p.peekTokenIs(token.FUNCTION_BLOCK) {
+			return p.parsePoulDeclaration()
+		}
+		return p.parseExpressionStatement() // Fallback to get "no prefix" error
+	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
@@ -2344,9 +2351,20 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 
 	p.nextToken() // Consume the block type token (e.g., VAR_INPUT)
 
+	// Check for an optional access specifier (PUBLIC, PRIVATE, PROTECTED)
+	// which is valid for VAR blocks inside a FUNCTION_BLOCK.
+	var accessSpecifier string
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) {
+		accessSpecifier = p.curToken.Literal
+		p.nextToken() // consume the access specifier
+	}
+
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
 	decls := p.parseVarDeclarations(token.END_VAR, blockType)
 
+	for _, decl := range decls {
+		decl.AccessSpecifier = accessSpecifier
+	}
 	// After parsing declarations, we should be on the END_VAR token.
 	// We consume it here so the caller doesn't have to.
 	if p.curTokenIs(token.END_VAR) {

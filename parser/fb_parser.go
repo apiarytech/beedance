@@ -20,22 +20,41 @@ import (
 func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	defer untrace(trace("parseFunctionBlockDeclaration"))
 
-	isAbstract := false
-	var fbToken token.Token
-
-	if p.curTokenIs(token.ABSTRACT) {
-		isAbstract = true
-		if !p.expectPeek(token.FUNCTION_BLOCK) {
-			return nil // Expected FUNCTION_BLOCK after ABSTRACT
-		}
-		fbToken = p.curToken // This is now FUNCTION_BLOCK
-	} else {
-		fbToken = p.curToken // This is FUNCTION_BLOCK
+	// The standard allows PUBLIC and INTERNAL.
+	var accessSpecifier string
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.INTERNAL) {
+		accessSpecifier = p.curToken.Literal
+		p.nextToken() // consume PUBLIC or INTERNAL
 	}
 
-	stmt := &ast.FunctionBlockDeclaration{Token: fbToken, IsAbstract: isAbstract, LeadingComments: p.leadingComments}
+	isAbstract := false
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
 
-	if !p.expectPeek(token.IDENT) {
+	if !p.curTokenIs(token.FUNCTION_BLOCK) {
+		p.currentError("expected FUNCTION_BLOCK, got %s", p.curToken.Type)
+		return nil
+	}
+	fbToken := p.curToken // This is FUNCTION_BLOCK
+	p.nextToken()         // consume FUNCTION_BLOCK
+
+	if !isAbstract && p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
+
+	isFinal := false
+	if p.curTokenIs(token.FINAL) {
+		isFinal = true
+		p.nextToken() // consume FINAL
+	}
+
+	stmt := &ast.FunctionBlockDeclaration{Token: fbToken, IsAbstract: isAbstract, IsFinal: isFinal, AccessSpecifier: accessSpecifier, LeadingComments: p.leadingComments}
+
+	if !p.curTokenIs(token.IDENT) {
+		p.currentError("expected function block name, got %s", p.curToken.Type)
 		return nil // Expected function block name
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -100,26 +119,27 @@ var_loop:
 	for {
 		p.consumeLeadingComments()
 
-		isAbstractMember := p.curTokenIs(token.ABSTRACT)
-		if isAbstractMember && !stmt.IsAbstract {
-			p.currentError("abstract members are not allowed in a non-abstract function block")
-			p.synchronize(token.END_METHOD, token.END_PROPERTY, token.END_FUNCTION_BLOCK)
-			continue
-		}
-
-		isMethod := p.curTokenIs(token.METHOD) || (isAbstractMember && p.peekTokenIs(token.METHOD))
-		isProperty := p.curTokenIs(token.PROPERTY) || (isAbstractMember && p.peekTokenIs(token.PROPERTY))
+		isMethod := p.curTokenIs(token.METHOD) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.METHOD))
+		isProperty := p.curTokenIs(token.PROPERTY) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.PROPERTY))
 		isComment := p.curTokenIs(token.COMMENT)
 
 		if isMethod {
 			method := p.parseMethodImplementation()
 			if method != nil {
-				body.Statements = append(body.Statements, method)
+				if method.IsAbstract && !stmt.IsAbstract {
+					p.currentError("abstract members are not allowed in a non-abstract function block")
+				} else {
+					body.Statements = append(body.Statements, method)
+				}
 			}
 		} else if isProperty {
 			prop := p.parsePropertyDeclaration()
 			if prop != nil {
-				stmt.Properties = append(stmt.Properties, prop)
+				if prop.IsAbstract && !stmt.IsAbstract {
+					p.currentError("abstract members are not allowed in a non-abstract function block")
+				} else {
+					stmt.Properties = append(stmt.Properties, prop)
+				}
 			}
 		} else if isComment {
 			p.nextToken()

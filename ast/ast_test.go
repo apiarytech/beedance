@@ -86,6 +86,14 @@ func TestStringMethods(t *testing.T) {
 		{&BitStringLiteral{Value: 0x12345678, Width: 32}, "DWORD#16#12345678"},
 		{&BitStringLiteral{Value: 0x1122334455667788, Width: 64}, "LWORD#16#1122334455667788"},
 		{&BitStringLiteral{Value: 0xFFF, Width: 12}, "BITSTRING#12#FFF"},
+		{&ThisExpression{}, "THIS"},
+		{&SuperExpression{}, "SUPER"},
+		{&DereferenceExpression{
+			Pointer: &Identifier{Value: "MyRef"},
+		}, "(MyRef^)"},
+		{&ReferenceType{
+			BaseType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+		}, "REFERENCE TO INT"},
 		{&UnsignedIntegerLiteral{Token: token.Token{Type: token.UINT, Literal: "UINT#65535"}, Value: 65535}, "UINT#65535"},
 		{&EnumeratedValueLiteral{TypeName: &Identifier{Value: "MyEnum"}, Value: &Identifier{Value: "EnumValue"}}, "MyEnum#EnumValue"},
 		{&FunctionParameter{Name: &Identifier{Value: "p"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}}, "p : INT"},

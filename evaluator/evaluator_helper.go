@@ -20,6 +20,87 @@ import (
 	"time"
 )
 
+// checkAccessPermission verifies if a member can be accessed based on its access specifier
+// (PUBLIC, PRIVATE, PROTECTED) from the current evaluation environment.
+func checkAccessPermission(accessSpecifier string, targetInstance *object.FunctionBlockInstance, callerEnv *object.Environment) *object.Error {
+	// PUBLIC members are always accessible. Default is PUBLIC.
+	if accessSpecifier == "" || accessSpecifier == "PUBLIC" {
+		return nil
+	}
+
+	// Get the calling instance from the 'THIS' variable in the caller's environment.
+	callerThisObj, ok := callerEnv.Get("THIS")
+	if !ok {
+		// If 'THIS' is not in the environment, the call is from outside any FB instance (e.g., from a PROGRAM).
+		// In this case, only PUBLIC members are allowed.
+		if accessSpecifier == "PRIVATE" {
+			return &object.Error{Message: "member is private"}
+		}
+		if accessSpecifier == "PROTECTED" {
+			return &object.Error{Message: "member is protected"}
+		}
+		return nil // Should not be reached if specifier is valid.
+	}
+
+	callerInstance, ok := callerThisObj.(*object.FunctionBlockInstance)
+	if !ok {
+		// This would be an internal error.
+		return &object.Error{Message: "internal error: THIS is not a FunctionBlockInstance"}
+	}
+
+	// PRIVATE members: accessible only from within the same instance.
+	if accessSpecifier == "PRIVATE" {
+		if callerInstance == targetInstance {
+			return nil // Access is from the same instance.
+		}
+		return &object.Error{Message: "member is private"}
+	}
+
+	// PROTECTED members: accessible from the same instance or derived instances.
+	if accessSpecifier == "PROTECTED" {
+		if callerInstance == targetInstance {
+			return nil // Access is from the same instance.
+		}
+
+		// Check if the caller's type extends the target's type.
+		callerDef := callerInstance.Definition
+		targetDef := targetInstance.Definition
+
+		if callerDef == nil || targetDef == nil || callerDef.Definition == nil {
+			return &object.Error{Message: "internal error: cannot check protected access without FB definitions"}
+		}
+
+		// Walk up the inheritance chain of the caller.
+		currentFB := callerDef
+		for currentFB != nil {
+			if currentFB.Definition == targetDef.Definition {
+				return nil // Caller is a derived type of the target.
+			}
+			currentFB = getParentFB(currentFB)
+		}
+
+		return &object.Error{Message: "member is protected"}
+	}
+
+	return nil // Default case, allow access.
+}
+
+func getParentFB(fb *object.FunctionBlock) *object.FunctionBlock {
+	if fb == nil || fb.Definition == nil || fb.Definition.Extends == nil {
+		return nil
+	}
+	// Look for the parent's definition in the environment where the current FB was defined.
+	parentObj, ok := fb.Env.Get(fb.Definition.Extends.Value)
+	if !ok {
+		return nil
+	}
+	parentFB, ok := parentObj.(*object.FunctionBlock)
+	if !ok {
+		return nil
+	}
+	return parentFB
+}
+
 func testEval(t *testing.T, input string) object.Object {
 	t.Helper()
 	l := lexer.New(input)

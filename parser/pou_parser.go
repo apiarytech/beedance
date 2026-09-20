@@ -18,14 +18,16 @@ import (
 // (Program Organization Unit), which can be a FUNCTION, FUNCTION_BLOCK, or PROGRAM.
 func (p *Parser) parsePoulDeclaration() ast.Statement {
 	defer untrace(trace("parsePoulDeclaration"))
-	if p.curTokenIs(token.ABSTRACT) {
-		return p.parseFunctionBlockDeclaration()
-	}
-
 	switch p.curToken.Type {
+	case token.ABSTRACT:
+		return p.parseFunctionBlockDeclaration()
 	case token.FUNCTION:
 		return p.parseFunctionDeclaration()
 	case token.FUNCTION_BLOCK:
+		return p.parseFunctionBlockDeclaration()
+	case token.PUBLIC:
+		return p.parseFunctionBlockDeclaration()
+	case token.INTERNAL:
 		return p.parseFunctionBlockDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
@@ -304,9 +306,34 @@ func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
 		p.nextToken() // consume ABSTRACT
 	}
 
-	stmt := &ast.MethodImplementation{Token: p.curToken, IsAbstract: isAbstract}
+	methodToken := p.curToken // curToken is METHOD
+	if !p.curTokenIs(token.METHOD) {
+		p.currentError("expected METHOD, got %s", p.curToken.Type)
+		return nil
+	}
+	p.nextToken() // consume METHOD
 
-	if !p.expectPeek(token.IDENT) {
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
+
+	isFinal := false
+	if p.curTokenIs(token.FINAL) {
+		isFinal = true
+		p.nextToken() // consume FINAL
+	}
+
+	var accessSpecifier string
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) {
+		accessSpecifier = p.curToken.Literal
+		p.nextToken() // consume access specifier
+	}
+
+	stmt := &ast.MethodImplementation{Token: methodToken, IsAbstract: isAbstract, IsFinal: isFinal, AccessSpecifier: accessSpecifier}
+
+	if !p.curTokenIs(token.IDENT) {
+		p.currentError("expected method name, got %s", p.curToken.Type)
 		return nil // Expected method name
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -357,8 +384,9 @@ var_loop:
 	if !isAbstract {
 		stmt.Body = p.parseBlockStatementUntil(token.END_METHOD)
 	} else {
-		if !p.curTokenIs(token.END_METHOD) {
+		if !p.curTokenIs(token.END_METHOD) && !p.peekTokenIs(token.END_METHOD) {
 			p.currentError("abstract method cannot have a body")
+			p.synchronize(token.END_METHOD)
 		}
 	}
 
@@ -386,9 +414,11 @@ func (p *Parser) parseInterfaceDeclaration() ast.Statement {
 	// Loop to parse all METHOD declarations
 	for !p.curTokenIs(token.END_INTERFACE) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.METHOD) {
-			method := p.parseMethodDeclaration()
+			method := p.parseMethodPrototype()
 			if method != nil {
 				stmt.Methods = append(stmt.Methods, method)
+				// The prototype parser consumes the semicolon. We must advance to the next token.
+				p.nextToken()
 			}
 		} else if p.curTokenIs(token.PROPERTY) {
 			prop := p.parsePropertyDeclaration()
@@ -469,6 +499,62 @@ var_loop:
 	return stmt
 }
 
+// parseMethodPrototype parses a method signature within an INTERFACE.
+// e.g., `METHOD Start : BOOL;`
+func (p *Parser) parseMethodPrototype() *ast.MethodDeclaration {
+	defer untrace(trace("parseMethodPrototype"))
+	stmt := &ast.MethodDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil // Expected method name
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	// Optional return type
+	if p.peekTokenIs(token.COLON) {
+		p.nextToken() // consume name
+		p.nextToken() // consume ':'
+		returnType := p.parseTypeSpecifier()
+		if returnType == nil {
+			return nil // Error already logged
+		}
+		ts, ok := returnType.(*ast.TypeSpecifier)
+		if !ok {
+			p.currentError("method return type cannot be a complex type like ARRAY or STRUCT, got %T", returnType)
+			return nil
+		}
+		stmt.ReturnType = ts
+	}
+
+	p.nextToken() // Consume name or return type
+
+	// Loop to parse VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT blocks
+var_loop:
+	for !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.END_METHOD) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.VAR_INPUT:
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
+		case token.VAR_OUTPUT:
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
+		case token.VAR_IN_OUT:
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		case token.COMMENT:
+			p.nextToken()
+			continue
+		default:
+			break var_loop
+		}
+	}
+
+	// A prototype ends with a semicolon (for simple form) or END_METHOD (for block form).
+	if !p.curTokenIs(token.SEMICOLON) && !p.curTokenIs(token.END_METHOD) {
+		p.currentError("expected ; or END_METHOD at end of method prototype, got %s", p.curToken.Type)
+		return nil
+	}
+
+	return stmt
+}
+
 // parsePropertyDeclaration parses a PROPERTY ... END_PROPERTY block.
 func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 	defer untrace(trace("parsePropertyDeclaration"))
@@ -479,9 +565,28 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 		p.nextToken() // consume ABSTRACT
 	}
 
-	stmt := &ast.PropertyDeclaration{Token: p.curToken, IsAbstract: isAbstract}
+	propToken := p.curToken // curToken is PROPERTY
+	if !p.curTokenIs(token.PROPERTY) {
+		p.currentError("expected PROPERTY, got %s", p.curToken.Type)
+		return nil
+	}
+	p.nextToken() // consume PROPERTY
 
-	if !p.expectPeek(token.IDENT) {
+	if p.curTokenIs(token.ABSTRACT) {
+		isAbstract = true
+		p.nextToken() // consume ABSTRACT
+	}
+
+	var accessSpecifier string
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) {
+		accessSpecifier = p.curToken.Literal
+		p.nextToken() // consume access specifier
+	}
+
+	stmt := &ast.PropertyDeclaration{Token: propToken, IsAbstract: isAbstract, AccessSpecifier: accessSpecifier}
+
+	if !p.curTokenIs(token.IDENT) {
+		p.currentError("expected property name, got %s", p.curToken.Type)
 		return nil // Expected property name
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -506,17 +611,25 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 
 	// Loop to parse GET and SET blocks
 	for !p.curTokenIs(token.END_PROPERTY) && !p.curTokenIs(token.EOF) {
+		var accessorAccessSpecifier string
+		if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) {
+			accessorAccessSpecifier = p.curToken.Literal
+			p.nextToken() // consume access specifier
+		}
+
 		switch p.curToken.Type {
 		case token.GET:
 			if stmt.Getter != nil {
 				p.currentError("property can only have one GET block")
+				// Continue parsing to attempt recovery, but mark as error.
 			}
-			stmt.Getter = p.parsePropertyGetter()
+			stmt.Getter = p.parsePropertyGetter(accessorAccessSpecifier)
 		case token.SET:
 			if stmt.Setter != nil {
 				p.currentError("property can only have one SET block")
+				// Continue parsing to attempt recovery, but mark as error.
 			}
-			stmt.Setter = p.parsePropertySetter()
+			stmt.Setter = p.parsePropertySetter(accessorAccessSpecifier)
 		case token.COMMENT:
 			p.nextToken()
 			continue
@@ -539,8 +652,54 @@ func (p *Parser) parsePropertyDeclaration() *ast.PropertyDeclaration {
 	return stmt
 }
 
-func (p *Parser) parsePropertyGetter() *ast.PropertyGetter {
-	getter := &ast.PropertyGetter{Token: p.curToken}
+// parsePropertyPrototype parses a property signature within an INTERFACE.
+// e.g., `PROPERTY Speed : INT GET;`
+func (p *Parser) parsePropertyPrototype() *ast.PropertyDeclaration {
+	defer untrace(trace("parsePropertyPrototype"))
+	stmt := &ast.PropertyDeclaration{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.COLON) {
+		return nil
+	}
+
+	p.nextToken() // consume ':'
+	dataType := p.parseTypeSpecifier()
+	if dataType == nil {
+		return nil
+	}
+	ts, ok := dataType.(*ast.TypeSpecifier)
+	if !ok {
+		p.currentError("property data type cannot be a complex type, got %T", dataType)
+		return nil
+	}
+	stmt.DataType = ts
+
+	// After the type, we can have optional GET and/or SET keywords.
+	if p.peekTokenIs(token.GET) {
+		p.nextToken()
+		stmt.Getter = &ast.PropertyGetter{Token: p.curToken} // Create a getter with no body
+	}
+	if p.peekTokenIs(token.SET) {
+		p.nextToken()
+		stmt.Setter = &ast.PropertySetter{Token: p.curToken} // Create a setter with no body
+	}
+
+	// A prototype ends with a semicolon.
+	if !p.expectPeek(token.SEMICOLON) {
+		return nil
+	}
+	// expectPeek consumed the semicolon.
+
+	return stmt
+}
+
+func (p *Parser) parsePropertyGetter(accessSpecifier string) *ast.PropertyGetter {
+	getter := &ast.PropertyGetter{Token: p.curToken, AccessSpecifier: accessSpecifier}
 	p.nextToken() // consume GET
 	getter.Body = p.parseBlockStatementUntil(token.END_GET)
 	if !p.curTokenIs(token.END_GET) {
@@ -551,8 +710,8 @@ func (p *Parser) parsePropertyGetter() *ast.PropertyGetter {
 	return getter
 }
 
-func (p *Parser) parsePropertySetter() *ast.PropertySetter {
-	setter := &ast.PropertySetter{Token: p.curToken}
+func (p *Parser) parsePropertySetter(accessSpecifier string) *ast.PropertySetter {
+	setter := &ast.PropertySetter{Token: p.curToken, AccessSpecifier: accessSpecifier}
 	p.nextToken() // consume SET
 	setter.Body = p.parseBlockStatementUntil(token.END_SET)
 	if !p.curTokenIs(token.END_SET) {

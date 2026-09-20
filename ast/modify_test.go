@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"beedance/token"
 	"reflect"
 	"testing"
 )
@@ -233,14 +234,158 @@ func TestModify(t *testing.T) {
 				Arguments: []Expression{two(), &NamedArgument{Value: two()}, &OutputArgument{Target: two()}},
 			},
 		},
+		{
+			&FunctionBlockDeclaration{
+				Name:    &Identifier{Value: "fb"},
+				Extends: &Identifier{Value: "Base"},
+				Implements: []*Identifier{
+					{Value: "IBase"},
+				},
+				VarInputs: []*VarDeclStatement{
+					{Value: one()},
+				},
+				Properties: []*PropertyDeclaration{
+					{Getter: &PropertyGetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: one()}}}}},
+				},
+				VarTemp: []*TempVarDeclaration{
+					{Vars: []*VarDeclStatement{{Value: one()}}},
+				},
+				Body: &BlockStatement{
+					Statements: []Statement{
+						&ExpressionStatement{Expression: one()},
+					},
+				},
+			},
+			&FunctionBlockDeclaration{
+				Name:    &Identifier{Value: "fb"},
+				Extends: &Identifier{Value: "Base"},
+				Implements: []*Identifier{
+					{Value: "IBase"},
+				},
+				VarInputs: []*VarDeclStatement{
+					{Value: two()},
+				},
+				Properties: []*PropertyDeclaration{
+					{Getter: &PropertyGetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: two()}}}}},
+				},
+				VarTemp: []*TempVarDeclaration{
+					{Vars: []*VarDeclStatement{{Value: two()}}},
+				},
+				Body: &BlockStatement{
+					Statements: []Statement{
+						&ExpressionStatement{Expression: two()},
+					},
+				},
+			},
+		},
+		{
+			&InterfaceDeclaration{
+				Name: &Identifier{Value: "iface"},
+				Methods: []*MethodDeclaration{
+					{
+						Name:       &Identifier{Value: "m"},
+						ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+						VarInputs:  []*VarDeclStatement{{Value: one()}},
+					},
+				},
+				Properties: []*PropertyDeclaration{
+					{Name: &Identifier{Value: "p"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}},
+				},
+			},
+			&InterfaceDeclaration{
+				Name: &Identifier{Value: "iface"},
+				Methods: []*MethodDeclaration{
+					{
+						Name:       &Identifier{Value: "m"},
+						ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+						VarInputs:  []*VarDeclStatement{{Value: two()}},
+					},
+				},
+				Properties: []*PropertyDeclaration{
+					{Name: &Identifier{Value: "p"}, DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}}},
+				},
+			},
+		},
+		{
+			&MethodDeclaration{
+				ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "one"}},
+				VarInputs:  []*VarDeclStatement{{Value: one()}},
+				VarOutputs: []*VarDeclStatement{{Value: one()}},
+				VarInOuts:  []*VarDeclStatement{{Value: one()}},
+			},
+			&MethodDeclaration{
+				ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "one"}},
+				VarInputs:  []*VarDeclStatement{{Value: two()}},
+				VarOutputs: []*VarDeclStatement{{Value: two()}},
+				VarInOuts:  []*VarDeclStatement{{Value: two()}},
+			},
+		},
+		{
+			&MethodImplementation{
+				ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "one"}},
+				VarInputs:  []*VarDeclStatement{{Value: one()}},
+				Body:       &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: one()}}},
+			},
+			&MethodImplementation{
+				ReturnType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "one"}},
+				VarInputs:  []*VarDeclStatement{{Value: two()}},
+				Body:       &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: two()}}},
+			},
+		},
+		{
+			&PropertyDeclaration{
+				DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+				Getter:   &PropertyGetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: one()}}}},
+				Setter:   &PropertySetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: one()}}}},
+			},
+			&PropertyDeclaration{
+				DataType: &TypeSpecifier{Token: token.Token{Type: token.INT, Literal: "INT"}},
+				Getter:   &PropertyGetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: two()}}}},
+				Setter:   &PropertySetter{Body: &BlockStatement{Statements: []Statement{&ExpressionStatement{Expression: two()}}}},
+			},
+		},
+		{
+			&DereferenceExpression{Pointer: one()},
+			&DereferenceExpression{Pointer: two()},
+		},
+		{
+			&NamespaceDeclaration{
+				Name:       one(),
+				Statements: []Statement{&ExpressionStatement{Expression: one()}},
+			},
+			&NamespaceDeclaration{
+				Name:       two(),
+				Statements: []Statement{&ExpressionStatement{Expression: two()}},
+			},
+		},
+		{
+			&ReferenceType{BaseType: one()},
+			&ReferenceType{BaseType: two()},
+		},
+		{
+			&ExternalVarDeclaration{
+				Vars: []*VarDeclStatement{{Value: one()}},
+			},
+			&ExternalVarDeclaration{
+				Vars: []*VarDeclStatement{{Value: two()}},
+			},
+		},
+		{
+			&TempVarDeclaration{
+				Vars: []*VarDeclStatement{{Value: one()}},
+			},
+			&TempVarDeclaration{
+				Vars: []*VarDeclStatement{{Value: two()}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		modified := Modify(tt.input, turnOneIntoTwo)
 
-		equal := reflect.DeepEqual(tt.input, tt.expected)
+		equal := reflect.DeepEqual(modified, tt.expected)
 		if !equal {
-			t.Errorf("not equal. got=%#v, want=%#v",
+			t.Errorf("modification failed.\ngot =%#v\nwant=%#v",
 				modified, tt.expected)
 		}
 	}

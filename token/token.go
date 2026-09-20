@@ -148,23 +148,6 @@ const (
 	END_RESOURCE      = "END_RESOURCE"
 	ON                = "ON"
 	WITH              = "WITH"
-	EXTENDS           = "EXTENDS"
-	IMPLEMENTS        = "IMPLEMENTS"
-	METHOD            = "METHOD"
-	END_METHOD        = "END_METHOD"
-	INTERFACE         = "INTERFACE"
-	END_INTERFACE     = "END_INTERFACE"
-	THIS              = "THIS"
-	SUPER             = "SUPER"
-	PROPERTY          = "PROPERTY"
-	END_PROPERTY      = "END_PROPERTY"
-	GET               = "GET"
-	SET               = "SET"
-	END_GET           = "END_GET"
-	END_SET           = "END_SET"
-	ABSTRACT          = "ABSTRACT"
-	NAMESPACE         = "NAMESPACE"
-	END_NAMESPACE     = "END_NAMESPACE"
 
 	// Program Organization Unit Keywords
 	PROGRAM            = "PROGRAM"
@@ -186,6 +169,30 @@ const (
 	MIN                = "MIN"
 	MAX                = "MAX"
 	NIL                = "NIL"
+
+	// OOP Keywords
+	EXTENDS       = "EXTENDS"
+	IMPLEMENTS    = "IMPLEMENTS"
+	METHOD        = "METHOD"
+	END_METHOD    = "END_METHOD"
+	INTERFACE     = "INTERFACE"
+	END_INTERFACE = "END_INTERFACE"
+	THIS          = "THIS"
+	SUPER         = "SUPER"
+	PROPERTY      = "PROPERTY"
+	END_PROPERTY  = "END_PROPERTY"
+	GET           = "GET"
+	SET           = "SET"
+	END_GET       = "END_GET"
+	END_SET       = "END_SET"
+	ABSTRACT      = "ABSTRACT"
+	NAMESPACE     = "NAMESPACE"
+	END_NAMESPACE = "END_NAMESPACE"
+	PUBLIC        = "PUBLIC"
+	PRIVATE       = "PRIVATE"
+	PROTECTED     = "PROTECTED"
+	FINAL         = "FINAL"
+	INTERNAL      = "INTERNAL"
 
 	// Data Type Keywords
 	BOOL    = "BOOL"
@@ -307,62 +314,69 @@ var keywords = map[string]TokenType{
 	"RESOURCE":           RESOURCE,
 	"END_RESOURCE":       END_RESOURCE,
 	"REFERENCE":          REFERENCE,
-	"EXTENDS":            EXTENDS,
-	"IMPLEMENTS":         IMPLEMENTS,
-	"INTERFACE":          INTERFACE,
-	"END_INTERFACE":      END_INTERFACE,
-	"METHOD":             METHOD,
-	"THIS":               THIS,
-	"SUPER":              SUPER,
-	"ABSTRACT":           ABSTRACT,
-	"PROPERTY":           PROPERTY,
-	"END_PROPERTY":       END_PROPERTY,
-	"GET":                GET,
-	"SET":                SET,
-	"END_GET":            END_GET,
-	"END_SET":            END_SET,
-	"END_METHOD":         END_METHOD,
-	"NAMESPACE":          NAMESPACE,
-	"END_NAMESPACE":      END_NAMESPACE,
-	"ON":                 ON,
-	"WITH":               WITH,
-	"TASK":               TASK,
-	"MIN":                MIN,
-	"MAX":                MAX,
-	"MOVE":               MOVE,
-	"NIL":                NIL,
-	"SINGLE":             SINGLE,
-	"INTERVAL":           INTERVAL,
-	"PRIORITY":           PRIORITY,
-	"BOOL":               BOOL,
-	"INT":                INT,
-	"SINT":               SINT,
-	"DINT":               DINT,
-	"LINT":               LINT,
-	"USINT":              USINT,
-	"UINT":               UINT,
-	"UDINT":              UDINT,
-	"ULINT":              ULINT, // Abbreviation for TIME
-	"REAL":               REAL,
-	"LREAL":              LREAL,
-	"T":                  TIME,
-	"DT":                 DATE_AND_TIME,
-	"TIME":               TIME,
-	"D":                  DATE,
-	"DATE":               DATE,
-	"DATE_AND_TIME":      DATE_AND_TIME,
-	"TIME_OF_DAY":        TIME_OF_DAY,
-	"TOD":                TIME_OF_DAY, // Alias for TIME_OF_DAY
-	"WSTRING":            WSTRING,
-	"BYTE":               BYTE,
-	"WORD":               WORD,
-	"DWORD":              DWORD,
-	"LWORD":              LWORD,
-	"ARRAY":              ARRAY,
-	"STRING":             STRING,
-	"SR":                 SR,
-	"RS":                 RS,
-	"RANGE":              RANGE,
+	// OOP VARIABLES
+	"EXTENDS":       EXTENDS,
+	"IMPLEMENTS":    IMPLEMENTS,
+	"INTERFACE":     INTERFACE,
+	"END_INTERFACE": END_INTERFACE,
+	"METHOD":        METHOD,
+	"THIS":          THIS,
+	"SUPER":         SUPER,
+	"ABSTRACT":      ABSTRACT,
+	"PROPERTY":      PROPERTY,
+	"END_PROPERTY":  END_PROPERTY,
+	"GET":           GET,
+	"SET":           SET,
+	"END_GET":       END_GET,
+	"END_SET":       END_SET,
+	"END_METHOD":    END_METHOD,
+	"NAMESPACE":     NAMESPACE,
+	"END_NAMESPACE": END_NAMESPACE,
+	"PUBLIC":        PUBLIC,
+	"PRIVATE":       PRIVATE,
+	"PROTECTED":     PROTECTED,
+	"FINAL":         FINAL,
+	"INTERNAL":      INTERNAL,
+	//
+	"ON":            ON,
+	"WITH":          WITH,
+	"TASK":          TASK,
+	"MIN":           MIN,
+	"MAX":           MAX,
+	"MOVE":          MOVE,
+	"NIL":           NIL,
+	"SINGLE":        SINGLE,
+	"INTERVAL":      INTERVAL,
+	"PRIORITY":      PRIORITY,
+	"BOOL":          BOOL,
+	"INT":           INT,
+	"SINT":          SINT,
+	"DINT":          DINT,
+	"LINT":          LINT,
+	"USINT":         USINT,
+	"UINT":          UINT,
+	"UDINT":         UDINT,
+	"ULINT":         ULINT, // Abbreviation for TIME
+	"REAL":          REAL,
+	"LREAL":         LREAL,
+	"T":             TIME,
+	"DT":            DATE_AND_TIME,
+	"TIME":          TIME,
+	"D":             DATE,
+	"DATE":          DATE,
+	"DATE_AND_TIME": DATE_AND_TIME,
+	"TIME_OF_DAY":   TIME_OF_DAY,
+	"TOD":           TIME_OF_DAY, // Alias for TIME_OF_DAY
+	"WSTRING":       WSTRING,
+	"BYTE":          BYTE,
+	"WORD":          WORD,
+	"DWORD":         DWORD,
+	"LWORD":         LWORD,
+	"ARRAY":         ARRAY,
+	"STRING":        STRING,
+	"SR":            SR,
+	"RS":            RS,
+	"RANGE":         RANGE,
 }
 
 // LookupIdent checks the `keywords` table to see whether the given identifier

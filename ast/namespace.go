@@ -29,7 +29,9 @@ func (nsd *NamespaceDeclaration) Pos() (int, int)      { return nsd.Token.Row, n
 func (nsd *NamespaceDeclaration) TokenLiteral() string { return nsd.Token.Literal }
 func (nsd *NamespaceDeclaration) String() string {
 	var out bytes.Buffer
-	out.WriteString("NAMESPACE " + nsd.Name.String() + "\n")
+	out.WriteString("NAMESPACE ")
+	out.WriteString(nsd.Name.String())
+	out.WriteString("\n")
 	for _, s := range nsd.Statements {
 		out.WriteString(s.String())
 	}

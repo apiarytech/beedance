@@ -12,7 +12,7 @@ END_INTERFACE
 
 // 2. Create an Abstract Base Function Block
 // This FB implements the interface but leaves some parts abstract.
-ABSTRACT FUNCTION_BLOCK AbstractMotor IMPLEMENTS IMotor
+FUNCTION_BLOCK ABSTRACT AbstractMotor IMPLEMENTS IMotor
     VAR_OUTPUT
         IsRunning : BOOL;
     END_VAR
@@ -34,10 +34,10 @@ ABSTRACT FUNCTION_BLOCK AbstractMotor IMPLEMENTS IMotor
     END_METHOD
 
     // Leave Start and Speed as abstract, forcing derived FBs to implement them
-    ABSTRACT METHOD Start : BOOL
+    METHOD ABSTRACT Start : BOOL
     END_METHOD
 
-    ABSTRACT PROPERTY Speed : LREAL
+    PROPERTY ABSTRACT Speed : LREAL
     END_PROPERTY
 END_FUNCTION_BLOCK
 

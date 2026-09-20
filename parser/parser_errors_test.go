@@ -75,7 +75,7 @@ func TestParserErrorHandling(t *testing.T) {
 		{
 			name:          "Missing function block name",
 			input:         `FUNCTION_BLOCK;`,
-			expectedError: "expected next token to be IDENT, got ; instead",
+			expectedError: "expected function block name, got ;",
 		},
 		{
 			name:          "Invalid IL mnemonic",

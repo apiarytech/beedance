@@ -228,8 +228,26 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		for i := range node.Vars {
 			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
 		}
+		for i := range node.Properties {
+			node.Properties[i], _ = Modify(node.Properties[i], modifier).(*PropertyDeclaration)
+		}
+		for i := range node.VarExternal {
+			node.VarExternal[i], _ = Modify(node.VarExternal[i], modifier).(*ExternalVarDeclaration)
+		}
+		for i := range node.VarTemp {
+			node.VarTemp[i], _ = Modify(node.VarTemp[i], modifier).(*TempVarDeclaration)
+		}
 		if node.Body != nil {
 			node.Body, _ = Modify(node.Body, modifier).(Statement)
+		}
+
+	case *ExternalVarDeclaration:
+		for i := range node.Vars {
+			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
+		}
+	case *TempVarDeclaration:
+		for i := range node.Vars {
+			node.Vars[i], _ = Modify(node.Vars[i], modifier).(*VarDeclStatement)
 		}
 
 	case *InterfaceDeclaration:
