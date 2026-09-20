@@ -398,6 +398,61 @@ func TestAbstractFunctionBlock(t *testing.T) {
 	}
 }
 
+func TestNamespaceDeclarationParsing(t *testing.T) {
+	input := `
+		NAMESPACE MyLib
+			INTERFACE IGreeter
+				METHOD Greet : STRING;
+			END_INTERFACE
+
+			FUNCTION_BLOCK Greeter IMPLEMENTS IGreeter
+				METHOD Greet : STRING
+					Greet := THIS.Greeting;
+				END_METHOD
+			END_FUNCTION_BLOCK
+		END_NAMESPACE
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestNamespaceDeclarationParsing", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	ns, ok := program.Statements[0].(*ast.NamespaceDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.NamespaceDeclaration. got=%T", program.Statements[0])
+	}
+
+	if ns.Name.String() != "MyLib" {
+		t.Errorf("namespace name is not 'MyLib'. got=%s", ns.Name.String())
+	}
+
+	if len(ns.Statements) != 2 {
+		t.Fatalf("namespace should contain 2 statements. got=%d", len(ns.Statements))
+	}
+
+	// Check the interface
+	iface, ok := ns.Statements[0].(*ast.InterfaceDeclaration)
+	if !ok {
+		t.Fatalf("Statement 0 is not InterfaceDeclaration. got=%T", ns.Statements[0])
+	}
+	if iface.Name.Value != "IGreeter" {
+		t.Errorf("Interface name is not 'IGreeter'. got=%s", iface.Name.Value)
+	}
+
+	// Check the function block
+	fb, ok := ns.Statements[1].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("Statement 1 is not FunctionBlockDeclaration. got=%T", ns.Statements[1])
+	}
+	if fb.Name.Value != "Greeter" {
+		t.Errorf("Function block name is not 'Greeter'. got=%s", fb.Name.Value)
+	}
+}
+
 func TestAbstractErrorCases(t *testing.T) {
 	tests := []struct {
 		name          string

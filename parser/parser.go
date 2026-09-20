@@ -151,6 +151,8 @@ func New(l *lexer.Lexer) *Parser {
 	// We treat them like identifiers at this stage.
 	p.registerPrefix(token.TIME, p.parseDataTypeKeyword)
 	p.registerPrefix(token.DATE, p.parseDataTypeKeyword)
+	p.registerPrefix(token.STRING, p.parseIdentifier)
+	p.registerPrefix(token.WSTRING, p.parseIdentifier)
 	// Register keywords that are also infix operators but can be used as
 	// function calls (e.g., "MOD(a, b)"). When they appear in a prefix position,
 	// they should be parsed as identifiers to enable function call parsing.
@@ -189,9 +191,12 @@ func New(l *lexer.Lexer) *Parser {
 	// p.registerPrefix(token.CPT, p.parseFunctionLiteral)
 	p.registerPrefix(token.MACRO, p.parseMacroLiteral)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
+	p.registerPrefix(token.ARRAY, p.parseArrayDefinition)
+	p.registerPrefix(token.VOID, p.parseIdentifier)
 	p.registerPrefix(token.LBRACE, p.parseHashLiteral)
 	p.registerPrefix(token.STRUCT, p.parseStructDefinition)
 	// Bit-string literals
+	p.registerPrefix(token.REFERENCE, p.parseReferenceType)
 	p.registerPrefix(token.BYTE, p.parseIdentifier)
 	p.registerPrefix(token.WORD, p.parseIdentifier)
 	p.registerPrefix(token.THIS, p.parseThisExpression)
@@ -1125,7 +1130,9 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		}
 
 		p.nextToken() // Consume ':', move to data type
-		dataType := p.parseTypeSpecifier()
+		// The data type can be a simple identifier (INT) or a qualified one (MyLib.MyType).
+		// We parse it as a general expression to handle member access paths.
+		dataType := p.parseExpression(CALL)
 		if dataType == nil {
 			return nil
 		}
@@ -1145,10 +1152,8 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		var subrange, stringLength ast.Expression
 		if p.peekTokenIs(token.LPAREN) {
 			isString := false
-			if ts, ok := dataType.(*ast.TypeSpecifier); ok {
-				if ts.Token.Type == token.STRING || ts.Token.Type == token.WSTRING {
-					isString = true
-				}
+			if ident, ok := dataType.(*ast.Identifier); ok {
+				isString = ident.Value == "STRING" || ident.Value == "WSTRING"
 			}
 
 			p.nextToken() // consume data type or AT, curToken is now LPAREN
@@ -1531,7 +1536,7 @@ func (p *Parser) parseReferenceType() ast.Expression {
 
 	p.nextToken() // Consume 'TO', move to the base data type
 
-	refType.BaseType = p.parseTypeSpecifier()
+	refType.BaseType = p.parseExpression(MEMBER)
 	if refType.BaseType == nil {
 		return nil // Error already logged
 	}
@@ -1539,7 +1544,7 @@ func (p *Parser) parseReferenceType() ast.Expression {
 }
 
 // parseArrayDefinition parses an `ARRAY [...] OF ...` type definition.
-func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
+func (p *Parser) parseArrayDefinition() ast.Expression {
 	defer untrace(trace("parseArrayDefinition"))
 	def := &ast.ArrayDefinition{Token: p.curToken}
 
@@ -1583,7 +1588,7 @@ func (p *Parser) parseArrayDefinition() *ast.ArrayDefinition {
 func (p *Parser) isDataTypeToken(tok token.Token) bool {
 	switch tok.Type {
 	case token.BOOL, token.SINT, token.INT, token.DINT, token.LINT,
-		token.USINT, token.UINT, token.UDINT, token.ULINT, token.SR, token.RS, token.MACRO,
+		token.USINT, token.UINT, token.UDINT, token.ULINT, token.SR, token.RS, token.MACRO, token.VOID,
 		token.REAL, token.LREAL, token.STRING, token.WSTRING,
 		token.TIME, token.DATE, token.TIME_OF_DAY, token.DATE_AND_TIME,
 		token.BYTE, token.WORD, token.DWORD, token.LWORD,
@@ -2412,12 +2417,24 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		return false
 	}
 
+	isParsingNamespace := false
+	for _, et := range end {
+		if et == token.END_NAMESPACE {
+			isParsingNamespace = true
+			break
+		}
+	}
+
 	for !isEndToken(p.curToken.Type) && !p.curTokenIs(token.EOF) {
 		// Heuristic for error recovery: if we encounter a keyword that can only start a
 		// top-level POU or a VAR block, it's a strong signal that the current block
 		// was not closed correctly. We stop parsing this block and let the calling
 		// function handle the error.
 		isTopLevelKeyword := func(t token.TokenType) bool {
+			// FUNCTION_BLOCK is allowed inside a NAMESPACE, so we don't treat it as a top-level keyword if we are parsing a namespace.
+			if isParsingNamespace && t == token.FUNCTION_BLOCK {
+				return false
+			}
 			return t == token.PROGRAM || t == token.FUNCTION_BLOCK || t == token.CONFIGURATION
 		}
 
@@ -2948,6 +2965,14 @@ func (p *Parser) parseArrayElementOrRepetition() ast.Expression {
 // parseMacroLiteral parses a macro definition (a non-standard extension).
 func (p *Parser) parseMacroLiteral() ast.Expression {
 	defer untrace(trace("parseMacroLiteral"))
+
+	// Disambiguation: If the `MACRO` keyword is followed by `:=`, it is being
+	// used as a type specifier in a variable declaration, not as the start of a
+	// macro literal. In this context, we should parse it as a simple identifier.
+	if p.peekTokenIs(token.ASSIGN) {
+		return p.parseIdentifier()
+	}
+
 	lit := &ast.MacroLiteral{Token: p.curToken}
 
 	if !p.expectPeek(token.LPAREN) {
@@ -3021,4 +3046,27 @@ func (p *Parser) parseDereferenceExpression(left ast.Expression) ast.Expression 
 		Token:   p.curToken, // The '^' token
 		Pointer: left,
 	}
+}
+
+// parseSFCBody parses the elements of an SFC program until a given end token.
+func (p *Parser) parseSFCBody(end token.TokenType) *ast.SFCProgram {
+	sfc := &ast.SFCProgram{Token: p.curToken}
+	for !p.curTokenIs(end) && !p.curTokenIs(token.EOF) {
+		switch p.curToken.Type {
+		case token.INITIAL_STEP:
+			sfc.Elements = append(sfc.Elements, p.parseInitialStepStatement())
+		case token.STEP:
+			sfc.Elements = append(sfc.Elements, p.parseStepStatement())
+		case token.TRANSITION:
+			sfc.Elements = append(sfc.Elements, p.parseTransitionStatement())
+		case token.ACTION:
+			sfc.Elements = append(sfc.Elements, p.parseActionStatement())
+		case token.COMMENT:
+			p.nextToken()
+		default:
+			p.currentError("unexpected token in SFC body: %s", p.curToken.Type)
+			p.nextToken()
+		}
+	}
+	return sfc
 }

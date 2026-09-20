@@ -302,9 +302,15 @@ func TestPrivatePublicandProtected(t *testing.T) {
 		END_PROGRAM
 		` + baseProgram
 
-		evaluated := testEval(t, input)
+		env := object.NewEnvironment()
+		Eval(testParseProgramOOP(t, input), env) // Define POUs
+
+		progObj, _ := env.Get("TestProtectedExternalAccess")
+		prog := progObj.(*object.Program)
+		evaluated := Eval(prog.Body, prog.Env) // Execute the program body
+
 		// This test assumes the evaluator has logic to produce this specific error.
-		testErrorObjectContains(t, evaluated, "member 'protectedVar' is protected and cannot be accessed")
+		testErrorObjectContains(t, evaluated, "cannot assign to member variable 'protectedVar': member is protected")
 	})
 
 	t.Run("Private member access from derived class", func(t *testing.T) {
@@ -318,9 +324,15 @@ func TestPrivatePublicandProtected(t *testing.T) {
 		END_PROGRAM
 		` + baseProgram
 
-		evaluated := testEval(t, input)
+		env := object.NewEnvironment()
+		Eval(testParseProgramOOP(t, input), env) // Define POUs
+
+		progObj, _ := env.Get("TestPrivateAccess")
+		prog := progObj.(*object.Program)
+		evaluated := Eval(prog.Body, prog.Env) // Execute the program body
+
 		// This test assumes the evaluator has logic to produce this specific error.
-		testErrorObjectContains(t, evaluated, "member 'privateVar' is private and cannot be accessed from derived function block")
+		testErrorObjectContains(t, evaluated, "cannot access member variable 'privateVar': member is private and cannot be accessed from derived function block")
 	})
 
 	t.Run("Private member access from outside", func(t *testing.T) {
@@ -333,9 +345,15 @@ func TestPrivatePublicandProtected(t *testing.T) {
 		END_PROGRAM
 		` + baseProgram
 
-		evaluated := testEval(t, input)
+		env := object.NewEnvironment()
+		Eval(testParseProgramOOP(t, input), env) // Define POUs
+
+		progObj, _ := env.Get("TestPrivateExternalAccess")
+		prog := progObj.(*object.Program)
+		evaluated := Eval(prog.Body, prog.Env) // Execute the program body
+
 		// This test assumes the evaluator has logic to produce this specific error.
-		testErrorObjectContains(t, evaluated, "member 'privateVar' is private and cannot be accessed")
+		testErrorObjectContains(t, evaluated, "cannot assign to member variable 'privateVar': member is private")
 	})
 
 	t.Run("Public member access from outside", func(t *testing.T) {
@@ -375,7 +393,7 @@ func TestPropertyAccessorPermissions(t *testing.T) {
 					Value := THIS._internal;
 				END_GET
 				PRIVATE SET
-					THIS._internal := Value;
+					THIS._internal := value;
 				END_SET
 			END_PROPERTY
 
@@ -406,9 +424,16 @@ func TestPropertyAccessorPermissions(t *testing.T) {
 			VAR myFb : AccessorTest; END_VAR
 			myFb.Value := 100;
 		END_PROGRAM
-		` + baseProgram
-		evaluated := testEval(t, input)
-		testErrorObjectContains(t, evaluated, "cannot access setter for property 'Value': member is private")
+		` + baseProgram // cspell:disable-line
+
+		env := object.NewEnvironment()
+		Eval(testParseProgramOOP(t, input), env) // Define POUs
+
+		progObj, _ := env.Get("TestPrivateSet")
+		prog := progObj.(*object.Program)
+		evaluated := Eval(prog.Body, prog.Env) // Execute the program body
+
+		testErrorObjectContains(t, evaluated, "cannot access setter for property 'Value': member is private") // cspell:disable-line
 	})
 
 	t.Run("Private SET is allowed from inside", func(t *testing.T) {
@@ -418,9 +443,85 @@ func TestPropertyAccessorPermissions(t *testing.T) {
 			myFb.InternalWrite(NewValue := 99);
 			result := myFb.Value;
 		END_PROGRAM
-		` + baseProgram
+		` + baseProgram // cspell:disable-line
+		env := object.NewEnvironment()
+		Eval(testParseProgramOOP(t, input), env) // Define POUs
+
+		progObj, _ := env.Get("TestInternalSet")
+		prog := progObj.(*object.Program)
+		Eval(prog.Body, prog.Env) // Execute the program body
+
+		testIntegerObjectInEnv(t, prog.Env, "result", 99)
+	})
+}
+
+func TestNamespacedOOP(t *testing.T) {
+	t.Run("Successful implementation across namespaces", func(t *testing.T) {
+		input := `
+			NAMESPACE MyLib
+				INTERFACE IGreeter
+					METHOD Greet : STRING;
+				END_INTERFACE
+
+				FUNCTION_BLOCK Greeter IMPLEMENTS IGreeter
+					VAR_INPUT
+						Greeting : STRING := 'Hello';
+					END_VAR
+
+					METHOD Greet : STRING
+						Greet := THIS.Greeting;
+					END_METHOD
+				END_FUNCTION_BLOCK
+			END_NAMESPACE
+
+			PROGRAM TestNamespace
+				VAR
+					myGreeter : MyLib.Greeter;
+					result : STRING;
+				END_VAR
+
+				myGreeter.Greeting := 'Bonjour';
+				result := myGreeter.Greet();
+			END_PROGRAM
+		`
+
+		env := object.NewEnvironment()
+		// First call defines all POUs from the input string.
+		testEvalWithEnv(t, input, env)
+
+		// Second call executes the main program logic.
+		testEvalWithEnv(t, "TestNamespace();", env)
+
+		// Get the program's environment to check the result.
+		progObj, ok := env.Get("TestNamespace")
+		if !ok {
+			t.Fatalf("Program 'TestNamespace' not found in environment")
+		}
+		progEnv := progObj.(*object.Program).Env
+
+		testStringObjectInEnv(t, progEnv, "result", "Bonjour")
+	})
+
+	t.Run("Failed implementation of namespaced interface", func(t *testing.T) {
+		input := `
+			NAMESPACE MyLib
+				INTERFACE IRunner
+					METHOD Run : VOID;
+				END_INTERFACE
+
+				FUNCTION_BLOCK BadRunner IMPLEMENTS IRunner
+					// Missing the 'Run' method
+				END_FUNCTION_BLOCK
+			END_NAMESPACE
+
+			PROGRAM TestBadRunner
+				VAR
+					myRunner : MyLib.BadRunner;
+				END_VAR
+			END_PROGRAM
+		`
 		evaluated := testEval(t, input)
-		testIntegerObjectInEnv(t, evaluated.(*object.Program).Env, "result", 99)
+		testErrorObjectContains(t, evaluated, "function block 'BadRunner' does not implement method 'Run' from interface 'IRunner'")
 	})
 }
 

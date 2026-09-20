@@ -118,7 +118,7 @@ func TestSFCActionQualifiers(t *testing.T) {
 	progEnv := progObj.(*object.Program).Env
 
 	// Initialize all action variables to FALSE before starting the test cycles.
-	initializeActionVars(sfc, progEnv)
+	initializeActionVars(t, sfc, progEnv)
 
 	// --- Cycle 1: Initial state ---
 	// S1 is active. ActionN and ActionS should be TRUE. ActionP and ActionR_S are FALSE.
@@ -176,7 +176,7 @@ func TestSFCTimedQualifier_SD(t *testing.T) {
 	sfc, _ := sfcObj.(*object.SFC)
 	progObj, _ := env.Get("TestSD")
 	progEnv := progObj.(*object.Program).Env
-	initializeActionVars(sfc, progEnv)
+	initializeActionVars(t, sfc, progEnv)
 
 	// Cycle 1 (t=1s): S1 active, timer starts, output is FALSE
 	advanceMockTime(1001 * time.Millisecond)
@@ -220,7 +220,7 @@ func TestSFCTimedQualifier_DS(t *testing.T) {
 	sfc, _ := sfcObj.(*object.SFC)
 	progObj, _ := env.Get("TestDS")
 	progEnv := progObj.(*object.Program).Env
-	initializeActionVars(sfc, progEnv)
+	initializeActionVars(t, sfc, progEnv)
 
 	cycle := 1
 
@@ -281,7 +281,7 @@ func TestSFCTimedQualifier_SL(t *testing.T) {
 	sfc, _ := sfcObj.(*object.SFC)
 	progObj, _ := env.Get("TestSL")
 	progEnv := progObj.(*object.Program).Env
-	initializeActionVars(sfc, progEnv)
+	initializeActionVars(t, sfc, progEnv)
 
 	// Cycle 1 (t=1s): S1 active, output becomes TRUE immediately, timer starts
 	advanceMockTime(1001 * time.Millisecond)
@@ -313,9 +313,16 @@ func TestSFCTimedQualifier_SL(t *testing.T) {
 
 // initializeActionVars sets all action-related boolean variables in the environment to FALSE.
 // This ensures a clean state before starting SFC cycle tests.
-func initializeActionVars(sfc *object.SFC, env *object.Environment) {
-	for _, action := range sfc.Actions {
-		env.Set(action.Name.Value, FALSE)
+func initializeActionVars(t *testing.T, sfc *object.SFC, env *object.Environment) {
+	if sfc != nil {
+		for _, action := range sfc.Actions {
+			if action == nil || action.Name == nil {
+				continue // Skip nil actions or actions with nil names to prevent panic
+			}
+			env.Set(action.Name.Value, FALSE)
+		}
+	} else {
+		t.Fatalf("Evaluation did not return an SFC object. got=%T", sfc)
 	}
 }
 
@@ -482,7 +489,7 @@ func TestSFCActionQualifiersTimed(t *testing.T) {
 	progEnv := progObj.(*object.Program).Env
 
 	// Initialize all action variables to FALSE before starting the test cycles.
-	initializeActionVars(sfc, progEnv)
+	initializeActionVars(t, sfc, progEnv)
 
 	cycle := 1
 

@@ -193,6 +193,7 @@ const (
 	PROTECTED     = "PROTECTED"
 	FINAL         = "FINAL"
 	INTERNAL      = "INTERNAL"
+	VOID          = "VOID"
 
 	// Data Type Keywords
 	BOOL    = "BOOL"
@@ -337,6 +338,7 @@ var keywords = map[string]TokenType{
 	"PROTECTED":     PROTECTED,
 	"FINAL":         FINAL,
 	"INTERNAL":      INTERNAL,
+	"VOID":          VOID,
 	//
 	"ON":            ON,
 	"WITH":          WITH,

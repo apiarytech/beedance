@@ -84,6 +84,7 @@ const (
 	SUPER_CONTEXT_OBJ           = "SUPER_CONTEXT"           // A context for a SUPER call
 	METHOD_OBJ                  = "METHOD"                  // A method bound to a function block instance
 	INTERFACE_DEFINITION_OBJ    = "INTERFACE_DEFINITION"    // The definition of an interface
+	NAMESPACE_OBJ               = "NAMESPACE"               // A namespace object
 )
 
 // Generic ANY types
@@ -970,6 +971,20 @@ func (id *InterfaceDefinition) Type() ObjectType { return INTERFACE_DEFINITION_O
 // Inspect returns a string representation of the interface definition.
 func (id *InterfaceDefinition) Inspect() string {
 	return fmt.Sprintf("INTERFACE %s", id.Name.Value)
+}
+
+// Namespace represents a container for other POUs and definitions.
+type Namespace struct {
+	Name string
+	Env  *Environment
+}
+
+// Type returns the object's type.
+func (ns *Namespace) Type() ObjectType { return NAMESPACE_OBJ }
+
+// Inspect returns a string representation of the namespace.
+func (ns *Namespace) Inspect() string {
+	return fmt.Sprintf("NAMESPACE(%s)", ns.Name)
 }
 
 // Program represents the definition of a PROGRAM POU.

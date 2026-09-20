@@ -119,8 +119,8 @@ var_loop:
 	for {
 		p.consumeLeadingComments()
 
-		isMethod := p.curTokenIs(token.METHOD) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.METHOD))
-		isProperty := p.curTokenIs(token.PROPERTY) || (p.curTokenIs(token.ABSTRACT) && p.peekTokenIs(token.PROPERTY))
+		isMethod := p.curTokenIs(token.METHOD)
+		isProperty := p.curTokenIs(token.PROPERTY)
 		isComment := p.curTokenIs(token.COMMENT)
 
 		if isMethod {
@@ -133,7 +133,7 @@ var_loop:
 				}
 			}
 		} else if isProperty {
-			prop := p.parsePropertyDeclaration()
+			prop := p.parsePropertyDeclaration(false)
 			if prop != nil {
 				if prop.IsAbstract && !stmt.IsAbstract {
 					p.currentError("abstract members are not allowed in a non-abstract function block")

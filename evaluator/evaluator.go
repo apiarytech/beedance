@@ -90,6 +90,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.SFCProgram:
 		return evalSFCProgram(node, env)
 
+	case *ast.NamespaceDeclaration:
+		return evalNamespaceDeclaration(node, env)
+
 	case *ast.ConfigurationDeclaration:
 		return evalConfigurationDeclaration(node, env)
 
@@ -183,6 +186,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// Store with a `_function_` prefix to avoid being shadowed by variables.
 		env.Set("_function_"+node.Name.Value, fn)
 		return fn
+
+	case *ast.InterfaceDeclaration:
+		return evalInterfaceDeclaration(node, env)
 
 	case *ast.FunctionBlockDeclaration:
 		// A FunctionBlockDeclaration creates a "template" or "class" for a function block,
@@ -1363,12 +1369,12 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 		}
 
 		// Check if it's a property write (SET).
-		if propDef := findPropertyOnFBChain(fbInstance.Definition, target.Member.Value); propDef != nil {
+		if propDef, ownerDef := findPropertyOnFBChain(fbInstance.Definition, target.Member.Value, env); propDef != nil {
 			if propDef.Setter == nil {
 				return newError(target, "property '%s' is read-only", propDef.Name.Value)
 			}
-			// Check access permission for the SET accessor
-			err := checkAccessPermission(propDef.Setter.AccessSpecifier, fbInstance, env)
+			// Check access permission for the SET accessor.
+			err := checkAccessPermission(propDef.Setter.AccessSpecifier, ownerDef, env)
 			if err != nil {
 				return newError(target, "cannot access setter for property '%s': %s", propDef.Name.Value, err.Message)
 			}
@@ -1381,13 +1387,45 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 			return val // Assignment evaluates to the assigned value.
 		}
 
-		// It's a regular member variable assignment.
+		// It's a regular member variable assignment. Check permissions.
+		if fbInstance.Definition != nil {
+			varDecl, ownerDef := findVarDeclOnFBChain(fbInstance.Definition, target.Member.Value, env)
+			if varDecl != nil {
+				err := checkAccessPermission(varDecl.AccessSpecifier, ownerDef, env)
+				if err != nil {
+					return newError(target, "cannot assign to member variable '%s': %s", target.Member.Value, err.Message)
+				}
+			}
+		}
 		fbInstance.Env.Set(target.Member.Value, val)
 
 	default:
 		return newError(node.Left, "invalid assignment target: %T", node.Left)
 	}
 	return val // Assignment statements evaluate to the assigned value.
+}
+
+// evalNamespaceDeclaration evaluates a NAMESPACE block by creating a new
+// environment for it and evaluating all the POU definitions within that scope.
+func evalNamespaceDeclaration(node *ast.NamespaceDeclaration, env *object.Environment) object.Object {
+	// Create a new environment for the namespace, enclosed by the current one.
+	namespaceEnv := object.NewEnclosedEnvironment(env)
+	ns := &object.Namespace{
+		Name: node.Name.String(),
+		Env:  namespaceEnv,
+	}
+
+	// Evaluate all statements within the namespace in its new environment.
+	// This will define all the FBs, functions, types, etc. inside the namespace.
+	Eval(&ast.Program{Statements: node.Statements}, namespaceEnv)
+
+	// Store the namespace object in the parent environment.
+	// For now, we only support simple, non-nested namespace names at the top level.
+	if ident, ok := node.Name.(*ast.Identifier); ok {
+		env.Set(ident.Value, ns)
+	}
+
+	return ns
 }
 
 // evalBlockStatement evaluates a block of statements sequentially. It returns the
@@ -1463,9 +1501,18 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		if isError(val) {
 			return val
 		}
-		// Convert the initial value to the declared type, if necessary.
-		if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
-			targetType := strings.ToUpper(typeSpec.TokenLiteral())
+
+		// Determine the target type from the declaration to perform conversion.
+		var targetType string
+		if node.DataType != nil {
+			if typeIdent, ok := node.DataType.(*ast.Identifier); ok {
+				targetType = strings.ToUpper(typeIdent.Value)
+			} else if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
+				targetType = strings.ToUpper(typeSpec.TokenLiteral())
+			}
+		}
+
+		if targetType != "" {
 			// Avoid converting if types are already the same, or if it's not a basic type conversion.
 			// This is a simple heuristic to avoid errors with complex types like structs.
 			if string(val.Type()) != targetType && (object.IsIntegerType(targetType) || object.IsRealType(targetType) || object.IsBooleanType(targetType)) {
@@ -1478,119 +1525,111 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		}
 	} else {
 		// No initial value provided in the declaration. Check for user-defined types or FB instantiation.
-		if typeSpec, ok := node.DataType.(*ast.TypeSpecifier); ok {
-			typeName := typeSpec.TokenLiteral()
-			// 1. Check if it's a user-defined type with a default value.
-			if typeQuote, ok := env.Get("_type_" + typeName); ok {
-				if quote, isQuote := typeQuote.(*object.Quote); isQuote {
-					if typeDecl, isTypeDecl := quote.Node.(*ast.TypeDeclaration); isTypeDecl {
-						if typeDecl.InitialValue != nil {
-							val = Eval(typeDecl.InitialValue, env)
-						}
+		if node.DataType != nil {
+			typeName := node.DataType.String()
+			upperTypeName := strings.ToUpper(typeName)
+			isPrimitive := object.IsIntegerType(upperTypeName) ||
+				object.IsRealType(upperTypeName) ||
+				object.IsBooleanType(upperTypeName) ||
+				object.IsStringType(upperTypeName) ||
+				object.IsBitStringType(upperTypeName) ||
+				object.IsTimeDateKeyword(upperTypeName)
+
+			if !isPrimitive {
+				// It's not a primitive type, so it could be a user-defined FB, a built-in FB, or a user-defined type.
+				// Evaluate the data type expression to resolve it.
+				typeObj := Eval(node.DataType, env)
+				if isError(typeObj) {
+					return typeObj
+				}
+
+				// Now, based on the evaluated type object, create an instance or default value.
+				switch resolvedType := typeObj.(type) {
+				case *object.FunctionBlock:
+					// It's a user-defined function block. Instantiate it.
+					if resolvedType.Definition.IsAbstract {
+						return newError(node, "cannot instantiate abstract function block '%s'", resolvedType.Name.Value)
 					}
+					if err := checkInterfaceImplementation(resolvedType, env); err != nil {
+						return err
+					}
+					instanceEnv := object.NewEnclosedEnvironment(resolvedType.Env)
+					val = &object.FunctionBlockInstance{Definition: resolvedType, Env: instanceEnv}
+
+					var populateInheritedVars func(d *ast.FunctionBlockDeclaration) *object.Error
+					populateInheritedVars = func(d *ast.FunctionBlockDeclaration) *object.Error {
+						if d.Extends != nil {
+							parentObj, ok := instanceEnv.Get(d.Extends.Value)
+							if !ok {
+								return newError(d, "parent function block '%s' not found", d.Extends.Value)
+							}
+							parentFb, ok := parentObj.(*object.FunctionBlock)
+							if !ok {
+								return newError(d, "parent '%s' is not a function block", d.Extends.Value)
+							}
+							if parentFb.Definition == nil {
+								return newError(d, "internal error: function block definition for '%s' is missing", d.Extends.Value)
+							}
+							if err := populateInheritedVars(parentFb.Definition); err != nil {
+								return err
+							}
+						}
+						evalGenericVarBlock(d.VarInputs, instanceEnv)
+						evalGenericVarBlock(d.VarOutputs, instanceEnv)
+						evalGenericVarBlock(d.VarInOuts, instanceEnv)
+						evalGenericVarBlock(d.Vars, instanceEnv)
+						return nil
+					}
+					if err := populateInheritedVars(resolvedType.Definition); err != nil {
+						return err
+					}
+
+					if sfcAST, isSFC := resolvedType.Body.(*ast.SFCProgram); isSFC {
+						sfcObj := evalSFCProgram(sfcAST, instanceEnv)
+						instanceEnv.Set("__sfc_instance__", sfcObj)
+					}
+
+				case *object.BuiltinFunctionBlock:
+					// It's a standard function block like TON.
+					instanceEnv := object.NewEnclosedEnvironment(env)
+					instanceEnv.Set("__fb_logic__", resolvedType)
+					val = &object.FunctionBlockInstance{Definition: nil, Env: instanceEnv}
 				}
 			}
+		}
 
-			// 2. If no value was inherited, check for FB instantiation.
-			if val == nil {
-				// Only attempt to evaluate the type name as a potential function block
-				// if it's not a known primitive type. For primitive types, we assign
-				// their default zero value.
-				upperTypeName := strings.ToUpper(typeName)
+		// If after all that, `val` is still nil, apply default primitive values.
+		if val == nil {
+			typeName := node.DataType.String()
+			upperTypeName := strings.ToUpper(typeName)
 
-				if object.IsIntegerType(upperTypeName) {
-					val = &object.LInt{Value: 0}
-				} else if object.IsRealType(upperTypeName) {
-					val = &object.LReal{Value: 0.0}
-				} else if object.IsBooleanType(upperTypeName) {
-					val = FALSE
-				} else if object.IsStringType(upperTypeName) {
-					if upperTypeName == "STRING" {
-						val = &object.String{Value: ""}
-					} else { // WSTRING
-						val = &object.WString{Value: ""}
-					}
-				} else if object.IsBitStringType(upperTypeName) {
-					width, ok := object.GetBitStringWidth(upperTypeName)
-					if ok {
-						val = &object.BitString{Value: 0, Width: width}
-					}
-				} else if object.IsTimeDateKeyword(upperTypeName) {
-					switch upperTypeName {
-					case "TIME", "T":
-						val = &object.Time{Value: 0}
-					case "DATE", "D":
-						val = &object.Date{Value: time.Time{}}
-					case "TIME_OF_DAY", "TOD":
-						val = &object.TimeOfDay{Value: time.Time{}}
-					case "DATE_AND_TIME", "DT":
-						val = &object.DateAndTime{Value: time.Time{}}
-					}
-				} else {
-					// It's not a primitive, so it could be a user-defined FB instance.
-					typeObj := evalIdentifier(
-						&ast.Identifier{Token: typeSpec.Token, Value: typeName},
-						env,
-					)
-					if isError(typeObj) {
-						return typeObj
-					}
-
-					if fbDef, ok := typeObj.(*object.FunctionBlock); ok {
-						// Check if the function block is abstract.
-						if fbDef.Definition.IsAbstract {
-							return newError(node, "cannot instantiate abstract function block '%s'", fbDef.Name.Value)
-						}
-
-						// Check if the function block correctly implements its interfaces.
-						if err := checkInterfaceImplementation(fbDef, env); err != nil {
-							return err
-						}
-
-						// This is where we instantiate a derived FB. We need to
-						// recursively populate its environment with all inherited variables.
-						instanceEnv := object.NewEnclosedEnvironment(fbDef.Env)
-						val = &object.FunctionBlockInstance{Definition: fbDef, Env: instanceEnv}
-
-						var populateInheritedVars func(d *ast.FunctionBlockDeclaration) *object.Error
-						populateInheritedVars = func(d *ast.FunctionBlockDeclaration) *object.Error {
-							if d.Extends != nil {
-								parentObj, ok := env.Get(d.Extends.Value)
-								if !ok {
-									return newError(d, "parent function block '%s' not found", d.Extends.Value)
-								}
-								parentFb, ok := parentObj.(*object.FunctionBlock)
-								if !ok {
-									return newError(d, "parent '%s' is not a function block", d.Extends.Value)
-								}
-								parentDef := parentFb.Definition
-								if parentDef == nil {
-									return newError(d, "internal error: function block definition for '%s' is missing", d.Extends.Value)
-								}
-								populateInheritedVars(parentDef)
-							}
-							evalGenericVarBlock(d.VarInputs, instanceEnv)
-							evalGenericVarBlock(d.VarOutputs, instanceEnv)
-							evalGenericVarBlock(d.VarInOuts, instanceEnv)
-							evalGenericVarBlock(d.Vars, instanceEnv)
-							return nil
-						}
-						if err := populateInheritedVars(fbDef.Definition); err != nil {
-							return err
-						}
-
-						// If the FB has an SFC body, evaluate it to create the SFC object instance
-						// and store it in the FB's persistent environment.
-						if sfcAST, isSFC := fbDef.Body.(*ast.SFCProgram); isSFC {
-							sfcObj := evalSFCProgram(sfcAST, instanceEnv)
-							instanceEnv.Set("__sfc_instance__", sfcObj)
-						}
-
-					} else if builtinFB, ok := typeObj.(*object.BuiltinFunctionBlock); ok {
-						instanceEnv := object.NewEnclosedEnvironment(env)
-						instanceEnv.Set("__fb_logic__", builtinFB)
-						val = &object.FunctionBlockInstance{Definition: nil, Env: instanceEnv}
-					}
+			if object.IsIntegerType(upperTypeName) {
+				val = &object.LInt{Value: 0}
+			} else if object.IsRealType(upperTypeName) {
+				val = &object.LReal{Value: 0.0}
+			} else if object.IsBooleanType(upperTypeName) {
+				val = FALSE
+			} else if object.IsStringType(upperTypeName) {
+				if upperTypeName == "STRING" {
+					val = &object.String{Value: ""}
+				} else { // WSTRING
+					val = &object.WString{Value: ""}
+				}
+			} else if object.IsBitStringType(upperTypeName) {
+				width, ok := object.GetBitStringWidth(upperTypeName)
+				if ok {
+					val = &object.BitString{Value: 0, Width: width}
+				}
+			} else if object.IsTimeDateKeyword(upperTypeName) {
+				switch upperTypeName {
+				case "TIME", "T":
+					val = &object.Time{Value: 0}
+				case "DATE", "D":
+					val = &object.Date{Value: time.Time{}}
+				case "TIME_OF_DAY", "TOD":
+					val = &object.TimeOfDay{Value: time.Time{}}
+				case "DATE_AND_TIME", "DT":
+					val = &object.DateAndTime{Value: time.Time{}}
 				}
 			}
 		}
@@ -3385,17 +3424,28 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 	}
 
 	switch l := left.(type) {
+	case *object.Namespace:
+		member := node.Member.Value
+		val, ok := l.Env.Get(member)
+		if !ok {
+			// Also check for functions, which are stored with a prefix
+			if fnVal, fnOk := l.Env.Get("_function_" + member); fnOk {
+				return fnVal
+			}
+			return newError(node, "member '%s' not found in namespace '%s'", member, l.Name)
+		}
+		return val
 	case *object.FunctionBlockInstance:
 		member := node.Member.Value
 		val, ok := l.Env.Get(member)
 		if !ok {
 			// If not a variable, check if it's a property read (GET).
-			if propDef := findPropertyOnFBChain(l.Definition, member); propDef != nil {
+			if propDef, ownerDef := findPropertyOnFBChain(l.Definition, member, env); propDef != nil {
 				if propDef.Getter == nil {
 					return newError(node, "property '%s' is write-only", member)
 				}
 				// Check access permission for the GET accessor
-				err := checkAccessPermission(propDef.Getter.AccessSpecifier, l, env)
+				err := checkAccessPermission(propDef.Getter.AccessSpecifier, ownerDef, env)
 				if err != nil {
 					return newError(node, "cannot access getter for property '%s': %s", member, err.Message)
 				}
@@ -3413,24 +3463,29 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 				return result
 			}
 
-			// If the member is not a variable, check if it's a method.
-			if l.Definition != nil && l.Definition.Body != nil {
-				if body, ok := l.Definition.Body.(*ast.BlockStatement); ok {
-					for _, stmt := range body.Statements {
-						if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
-							if method.Name.Value == member {
-								// It's a method. Return a new Method object that binds the
-								// method's definition to this specific FB instance.
-								return &object.Method{Definition: method, Instance: l}
-							}
-						}
-					}
-				}
+			// If not a property, check if it's a method by searching up the inheritance chain.
+			if methodDef := findMethodOnFBChain(l.Definition, member, env); methodDef != nil {
+				// It's a method. Return a new Method object that binds the
+				// method's definition to this specific FB instance.
+				return &object.Method{Definition: methodDef, Instance: l}
 			}
 
 			return newError(node, "member '%s' not found in function block instance '%s'", member, l.Definition.Name.Value)
 		}
-		return val
+
+		// Check access permission for direct variable access
+		if l.Definition != nil {
+			varDecl, ownerDef := findVarDeclOnFBChain(l.Definition, member, env)
+			if varDecl != nil {
+				err := checkAccessPermission(varDecl.AccessSpecifier, ownerDef, env)
+				if err != nil {
+					return newError(node, "cannot access member variable '%s': %s", member, err.Message)
+				}
+			}
+		}
+
+		// If we are here, access is granted. Dereference if it's a pointer.
+		return dereferencePointer(node, val)
 
 	case *object.SuperContext:
 		// This handles SUPER^.MyMethod() calls.
@@ -3452,7 +3507,7 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		}
 
 		// Resolve the parent function block definition from the identifier.
-		parentFBObj, ok := env.Get(parentFBIdentifier.Value)
+		parentFBObj, ok := currentInstance.Definition.Env.Get(parentFBIdentifier.Value)
 		if !ok {
 			return newError(node, "parent function block '%s' not found", parentFBIdentifier.Value)
 		}
@@ -3977,44 +4032,16 @@ func findMethodOnFBChain(fbDef *object.FunctionBlock, methodName string, env *ob
 
 	// If not found, recurse to the parent.
 	if fbDef.Definition.Extends != nil {
-		parentObj, ok := env.Get(fbDef.Definition.Extends.Value)
-		if ok {
-			if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
-				return findMethodOnFBChain(parentDef, methodName, env)
-			}
+		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		if !ok {
+			return nil
+		}
+		if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
+			return findMethodOnFBChain(parentDef, methodName, env)
 		}
 	}
 
 	return nil // Reached the top of the chain without finding the method.
-}
-
-// findPropertyOnFBChain recursively searches for a property definition starting from a given
-// function block and traversing up its inheritance chain.
-func findPropertyOnFBChain(fbDef *object.FunctionBlock, propName string) *ast.PropertyDeclaration {
-	if fbDef == nil {
-		return nil
-	}
-
-	// Search for the property in the current FB's definition.
-	if fbDef.Definition != nil {
-		for _, prop := range fbDef.Definition.Properties {
-			if prop.Name.Value == propName {
-				return prop // Found it.
-			}
-		}
-	}
-
-	// If not found, recurse to the parent.
-	if fbDef.Definition != nil && fbDef.Definition.Extends != nil {
-		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
-		if ok {
-			if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
-				return findPropertyOnFBChain(parentDef, propName)
-			}
-		}
-	}
-
-	return nil // Reached the top of the chain without finding the property.
 }
 
 // evalInterfaceDeclaration evaluates an INTERFACE declaration and stores its
@@ -4034,21 +4061,22 @@ func evalInterfaceDeclaration(node *ast.InterfaceDeclaration, env *object.Enviro
 func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Environment) *object.Error {
 	// Collect all interfaces implemented by this FB and its parents.
 	allInterfaces := []*ast.Identifier{}
-	currentDef := fbDef.Definition
-	for currentDef != nil {
-		allInterfaces = append(allInterfaces, currentDef.Implements...)
-		if currentDef.Extends == nil {
+	currentFB := fbDef
+	for currentFB != nil && currentFB.Definition != nil {
+		allInterfaces = append(allInterfaces, currentFB.Definition.Implements...)
+		if currentFB.Definition.Extends == nil {
 			break
 		}
-		parentObj, ok := env.Get(currentDef.Extends.Value)
+		// The parent FB definition must be resolved from the context of the child's definition.
+		parentObj, ok := currentFB.Env.Get(currentFB.Definition.Extends.Value)
 		if !ok {
-			return newError(currentDef, "parent function block '%s' not found during interface check", currentDef.Extends.Value)
+			return newError(currentFB.Definition, "parent function block '%s' not found during interface check", currentFB.Definition.Extends.Value)
 		}
 		parentFb, ok := parentObj.(*object.FunctionBlock)
 		if !ok {
-			return newError(currentDef, "parent '%s' is not a function block", currentDef.Extends.Value)
+			return newError(currentFB.Definition, "parent '%s' is not a function block", currentFB.Definition.Extends.Value)
 		}
-		currentDef = parentFb.Definition
+		currentFB = parentFb
 	}
 
 	uniqueInterfaces := make(map[string]*ast.Identifier)
@@ -4057,7 +4085,9 @@ func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Envir
 	}
 
 	for _, ifaceIdent := range uniqueInterfaces {
-		ifaceObj, ok := env.Get(ifaceIdent.Value)
+		// The interface must be found in the environment where the FB was defined (fbDef.Env),
+		// not the environment where it is being instantiated (`env`).
+		ifaceObj, ok := fbDef.Env.Get(ifaceIdent.Value)
 		if !ok {
 			return newError(ifaceIdent, "interface '%s' not found", ifaceIdent.Value)
 		}
@@ -4079,7 +4109,7 @@ func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Envir
 
 		// Check properties
 		for _, requiredProp := range ifaceDef.Properties {
-			foundProp := findPropertyOnFBChain(fbDef, requiredProp.Name.Value)
+			foundProp, _ := findPropertyOnFBChain(fbDef, requiredProp.Name.Value, env)
 			if foundProp == nil {
 				return newError(fbDef.Definition, "function block '%s' does not implement property '%s' from interface '%s'", fbDef.Name.Value, requiredProp.Name.Value, ifaceDef.Name.Value)
 			}
@@ -4090,4 +4120,68 @@ func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Envir
 	}
 
 	return nil
+}
+
+// findVarDeclOnFBChain recursively searches for a variable declaration starting from a given
+// function block and traversing up its inheritance chain. It returns the declaration and its owner.
+func findVarDeclOnFBChain(fbDef *object.FunctionBlock, varName string, env *object.Environment) (*ast.VarDeclStatement, *ast.FunctionBlockDeclaration) {
+	if fbDef == nil || fbDef.Definition == nil {
+		return nil, nil
+	}
+
+	// Search all var blocks in the current FB's definition.
+	allVarBlocks := [][]*ast.VarDeclStatement{
+		fbDef.Definition.VarInputs,
+		fbDef.Definition.VarOutputs,
+		fbDef.Definition.VarInOuts,
+		fbDef.Definition.Vars,
+	}
+	for _, varBlock := range allVarBlocks {
+		for _, decl := range varBlock {
+			if decl.Name.Value == varName {
+				return decl, fbDef.Definition // Found it.
+			}
+		}
+	}
+
+	// If not found, recurse to the parent.
+	if fbDef.Definition.Extends != nil {
+		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		if !ok {
+			return nil, nil
+		}
+		if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
+			return findVarDeclOnFBChain(parentDef, varName, env)
+		}
+	}
+
+	return nil, nil // Reached the top of the chain without finding the var.
+}
+
+// findPropertyOnFBChain recursively searches for a property declaration starting from a given
+// function block and traversing up its inheritance chain. It returns the declaration and its owner.
+func findPropertyOnFBChain(fbDef *object.FunctionBlock, propName string, env *object.Environment) (*ast.PropertyDeclaration, *ast.FunctionBlockDeclaration) {
+	if fbDef == nil || fbDef.Definition == nil {
+		return nil, nil
+	}
+
+	// Search for the property in the current FB's definition.
+	for _, prop := range fbDef.Definition.Properties {
+		if prop.Name.Value == propName {
+			return prop, fbDef.Definition // Found it.
+		}
+	}
+
+	// If not found, recurse to the parent.
+	if fbDef.Definition.Extends != nil {
+		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		if !ok {
+			return nil, nil
+		}
+		if parentDef, isParentFB := parentObj.(*object.FunctionBlock); isParentFB {
+			return findPropertyOnFBChain(parentDef, propName, env)
+		}
+	}
+
+	return nil, nil // Reached the top of the chain without finding the property.
 }

@@ -656,6 +656,7 @@ func TestExtendedObjectInspection(t *testing.T) {
 		{"FunctionBlock", fbDef, FUNCTION_BLOCK_OBJ, "FUNCTION_BLOCK MyFB ()"},
 		{"Program", progDef, PROGRAM_OBJ, "PROGRAM MyProg ()"},
 		{"ProgramInstance", &ProgramInstance{Definition: progDef}, PROGRAM_INSTANCE_OBJ, "INSTANCE OF MyProg"},
+		{"Namespace", &Namespace{Name: "MyLib"}, NAMESPACE_OBJ, "NAMESPACE(MyLib)"},
 	}
 
 	for _, tt := range tests {

@@ -35,12 +35,7 @@ func TestSingleVarDeclStatement(t *testing.T) {
 		t.Errorf("decl.Name.Value not 'myVar'. got=%s", decl.Name.Value)
 	}
 
-	ts, ok := decl.DataType.(*ast.TypeSpecifier)
-	if !ok {
-		t.Fatalf("decl.DataType is not *ast.TypeSpecifier. got=%T", decl.DataType)
-	}
-
-	if ts.TokenLiteral() != "INT" {
+	if decl.DataType.String() != "INT" {
 		t.Errorf("decl.DataType not 'INT'. got=%s", decl.DataType)
 	}
 
