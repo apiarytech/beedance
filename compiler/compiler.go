@@ -40,6 +40,7 @@ type Compiler struct {
 
 	functionStack []*ast.FunctionDeclaration
 	loopCtxStack  []*loopContext
+	currentFB     *ast.FunctionBlockDeclaration
 }
 
 // NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
@@ -63,6 +64,7 @@ func NewCompilerWithBuiltins(builtins []object.BuiltinEntry) *Compiler {
 		scopeIndex:    0,
 		functionStack: []*ast.FunctionDeclaration{},
 		loopCtxStack:  []*loopContext{},
+		currentFB:     nil,
 	}
 }
 
@@ -89,6 +91,7 @@ func NewWithState(s *SymbolTable, constants []object.Object) *Compiler {
 		scopeIndex:    0,
 		functionStack: []*ast.FunctionDeclaration{},
 		loopCtxStack:  []*loopContext{},
+		currentFB:     nil,
 	}
 }
 
@@ -293,14 +296,41 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A FunctionBlockDeclaration is compiled into a callable closure, similar to a function,
 	// representing the FB "template" or class.
 	case *ast.FunctionBlockDeclaration:
-		// This treats an FB declaration similarly to a function declaration.
-		// It compiles the body into a callable unit and defines the FB's name globally.
-		// The resulting object is a "template" or "class" that can later be instantiated.
+		// An FB declaration compiles into a hash of its constituent parts:
+		// the main logic body, and each method.
 		symbol := c.symbolTable.Define(node.Name.Value, false)
 
-		c.enterScope()
+		// Set context for compiling methods, allowing them to resolve FB members.
+		c.currentFB = node
+		defer func() { c.currentFB = nil }()
 
-		// Define all variables in the FB's scope so the body can be compiled correctly.
+		// Filter out methods from the main body logic.
+		mainLogicStmts := []ast.Statement{}
+		methods := []*ast.MethodImplementation{}
+		if bodyBlock, ok := node.Body.(*ast.BlockStatement); ok {
+			for _, stmt := range bodyBlock.Statements {
+				if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
+					methods = append(methods, method)
+				} else {
+					mainLogicStmts = append(mainLogicStmts, stmt)
+				}
+			}
+		}
+		mainBody := &ast.BlockStatement{Statements: mainLogicStmts}
+
+		// Compile methods
+		methodConstants := make(map[string]int)
+		for _, method := range methods {
+			compiledMethod, err := c.compileMethod(method)
+			if err != nil {
+				return err
+			}
+			methodConstants[method.Name.Value] = c.addConstant(compiledMethod)
+		}
+
+		// Compile main body
+		c.enterScope()
+		c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
 		for _, p := range node.VarInputs {
 			c.symbolTable.Define(p.Name.Value, false)
 		}
@@ -310,44 +340,36 @@ func (c *Compiler) Compile(node ast.Node) error {
 		for _, p := range node.VarInOuts {
 			c.symbolTable.Define(p.Name.Value, false)
 		}
-
-		// Compile local variable declarations to handle initial values.
 		for _, decl := range node.Vars {
 			if err := c.Compile(decl); err != nil {
 				return err
 			}
 		}
-		// Note: VAR_TEMP and VAR_EXTERNAL would also be handled here in a full implementation.
-
-		err := c.Compile(node.Body)
-		if err != nil {
+		if err := c.Compile(mainBody); err != nil {
 			return err
 		}
-
-		// Ensure the FB logic ends with a return, even if empty.
 		if !c.lastInstructionIs(code.OpReturnValue) {
 			c.emit(code.OpReturn)
 		}
 
-		freeSymbols := c.symbolTable.FreeSymbols
-		numLocals := c.symbolTable.numDefinitions
-		instructions := c.leaveScope()
-
-		compiledFn := &object.CompiledFunction{
-			Instructions:  instructions,
-			NumLocals:     numLocals,
+		mainLogicInstructions := c.leaveScope()
+		mainFn := &object.CompiledFunction{
+			Instructions:  mainLogicInstructions,
+			NumLocals:     c.symbolTable.numDefinitions,
 			NumParameters: len(node.VarInputs),
 		}
-		fnIndex := c.addConstant(compiledFn)
+		mainFnIndex := c.addConstant(mainFn)
 
-		// For now, we compile it into a closure, just like a function.
-		// A more advanced VM would need a dedicated FunctionBlock object.
-		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
-		if symbol.Scope == GlobalScope {
-			c.emit(code.OpSetGlobal, symbol.Index)
-		} else {
-			c.emit(code.OpSetLocal, symbol.Index)
+		// Create the hash that represents the FB class.
+		c.emit(code.OpConstant, c.addConstant(&object.String{Value: "main"}))
+		c.emit(code.OpClosure, mainFnIndex, 0)
+		for name, constIndex := range methodConstants {
+			c.emit(code.OpConstant, c.addConstant(&object.String{Value: name}))
+			c.emit(code.OpClosure, constIndex, 0)
 		}
+		c.emit(code.OpHash, (len(methodConstants)+1)*2)
+		c.emit(code.OpSetGlobal, symbol.Index)
+		return nil
 
 	// An SFCProgram is compiled into a static data structure (a hash).
 	case *ast.SFCProgram:
@@ -538,42 +560,42 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpPop)
 
 	case *ast.AssignmentStatement:
-		// Check if assigning to the current function's return variable.
-		// This is the standard way to return a value in IEC 61131-3.
-		// We can optimize this by treating it as an explicit return statement.
-		if ident, ok := node.Left.(*ast.Identifier); ok {
-			if currentFn := c.currentFunction(); currentFn != nil && ident.Value == currentFn.Name.Value {
-				// Compile the value and treat it as a return statement.
+		// Use a type switch to safely handle different kinds of assignment targets
+		// and prevent panics if the parser produces an unexpected AST node.
+		switch target := node.Left.(type) {
+		case *ast.Identifier:
+			// Check if this is an assignment to the current function's name,
+			// which is the IEC 61131-3 way of setting a return value.
+			if currentFn := c.currentFunction(); currentFn != nil && target.Value == currentFn.Name.Value {
 				if err := c.Compile(node.Value); err != nil {
 					return err
 				}
 				c.emit(code.OpReturnValue)
-				return nil // Statement handled.
+				return nil
 			}
-		}
 
-		err := c.Compile(node.Value)
-		if err != nil {
-			return err
-		}
+			// Otherwise, it's a regular variable assignment.
+			if err := c.Compile(node.Value); err != nil {
+				return err
+			}
+			symbol, ok := c.symbolTable.Resolve(target.Value)
+			if !ok {
+				return fmt.Errorf("undefined variable %s", target.Value)
+			}
+			return c.setSymbol(symbol)
 
-		symbol, ok := c.symbolTable.Resolve(node.Left.(*ast.Identifier).Value)
-		if !ok {
-			return fmt.Errorf("undefined variable %s", node.Left.(*ast.Identifier).Value)
-		}
+		case *ast.IndexExpression:
+			// Assignment to array elements (e.g., `MyArray[i] := ...`) is not yet implemented.
+			return fmt.Errorf("assignment to index expression not yet implemented in compiler")
 
-		// Check if assigning to the current function's return variable, which is a special case.
-		if currentFn := c.currentFunction(); currentFn != nil && symbol.Scope == LocalScope && symbol.Name == currentFn.Name.Value {
-			// We have the value on the stack. Instead of setting a local and then
-			// potentially returning it later, we just emit OpReturnValue directly.
-			c.emit(code.OpReturnValue)
-			// This is a return, so we don't pop the value.
-			return nil // The statement is fully handled.
-		}
+		case *ast.MemberAccessExpression:
+			// Assignment to struct members (e.g., `MyStruct.Field := ...`) is not yet implemented.
+			return fmt.Errorf("assignment to member expression not yet implemented in compiler")
 
-		err = c.setSymbol(symbol)
-		if err != nil {
-			return err
+		default:
+			// This default case catches any other type, including `nil`,
+			// preventing the panic and providing a clear error message.
+			return fmt.Errorf("unsupported assignment target: %T", node.Left)
 		}
 
 	// A VarBlockDeclaration simply triggers compilation of each declaration within it.
@@ -845,6 +867,47 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// which is then added to the constant pool.
 	case *ast.TypedLiteral:
 		return c.compileTypedLiteral(node)
+
+	// Specific time/date literals are parsed into their own AST nodes.
+	// We reconstruct a generic TypedLiteral to reuse the parsing logic.
+	case *ast.TimeLiteral:
+		return c.compileTypedLiteral(&ast.TypedLiteral{
+			Token:    node.Token,
+			TypeName: "TIME",
+			Value:    &ast.Identifier{Token: node.Token, Value: node.Value},
+		})
+	case *ast.DateLiteral:
+		return c.compileTypedLiteral(&ast.TypedLiteral{
+			Token:    node.Token,
+			TypeName: "DATE",
+			Value:    &ast.Identifier{Token: node.Token, Value: node.Value},
+		})
+	case *ast.TimeOfDayLiteral:
+		return c.compileTypedLiteral(&ast.TypedLiteral{
+			Token:    node.Token,
+			TypeName: "TIME_OF_DAY",
+			Value:    &ast.Identifier{Token: node.Token, Value: node.Value},
+		})
+	case *ast.DateAndTimeLiteral:
+		return c.compileTypedLiteral(&ast.TypedLiteral{
+			Token:    node.Token,
+			TypeName: "DATE_AND_TIME",
+			Value:    &ast.Identifier{Token: node.Token, Value: node.Value},
+		})
+
+	case *ast.ThisExpression:
+		thisSymbol, ok := c.symbolTable.Resolve("THIS")
+		if !ok {
+			return fmt.Errorf("cannot use THIS outside of a function block context")
+		}
+		c.loadSymbol(thisSymbol)
+
+	case *ast.DereferenceExpression:
+		// The '^' operator is for dereferencing pointers. In the context of
+		// `THIS^`, `THIS` is already the instance reference, so the dereference
+		// is effectively a no-op for the compiler's purpose. We just compile
+		// the expression being pointed to.
+		return c.Compile(node.Pointer)
 
 	// A ForLoopStatement is compiled into a sequence of initialization, condition
 	// check, body, increment, and jump instructions to create the loop structure.
@@ -1177,18 +1240,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-		// --- Part 1: Compile the function call with its inputs ---
-		// Check for recursive call
-		isRecursive := false
-		if ident, ok := node.Function.(*ast.Identifier); ok {
-			if currentFn := c.currentFunction(); currentFn != nil && ident.Value == currentFn.Name.Value {
-				isRecursive = true
+		// --- Part 1: Compile the function/callable object ---
+		if memberAccess, ok := node.Function.(*ast.MemberAccessExpression); ok {
+			// This is a method call like `instance.Method(...)`
+			// 1. Compile the instance (`instance`)
+			if err := c.Compile(memberAccess.Struct); err != nil {
+				return err
 			}
-		}
-		if isRecursive {
-			c.emit(code.OpCurrentClosure)
+			// 2. Get the method closure from the instance using the member name
+			c.emit(code.OpConstant, c.addConstant(&object.String{Value: memberAccess.Member.Value}))
+			c.emit(code.OpIndex)
 		} else {
-			if err := c.Compile(node.Function); err != nil {
+			// This is a standard function call (or recursive call)
+			isRecursive := false
+			if ident, ok := node.Function.(*ast.Identifier); ok {
+				if currentFn := c.currentFunction(); currentFn != nil && ident.Value == currentFn.Name.Value {
+					isRecursive = true
+				}
+			}
+			if isRecursive {
+				c.emit(code.OpCurrentClosure)
+			} else if err := c.Compile(node.Function); err != nil {
 				return err
 			}
 		}
@@ -1560,51 +1632,54 @@ func (c *Compiler) compileConfiguration(config *ast.ConfigurationDeclaration) er
 		}
 	}
 
-	// Compile each resource, leaving a resource hash object on the stack.
-	for _, res := range config.Resources {
-		// Find all VAR_CONFIG blocks that are relevant to this resource.
-		// This is a simplification; a real implementation might need to map
-		// program instances to resources more explicitly if names are not unique.
-		// For now, we pass all configs down.
-		// A better approach would be to pre-process configs into a map.
-		// For this implementation, we will pass all varConfigs to the resource compiler.
-		if err := c.compileResource(res, config.VarConfigs); err != nil {
-			return err
-		}
-	}
-	// Create an array of resource hashes.
-	c.emit(code.OpArray, len(config.Resources))
-
 	// Build the final configuration hash object.
 	// Key: "name"
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
-	// Value: config.Name.Value
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: config.Name.Value}))
 
 	// Key: "resources"
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "resources"}))
-	// Value: The array of resources is already on the stack.
+	// Compile each resource, leaving a resource hash object on the stack.
+	for _, res := range config.Resources {
+		if err := c.compileResource(res, config.VarConfigs); err != nil {
+			return err
+		}
+	}
+	// Create an array of resource hashes, which becomes the value for the "resources" key.
+	c.emit(code.OpArray, len(config.Resources))
 
 	c.emit(code.OpHash, 2*2) // 2 key-value pairs
 
 	// Store the final configuration hash in its global variable.
 	c.emit(code.OpSetGlobal, symbol.Index)
-
 	return nil
 }
 
 // compileResource compiles a RESOURCE block into a hash object containing its
 // tasks and program instances.
 func (c *Compiler) compileResource(res *ast.ResourceDeclaration, varConfigs []*ast.ConfigVarDeclaration) error {
-	// Compile tasks, leaving task hashes on the stack.
+	// Build the resource hash by compiling its key-value pairs in order.
+	// Key: "name"
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.Name.Value}))
+
+	// Key: "type"
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "type"}))
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.ResourceType.Value}))
+
+	// Key: "tasks"
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "tasks"}))
+	// Value: Compile tasks and create an array of task hashes.
 	for _, task := range res.Tasks {
 		if err := c.compileTask(task); err != nil {
 			return err
 		}
 	}
-	c.emit(code.OpArray, len(res.Tasks)) // Array of task hashes
+	c.emit(code.OpArray, len(res.Tasks))
 
-	// Compile program configurations, leaving program hashes on the stack.
+	// Key: "programs"
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "programs"}))
+	// Value: Compile program instances and create an array of program hashes.
 	for _, prog := range res.Programs {
 		var matchingConfig *ast.ConfigVarDeclaration
 		for _, vc := range varConfigs {
@@ -1617,21 +1692,7 @@ func (c *Compiler) compileResource(res *ast.ResourceDeclaration, varConfigs []*a
 			return err
 		}
 	}
-	c.emit(code.OpArray, len(res.Programs)) // Array of program hashes
-
-	// Build the resource hash object.
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.Name.Value}))
-
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "type"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.ResourceType.Value}))
-
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "programs"})) // Key for programs array
-	// The programs array is on top of the stack, tasks array is below it. Swap them.
-	c.emit(code.OpSwap)
-
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "tasks"})) // Key for tasks array
-	// The tasks array is now on top.
+	c.emit(code.OpArray, len(res.Programs))
 
 	c.emit(code.OpHash, 4*2) // 4 key-value pairs
 	return nil
@@ -1647,10 +1708,16 @@ func (c *Compiler) compileTask(task *ast.TaskDeclaration) error { // cspell:disa
 	if err := c.Compile(task.Interval); err != nil {
 		return err
 	}
+	if task.Interval == nil {
+		c.emit(code.OpNull)
+	}
 
 	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "priority"}))
 	if err := c.Compile(task.Priority); err != nil {
 		return err
+	}
+	if task.Priority == nil {
+		c.emit(code.OpNull)
 	}
 
 	c.emit(code.OpHash, 3*2) // 3 key-value pairs
@@ -1697,12 +1764,9 @@ func (c *Compiler) compileProgramConfig(prog *ast.ProgramConfiguration, varConfi
 
 // compileTypedLiteral compiles a typed literal (e.g., `INT#10`, `T#5s`) by
 // parsing its value and creating the corresponding object.Object.
-func (c *Compiler) compileTypedLiteral(node *ast.TypedLiteral) error {
+func (c *Compiler) parseTypedLiteralValue(node *ast.TypedLiteral) (object.Object, error) {
 	typeName := strings.ToUpper(node.TypeName)
 	valueStr := node.Value.String() // This is an ast.Identifier with the value part
-
-	var obj object.Object
-	var err error
 
 	switch typeName {
 	case "TIME", "T":
@@ -1710,58 +1774,58 @@ func (c *Compiler) compileTypedLiteral(node *ast.TypedLiteral) error {
 		durationStr := strings.ReplaceAll(valueStr, "_", "")
 		d, err := time.ParseDuration(durationStr)
 		if err != nil {
-			return fmt.Errorf("invalid TIME literal '%s': %w", valueStr, err)
+			return nil, fmt.Errorf("invalid TIME literal '%s': %w", valueStr, err)
 		}
-		obj = &object.Time{Value: d}
+		return &object.Time{Value: d}, nil
 	case "DATE", "D":
 		t, err := time.Parse("2006-01-02", valueStr)
 		if err != nil {
-			return fmt.Errorf("invalid DATE literal '%s': %w", valueStr, err)
+			return nil, fmt.Errorf("invalid DATE literal '%s': %w", valueStr, err)
 		}
-		obj = &object.Date{Value: t}
+		return &object.Date{Value: t}, nil
 	case "TIME_OF_DAY", "TOD":
 		t, err := time.Parse("15:04:05.999", valueStr)
 		if err != nil {
 			// try without milliseconds
 			t, err = time.Parse("15:04:05", valueStr)
 			if err != nil {
-				return fmt.Errorf("invalid TIME_OF_DAY literal '%s': %w", valueStr, err)
+				return nil, fmt.Errorf("invalid TIME_OF_DAY literal '%s': %w", valueStr, err)
 			}
 		}
-		obj = &object.TimeOfDay{Value: t}
+		return &object.TimeOfDay{Value: t}, nil
 	case "DATE_AND_TIME", "DT":
 		t, err := time.Parse("2006-01-02-15:04:05.999", valueStr)
 		if err != nil {
 			// try without milliseconds
 			t, err = time.Parse("2006-01-02-15:04:05", valueStr)
 			if err != nil {
-				return fmt.Errorf("invalid DATE_AND_TIME literal '%s': %w", valueStr, err)
+				return nil, fmt.Errorf("invalid DATE_AND_TIME literal '%s': %w", valueStr, err)
 			}
 		}
-		obj = &object.DateAndTime{Value: t}
+		return &object.DateAndTime{Value: t}, nil
 
 	// Integer types
 	case "SINT", "INT", "DINT", "LINT":
 		val, err := c.parseBasedInteger(valueStr)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// The VM uses LINT for all integer operations for simplicity.
-		obj = &object.LInt{Value: val}
+		return &object.LInt{Value: val}, nil
 	case "USINT", "UINT", "UDINT", "ULINT":
 		val, err := c.parseBasedUnsignedInteger(valueStr)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		obj = &object.ULInt{Value: val}
+		return &object.ULInt{Value: val}, nil
 
 	// Real types
 	case "REAL", "LREAL":
 		val, err := strconv.ParseFloat(strings.ReplaceAll(valueStr, "_", ""), 64)
 		if err != nil {
-			return fmt.Errorf("invalid REAL/LREAL literal '%s': %w", valueStr, err)
+			return nil, fmt.Errorf("invalid REAL/LREAL literal '%s': %w", valueStr, err)
 		}
-		obj = &object.LReal{Value: val}
+		return &object.LReal{Value: val}, nil
 
 	// Bit-string types
 	case "BYTE", "WORD", "DWORD", "LWORD":
@@ -1778,21 +1842,29 @@ func (c *Compiler) compileTypedLiteral(node *ast.TypedLiteral) error {
 		}
 		val, err := c.parseBasedUnsignedInteger(valueStr)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		obj = &object.BitString{Value: val, Width: width}
+		return &object.BitString{Value: val, Width: width}, nil
 
 	default:
 		// Fallback for enum types like `COLOR#RED` or other user-defined types.
-		obj = &object.EnumeratedValue{TypeName: node.TypeName, Value: valueStr}
+		return &object.EnumeratedValue{TypeName: node.TypeName, Value: valueStr}, nil
+	}
+}
+
+// compileTypedLiteral compiles a typed literal (e.g., `INT#10`, `T#5s`) by
+// parsing its value and creating the corresponding object.Object.
+func (c *Compiler) compileTypedLiteral(node *ast.TypedLiteral) error {
+	obj, err := c.parseTypedLiteralValue(node)
+	if err != nil {
+		return err
+	}
+	if obj == nil {
+		return fmt.Errorf("internal compiler error: parseTypedLiteralValue returned nil object without error for %s", node.String())
 	}
 
-	if obj != nil {
-		c.emit(code.OpConstant, c.addConstant(obj))
-	} else {
-		err = fmt.Errorf("unhandled typed literal: %s", node.String())
-	}
-	return err
+	c.emit(code.OpConstant, c.addConstant(obj))
+	return nil
 }
 
 // parseBasedInteger is a helper function to parse an integer string that may have a base prefix (e.g., "16#FF").
@@ -1892,4 +1964,48 @@ type CompilationScope struct {
 	instructions        code.Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+}
+
+// compileMethod compiles a method implementation into a CompiledFunction.
+// It's a helper for compiling FUNCTION_BLOCKs.
+func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.CompiledFunction, error) {
+	c.enterScope()
+	// A method is a function within the context of a function block.
+	// We need to push a function context so that return value assignments
+	// (e.g., `MyMethod := ...`) are compiled correctly as return statements.
+	// We create a temporary FunctionDeclaration for this context.
+	c.pushFunction(&ast.FunctionDeclaration{Name: method.Name})
+	defer c.popFunction()
+
+	// Define return var, params, and local vars
+	c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
+	c.symbolTable.Define(method.Name.Value, false)
+	for _, p := range method.VarInputs {
+		c.symbolTable.DefineVarInput(p.Name.Value)
+	}
+	for _, v := range method.Vars {
+		if err := c.Compile(v); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := c.Compile(method.Body); err != nil {
+		return nil, err
+	}
+
+	if c.lastInstructionIs(code.OpPop) {
+		c.replaceLastPopWithReturn()
+	}
+	if !c.lastInstructionIs(code.OpReturnValue) {
+		c.emit(code.OpReturn)
+	}
+
+	numLocals := c.symbolTable.numDefinitions
+	instructions := c.leaveScope()
+
+	return &object.CompiledFunction{
+		Instructions:  instructions,
+		NumLocals:     numLocals,
+		NumParameters: len(method.VarInputs),
+	}, nil
 }

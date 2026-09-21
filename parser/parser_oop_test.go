@@ -558,3 +558,91 @@ func TestFunctionBlockProperty(t *testing.T) {
 		t.Errorf("Incorrect statement in SET body. want='THIS.internalvar := value', got='%s := %s'", setStmt.Left.String(), setStmt.Value.String())
 	}
 }
+
+func TestFunctionBlockWithMethodCall(t *testing.T) {
+	input := `
+			FUNCTION_BLOCK MyFBWithMethod
+				VAR
+					Internalvar: INT := 1;
+				END_VAR
+
+				METHOD MyMethod : INT
+					VAR_INPUT
+						MethodIn : INT;
+					END_VAR
+					MyMethod := MethodIn * 2;
+				END_METHOD
+				
+				Internalvar := THIS^.MyMethod(Internalvar) + 1;
+			END_FUNCTION_BLOCK
+			`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p, "TestFunctionBlockWithMethodCall", input)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.FunctionBlockDeclaration. got=%T", program.Statements[0])
+	}
+
+	if fb.Name.Value != "MyFBWithMethod" {
+		t.Errorf("FB name is not 'MyFBWithMethod'. got=%s", fb.Name.Value)
+	}
+
+	// The body of a FB is a BlockStatement containing methods and then the logic
+	body, ok := fb.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("FB body is not a BlockStatement. got=%T", fb.Body)
+	}
+
+	if len(body.Statements) != 2 {
+		t.Fatalf("Expected 2 statements in FB body (method + assignment), got %d", len(body.Statements))
+	}
+
+	// Check METHOD
+	methodImpl, ok := body.Statements[0].(*ast.MethodImplementation)
+	if !ok {
+		t.Fatalf("Statement 0 is not a MethodImplementation. got=%T", body.Statements[0])
+	}
+	if methodImpl.Name.Value != "MyMethod" {
+		t.Errorf("Method name is not 'MyMethod'. got=%s", methodImpl.Name.Value)
+	}
+
+	// Check main logic assignment
+	assignStmt, ok := body.Statements[1].(*ast.AssignmentStatement)
+	if !ok {
+		t.Fatalf("Statement 1 is not an AssignmentStatement. got=%T", body.Statements[1])
+	}
+
+	// Check RHS of assignment: THIS^.MyMethod(Internal) + 1
+	infix, ok := assignStmt.Value.(*ast.InfixExpression)
+	if !ok {
+		t.Fatalf("Assignment value is not InfixExpression. got=%T", assignStmt.Value)
+	}
+
+	// Check call expression: THIS^.MyMethod(Internal)
+	call, ok := infix.Left.(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("LHS of infix is not CallExpression. got=%T", infix.Left)
+	}
+
+	// Check function being called: THIS^.MyMethod
+	memberAccess, ok := call.Function.(*ast.MemberAccessExpression)
+	if !ok {
+		t.Fatalf("Function of call is not MemberAccessExpression. got=%T", call.Function)
+	}
+
+	// Check THIS^
+	deref, ok := memberAccess.Struct.(*ast.DereferenceExpression)
+	if !ok {
+		t.Fatalf("Struct part of member access is not DereferenceExpression. got=%T", memberAccess.Struct)
+	}
+	if _, ok := deref.Pointer.(*ast.ThisExpression); !ok {
+		t.Fatalf("Pointer of dereference is not ThisExpression. got=%T", deref.Pointer)
+	}
+}

@@ -932,49 +932,46 @@ func TestConfigurationCompilation(t *testing.T) {
             END_CONFIGURATION
             `,
 			expectedConstants: []interface{}{
-				"name", "T1", "interval", 100 * time.Millisecond, "priority", 1, // Task
-				"instance", "P1", "task", "type", "ProgType", // Program
-				"params", "Input1", 42, // VAR_CONFIG
-				"Res1", "PLC1", "programs", "tasks", // Resource
-				"MyConfig", "resources", // Configuration
+				"name", "MyConfig", "resources", "Res1", "type", "PLC1", "tasks", "T1", // 0-7
+				"interval", 100 * time.Millisecond, "priority", int64(1), // 8-11
+				"programs", "instance", "P1", "task", "ProgType", "params", "Input1", int64(42), // 12-19
 			},
 			expectedInstructions: []code.Instructions{
-				// Task T1 Hash
+				// Configuration MyConfig Hash
 				code.Make(code.OpConstant, 0), // "name"
-				code.Make(code.OpConstant, 1), // "T1"
-				code.Make(code.OpConstant, 2), // "interval"
-				code.Make(code.OpConstant, 3), // T#100ms
-				code.Make(code.OpConstant, 4), // "priority"
-				code.Make(code.OpConstant, 5), // 1
-				code.Make(code.OpHash, 6),     // Task hash
-				code.Make(code.OpArray, 1),    // Tasks array
+				code.Make(code.OpConstant, 1), // "MyConfig"
+				code.Make(code.OpConstant, 2), // "resources"
+				// Resource Res1 Hash
+				code.Make(code.OpConstant, 0), // "name"
+				code.Make(code.OpConstant, 3), // "Res1"
+				code.Make(code.OpConstant, 4), // "type"
+				code.Make(code.OpConstant, 5), // "PLC1"
+				code.Make(code.OpConstant, 6), // "tasks"
+				// Task T1 Hash
+				code.Make(code.OpConstant, 0),  // "name"
+				code.Make(code.OpConstant, 7),  // "T1" (index 7)
+				code.Make(code.OpConstant, 8),  // "interval" (index 8)
+				code.Make(code.OpConstant, 9),  // 100ms
+				code.Make(code.OpConstant, 10), // "priority"
+				code.Make(code.OpConstant, 11), // 1
+				code.Make(code.OpHash, 6),      // Task hash
+				code.Make(code.OpArray, 1),     // Tasks array
+				code.Make(code.OpConstant, 12), // "programs"
 				// Program P1 Hash
-				code.Make(code.OpConstant, 6),  // "instance"
-				code.Make(code.OpConstant, 7),  // "P1"
-				code.Make(code.OpConstant, 8),  // "task"
-				code.Make(code.OpConstant, 1),  // "T1" (reused)
-				code.Make(code.OpConstant, 9),  // "type"
-				code.Make(code.OpConstant, 10), // "ProgType"
-				code.Make(code.OpConstant, 11), // "params"
-				code.Make(code.OpConstant, 12), // "Input1"
-				code.Make(code.OpConstant, 13), // 42
+				code.Make(code.OpConstant, 13), // "instance"
+				code.Make(code.OpConstant, 14), // "P1"
+				code.Make(code.OpConstant, 15), // "task"
+				code.Make(code.OpConstant, 7),  // "T1" (reused)
+				code.Make(code.OpConstant, 4),  // "type" (reused)
+				code.Make(code.OpConstant, 16), // "ProgType"
+				code.Make(code.OpConstant, 17), // "params"
+				code.Make(code.OpConstant, 18), // "Input1"
+				code.Make(code.OpConstant, 19), // int64(42)
 				code.Make(code.OpHash, 2),      // Params hash
 				code.Make(code.OpHash, 8),      // Program hash
 				code.Make(code.OpArray, 1),     // Programs array
-				// Resource Res1 Hash
-				code.Make(code.OpConstant, 0),  // "name" (reused)
-				code.Make(code.OpConstant, 14), // "Res1"
-				code.Make(code.OpConstant, 9),  // "type" (reused)
-				code.Make(code.OpConstant, 15), // "PLC1"
-				code.Make(code.OpConstant, 16), // "programs"
-				code.Make(code.OpSwap),
-				code.Make(code.OpConstant, 17), // "tasks"
-				code.Make(code.OpHash, 8),      // Resource hash // cspell:disable-line
+				code.Make(code.OpHash, 8),      // Resource hash
 				code.Make(code.OpArray, 1),     // Resources array
-				// Configuration MyConfig Hash
-				code.Make(code.OpConstant, 0),  // "name" (reused)
-				code.Make(code.OpConstant, 18), // "MyConfig"
-				code.Make(code.OpConstant, 19), // "resources"
 				code.Make(code.OpHash, 4),      // Config hash
 				code.Make(code.OpSetGlobal, 0), // Store config
 			},
@@ -1003,7 +1000,7 @@ func TestTypedLiterals(t *testing.T) {
 		},
 		{
 			input:             `INT#16#F`,
-			expectedConstants: []interface{}{15},
+			expectedConstants: []interface{}{int64(15)},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpPop),
@@ -1457,6 +1454,12 @@ func testConstants(
 			}
 		case int:
 			err := testIntegerObject(int64(constant), actual[i])
+			if err != nil { // cspell:disable-line
+				return fmt.Errorf("constant %d - testIntegerObject failed: %s",
+					i, err)
+			}
+		case int64:
+			err := testIntegerObject(constant, actual[i])
 			if err != nil {
 				return fmt.Errorf("constant %d - testIntegerObject failed: %s",
 					i, err)
