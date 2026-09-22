@@ -320,6 +320,22 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Compile methods
 		methodConstants := make(map[string]int)
+		for _, prop := range node.Properties {
+			if prop.Getter != nil {
+				getter, err := c.compilePropertyAccessor(prop, prop.Getter.Body, true)
+				if err != nil {
+					return err
+				}
+				methodConstants["get_"+prop.Name.Value] = c.addConstant(getter)
+			}
+			if prop.Setter != nil {
+				setter, err := c.compilePropertyAccessor(prop, prop.Setter.Body, false)
+				if err != nil {
+					return err
+				}
+				methodConstants["set_"+prop.Name.Value] = c.addConstant(setter)
+			}
+		}
 		for _, method := range methods {
 			compiledMethod, err := c.compileMethod(method)
 			if err != nil {
@@ -340,11 +356,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		for _, p := range node.VarInOuts {
 			c.symbolTable.Define(p.Name.Value, false)
 		}
-		for _, decl := range node.Vars {
-			if err := c.Compile(decl); err != nil {
-				return err
-			}
-		}
+		// Instance variables (VAR blocks) are not compiled into the main body's
+		// instructions. They represent the state of the FB instance and are
+		// handled by the VM during instantiation.
 		if err := c.Compile(mainBody); err != nil {
 			return err
 		}
@@ -363,7 +377,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Create the hash that represents the FB class.
 		c.emit(code.OpConstant, c.addConstant(&object.String{Value: "main"}))
 		c.emit(code.OpClosure, mainFnIndex, 0)
-		for name, constIndex := range methodConstants {
+		// Sort the method/property names to ensure deterministic bytecode generation,
+		// which is crucial for stable testing.
+		keys := make([]string, 0, len(methodConstants))
+		for k := range methodConstants {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, name := range keys {
+			constIndex := methodConstants[name]
 			c.emit(code.OpConstant, c.addConstant(&object.String{Value: name}))
 			c.emit(code.OpClosure, constIndex, 0)
 		}
@@ -585,12 +607,59 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return c.setSymbol(symbol)
 
 		case *ast.IndexExpression:
-			// Assignment to array elements (e.g., `MyArray[i] := ...`) is not yet implemented.
-			return fmt.Errorf("assignment to index expression not yet implemented in compiler")
-
+			// Compile the value to be assigned (RHS)
+			if err := c.Compile(node.Value); err != nil {
+				return err
+			}
+			// Compile the array/hash (LHS of index expression)
+			if err := c.Compile(target.Left); err != nil {
+				return err
+			}
+			// Compile the index
+			if err := c.Compile(target.Index); err != nil {
+				return err
+			}
+			c.emit(code.OpSetIndex)
+			return nil
 		case *ast.MemberAccessExpression:
-			// Assignment to struct members (e.g., `MyStruct.Field := ...`) is not yet implemented.
-			return fmt.Errorf("assignment to member expression not yet implemented in compiler")
+			// Check if this is an assignment to a property.
+			isProperty := false
+			if c.currentFB != nil {
+				// This is a simplification. A real implementation would need to know the type
+				// of `target.Struct` to check its properties. For now, we assume access on `THIS`.
+				if _, ok := target.Struct.(*ast.ThisExpression); ok {
+					for _, prop := range c.currentFB.Properties {
+						if prop.Name.Value == target.Member.Value {
+							isProperty = true
+							break
+						}
+					}
+				}
+			}
+
+			if isProperty {
+				// It's a property set. Compile as a call to the setter method.
+				// e.g., `p.MyProp := 5` becomes a call to `p.set_MyProp(5)`
+				setterCall := &ast.CallExpression{
+					Function: &ast.MemberAccessExpression{
+						Struct: target.Struct,
+						Member: &ast.Identifier{Value: "set_" + target.Member.Value},
+					},
+					Arguments: []ast.Expression{node.Value},
+				}
+				return c.Compile(setterCall)
+			} else {
+				// It's a regular field assignment.
+				if err := c.Compile(node.Value); err != nil {
+					return err
+				}
+				if err := c.Compile(target.Struct); err != nil {
+					return err
+				}
+				c.emit(code.OpConstant, c.addConstant(&object.String{Value: target.Member.Value}))
+				c.emit(code.OpSetIndex)
+				return nil
+			}
 
 		default:
 			// This default case catches any other type, including `nil`,
@@ -828,19 +897,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		afterAlternativePos := len(c.currentInstructions())
 		c.changeOperand(jumpPos, afterAlternativePos)
 
-	// A MemberAccessExpression compiles the base struct/FB and then treats the member
-	// name as a string key for an OpIndex operation.
-	case *ast.MemberAccessExpression:
-		// Compile the struct/FB instance on the left
-		if err := c.Compile(node.Struct); err != nil {
-			return err
-		}
-		// Compile the member name as a string constant for indexing.
-		// The VM's OpIndex will need to handle member access on structs.
-		c.emit(code.OpConstant, c.addConstant(&object.String{Value: node.Member.Value}))
-		c.emit(code.OpIndex)
-
-	// An UnsignedIntegerLiteral is added to the constant pool.
 	case *ast.UnsignedIntegerLiteral:
 		c.emit(code.OpConstant, c.addConstant(&object.ULInt{Value: node.Value}))
 
@@ -1158,6 +1214,38 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.emit(code.OpIndex)
+
+	case *ast.MemberAccessExpression:
+		// Check if this is a property access (read).
+		isProperty := false
+		// A more robust implementation would inspect the type of `node.Struct`.
+		// For now, we check if we are inside an FB and the access is on `THIS`.
+		if c.currentFB != nil {
+			if _, ok := node.Struct.(*ast.ThisExpression); ok {
+				for _, prop := range c.currentFB.Properties {
+					if prop.Name.Value == node.Member.Value {
+						isProperty = true
+						break
+					}
+				}
+			}
+		}
+
+		if isProperty {
+			// It's a property get. Compile as a call to the getter method.
+			// e.g., `x := p.MyProp` is compiled as `x := p.get_MyProp()`
+			getterCall := &ast.CallExpression{
+				Function: &ast.MemberAccessExpression{
+					Struct: node.Struct,
+					Member: &ast.Identifier{Value: "get_" + node.Member.Value},
+				},
+				Arguments: []ast.Expression{}, // Getter has no arguments
+			}
+			return c.Compile(getterCall)
+		}
+
+		// It's a regular field access.
+		return c.compileMemberAccess(node)
 
 	// A FunctionLiteral is compiled into a closure, similar to a named function.
 	case *ast.FunctionLiteral:
@@ -1977,12 +2065,18 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 	c.pushFunction(&ast.FunctionDeclaration{Name: method.Name})
 	defer c.popFunction()
 
-	// Define return var, params, and local vars
+	// Define params, return var, and local vars.
+	// The order is important: THIS, then input params, then the return var, then other locals.
 	c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
-	c.symbolTable.Define(method.Name.Value, false)
 	for _, p := range method.VarInputs {
 		c.symbolTable.DefineVarInput(p.Name.Value)
 	}
+
+	// Define and initialize the implicit return variable.
+	returnSymbol := c.symbolTable.Define(method.Name.Value, false)
+	c.emit(code.OpNull)
+	c.emit(code.OpSetLocal, returnSymbol.Index)
+
 	for _, v := range method.Vars {
 		if err := c.Compile(v); err != nil {
 			return nil, err
@@ -2008,4 +2102,64 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 		NumLocals:     numLocals,
 		NumParameters: len(method.VarInputs),
 	}, nil
+}
+
+// compilePropertyAccessor compiles a property's GET or SET block into a CompiledFunction.
+func (c *Compiler) compilePropertyAccessor(prop *ast.PropertyDeclaration, body *ast.BlockStatement, isGetter bool) (*object.CompiledFunction, error) {
+	c.enterScope()
+
+	// A property accessor is like a method. We push a function context.
+	// For GET, the property name is the return variable.
+	// For SET, we create a dummy function context.
+	funcName := prop.Name.Value
+	if !isGetter {
+		funcName = "set_" + funcName
+	}
+	c.pushFunction(&ast.FunctionDeclaration{Name: &ast.Identifier{Value: funcName}})
+	defer c.popFunction()
+
+	c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
+
+	var numParams int
+	if isGetter {
+		// Define and initialize the implicit return variable for the getter.
+		returnSymbol := c.symbolTable.Define(prop.Name.Value, false)
+		c.emit(code.OpNull)
+		c.emit(code.OpSetLocal, returnSymbol.Index)
+		numParams = 0
+	} else {
+		c.symbolTable.Define("value", false) // Implicit 'value' parameter for setters
+		numParams = 1
+	}
+
+	if err := c.Compile(body); err != nil {
+		return nil, err
+	}
+
+	if c.lastInstructionIs(code.OpPop) {
+		c.replaceLastPopWithReturn()
+	}
+	if !c.lastInstructionIs(code.OpReturnValue) {
+		c.emit(code.OpReturn)
+	}
+
+	numLocals := c.symbolTable.numDefinitions
+	instructions := c.leaveScope()
+
+	return &object.CompiledFunction{
+		Instructions:  instructions,
+		NumLocals:     numLocals,
+		NumParameters: numParams,
+	}, nil
+}
+
+func (c *Compiler) compileMemberAccess(node *ast.MemberAccessExpression) error {
+	// Compile the struct/FB instance on the left
+	if err := c.Compile(node.Struct); err != nil {
+		return err
+	}
+	// Then, treat the member name as a string constant to be used as an index.
+	c.emit(code.OpConstant, c.addConstant(&object.String{Value: node.Member.Value}))
+	c.emit(code.OpIndex)
+	return nil
 }

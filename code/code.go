@@ -113,6 +113,8 @@ const (
 	OpHash
 	OpIndex
 
+	OpSetIndex
+
 	OpCall
 
 	OpReturnValue
@@ -192,6 +194,8 @@ var definitions = map[Opcode]*Definition{
 	OpArray: {"OpArray", []int{2}},
 	OpHash:  {"OpHash", []int{2}},
 	OpIndex: {"OpIndex", []int{}},
+
+	OpSetIndex: {"OpSetIndex", []int{}},
 
 	OpCall: {"OpCall", []int{1}},
 
