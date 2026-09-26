@@ -62,17 +62,15 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	// Check for optional EXTENDS clause for inheritance
 	if p.peekTokenIs(token.EXTENDS) {
 		p.nextToken() // consume name, move to EXTENDS
-		if !p.expectPeek(token.IDENT) {
-			return nil // Expected base function block name
-		}
-		stmt.Extends = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken() // consume EXTENDS
+		stmt.Extends = p.parseExpression(MEMBER)
 	}
 
 	// Check for optional IMPLEMENTS clause for interfaces
 	if p.peekTokenIs(token.IMPLEMENTS) {
 		p.nextToken() // consume name or extends, move to IMPLEMENTS
 		p.nextToken() // consume IMPLEMENTS
-		stmt.Implements = p.parseIdentifierList()
+		stmt.Implements = p.parseTypeNameList()
 	}
 
 	p.nextToken()

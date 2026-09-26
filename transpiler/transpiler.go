@@ -1344,7 +1344,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	// If the FB extends another, embed the parent struct.
 	if fb.Extends != nil {
-		t.write("\t%s\n", fb.Extends.Value)
+		t.write("\t%s\n", fb.Extends.String())
 	}
 
 	originalVarInfo := t.varInfo
@@ -1405,7 +1405,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	// If this FB extends another, call the parent's Logic method first.
 	if fb.Extends != nil {
-		t.write("\t%s.%s.Logic(now)\n\n", receiverName, fb.Extends.Value)
+		t.write("\t%s.%s.Logic(now)\n\n", receiverName, fb.Extends.String())
 	}
 
 	// Transpile VAR_TEMP as local variables inside the Logic method.
@@ -1455,30 +1455,30 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	// 4. Add static checks to ensure it implements the specified interfaces. // This will call transpileNode recursively
 	if !fb.IsAbstract {
 		// Collect all interfaces implemented by this FB and its parents.
-		allInterfaces := []*ast.Identifier{}
+		allInterfaces := []ast.Expression{}
 		allInterfaces = append(allInterfaces, fb.Implements...)
 
 		// Start with the current FB and walk up the inheritance chain.
 		// A temporary variable `currentExtends` is used to traverse the chain.
 		if fb.Extends != nil {
-			currentExtends := fb.Extends
-			for currentExtends != nil {
-				parentFBDef := t.getFunctionBlockDefinitionFromTypeInfo(currentExtends.Value)
+			currentExtendsExpr := fb.Extends
+			for currentExtendsExpr != nil {
+				parentFBDef := t.getFunctionBlockDefinitionFromTypeInfo(currentExtendsExpr.String())
 				if parentFBDef == nil {
 					break // Parent not found, stop traversing.
 				}
 				allInterfaces = append(allInterfaces, parentFBDef.Implements...)
-				currentExtends = parentFBDef.Extends // Move to the next parent.
+				currentExtendsExpr = parentFBDef.Extends // Move to the next parent.
 			}
 		}
 
-		uniqueInterfaces := make(map[string]*ast.Identifier)
+		uniqueInterfaces := make(map[string]ast.Expression)
 		for _, iface := range allInterfaces {
-			uniqueInterfaces[iface.Value] = iface
+			uniqueInterfaces[iface.String()] = iface
 		}
 		for _, iface := range uniqueInterfaces {
-			t.write("// Statically assert that %s implements %s.\n", fb.Name.Value, iface.Value)
-			t.write("var _ %s = (*%s)(nil)\n\n", iface.Value, fb.Name.Value)
+			t.write("// Statically assert that %s implements %s.\n", fb.Name.Value, iface.String())
+			t.write("var _ %s = (*%s)(nil)\n\n", iface.String(), fb.Name.Value)
 		}
 	}
 
@@ -1541,6 +1541,13 @@ func (t *Transpiler) transpilePropertyDeclaration(fb *ast.FunctionBlockDeclarati
 func (t *Transpiler) transpileInterfaceDeclaration(iface *ast.InterfaceDeclaration) error {
 	t.write("// %s is the transpiled Go interface for the IEC 61131-3 INTERFACE of the same name.\n", iface.Name.Value)
 	t.write("type %s interface {\n", iface.Name.Value)
+
+	// Embed parent interfaces. Assumes parser adds `Extends` to `ast.InterfaceDeclaration`.
+	if iface.Extends != nil {
+		for _, parent := range iface.Extends {
+			t.write("\t%s\n", parent.String())
+		}
+	}
 
 	for _, method := range iface.Methods {
 		// Build parameter list string for VAR_INPUT and VAR_IN_OUT.
@@ -2203,7 +2210,7 @@ func (t *Transpiler) findPropertyOnFBChain(fbDef *ast.FunctionBlockDeclaration, 
 
 	// If not found, recurse to the parent.
 	if fbDef.Extends != nil {
-		parentDef := t.getFunctionBlockDefinitionFromTypeInfo(fbDef.Extends.Value)
+		parentDef := t.getFunctionBlockDefinitionFromTypeInfo(fbDef.Extends.String())
 		return t.findPropertyOnFBChain(parentDef, propName)
 	}
 
@@ -2571,6 +2578,11 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		typeName = dt.Value
 	case *ast.TypeSpecifier:
 		typeName = dt.Token.Literal
+	case *ast.MemberAccessExpression:
+		// For qualified names like MyLib.MyType, transpile to mylib.MyType.
+		// The String() method on MemberAccessExpression already produces the correct dot-separated path.
+		// We just need to lowercase the namespace part to follow Go conventions.
+		return t.transpileQualifiedIdentifier(dt)
 	case *ast.ArrayDefinition:
 		dims := ""
 		for range dt.Ranges {
@@ -2599,6 +2611,23 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 	}
 	log.Printf("Warning: Unhandled data type expression in transpiler: %s", dataType.String())
 	return "any /* unhandled type */"
+}
+
+// transpileQualifiedIdentifier converts an IEC qualified name (MyLib.MyType)
+// into a Go qualified name (mylib.MyType).
+func (t *Transpiler) transpileQualifiedIdentifier(expr *ast.MemberAccessExpression) string {
+	// Recursively build the path.
+	var buildPath func(e ast.Expression) string
+	buildPath = func(e ast.Expression) string {
+		if ident, ok := e.(*ast.Identifier); ok {
+			return ident.Value
+		}
+		if member, ok := e.(*ast.MemberAccessExpression); ok {
+			return buildPath(member.Struct) + "." + member.Member.Value
+		}
+		return ""
+	}
+	return buildPath(expr)
 }
 
 // transpileInfixExpression transpiles an IEC 61131-3 infix expression (e.g., `A + B`, `X AND Y`)
@@ -2776,7 +2805,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 				// Find which parent in the hierarchy implements the method.
 				methodName := memberAccess.Member.Value
 				var implementingParent *ast.FunctionBlockDeclaration
-				currentParent := t.getFunctionBlockDefinitionFromTypeInfo(t.currentFuncBlock.Extends.Value)
+				currentParent := t.getFunctionBlockDefinitionFromTypeInfo(t.currentFuncBlock.Extends.String())
 
 				for currentParent != nil {
 					if currentParent.HasMethod(methodName) {
@@ -2786,7 +2815,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 					if currentParent.Extends == nil {
 						break
 					}
-					currentParent = t.getFunctionBlockDefinitionFromTypeInfo(currentParent.Extends.Value)
+					currentParent = t.getFunctionBlockDefinitionFromTypeInfo(currentParent.Extends.String())
 				}
 
 				if implementingParent == nil {

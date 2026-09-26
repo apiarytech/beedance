@@ -238,8 +238,8 @@ func TestModify(t *testing.T) {
 			&FunctionBlockDeclaration{
 				Name:    &Identifier{Value: "fb"},
 				Extends: &Identifier{Value: "Base"},
-				Implements: []*Identifier{
-					{Value: "IBase"},
+				Implements: []Expression{
+					&Identifier{Value: "IBase"},
 				},
 				VarInputs: []*VarDeclStatement{
 					{Value: one()},
@@ -259,8 +259,8 @@ func TestModify(t *testing.T) {
 			&FunctionBlockDeclaration{
 				Name:    &Identifier{Value: "fb"},
 				Extends: &Identifier{Value: "Base"},
-				Implements: []*Identifier{
-					{Value: "IBase"},
+				Implements: []Expression{
+					&Identifier{Value: "IBase"},
 				},
 				VarInputs: []*VarDeclStatement{
 					{Value: two()},

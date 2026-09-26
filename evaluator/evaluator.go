@@ -1559,16 +1559,17 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 					var populateInheritedVars func(d *ast.FunctionBlockDeclaration) *object.Error
 					populateInheritedVars = func(d *ast.FunctionBlockDeclaration) *object.Error {
 						if d.Extends != nil {
-							parentObj, ok := instanceEnv.Get(d.Extends.Value)
+							parentName := d.Extends.String()
+							parentObj, ok := instanceEnv.Get(parentName)
 							if !ok {
-								return newError(d, "parent function block '%s' not found", d.Extends.Value)
+								return newError(d, "parent function block '%s' not found", parentName)
 							}
 							parentFb, ok := parentObj.(*object.FunctionBlock)
 							if !ok {
-								return newError(d, "parent '%s' is not a function block", d.Extends.Value)
+								return newError(d, "parent '%s' is not a function block", parentName)
 							}
 							if parentFb.Definition == nil {
-								return newError(d, "internal error: function block definition for '%s' is missing", d.Extends.Value)
+								return newError(d, "internal error: function block definition for '%s' is missing", parentName)
 							}
 							if err := populateInheritedVars(parentFb.Definition); err != nil {
 								return err
@@ -3507,13 +3508,14 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		}
 
 		// Resolve the parent function block definition from the identifier.
-		parentFBObj, ok := currentInstance.Definition.Env.Get(parentFBIdentifier.Value)
+		parentName := parentFBIdentifier.String()
+		parentFBObj, ok := currentInstance.Definition.Env.Get(parentName)
 		if !ok {
-			return newError(node, "parent function block '%s' not found", parentFBIdentifier.Value)
+			return newError(node, "parent function block '%s' not found", parentName)
 		}
 		parentFB, ok := parentFBObj.(*object.FunctionBlock)
 		if !ok {
-			return newError(node, "'%s' is not a function block", parentFBIdentifier.Value)
+			return newError(node, "'%s' is not a function block", parentName)
 		}
 
 		// Now, search for the method starting from the parent's definition.
@@ -4032,7 +4034,7 @@ func findMethodOnFBChain(fbDef *object.FunctionBlock, methodName string, env *ob
 
 	// If not found, recurse to the parent.
 	if fbDef.Definition.Extends != nil {
-		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.String())
 		if !ok {
 			return nil
 		}
@@ -4060,7 +4062,7 @@ func evalInterfaceDeclaration(node *ast.InterfaceDeclaration, env *object.Enviro
 // implementations for all methods and properties required by the interfaces it implements.
 func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Environment) *object.Error {
 	// Collect all interfaces implemented by this FB and its parents.
-	allInterfaces := []*ast.Identifier{}
+	allInterfaces := []ast.Expression{}
 	currentFB := fbDef
 	for currentFB != nil && currentFB.Definition != nil {
 		allInterfaces = append(allInterfaces, currentFB.Definition.Implements...)
@@ -4068,32 +4070,33 @@ func checkInterfaceImplementation(fbDef *object.FunctionBlock, env *object.Envir
 			break
 		}
 		// The parent FB definition must be resolved from the context of the child's definition.
-		parentObj, ok := currentFB.Env.Get(currentFB.Definition.Extends.Value)
+		parentName := currentFB.Definition.Extends.String()
+		parentObj, ok := currentFB.Env.Get(parentName)
 		if !ok {
-			return newError(currentFB.Definition, "parent function block '%s' not found during interface check", currentFB.Definition.Extends.Value)
+			return newError(currentFB.Definition, "parent function block '%s' not found during interface check", parentName)
 		}
 		parentFb, ok := parentObj.(*object.FunctionBlock)
 		if !ok {
-			return newError(currentFB.Definition, "parent '%s' is not a function block", currentFB.Definition.Extends.Value)
+			return newError(currentFB.Definition, "parent '%s' is not a function block", parentName)
 		}
 		currentFB = parentFb
 	}
 
-	uniqueInterfaces := make(map[string]*ast.Identifier)
+	uniqueInterfaces := make(map[string]ast.Expression)
 	for _, iface := range allInterfaces {
-		uniqueInterfaces[iface.Value] = iface
+		uniqueInterfaces[iface.String()] = iface
 	}
 
 	for _, ifaceIdent := range uniqueInterfaces {
 		// The interface must be found in the environment where the FB was defined (fbDef.Env),
 		// not the environment where it is being instantiated (`env`).
-		ifaceObj, ok := fbDef.Env.Get(ifaceIdent.Value)
+		ifaceObj, ok := fbDef.Env.Get(ifaceIdent.String())
 		if !ok {
-			return newError(ifaceIdent, "interface '%s' not found", ifaceIdent.Value)
+			return newError(ifaceIdent, "interface '%s' not found", ifaceIdent.String())
 		}
 		ifaceDef, ok := ifaceObj.(*object.InterfaceDefinition)
 		if !ok {
-			return newError(ifaceIdent, "'%s' is not an interface", ifaceIdent.Value)
+			return newError(ifaceIdent, "'%s' is not an interface", ifaceIdent.String())
 		}
 
 		// Check methods
@@ -4146,7 +4149,8 @@ func findVarDeclOnFBChain(fbDef *object.FunctionBlock, varName string, env *obje
 
 	// If not found, recurse to the parent.
 	if fbDef.Definition.Extends != nil {
-		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		parentName := fbDef.Definition.Extends.String()
+		parentObj, ok := fbDef.Env.Get(parentName)
 		if !ok {
 			return nil, nil
 		}
@@ -4174,7 +4178,8 @@ func findPropertyOnFBChain(fbDef *object.FunctionBlock, propName string, env *ob
 
 	// If not found, recurse to the parent.
 	if fbDef.Definition.Extends != nil {
-		parentObj, ok := fbDef.Env.Get(fbDef.Definition.Extends.Value)
+		parentName := fbDef.Definition.Extends.String()
+		parentObj, ok := fbDef.Env.Get(parentName)
 		if !ok {
 			return nil, nil
 		}

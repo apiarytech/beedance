@@ -77,8 +77,8 @@ func TestFunctionBlockExtends(t *testing.T) {
 		t.Fatal("fb.Extends is nil, expected a base FB name")
 	}
 
-	if fb.Extends.Value != "BaseFB" {
-		t.Errorf("Expected Extends name to be 'BaseFB', got %s", fb.Extends.Value)
+	if fb.Extends.String() != "BaseFB" {
+		t.Errorf("Expected Extends name to be 'BaseFB', got %s", fb.Extends.String())
 	}
 
 	if len(fb.VarInputs) != 1 || fb.VarInputs[0].Name.Value != "NewInput" {
@@ -105,8 +105,8 @@ func TestFunctionBlockImplements(t *testing.T) {
 				if len(fb.Implements) != 1 {
 					t.Fatalf("Expected 1 implemented interface, got %d", len(fb.Implements))
 				}
-				if fb.Implements[0].Value != "IMyInterface" {
-					t.Errorf("Expected interface 'IMyInterface', got %s", fb.Implements[0].Value)
+				if fb.Implements[0].String() != "IMyInterface" {
+					t.Errorf("Expected interface 'IMyInterface', got %s", fb.Implements[0].String())
 				}
 				if fb.Extends != nil {
 					t.Errorf("Extends should be nil")
@@ -123,8 +123,8 @@ func TestFunctionBlockImplements(t *testing.T) {
 				if len(fb.Implements) != 2 {
 					t.Fatalf("Expected 2 implemented interfaces, got %d", len(fb.Implements))
 				}
-				if fb.Implements[0].Value != "IMyInterface1" || fb.Implements[1].Value != "IMyInterface2" {
-					t.Errorf("Incorrect interfaces parsed")
+				if fb.Implements[0].String() != "IMyInterface1" || fb.Implements[1].String() != "IMyInterface2" {
+					t.Errorf("Incorrect interfaces parsed. Got %s, %s", fb.Implements[0].String(), fb.Implements[1].String())
 				}
 			},
 		},
@@ -135,10 +135,10 @@ func TestFunctionBlockImplements(t *testing.T) {
 				END_FUNCTION_BLOCK
 			`,
 			check: func(t *testing.T, fb *ast.FunctionBlockDeclaration) {
-				if fb.Extends == nil || fb.Extends.Value != "BaseFB" {
+				if fb.Extends == nil || fb.Extends.String() != "BaseFB" {
 					t.Errorf("Expected Extends 'BaseFB', got %v", fb.Extends)
 				}
-				if len(fb.Implements) != 1 || fb.Implements[0].Value != "IMyInterface" {
+				if len(fb.Implements) != 1 || fb.Implements[0].String() != "IMyInterface" {
 					t.Errorf("Expected Implements 'IMyInterface', got %v", fb.Implements)
 				}
 			},

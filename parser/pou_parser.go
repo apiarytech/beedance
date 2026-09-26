@@ -19,6 +19,11 @@ import (
 func (p *Parser) parsePoulDeclaration() ast.Statement {
 	defer untrace(trace("parsePoulDeclaration"))
 	switch p.curToken.Type {
+	case token.FINAL:
+		if p.peekTokenIs(token.INTERFACE) {
+			return p.parseInterfaceDeclaration()
+		}
+		return p.parseFunctionBlockDeclaration()
 	case token.ABSTRACT:
 		return p.parseFunctionBlockDeclaration()
 	case token.FUNCTION:
@@ -453,8 +458,17 @@ func (p *Parser) parseMethodDeclaration(isPrototype bool) *ast.MethodDeclaration
 
 	if p.curTokenIs(token.COLON) {
 		p.nextToken()
-		stmt.ReturnType = p.parseTypeSpecifier().(*ast.TypeSpecifier)
-		p.nextToken()
+		returnType := p.parseTypeSpecifier()
+		if returnType == nil {
+			return nil // Error already logged
+		}
+		ts, ok := returnType.(*ast.TypeSpecifier)
+		if !ok {
+			p.currentError("method return type cannot be a complex type like ARRAY or REFERENCE TO, got %T", returnType)
+			return nil
+		}
+		stmt.ReturnType = ts
+		p.nextToken() // consume return type
 	}
 
 	// In a prototype, we only expect a semicolon.
@@ -489,6 +503,12 @@ func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
 		return nil
 	}
 	p.nextToken() // consume METHOD
+
+	// Optional access specifier
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) || p.curTokenIs(token.INTERNAL) {
+		stmt.AccessSpecifier = p.curToken.Literal
+		p.nextToken()
+	}
 
 	if p.curTokenIs(token.ABSTRACT) {
 		stmt.IsAbstract = true
@@ -628,6 +648,12 @@ func (p *Parser) parsePropertyDeclaration(isPrototype bool) *ast.PropertyDeclara
 	}
 	p.nextToken() // consume PROPERTY
 
+	// Optional access specifier
+	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) || p.curTokenIs(token.INTERNAL) {
+		stmt.AccessSpecifier = p.curToken.Literal
+		p.nextToken()
+	}
+
 	if p.curTokenIs(token.ABSTRACT) {
 		stmt.IsAbstract = true
 		p.nextToken()
@@ -645,8 +671,17 @@ func (p *Parser) parsePropertyDeclaration(isPrototype bool) *ast.PropertyDeclara
 		return nil
 	}
 	p.nextToken()
-	stmt.DataType = p.parseTypeSpecifier().(*ast.TypeSpecifier)
-	p.nextToken()
+	dataType := p.parseTypeSpecifier()
+	if dataType == nil {
+		return nil // Error already logged
+	}
+	ts, ok := dataType.(*ast.TypeSpecifier)
+	if !ok {
+		p.currentError("property data type cannot be a complex type like ARRAY or REFERENCE TO, got %T", dataType)
+		return nil
+	}
+	stmt.DataType = ts
+	p.nextToken() // consume data type
 
 	if isPrototype {
 		// Prototypes can have GET, SET, or both, followed by a semicolon.

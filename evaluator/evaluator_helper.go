@@ -88,7 +88,8 @@ func isSubclassOf(d *object.FunctionBlock, target *ast.FunctionBlockDeclaration,
 			return false
 		}
 		// The parent FB must be found in the environment where the current FB was defined.
-		parentObj, ok := current.Env.Get(current.Definition.Extends.Value)
+		parentName := current.Definition.Extends.String()
+		parentObj, ok := current.Env.Get(parentName)
 		if !ok {
 			return false
 		}
@@ -106,7 +107,8 @@ func getParentFB(fb *object.FunctionBlock) *object.FunctionBlock {
 		return nil
 	}
 	// Look for the parent's definition in the environment where the current FB was defined.
-	parentObj, ok := fb.Env.Get(fb.Definition.Extends.Value)
+	parentName := fb.Definition.Extends.String()
+	parentObj, ok := fb.Env.Get(parentName)
 	if !ok {
 		return nil
 	}

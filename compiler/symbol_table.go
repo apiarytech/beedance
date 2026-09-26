@@ -31,6 +31,7 @@ type Symbol struct {
 	Index      int
 	IsConstant bool
 	IsReadOnly bool
+	TypeName   string // The declared type of the symbol, if applicable.
 }
 
 // SymbolTable manages symbols for a given scope and can be chained to represent
@@ -61,8 +62,12 @@ func NewSymbolTable() *SymbolTable {
 
 // Define adds a new symbol to the current symbol table. It determines the scope
 // (Global or Local) based on whether the table has an outer scope.
-func (s *SymbolTable) Define(name string, isConstant bool) Symbol {
-	symbol := Symbol{Name: name, Index: s.numDefinitions, IsConstant: isConstant}
+func (s *SymbolTable) Define(name string, isConstant bool, typeName ...string) Symbol {
+	tn := ""
+	if len(typeName) > 0 {
+		tn = typeName[0]
+	}
+	symbol := Symbol{Name: name, Index: s.numDefinitions, IsConstant: isConstant, TypeName: tn}
 	if s.Outer == nil {
 		symbol.Scope = GlobalScope
 	} else {
@@ -141,7 +146,7 @@ func (s *SymbolTable) DefineFunctionName(name string) Symbol {
 func (s *SymbolTable) defineFree(original Symbol) Symbol {
 	s.FreeSymbols = append(s.FreeSymbols, original)
 
-	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, IsConstant: original.IsConstant}
+	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, IsConstant: original.IsConstant, TypeName: original.TypeName}
 	symbol.Scope = FreeScope
 
 	s.store[original.Name] = symbol

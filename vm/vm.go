@@ -312,6 +312,16 @@ func (vm *VM) Run() error {
 		case code.OpSwap:
 			// OpSwap swaps the top two elements of the stack.
 			vm.stack[vm.sp-1], vm.stack[vm.sp-2] = vm.stack[vm.sp-2], vm.stack[vm.sp-1]
+		case code.OpSuperIndex:
+			// OpSuperIndex finds a method on a parent class. It expects the instance ('this')
+			// and the method name on the stack. It uses the currently executing closure
+			// to determine the correct parent class for the lookup.
+			methodName := vm.pop()
+			instance := vm.pop()
+			err = vm.executeSuperIndex(instance, methodName)
+			if err == nil {
+				err = vm.push(instance)
+			}
 		}
 		if err != nil {
 			return err
@@ -791,4 +801,99 @@ func isInteger(obj object.Object) bool {
 	default:
 		return false
 	}
+}
+
+// executeSuperIndex finds a method on a parent class and pushes the corresponding closure onto the stack.
+// It is used to implement `SUPER^.Method()`. It consumes the instance and method name from the stack
+// and pushes the parent's method closure. The instance is pushed back on by the caller (`Run` loop).
+func (vm *VM) executeSuperIndex(instance, methodName object.Object) error {
+	methodNameStr, ok := methodName.(*object.String)
+	if !ok {
+		return fmt.Errorf("super index method name must be a string, got %T", methodName)
+	}
+
+	instanceHash, ok := instance.(*object.Hash)
+	if !ok {
+		return fmt.Errorf("base of super call must be a function block instance (hash), got %T", instance)
+	}
+
+	// The currently executing method's closure is in the current frame.
+	currentClosure := vm.currentFrame().cl
+
+	var classHash *object.Hash
+	// An instance must have a `__class__` field pointing to its class hash.
+	// This is a design assumption for the VM's OOP model.
+	classHashKey := (&object.String{Value: "__class__"}).HashKey()
+	classPair, ok := instanceHash.Pairs[classHashKey]
+	if !ok {
+		// Fallback for tests where an instance might be the class hash itself.
+		classHash = instanceHash
+	} else {
+		classHash, ok = classPair.Value.(*object.Hash)
+		if !ok {
+			return fmt.Errorf("internal VM error: __class__ is not a hash")
+		}
+	}
+
+	// Find which class in the hierarchy owns the currently executing method.
+	ownerClass, err := vm.findClosureOwner(classHash, currentClosure)
+	if err != nil {
+		return err
+	}
+
+	// Get the parent of that owner class.
+	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	parentPair, ok := ownerClass.Pairs[parentHashKey]
+	if !ok {
+		return fmt.Errorf("super call on a class with no parent")
+	}
+	parentHash, ok := parentPair.Value.(*object.Hash)
+	if !ok {
+		return fmt.Errorf("internal VM error: parent class is not a hash")
+	}
+
+	// Find the method in the parent's hierarchy.
+	method, err := vm.findMethodInHierarchy(parentHash, methodNameStr)
+	if err != nil {
+		return err
+	}
+
+	// Push the found parent method closure onto the stack.
+	return vm.push(method)
+}
+
+// findClosureOwner recursively searches the class hierarchy starting from `class`
+// to find which class hash contains the given closure `cl`.
+func (vm *VM) findClosureOwner(class *object.Hash, cl *object.Closure) (*object.Hash, error) {
+	for _, pair := range class.Pairs {
+		if methodClosure, ok := pair.Value.(*object.Closure); ok && methodClosure == cl {
+			return class, nil
+		}
+	}
+
+	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	if parentPair, ok := class.Pairs[parentHashKey]; ok {
+		if parentHash, ok := parentPair.Value.(*object.Hash); ok {
+			return vm.findClosureOwner(parentHash, cl)
+		}
+	}
+
+	return nil, fmt.Errorf("internal VM error: closure owner not found in class hierarchy")
+}
+
+// findMethodInHierarchy recursively searches the class hierarchy starting from `class`
+// to find a method by name.
+func (vm *VM) findMethodInHierarchy(class *object.Hash, methodName *object.String) (object.Object, error) {
+	if methodPair, ok := class.Pairs[methodName.HashKey()]; ok {
+		return methodPair.Value, nil
+	}
+
+	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	if parentPair, ok := class.Pairs[parentHashKey]; ok {
+		if parentHash, ok := parentPair.Value.(*object.Hash); ok {
+			return vm.findMethodInHierarchy(parentHash, methodName)
+		}
+	}
+
+	return nil, fmt.Errorf("method '%s' not found in class hierarchy", methodName.Value)
 }

@@ -141,6 +141,8 @@ const (
 
 	OpMakeNamedArg
 	OpReturnValueMulti
+
+	OpSuperIndex
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -223,6 +225,9 @@ var definitions = map[Opcode]*Definition{
 
 	OpMakeNamedArg:     {"OpMakeNamedArg", []int{2}},
 	OpReturnValueMulti: {"OpReturnValueMulti", []int{}},
+
+	// OpSuperIndex retrieves a method from a parent function block. It expects the instance and the method name (as a string constant) on the stack.
+	OpSuperIndex: {"OpSuperIndex", []int{}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

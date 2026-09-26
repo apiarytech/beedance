@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 
+	"beedance/ast"
 	"beedance/compiler"
 	"beedance/lexer"
 	"beedance/parser"
@@ -46,6 +47,7 @@ func Start(in io.Reader, out io.Writer, engine string) {
 	for i, v := range object.Builtins {
 		symbolTable.DefineBuiltin(i, v.Name)
 	}
+	typeInfo := make(map[string]ast.Node)
 
 	for {
 		fmt.Fprintf(out, PROMPT)
@@ -65,7 +67,7 @@ func Start(in io.Reader, out io.Writer, engine string) {
 		}
 
 		if engine == "vm" {
-			comp := compiler.NewWithState(symbolTable, constants)
+			comp := compiler.NewWithState(symbolTable, constants, typeInfo)
 			err := comp.Compile(program)
 			if err != nil {
 				fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)

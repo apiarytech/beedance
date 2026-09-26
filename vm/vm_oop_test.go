@@ -8,3 +8,49 @@
  * See the LICENSE files in the project root for full license text.
  */
 package vm
+
+import (
+	_ "beedance/stdlib"
+	"testing"
+)
+
+func TestFunctionBlockThreeLevelInheritanceVM(t *testing.T) {
+	tests := []vmTestCase{
+		{
+			input: `
+			PROGRAM TestInheritance
+				VAR
+					c_def : C;
+					b_def : B;
+					a_def : A;
+					instance : A;
+				END_VAR
+
+				FUNCTION_BLOCK C
+					METHOD GetValue : INT
+						GetValue := 10;
+					END_METHOD
+				END_FUNCTION_BLOCK
+
+				FUNCTION_BLOCK B EXTENDS C
+					METHOD GetValue : INT
+						GetValue := SUPER^.GetValue() + 20;
+					END_METHOD
+				END_FUNCTION_BLOCK
+
+				FUNCTION_BLOCK A EXTENDS B
+					METHOD GetValue : INT
+						GetValue := SUPER^.GetValue() + 30;
+					END_METHOD
+				END_FUNCTION_BLOCK
+
+				instance := A();
+				instance.GetValue();
+			`,
+			expected: 60,
+		},
+	}
+	runVmTests(t, tests)
+}
+
+// --- Helper functions copied from vm_test.go ---

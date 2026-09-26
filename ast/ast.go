@@ -106,6 +106,7 @@ type VarDeclStatement struct {
 	IsNonRetain     bool
 	IsRisingEdge    bool
 	IsFallingEdge   bool
+	IsFinal         bool
 	AccessSpecifier string // PUBLIC, PRIVATE, PROTECTED for VAR blocks
 	AccessType      string // "READ_ONLY", "READ_WRITE", or ""
 }
@@ -130,6 +131,9 @@ func (vds *VarDeclStatement) String() string {
 	// to correctly format struct members and other declarations.
 	if vds.Token.Type >= token.VAR && vds.Token.Type <= token.VAR_CONFIG {
 		out.WriteString(vds.TokenLiteral() + " ")
+	}
+	if vds.IsFinal {
+		out.WriteString("FINAL ")
 	}
 	out.WriteString(vds.Name.String())
 	if vds.Location != nil {
@@ -1474,8 +1478,8 @@ type FunctionBlockDeclaration struct {
 	AccessSpecifier string // PUBLIC, INTERNAL
 	IsAbstract      bool
 	IsFinal         bool
-	Extends         *Identifier // For FB inheritance
-	Implements      []*Identifier
+	Extends         Expression // For FB inheritance
+	Implements      []Expression
 	VarInputs       []*VarDeclStatement
 	Properties      []*PropertyDeclaration
 	VarOutputs      []*VarDeclStatement
@@ -2303,7 +2307,9 @@ func (md *MethodDeclaration) String() string {
 type InterfaceDeclaration struct {
 	Token           token.Token // The 'INTERFACE' token
 	Name            *Identifier
+	IsFinal         bool
 	Properties      []*PropertyDeclaration
+	Extends         []Expression
 	Methods         []*MethodDeclaration
 	LeadingComments []string
 }
@@ -2326,6 +2332,9 @@ func (id *InterfaceDeclaration) String() string {
 	out.WriteString("INTERFACE ")
 	if id.Name != nil {
 		out.WriteString(id.Name.String())
+	}
+	if id.IsFinal {
+		out.WriteString(" FINAL")
 	}
 	out.WriteString("\n")
 	for _, method := range id.Methods {
@@ -2369,14 +2378,14 @@ func (mi *MethodImplementation) String() string {
 		out.WriteString(mi.AccessSpecifier + " ")
 	}
 	out.WriteString("METHOD ")
-	if mi.Name != nil {
-		out.WriteString(mi.Name.String())
-	}
 	if mi.IsAbstract {
 		out.WriteString("ABSTRACT ")
 	}
 	if mi.IsFinal {
 		out.WriteString("FINAL ")
+	}
+	if mi.Name != nil {
+		out.WriteString(mi.Name.String())
 	}
 	if mi.ReturnType != nil {
 		out.WriteString(" : ")
@@ -2488,6 +2497,7 @@ func (ps *PropertySetter) String() string {
 type PropertyDeclaration struct {
 	Token           token.Token // The 'PROPERTY' token
 	IsAbstract      bool
+	IsFinal         bool
 	AccessSpecifier string // PUBLIC, PRIVATE, PROTECTED
 	Name            *Identifier
 	DataType        *TypeSpecifier
@@ -2510,11 +2520,14 @@ func (pd *PropertyDeclaration) String() string {
 		out.WriteString(pd.AccessSpecifier + " ")
 	}
 	out.WriteString("PROPERTY ")
-	if pd.Name != nil {
-		out.WriteString(pd.Name.String())
-	}
 	if pd.IsAbstract {
 		out.WriteString("ABSTRACT ")
+	}
+	if pd.IsFinal {
+		out.WriteString("FINAL ")
+	}
+	if pd.Name != nil {
+		out.WriteString(pd.Name.String())
 	}
 	if pd.DataType != nil {
 		out.WriteString(" : ")

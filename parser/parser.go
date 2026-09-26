@@ -539,10 +539,16 @@ func (p *Parser) parseStatement() ast.Statement {
 			return p.parsePoulDeclaration()
 		}
 		return p.parseExpressionStatement() // Fallback to get "no prefix" error
+	case token.FINAL:
+		return p.parsePoulDeclaration()
 	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
+	case token.METHOD:
+		// This case was missing. Methods are valid statements within a FUNCTION_BLOCK body.
+		// This ensures they are parsed correctly when encountered by the general-purpose parseStatement function.
+		return p.parseMethodImplementation()
 	case token.NAMESPACE:
 		return p.parseNamespaceDeclaration()
 	case token.EXIT:
@@ -1504,6 +1510,23 @@ func (p *Parser) parseIdentifierList() []*ast.Identifier {
 		p.nextToken()
 		p.nextToken()
 		list = append(list, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
+	}
+
+	return list
+}
+
+// parseTypeNameList parses a comma-separated list of type names, which can be qualified.
+func (p *Parser) parseTypeNameList() []ast.Expression {
+	defer untrace(trace("parseTypeNameList"))
+	list := []ast.Expression{}
+
+	// A type name is parsed as an expression, which can handle qualified names (e.g., MyLib.MyType)
+	list = append(list, p.parseExpression(MEMBER))
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // consume expression
+		p.nextToken() // consume comma
+		list = append(list, p.parseExpression(MEMBER))
 	}
 
 	return list

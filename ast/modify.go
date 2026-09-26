@@ -211,10 +211,10 @@ func Modify(node Node, modifier ModifierFunc) Node {
 	case *FunctionBlockDeclaration:
 		node.Name, _ = Modify(node.Name, modifier).(*Identifier)
 		if node.Extends != nil {
-			node.Extends, _ = Modify(node.Extends, modifier).(*Identifier)
+			node.Extends, _ = Modify(node.Extends, modifier).(Expression)
 		}
 		for i := range node.Implements {
-			node.Implements[i], _ = Modify(node.Implements[i], modifier).(*Identifier)
+			node.Implements[i], _ = Modify(node.Implements[i], modifier).(Expression)
 		}
 		for i := range node.VarInputs {
 			node.VarInputs[i], _ = Modify(node.VarInputs[i], modifier).(*VarDeclStatement)
@@ -257,6 +257,9 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 		for i := range node.Properties {
 			node.Properties[i], _ = Modify(node.Properties[i], modifier).(*PropertyDeclaration)
+		}
+		for i := range node.Extends {
+			node.Extends[i], _ = Modify(node.Extends[i], modifier).(Expression)
 		}
 
 	case *MethodDeclaration:
