@@ -843,14 +843,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// The index will be populated when the symbol is defined below.
 		}
 
-		// Initialize the return variable to Null. This ensures that if no explicit
-		// return value is assigned, the function implicitly returns Null.
-		c.emit(code.OpNull)
+		// The result starts at the default of the return type, so a function
+		// that never assigns it returns e.g. 0 for INT, not NULL.
+		if err := c.compileStartingValue(node.Name.Value, node.ReturnType, nil, map[ast.Node]bool{}); err != nil {
+			return err
+		}
 		c.emit(code.OpSetLocal, returnSymbol.Index)
 
+		// VAR_OUTPUTs start at their initial value or their type's default.
 		for i, p := range node.VarOutputs {
+			if err := c.compileVarValue(p); err != nil {
+				return err
+			}
 			symbol := c.symbolTable.Define(p.Name.Value, false)
 			outputIndices[i] = symbol.Index
+			c.emit(code.OpSetLocal, symbol.Index)
 		}
 		c.setFunctionResult(returnSymbol, len(node.VarOutputs) > 0)
 
@@ -944,8 +951,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 					// If it's an instance variable (VAR, VAR_TEMP, VAR_GLOBAL in FB), compile as THIS.variable := value
 					// VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT are handled as local symbols.
-					if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" {
-						// Compile as `THIS.variable := value`
+					_, isLocal := c.symbolTable.Resolve(target.Value)
+					if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" || !isLocal {
+						// Compile as `THIS.variable := value`. Inside a method, the FB's
+						// outputs are also instance fields rather than locals.
 						thisSymbol, _ := c.symbolTable.Resolve("THIS")
 						c.loadSymbol(thisSymbol)
 						c.emitConstant(c.addConstant(&object.String{Value: target.Value}))
@@ -1182,54 +1191,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 			typeName = c.flattenExpressionToString(node.DataType)
 		}
 
+		// The starting value is compiled before the name is defined, so that an
+		// initial value cannot refer to the variable being declared, and a
+		// variable named like its type (`counter : Counter`) still sees the type.
+		if err := c.compileVarValue(node); err != nil {
+			return err
+		}
 		symbol := c.symbolTable.Define(node.Name.Value, node.IsConstant, typeName)
 		c.scopes[c.scopeIndex].varDecls[node.Name.Value] = node
 
-		if node.Value != nil {
-			err := c.Compile(node.Value)
-			if err != nil {
-				return err
-			}
-		} else {
-			// If no initial value is provided, check if we are trying to instantiate an abstract FB.
-			instantiated := false
-			if typeName != "" { // This check will now work correctly.
-				if typeDef, ok := c.resolveTypeNode(node.DataType); ok {
-					if fbDef, isFB := typeDef.(*ast.FunctionBlockDeclaration); isFB {
-						if fbDef.IsAbstract {
-							return fmt.Errorf("cannot instantiate abstract function block '%s'", fbDef.Name.Value)
-						}
-						// Check for INTERNAL access
-						if fbDef.AccessSpecifier == "INTERNAL" {
-							var defFqn string
-							for fqn, n := range c.typeInfo {
-								if n == fbDef {
-									defFqn = fqn
-									break
-								}
-							}
-
-							defNS := c.pouNamespaces[defFqn]
-							callerNS := c.currentNS
-							if defNS != callerNS {
-								return fmt.Errorf("cannot access INTERNAL function block '%s' from a different namespace", fbDef.Name.Value)
-							}
-						}
-						// Declaring a variable of an FB type creates an instance of it.
-						if err := c.emitFBInstance(fbDef, map[*ast.FunctionBlockDeclaration]bool{}); err != nil {
-							return err
-						}
-						instantiated = true
-					}
-				}
-			}
-			if !instantiated {
-				// If no initial value is provided, push null onto the stack.
-				c.emit(code.OpNull)
-			}
-		}
-
-		return c.setSymbol(symbol)
+		// A declaration's initial value is not an assignment, so it also
+		// initializes CONSTANT variables.
+		return c.initSymbol(symbol)
 
 	// An InfixExpression compiles the left and right sides, then emits the operator instruction.
 	case *ast.InfixExpression:
@@ -1649,15 +1622,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Check if this identifier refers to an instance variable of the current function block.
 		// If so, implicitly transform it into a `THIS.Identifier` access.
 		if c.currentFB != nil {
-			// Check for instance variables (VAR, VAR_TEMP, VAR_GLOBAL in FB)
+			// Any variable of the FB that is not a local symbol here (e.g. an
+			// FB input read inside a method) is a field of the instance.
 			if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, node.Value); varDecl != nil {
-				// If it's a VAR_INPUT/VAR_OUTPUT/VAR_IN_OUT, it's a local symbol, so it should have been found above.
-				// This logic is for instance variables (VAR, VAR_TEMP, VAR_GLOBAL).
-				if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" {
-					thisExpr := &ast.ThisExpression{Token: node.Token}
-					memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
-					return c.Compile(memberAccess)
-				}
+				thisExpr := &ast.ThisExpression{Token: node.Token}
+				memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
+				return c.Compile(memberAccess)
 			}
 
 			// Check for properties. If it's a property, implicitly transform to THIS.Property.
@@ -1954,7 +1924,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-		c.emit(code.OpCall, len(inputArgs))
+		// Inputs the call omits take their initial value or type default.
+		numArgs := len(inputArgs)
+		if inputs, known := c.calleeInputs(node.Function); known {
+			added, err := c.emitOmittedInputs(node.Function.String(), inputs, inputArgs)
+			if err != nil {
+				return err
+			}
+			numArgs += added
+		}
+
+		c.emit(code.OpCall, numArgs)
 
 		// --- Part 2: Compile output assignments ---
 		// The result of the call (FB instance or return value hash) is now on the stack.
@@ -1998,6 +1978,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.IlInstructionStatement:
 		return fmt.Errorf("IL instruction '%s' found in a Structured Text context", node.Operator)
+
+	// A structure initializer such as `(PT := T#1s)` only has meaning as the
+	// initial value of a structure or function block variable, where
+	// compileStartingValue handles it.
+	case *ast.StructLiteral:
+		return fmt.Errorf("a structure initializer %s is only allowed as the initial value of a structure or function block variable", node.String())
 
 	}
 
@@ -2174,7 +2160,17 @@ func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.
 		return "", fmt.Errorf("member '%s' not found on function block '%s'", memberName, def.Name.Value)
 
 	case *ast.TypeDeclaration:
-		// TODO: Handle struct member access
+		if structDef, ok := def.DataType.(*ast.StructDefinition); ok {
+			for _, m := range structDef.Members {
+				if strings.EqualFold(m.Name.Value, memberName) {
+					if _, isArray := m.DataType.(*ast.ArrayDefinition); isArray {
+						return anyType, nil
+					}
+					return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(m.DataType))), nil
+				}
+			}
+			return "", fmt.Errorf("member '%s' not found on structure '%s'", memberName, def.Name.Value)
+		}
 	}
 	return "", fmt.Errorf("member access on non-composite type '%T'", typeNode)
 }
@@ -2214,8 +2210,12 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 					return c.getExpressionType(memberAccess)
 				}
 			}
-			// A property of the enclosing FB, read by name.
+			// Any other variable (e.g. an FB input read inside a method) or a
+			// property of the enclosing FB, read by name.
 			if _, isSymbol := c.symbolTable.Resolve(e.Value); !isSymbol {
+				if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, e.Value); varDecl != nil && varDecl.DataType != nil {
+					return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(varDecl.DataType))), nil
+				}
 				if prop, _ := c.findPropertyOnFBChain(c.currentFB, e.Value); prop != nil {
 					return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(prop.DataType))), nil
 				}
@@ -2605,9 +2605,14 @@ func (c *Compiler) addConstant(obj object.Object) int {
 		// This ensures that identical functions are stored only once in the constant pool.
 		if fn1, ok1 := constant.(*object.CompiledFunction); ok1 {
 			if fn2, ok2 := obj.(*object.CompiledFunction); ok2 {
+				// Parameter and output names matter too: named arguments and
+				// VAR_OUTPUT results are resolved through them.
 				if fn1.NumLocals == fn2.NumLocals &&
 					fn1.NumParameters == fn2.NumParameters &&
-					bytes.Equal(fn1.Instructions, fn2.Instructions) {
+					bytes.Equal(fn1.Instructions, fn2.Instructions) &&
+					equalStrings(fn1.ParameterNames, fn2.ParameterNames) &&
+					equalStrings(fn1.OutputNames, fn2.OutputNames) &&
+					equalInts(fn1.OutputIndices, fn2.OutputIndices) {
 					return i
 				}
 			}
@@ -2618,12 +2623,40 @@ func (c *Compiler) addConstant(obj object.Object) int {
 			continue
 		}
 
-		if object.IsEqual(constant, obj) {
+		// Only constants of the same type are shared: object.IsEqual compares
+		// numbers by value, so it would merge LREAL 0.0 into LINT 0.
+		if constant.Type() == obj.Type() && object.IsEqual(constant, obj) {
 			return i
 		}
 	}
 	c.constants = append(c.constants, obj)
 	return len(c.constants) - 1
+}
+
+// equalStrings reports whether two string slices are identical.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalInts reports whether two int slices are identical.
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // emit creates a bytecode instruction and adds it to the current scope's
@@ -3413,7 +3446,10 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 
 	// Define and initialize the implicit return variable.
 	returnSymbol := c.symbolTable.Define(method.Name.Value, false)
-	c.emit(code.OpNull)
+	// The result starts at the return type's default (NULL for a method without one).
+	if err := c.compileStartingValue(method.Name.Value, method.ReturnType, nil, map[ast.Node]bool{}); err != nil {
+		return nil, err
+	}
 	c.emit(code.OpSetLocal, returnSymbol.Index)
 	c.setFunctionResult(returnSymbol, false)
 
@@ -3471,7 +3507,9 @@ func (c *Compiler) compilePropertyAccessor(prop *ast.PropertyDeclaration, body *
 	if isGetter {
 		// Define and initialize the implicit return variable for the getter.
 		returnSymbol := c.symbolTable.Define(prop.Name.Value, false)
-		c.emit(code.OpNull)
+		if err := c.compileStartingValue(prop.Name.Value, prop.DataType, nil, map[ast.Node]bool{}); err != nil {
+			return nil, err
+		}
 		c.emit(code.OpSetLocal, returnSymbol.Index)
 		c.setFunctionResult(returnSymbol, false)
 		numParams = 1 // THIS
@@ -3926,8 +3964,9 @@ func (c *Compiler) buildPouInfo(program *ast.Program) {
 					if prefix != "" {
 						fqn = prefix + "." + decl.Name.Value
 					}
-					c.typeInfo[fqn] = decl
-					c.pouNamespaces[fqn] = ns
+					// Stored in upper case, like POUs: identifiers are case-insensitive.
+					c.typeInfo[strings.ToUpper(fqn)] = decl
+					c.pouNamespaces[strings.ToUpper(fqn)] = ns
 				}
 				continue // Skip the common POU registration logic
 			case *ast.NamespaceDeclaration:
@@ -4049,13 +4088,15 @@ func (c *Compiler) predefineFunctionBlocks(stmts []ast.Statement) {
 	}
 }
 
-// emitFBInstance emits code that builds a new instance of fbDef and leaves it on
+// emitFBInstanceWith emits code that builds a new instance of fbDef and leaves it on
 // the stack. An instance is a hash with a "__class__" entry holding the FB's
 // class hash (so the VM can find methods and SUPER targets), plus one entry per
 // variable declared along the inheritance chain, set to its initial value.
 // A variable redeclared in a derived FB takes the derived declaration.
-// Variables of FB type without an initializer become nested instances.
-func (c *Compiler) emitFBInstance(fbDef *ast.FunctionBlockDeclaration, visiting map[*ast.FunctionBlockDeclaration]bool) error {
+// Each variable starts from its initial value or its type's default, so a
+// variable of FB type without an initializer becomes a nested instance.
+// An initializer such as `(PT := T#1s)` overrides the named variables' starting values.
+func (c *Compiler) emitFBInstanceWith(fbDef *ast.FunctionBlockDeclaration, init *ast.StructLiteral, visiting map[ast.Node]bool) error {
 	if visiting[fbDef] {
 		return fmt.Errorf("function block '%s' contains an instance of itself", fbDef.Name.Value)
 	}
@@ -4079,7 +4120,7 @@ func (c *Compiler) emitFBInstance(fbDef *ast.FunctionBlockDeclaration, visiting 
 			break
 		}
 		parentFB, ok := parentNode.(*ast.FunctionBlockDeclaration)
-		if !ok || visiting[parentFB] {
+		if !ok || visiting[ast.Node(parentFB)] {
 			break
 		}
 		current = parentFB
@@ -4099,31 +4140,27 @@ func (c *Compiler) emitFBInstance(fbDef *ast.FunctionBlockDeclaration, visiting 
 		}
 	}
 
+	overrides, err := structInitializers(init)
+	if err != nil {
+		return err
+	}
+	for member := range overrides {
+		if _, ok := fields[strings.ToUpper(member)]; !ok {
+			return fmt.Errorf("function block '%s' has no variable '%s'", fbDef.Name.Value, member)
+		}
+	}
+
 	c.emitConstant(c.addConstant(&object.String{Value: "__class__"}))
 	c.loadSymbol(classSymbol)
 	for _, key := range order {
 		v := fields[key]
 		c.emitConstant(c.addConstant(&object.String{Value: v.Name.Value}))
-		switch {
-		case v.Value != nil:
-			if err := c.Compile(v.Value); err != nil {
-				return err
-			}
-		default:
-			nested := false
-			if v.DataType != nil {
-				if typeNode, ok := c.resolveTypeNode(v.DataType); ok {
-					if nestedFB, isFB := typeNode.(*ast.FunctionBlockDeclaration); isFB {
-						if err := c.emitFBInstance(nestedFB, visiting); err != nil {
-							return err
-						}
-						nested = true
-					}
-				}
-			}
-			if !nested {
-				c.emit(code.OpNull)
-			}
+		value := v.Value
+		if override, ok := lookupFold(overrides, v.Name.Value); ok {
+			value = override
+		}
+		if err := c.compileStartingValue(v.Name.Value, v.DataType, value, visiting); err != nil {
+			return err
 		}
 	}
 	c.emit(code.OpHash, (len(order)+1)*2)

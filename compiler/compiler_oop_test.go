@@ -26,50 +26,37 @@ func TestFunctionBlockWithMethod(t *testing.T) {
 				THIS.Internalvar := THIS.MyMethod(THIS.Internalvar) + 1;
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{
-				int64(2), // 0: for the * 2 in the method
-				[]code.Instructions{ // 1: Method Body
-					// THIS=0, MethodIn=1, MyMethod=2(ret)
-					code.Make(code.OpNull),        // init return var
-					code.Make(code.OpSetLocal, 2), // Set MyMethod (ret var)
-					code.Make(code.OpGetLocal, 1), // Get MethodIn
-					code.Make(code.OpConstant, 0), // Push 2 (const 0)
-					code.Make(code.OpMul),
-					code.Make(code.OpSetLocal, 2), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 2), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				"Internalvar", // 2
-				"MyMethod",    // 3
-				int64(1),      // 4: for the +1
-				[]code.Instructions{ // 5: Main Body
-					// THIS=0
-					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
-					code.Make(code.OpConstant, 2), // "Internalvar"
-					// RHS:
-					code.Make(code.OpGetLocal, 0), // Get THIS for method call
-					code.Make(code.OpConstant, 3), // "MyMethod"
-					code.Make(code.OpIndex),       // Get method closure
-					code.Make(code.OpGetLocal, 0), // Get THIS for argument
-					code.Make(code.OpConstant, 2), // "Internalvar"
-					code.Make(code.OpIndex),       // Get value of Internalvar
-					code.Make(code.OpCall, 1),     // Call method
-					code.Make(code.OpConstant, 4), // Push 1 (const 4)
-					code.Make(code.OpAdd),         // Add
-					code.Make(code.OpSetIndex),    // Set member
-					code.Make(code.OpReturn),
-				},
-				"main", // 6
-			},
+			expectedConstants: []interface{}{0, 2, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 2),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpMul),
+				code.Make(code.OpSetLocal, 2),
+				code.Make(code.OpGetLocal, 2),
+				code.Make(code.OpReturnValue),
+			}, "Internalvar", "MyMethod", 1, []code.Instructions{
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpIndex),
+				code.Make(code.OpCall, 1),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			}, "main"},
 			expectedInstructions: []code.Instructions{
-				// The compiler sorts keys before creating the hash.
-				// "MyMethod" comes before "main" alphabetically.
-				code.Make(code.OpConstant, 3),   // "MyMethod"
-				code.Make(code.OpClosure, 1, 0), // Method closure
-				code.Make(code.OpConstant, 6),   // "main"
-				code.Make(code.OpClosure, 5, 0), // Main body closure
-				code.Make(code.OpHash, 4),       // Create hash with 2 key-value pairs
-				code.Make(code.OpSetGlobal, 0),  // Set the global 'MyFBWithMethod'
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpClosure, 6, 0),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 0),
 			},
 		},
 	}
@@ -98,67 +85,63 @@ func TestFunctionBlockThreeLevelInheritance(t *testing.T) {
 				END_METHOD
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{
-				// C's constants
-				int64(10), // 0
-				[]code.Instructions{ // 1: C.GetValue
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				[]code.Instructions{code.Make(code.OpReturn)}, // 2: C.main (reused by B and A)
-				"GetValue", // 3
-				"main",     // 4
-				// B's constants
-				int64(20), // 5
-				[]code.Instructions{ // 6: B.GetValue
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 3), // "GetValue"
-					code.Make(code.OpSuperIndex),
-					code.Make(code.OpCall, 0),
-					code.Make(code.OpConstant, 5), // 20
-					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				"__parent__", // 7
-				// A's constants
-				int64(30), // 8
-				[]code.Instructions{ // 9: A.GetValue
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 3), // "GetValue"
-					code.Make(code.OpSuperIndex),
-					code.Make(code.OpCall, 0),
-					code.Make(code.OpConstant, 8), // 30
-					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 10, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, []code.Instructions{
+				code.Make(code.OpReturn),
+			}, "GetValue", "main", 20, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpSuperIndex),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, "__parent__", 30, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpSuperIndex),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpConstant, 9),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
-				// C compilation (sorted: GetValue, main)
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 1, 0),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
-				code.Make(code.OpHash, 4), code.Make(code.OpSetGlobal, 0),
-				// B compilation (__parent__, then sorted: GetValue, main)
-				code.Make(code.OpConstant, 7), code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 6, 0),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
-				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 1),
-				// A compilation (__parent__, then sorted: GetValue, main)
-				code.Make(code.OpConstant, 7), code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 9, 0),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
-				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 7, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 6),
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 10, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 6),
+				code.Make(code.OpSetGlobal, 2),
 			},
 		},
 	}
@@ -194,68 +177,64 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 				END_PROPERTY
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{
-				// BaseProp constants
-				"_val", // 0
-				[]code.Instructions{ // 1: BaseProp.get_Value
-					code.Make(code.OpNull), code.Make(code.OpSetLocal, 1), // Init ret var
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 0), // "_val"
-					code.Make(code.OpIndex),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				[]code.Instructions{ // 2: BaseProp.set_Value
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 0), // "_val"
-					code.Make(code.OpGetLocal, 1), // value
-					code.Make(code.OpSetIndex),
-					code.Make(code.OpReturn),
-				},
-				[]code.Instructions{code.Make(code.OpReturn)}, // 3: BaseProp.main
-				"get_Value", // 4
-				"main",      // 5
-				"set_Value", // 6
-				// DerivedProp constants
-				int64(2), // 7
-				[]code.Instructions{ // 8: DerivedProp.get_Value body
-					code.Make(code.OpNull), code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 4), // "get_Value"
-					code.Make(code.OpSuperIndex),
-					code.Make(code.OpCall, 0),
-					code.Make(code.OpConstant, 7), // 2
-					code.Make(code.OpMul),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				int64(1), // 9
-				[]code.Instructions{ // 10: DerivedProp.set_Value body
-					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 6), // "set_Value"
-					code.Make(code.OpSuperIndex),
-					code.Make(code.OpGetLocal, 1), // value
-					code.Make(code.OpConstant, 9), // 1
-					code.Make(code.OpAdd),
-					code.Make(code.OpCall, 1),
-					code.Make(code.OpReturn),
-				},
-				"__parent__", // 11
-			},
+			expectedConstants: []interface{}{0, "_val", []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, []code.Instructions{
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			}, []code.Instructions{
+				code.Make(code.OpReturn),
+			}, "get_Value", "main", "set_Value", 2, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpSuperIndex),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpMul),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, 1, []code.Instructions{
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpSuperIndex),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpConstant, 10),
+				code.Make(code.OpAdd),
+				code.Make(code.OpCall, 1),
+				code.Make(code.OpReturn),
+			}, "__parent__"},
 			expectedInstructions: []code.Instructions{
-				// BaseProp compilation (sorted: get_Value, main, set_Value)
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 1, 0),
-				code.Make(code.OpConstant, 5), code.Make(code.OpClosure, 3, 0),
-				code.Make(code.OpConstant, 6), code.Make(code.OpClosure, 2, 0),
-				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 0),
-				// DerivedProp compilation (sorted: __parent__, get_Value, main, set_Value)
-				code.Make(code.OpConstant, 11), code.Make(code.OpGetGlobal, 0), // __parent__
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 8, 0), // get_Value
-				code.Make(code.OpConstant, 5), code.Make(code.OpClosure, 3, 0),
-				code.Make(code.OpConstant, 6), code.Make(code.OpClosure, 10, 0), // set_Value
-				code.Make(code.OpHash, 8), code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 4, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 6),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 12),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 9, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 4, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpClosure, 11, 0),
+				code.Make(code.OpHash, 8),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 	}
@@ -336,52 +315,41 @@ func TestFunctionBlockInheritanceAndSuper(t *testing.T) {
 				END_METHOD
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{
-				// BaseFB constants
-				int64(10), // 0
-				[]code.Instructions{ // 1: BaseFB.DoSomething
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				[]code.Instructions{code.Make(code.OpReturn)}, // 2: BaseFB.main (reused)
-				"DoSomething", // 3
-				"main",        // 4
-				// DerivedFB constants
-				int64(5), // 5
-				[]code.Instructions{ // 6: DerivedFB.DoSomething
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0), // Get THIS for SUPER call
-					code.Make(code.OpConstant, 3), // "DoSomething"
-					code.Make(code.OpSuperIndex),  // Get parent method
-					code.Make(code.OpCall, 0),     // Call SUPER^.DoSomething()
-					code.Make(code.OpConstant, 5), // 5
-					code.Make(code.OpAdd),         // +
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue), // Return the result
-				},
-				"__parent__", // 7
-			},
+			expectedConstants: []interface{}{0, 10, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, []code.Instructions{
+				code.Make(code.OpReturn),
+			}, "DoSomething", "main", 5, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpSuperIndex),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, "__parent__"},
 			expectedInstructions: []code.Instructions{
-				// BaseFB compilation (sorted: DoSomething, main)
-				code.Make(code.OpConstant, 3),   // "DoSomething"
-				code.Make(code.OpClosure, 1, 0), // BaseFB.DoSomething
-				code.Make(code.OpConstant, 4),   // "main"
-				code.Make(code.OpClosure, 2, 0), // BaseFB.main
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpHash, 4),
 				code.Make(code.OpSetGlobal, 0),
-				// DerivedFB compilation (__parent__, then sorted: DoSomething, main)
-				code.Make(code.OpConstant, 7),
+				code.Make(code.OpConstant, 8),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 3),   // "DoSomething"
-				code.Make(code.OpClosure, 6, 0), // DerivedFB.DoSomething
-				code.Make(code.OpConstant, 4),   // "main"
-				code.Make(code.OpClosure, 2, 0), // main (reused)
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 7, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
 			},
@@ -409,47 +377,34 @@ func TestFunctionBlockProperty(t *testing.T) {
 				END_PROPERTY
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{
-				"internalvar", // const[0] (global)
-				int64(2),      // const[1] (global, discovered during GET compilation)
-				[]code.Instructions{ // const[2] GET body (global)
-					// THIS=0, MyProp=1(ret)
-					code.Make(code.OpNull),        // init return var
-					code.Make(code.OpSetLocal, 1), //
-					code.Make(code.OpGetLocal, 0), // Get THIS
-					code.Make(code.OpConstant, 0), // "internalvar"
-					code.Make(code.OpIndex),       // Get internal var
-					code.Make(code.OpConstant, 1), // The constant '2'
-					code.Make(code.OpMul),
-					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
-					code.Make(code.OpGetLocal, 1), // which is returned at the end
-					code.Make(code.OpReturnValue),
-				},
-				[]code.Instructions{ // const[3] SET body (global)
-					// THIS=0, value=1
-					code.Make(code.OpGetLocal, 0), // Get THIS
-					code.Make(code.OpConstant, 0), // "internalvar"
-					code.Make(code.OpGetLocal, 1), // value
-					code.Make(code.OpSetIndex),
-					code.Make(code.OpReturn),
-				},
-				[]code.Instructions{ // const[4] Main body (empty) (global)
-					code.Make(code.OpReturn),
-				},
-				"get_MyProp", // const[5] (global)
-				"main",       // const[6] (global)
-				"set_MyProp", // const[7] (global)
-			},
+			expectedConstants: []interface{}{0, "internalvar", 2, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpMul),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, []code.Instructions{
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			}, []code.Instructions{
+				code.Make(code.OpReturn),
+			}, "get_MyProp", "main", "set_MyProp"},
 			expectedInstructions: []code.Instructions{
-				// The order of hash elements is now deterministic due to sorting keys.
-				// Alphabetical order: get_MyProp, main, set_MyProp
-				code.Make(code.OpConstant, 5),   // "get_MyProp"
-				code.Make(code.OpClosure, 2, 0), // Getter closure
-				code.Make(code.OpConstant, 6),   // "main"
-				code.Make(code.OpClosure, 4, 0), // Main body closure
-				code.Make(code.OpConstant, 7),   // "set_MyProp"
-				code.Make(code.OpClosure, 3, 0), // Setter closure
-				code.Make(code.OpHash, 6),       // Create hash with 3 key-value pairs
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpClosure, 5, 0),
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpClosure, 4, 0),
+				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},

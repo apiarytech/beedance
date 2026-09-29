@@ -799,6 +799,7 @@ type Function struct {
 	VarOutputs []*ast.VarDeclStatement
 	VarInOuts  []*ast.VarDeclStatement
 	Vars       []*ast.VarDeclStatement
+	ReturnType ast.Expression // The declared return type, or nil; the result starts at its default.
 	Body       ast.Statement
 	Env        *Environment
 }
@@ -892,15 +893,19 @@ func (fb *FunctionBlock) Inspect() string {
 	}
 	if len(fb.VarTemp) > 0 {
 		params := []string{}
-		for i, p := range fb.VarTemp {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range fb.VarTemp {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_TEMP "+strings.Join(params, "; ")+";")
 	}
 	if len(fb.VarExternal) > 0 {
 		params := []string{}
-		for i, p := range fb.VarExternal {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range fb.VarExternal {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_EXTERNAL "+strings.Join(params, "; ")+";")
 	}
@@ -1038,29 +1043,37 @@ func (p *Program) Inspect() string {
 	}
 	if len(p.VarTemp) > 0 {
 		params := []string{}
-		for i, p := range p.VarTemp {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range p.VarTemp {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_TEMP "+strings.Join(params, "; ")+";")
 	}
 	if len(p.VarExternal) > 0 {
 		params := []string{}
-		for i, p := range p.VarExternal {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range p.VarExternal {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_EXTERNAL "+strings.Join(params, "; ")+";")
 	}
 	if len(p.VarGlobal) > 0 {
 		params := []string{}
-		for i, p := range p.VarGlobal {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range p.VarGlobal {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_GLOBAL "+strings.Join(params, "; ")+";")
 	}
 	if len(p.VarAccess) > 0 {
 		params := []string{}
-		for i, p := range p.VarAccess {
-			params = append(params, p.Vars[i].Name.String()+" : "+p.Vars[i].DataType.String())
+		for _, block := range p.VarAccess {
+			for _, v := range block.Vars {
+				params = append(params, v.Name.String()+" : "+v.DataType.String())
+			}
 		}
 		allParams = append(allParams, "VAR_ACCESS "+strings.Join(params, "; ")+";")
 	}

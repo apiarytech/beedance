@@ -331,22 +331,18 @@ func TestFunctions(t *testing.T) {
 	tests := []compilerTestCase{
 		{
 			input: `FUNCTION MyFunc : INT MyFunc := 5 + 10; END_FUNCTION`,
-			expectedConstants: []interface{}{
-				5,
-				10,
-				[]code.Instructions{
-					code.Make(code.OpNull),        // Initialize return var to null
-					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpConstant, 1),
-					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 0), // MyFunc := 5 + 10 sets the result
-					code.Make(code.OpGetLocal, 0), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 5, 10, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -363,48 +359,39 @@ func TestFunctions(t *testing.T) {
 				MyFuncWithVars := OutVar + 1;
 			END_FUNCTION
 			`,
-			expectedConstants: []interface{}{
-				2,
-				1,
-				[]code.Instructions{
-					// The compiler correctly initializes the return variable to null first.
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1), // Set return var 'MyFuncWithVars' (index 1)
-					// OutVar := InVar * 2;
-					code.Make(code.OpGetLocal, 0), // Get InVar (index 0)
-					code.Make(code.OpConstant, 0), // Push 2
-					code.Make(code.OpMul),
-					code.Make(code.OpSetLocal, 2), // Set OutVar (index 2)
-					// MyFuncWithVars := OutVar + 1;
-					code.Make(code.OpGetLocal, 2), // Get OutVar (index 2)
-					code.Make(code.OpConstant, 1), // Push 1
-					code.Make(code.OpAdd),
-					code.Make(code.OpSetLocal, 1), // set the result
-					// Return the result and the VAR_OUTPUTs together.
-					code.Make(code.OpGetLocal, 1),
-					code.Make(code.OpReturnValueMulti),
-				},
-			},
+			expectedConstants: []interface{}{0, 2, 1, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 2),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpMul),
+				code.Make(code.OpSetLocal, 2),
+				code.Make(code.OpGetLocal, 2),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpAdd),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValueMulti),
+			}},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
 		{
 			input: `FUNCTION MyFunc : INT MyFunc := 2; END_FUNCTION`,
-			expectedConstants: []interface{}{
-				2,
-				[]code.Instructions{
-					code.Make(code.OpNull),        // Initialize return var
-					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpConstant, 0), // MyFunc := 2
-					code.Make(code.OpSetLocal, 0),
-					code.Make(code.OpGetLocal, 0), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 2, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -440,8 +427,8 @@ func TestProgramDeclarationWithVars(t *testing.T) {
 				// VAR_GLOBAL gVar := 1;
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
-				// VAR_EXTERNAL eVar; (implicit init to null)
-				code.Make(code.OpNull),
+				// VAR_EXTERNAL eVar : BOOL; (no matching global, so it starts at the BOOL default)
+				code.Make(code.OpFalse),
 				code.Make(code.OpSetGlobal, 1),
 				// VAR_ACCESS aVar; (no code generated, only symbol table entry)
 				// VAR_TEMP tVar := 2.5;
@@ -738,21 +725,16 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 			FUNCTION noArg : INT noArg := 24; END_FUNCTION
 			noArg();`,
-			expectedConstants: []interface{}{
-				24,
-				[]code.Instructions{
-					// The compiler correctly implements the IEC 61131-3 standard,
-					// where the function name acts as a return variable.
-					code.Make(code.OpNull),        // Initialize return var
-					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpConstant, 0), // noArg := 24
-					code.Make(code.OpSetLocal, 0),
-					code.Make(code.OpGetLocal, 0), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 24, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpCall, 0),
@@ -763,24 +745,19 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 			FUNCTION oneArg : INT VAR_INPUT a:INT; END_VAR oneArg := a; END_FUNCTION
 			oneArg(24);`,
-			expectedConstants: []interface{}{
-				[]code.Instructions{
-					// The compiler correctly implements the IEC 61131-3 standard,
-					// where the function name acts as a return variable.
-					code.Make(code.OpNull),        // Initialize return var 'oneArg'
-					code.Make(code.OpSetLocal, 1), // (a is 0, oneArg is 1)
-					code.Make(code.OpGetLocal, 0), // oneArg := a
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 1), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-				24,
-			},
+			expectedConstants: []interface{}{0, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, 24},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 0, 0),
+				code.Make(code.OpClosure, 1, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 1),
+				code.Make(code.OpConstant, 2),
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
 			},
@@ -789,32 +766,25 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 			FUNCTION manyArg : INT VAR_INPUT a:INT; b:INT; c:INT; END_VAR a; b; manyArg := c; END_FUNCTION
 			manyArg(24, 25, 26);`,
-			expectedConstants: []interface{}{
-				[]code.Instructions{
-					// The compiler correctly implements the IEC 61131-3 standard,
-					// where the function name acts as a return variable.
-					code.Make(code.OpNull),        // Initialize return var 'manyArg'
-					code.Make(code.OpSetLocal, 3), //
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpPop), // a;
-					code.Make(code.OpGetLocal, 1),
-					code.Make(code.OpPop),         // b;
-					code.Make(code.OpGetLocal, 2), // manyArg := c
-					code.Make(code.OpSetLocal, 3),
-					code.Make(code.OpGetLocal, 3), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-				24,
-				25,
-				26,
-			},
+			expectedConstants: []interface{}{0, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 3),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpPop),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpPop),
+				code.Make(code.OpGetLocal, 2),
+				code.Make(code.OpSetLocal, 3),
+				code.Make(code.OpGetLocal, 3),
+				code.Make(code.OpReturnValue),
+			}, 24, 25, 26},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 0, 0),
+				code.Make(code.OpClosure, 1, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 1),
 				code.Make(code.OpConstant, 2),
 				code.Make(code.OpConstant, 3),
+				code.Make(code.OpConstant, 4),
 				code.Make(code.OpCall, 3),
 				code.Make(code.OpPop),
 			},
@@ -1315,34 +1285,30 @@ func TestRecursiveFunctions(t *testing.T) {
 						END_IF
 					END_FUNCTION;
 			countDown(1);`,
-			expectedConstants: []interface{}{
-				0, // for the IF and assignment
-				1,
-				[]code.Instructions{
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpEqual),
-					code.Make(code.OpJumpNotTruthy, 20),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpSetLocal, 1), // countDown := 0 (no early return)
-					code.Make(code.OpJump, 31),
-					code.Make(code.OpCurrentClosure),
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpConstant, 1),
-					code.Make(code.OpSub),
-					code.Make(code.OpCall, 1),
-					code.Make(code.OpSetLocal, 1), // countDown := countDown(x - 1)
-					code.Make(code.OpGetLocal, 1), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 1, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpEqual),
+				code.Make(code.OpJumpNotTruthy, 22),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpJump, 33),
+				code.Make(code.OpCurrentClosure),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSub),
+				code.Make(code.OpCall, 1),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 1), // The '1' from countDown(1)
+				code.Make(code.OpConstant, 1),
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpPop),
 			},
@@ -1356,41 +1322,36 @@ func TestRecursiveFunctions(t *testing.T) {
 				wrapper := countDown(1);
 			END_FUNCTION;
 			wrapper();`,
-			expectedConstants: []interface{}{
-				0,
-				1,
-				[]code.Instructions{ // Body of inner countDown
-					code.Make(code.OpNull),
-					code.Make(code.OpSetLocal, 1),
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpEqual),
-					code.Make(code.OpJumpNotTruthy, 20),
-					code.Make(code.OpConstant, 0),
-					code.Make(code.OpSetLocal, 1), // countDown := 0 (no early return)
-					code.Make(code.OpJump, 31),
-					code.Make(code.OpCurrentClosure),
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpConstant, 1),
-					code.Make(code.OpSub),
-					code.Make(code.OpCall, 1),
-					code.Make(code.OpSetLocal, 1), // countDown := countDown(x - 1)
-					code.Make(code.OpGetLocal, 1), // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-				[]code.Instructions{ // Body of outer wrapper
-					code.Make(code.OpNull),        // Initialize return var 'wrapper'
-					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpClosure, 2, 0),
-					code.Make(code.OpSetLocal, 1), // Store 'countDown' closure
-					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
-					code.Make(code.OpConstant, 1), // Call with constant 1
-					code.Make(code.OpCall, 1),     // Call countDown(1)
-					code.Make(code.OpSetLocal, 0), // wrapper := countDown(1)
-					code.Make(code.OpGetLocal, 0),
-					code.Make(code.OpReturnValue),
-				},
-			},
+			expectedConstants: []interface{}{0, 1, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpEqual),
+				code.Make(code.OpJumpNotTruthy, 22),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpJump, 33),
+				code.Make(code.OpCurrentClosure),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSub),
+				code.Make(code.OpCall, 1),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpReturnValue),
+			}, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpCall, 1),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),

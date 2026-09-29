@@ -40,10 +40,7 @@ type DataStructTest struct {
 // NewDataStructTestFactory creates a new instance of the DataStructTest program.
 func NewDataStructTestFactory(params map[string]string) (func(time.Time), error) {
 	instance := &DataStructTest{}
-	instance.matrix = make([][]iec.INT, 3)
-	for i := range instance.matrix {
-		instance.matrix[i] = make([]iec.INT, 4)
-	}
+	instance.matrix = func() [][]iec.INT { __a := make([][]iec.INT, 2); for __i := range __a { __a[__i] = make([]iec.INT, 3) }; return __a }()
 	instance.s2 = MY_STRUCT{A: 10, B: true}
 	return instance.Logic, nil
 }

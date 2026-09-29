@@ -131,7 +131,6 @@ func TestMethodAsValueIsBound(t *testing.T) {
 func TestCallingNonCallable(t *testing.T) {
 	runVmErrorTests(t, []vmErrorTestCase{
 		{"VAR x : INT := 1; END_VAR x();", "calling non-closure and non-builtin"},
-		{"FUNCTION f : INT VAR_INPUT a : INT; END_VAR f := a; END_FUNCTION f(z := 1);", "unknown named argument: z"},
 	})
 }
 

@@ -18,13 +18,13 @@ func TestIlCompilerOperators(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{10, 20},
+			expectedConstants: []interface{}{10, 20, 0},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpConstant, 1),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpNull),
+				code.Make(code.OpConstant, 2),
 				code.Make(code.OpSetGlobal, 2),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpGetGlobal, 1),
@@ -44,15 +44,15 @@ func TestIlCompilerOperators(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{10},
+			expectedConstants: []interface{}{0, 10},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpNull),
+				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpFalse),
 				code.Make(code.OpSetGlobal, 1),
 				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpJumpNotTruthy, 17),
-				code.Make(code.OpConstant, 0),
+				code.Make(code.OpJumpNotTruthy, 19),
+				code.Make(code.OpConstant, 1),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -73,16 +73,16 @@ func TestIlCompiler_JMPC(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{10},
+		expectedConstants: []interface{}{0, 10},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpNull),
+			code.Make(code.OpConstant, 0),
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpTrue),
 			code.Make(code.OpSetGlobal, 1),
 			code.Make(code.OpGetGlobal, 1),
 			code.Make(code.OpBang),
-			code.Make(code.OpJumpNotTruthy, 18),
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpJumpNotTruthy, 20),
+			code.Make(code.OpConstant, 1),
 			code.Make(code.OpSetGlobal, 0),
 		},
 	}})
@@ -101,9 +101,9 @@ func TestIlCompiler_SetAndReset(t *testing.T) {
 			`,
 		expectedConstants: []interface{}{},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 1),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpDup),
@@ -135,7 +135,7 @@ func TestIlCompiler_GtOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 1),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -162,7 +162,7 @@ func TestIlCompiler_LtOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 1),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -189,7 +189,7 @@ func TestIlCompiler_EqOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 0),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -216,7 +216,7 @@ func TestIlCompiler_GeOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 0),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -243,7 +243,7 @@ func TestIlCompiler_LeOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 1),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -270,7 +270,7 @@ func TestIlCompiler_NeOperator(t *testing.T) {
 			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpConstant, 1),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse), // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 2),
 			code.Make(code.OpGetGlobal, 0),
 			code.Make(code.OpGetGlobal, 1),
@@ -295,7 +295,7 @@ func TestIlCompiler_NotOperator(t *testing.T) {
 		expectedInstructions: []code.Instructions{
 			code.Make(code.OpTrue),
 			code.Make(code.OpSetGlobal, 0), // a := TRUE
-			code.Make(code.OpNull),
+			code.Make(code.OpFalse),        // BOOL defaults to FALSE
 			code.Make(code.OpSetGlobal, 1), // b
 			code.Make(code.OpGetGlobal, 0), // LD a
 			code.Make(code.OpBang),         // NOT
@@ -321,33 +321,28 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// The function should be called, setting result to 10.
-			expectedConstants: []interface{}{
-				10, 1, // No initial 0
-				[]code.Instructions{ // MyFunc body (now const index 2)
-					code.Make(code.OpNull),         // init return var
-					code.Make(code.OpSetLocal, 0),  // MyFunc is local 0
-					code.Make(code.OpConstant, 0),  // 10 (now const index 0)
-					code.Make(code.OpSetGlobal, 0), // result := 10
-					code.Make(code.OpConstant, 1),  // 1 (now const index 1)
-					code.Make(code.OpSetLocal, 0),  // MyFunc := 1
-					code.Make(code.OpGetLocal, 0),  // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
-			expectedInstructions: []code.Instructions{
-				// Globals
-				code.Make(code.OpNull), // result is uninitialized
+			expectedConstants: []interface{}{0, 10, 1, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpConstant, 1),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpClosure, 2, 0), // MyFunc (const index 2)
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 1),
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 2), // cond := TRUE
-				// IL Body
-				code.Make(code.OpGetGlobal, 2),      // LD cond
-				code.Make(code.OpJumpNotTruthy, 27), // Jump over CAL if false
-				code.Make(code.OpGetGlobal, 1),      // Get MyFunc
-				code.Make(code.OpCall, 0),           // Call it
-				code.Make(code.OpPop),               // Pop result of call
+				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpGetGlobal, 2),
+				code.Make(code.OpJumpNotTruthy, 29),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpPop),
 			},
 		},
 		{
@@ -365,34 +360,29 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// The function should be called because condition is FALSE.
-			expectedConstants: []interface{}{
-				10, 0,
-				[]code.Instructions{ // MyFunc body (now const index 2)
-					code.Make(code.OpNull),         // init return var
-					code.Make(code.OpSetLocal, 0),  // MyFunc is local 0
-					code.Make(code.OpConstant, 0),  // 10 (now const index 0)
-					code.Make(code.OpSetGlobal, 0), // result := 10
-					code.Make(code.OpConstant, 1),  // 0 (now const index 1)
-					code.Make(code.OpSetLocal, 0),  // MyFunc := 0
-					code.Make(code.OpGetLocal, 0),  // return the result at the end
-					code.Make(code.OpReturnValue),
-				},
-			},
-			expectedInstructions: []code.Instructions{
-				// Globals
-				code.Make(code.OpNull), // result is uninitialized
+			expectedConstants: []interface{}{0, 10, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpConstant, 1),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpClosure, 2, 0), // MyFunc (const index 2)
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpReturnValue),
+			}},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 1),
 				code.Make(code.OpFalse),
 				code.Make(code.OpSetGlobal, 2),
-				// IL Body
-				code.Make(code.OpGetGlobal, 2),      // LD cond
-				code.Make(code.OpBang),              // Invert condition for CALCN
-				code.Make(code.OpJumpNotTruthy, 28), // Jump over CAL if original was true
-				code.Make(code.OpGetGlobal, 1),      // Get MyFunc
-				code.Make(code.OpCall, 0),           // Call it
-				code.Make(code.OpPop),               // Pop result
+				code.Make(code.OpGetGlobal, 2),
+				code.Make(code.OpBang),
+				code.Make(code.OpJumpNotTruthy, 30),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpCall, 0),
+				code.Make(code.OpPop),
 			},
 		},
 		{
@@ -411,29 +401,26 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// MyFunc should return 5 because RETC is executed.
-			expectedConstants: []interface{}{
-				5, 10,
-				[]code.Instructions{ // MyFunc body
-					code.Make(code.OpNull),        // Init return var 'MyFunc'
-					code.Make(code.OpSetLocal, 0), // MyFunc is local 0
-					code.Make(code.OpTrue),        // cond := TRUE
-					code.Make(code.OpSetLocal, 1), // cond is local 1
-					code.Make(code.OpConstant, 0), // LD 5
-					code.Make(code.OpGetLocal, 1), // LD cond
-					code.Make(code.OpJumpNotTruthy, 15),
-					code.Make(code.OpReturnValue), // RET
-					code.Make(code.OpConstant, 1), // LD 10
-					code.Make(code.OpReturnValue), // Implicit return at end
-				},
-			},
+			expectedConstants: []interface{}{0, 5, 10, []code.Instructions{
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetLocal, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpSetLocal, 1),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpJumpNotTruthy, 17),
+				code.Make(code.OpReturnValue),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpReturnValue),
+			}},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpClosure, 2, 0), // MyFunc is defined first
+				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpNull), // result is defined second
+				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpGetGlobal, 0), // Correctly get MyFunc (index 0)
+				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpCall, 0),
-				code.Make(code.OpSetGlobal, 1), // Correctly set result (index 1)
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 	}
@@ -456,19 +443,13 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{5, 10},
+			expectedConstants: []interface{}{0, 5, 10},
 			expectedInstructions: []code.Instructions{
-				// VAR a
-				code.Make(code.OpNull),
+				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
-				// IL Body
-				// Outer LD( ... )
-				// Inner LD( LD 5 )
-				code.Make(code.OpConstant, 0), // LD 5
-				// ADD 10
-				code.Make(code.OpConstant, 1), // 10
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpConstant, 2),
 				code.Make(code.OpAdd),
-				// ST a
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -490,20 +471,15 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 			`,
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
-				// VAR a
-				code.Make(code.OpNull),
+				code.Make(code.OpFalse),
 				code.Make(code.OpSetGlobal, 0),
-				// IL Body
-				code.Make(code.OpTrue), // LD TRUE
-				// AND( ... )
-				code.Make(code.OpFalse), // LD FALSE
-				// OR( ... )
-				code.Make(code.OpTrue), // LD TRUE
-				code.Make(code.OpTrue), // operand for AND TRUE
-				code.Make(code.OpAnd),  // AND TRUE
-				code.Make(code.OpOr),   // OR
-				code.Make(code.OpAnd),  // AND
-				// ST a
+				code.Make(code.OpTrue),
+				code.Make(code.OpFalse),
+				code.Make(code.OpTrue),
+				code.Make(code.OpTrue),
+				code.Make(code.OpAnd),
+				code.Make(code.OpOr),
+				code.Make(code.OpAnd),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -530,26 +506,24 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 			`,
 			expectedConstants: []interface{}{}, // All values are TRUE/FALSE/NULL, no constants needed
 			expectedInstructions: []code.Instructions{
-				// VAR Decls
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 0), // A
+				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 1), // B
+				code.Make(code.OpSetGlobal, 1),
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 2), // C
+				code.Make(code.OpSetGlobal, 2),
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 3), // D
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 4), // Result
-				// IL Body
-				code.Make(code.OpGetGlobal, 0), // LD A
-				code.Make(code.OpGetGlobal, 1), // operand for AND B
-				code.Make(code.OpAnd),          // AND
-				code.Make(code.OpGetGlobal, 2), // LD C (deferred block)
-				code.Make(code.OpGetGlobal, 3), // operand for AND D
-				code.Make(code.OpAnd),          // AND
-				code.Make(code.OpOr),           // Deferred OR
-				code.Make(code.OpSetGlobal, 4), // ST Result
+				code.Make(code.OpSetGlobal, 3),
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 4),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpAnd),
+				code.Make(code.OpGetGlobal, 2),
+				code.Make(code.OpGetGlobal, 3),
+				code.Make(code.OpAnd),
+				code.Make(code.OpOr),
+				code.Make(code.OpSetGlobal, 4),
 			},
 		},
 	}
@@ -570,20 +544,15 @@ func TestIlCompiler_DeferredModifiers(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{10, 5},
+			expectedConstants: []interface{}{0, 10, 5},
 			expectedInstructions: []code.Instructions{
-				// VAR a
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 0),
-				// VAR b := 10
 				code.Make(code.OpConstant, 0),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 1),
 				code.Make(code.OpSetGlobal, 1),
-				// IL Body
-				// LD( ... )
-				code.Make(code.OpGetGlobal, 1), // LD b
-				code.Make(code.OpConstant, 1),  // 5
-				code.Make(code.OpAdd),          // ADD 5
-				// ST a
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpAdd),
 				code.Make(code.OpSetGlobal, 0),
 			},
 		},
@@ -602,20 +571,16 @@ func TestIlCompiler_DeferredModifiers(t *testing.T) {
 			`,
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
-				// VARs
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 0), // a
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 1), // b
+				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 2), // c
-				// IL Body
-				code.Make(code.OpGetGlobal, 0), // LD a
-				// AND( ... )
-				code.Make(code.OpGetGlobal, 2), // LD c
-				code.Make(code.OpBang),         // NOT
-				code.Make(code.OpAnd),          // AND
-				// ST b
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpGetGlobal, 2),
+				code.Make(code.OpBang),
+				code.Make(code.OpAnd),
 				code.Make(code.OpSetGlobal, 1),
 			},
 		},
@@ -637,12 +602,12 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 0), // a := TRUE
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 1), // b
-				code.Make(code.OpGetGlobal, 0), // LD a
-				code.Make(code.OpBang),         // N modifier
-				code.Make(code.OpSetGlobal, 1), // ST b
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpBang),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -657,12 +622,12 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 0), // a := TRUE
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 1), // b
-				code.Make(code.OpGetGlobal, 0), // LD a
-				code.Make(code.OpBang),         // N modifier for STN
-				code.Make(code.OpSetGlobal, 1), // ST b
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpBang),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -678,16 +643,16 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 			expectedConstants: []interface{}{},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 0), // a := TRUE
+				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 1), // b := TRUE
-				code.Make(code.OpNull),
-				code.Make(code.OpSetGlobal, 2), // c
-				code.Make(code.OpGetGlobal, 0), // LD a
-				code.Make(code.OpGetGlobal, 1), // operand b for ANDN
-				code.Make(code.OpBang),         // N modifier
-				code.Make(code.OpAnd),          // AND
-				code.Make(code.OpSetGlobal, 2), // ST c
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpBang),
+				code.Make(code.OpAnd),
+				code.Make(code.OpSetGlobal, 2),
 			},
 		},
 	}

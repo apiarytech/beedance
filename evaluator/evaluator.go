@@ -164,7 +164,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 				}
 			}
 
-			env.Set("_type_"+decl.Name.Value, &object.Quote{Node: decl})
+			// Stored in upper case: identifiers are case-insensitive. See lookupTypeDeclaration.
+			env.Set("_type_"+strings.ToUpper(decl.Name.Value), &object.Quote{Node: decl})
 		}
 		return NULL
 
@@ -180,6 +181,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			VarOutputs: node.VarOutputs,
 			VarInOuts:  node.VarInOuts,
 			Vars:       node.Vars,
+			ReturnType: typeSpecifierExpression(node.ReturnType),
 			Body:       node.Body,
 			Env:        env,
 		}
@@ -1279,7 +1281,7 @@ func evalOperand(operandNode ast.Expression, env *object.Environment) object.Obj
 	if block, ok := operandNode.(*ast.BlockStatement); ok {
 		blockEnv := object.NewEnclosedEnvironment(env)
 		evalIlProgram(block.Statements, blockEnv)
-		operand, ok := blockEnv.Get(currentResultVar)
+		operand, ok := blockEnv.GetRaw(currentResultVar) // Only the nested program's own result.
 		if !ok {
 			return newError(operandNode, "parenthesized IL expression did not produce a result")
 		}
@@ -1310,8 +1312,15 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 	if isError(val) {
 		return val
 	}
+	return assignValue(node, node.Left, val, env)
+}
 
-	switch target := node.Left.(type) {
+// assignValue assigns val to an assignment target: a variable, an array
+// element, a structure member, or a function block variable or property. It
+// is used by assignments and by output arguments (`o => target`). Errors are
+// reported at node.
+func assignValue(node ast.Node, left ast.Expression, val object.Object, env *object.Environment) object.Object {
+	switch target := left.(type) {
 	case *ast.Identifier:
 		if existing, ok := env.Get(target.Value); ok {
 			switch v := existing.(type) {
@@ -1363,6 +1372,17 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 		if isError(instanceObj) {
 			return instanceObj
 		}
+		if structValue, isStruct := instanceObj.(*object.Hash); isStruct {
+			// Assignment to a member of a structure value.
+			key, ok := hashMemberKey(structValue, target.Member.Value)
+			if !ok {
+				return newError(target, "structure has no member '%s'", target.Member.Value)
+			}
+			pair := structValue.Pairs[key]
+			pair.Value = val
+			structValue.Pairs[key] = pair
+			return val
+		}
 		fbInstance, ok := instanceObj.(*object.FunctionBlockInstance)
 		if !ok {
 			return newError(target, "left side of member assignment is not a function block instance, got %s", instanceObj.Type())
@@ -1400,7 +1420,7 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 		fbInstance.Env.Set(target.Member.Value, val)
 
 	default:
-		return newError(node.Left, "invalid assignment target: %T", node.Left)
+		return newError(node, "invalid assignment target: %T", left)
 	}
 	return val // Assignment statements evaluate to the assigned value.
 }
@@ -1480,15 +1500,7 @@ func evalGenericVarBlock(decls []*ast.VarDeclStatement, env *object.Environment)
 // array types are left to the caller.
 func aliasTypeDeclaration(node *ast.VarDeclStatement, env *object.Environment) *ast.VarDeclStatement {
 	typeName := node.DataType.String()
-	quoteObj, ok := env.Get("_type_" + typeName)
-	if !ok {
-		return nil
-	}
-	quote, ok := quoteObj.(*object.Quote)
-	if !ok {
-		return nil
-	}
-	typeDecl, ok := quote.Node.(*ast.TypeDeclaration)
+	typeDecl, ok := lookupTypeDeclaration(typeName, env)
 	if !ok || typeDecl.DataType == nil {
 		return nil
 	}
@@ -1542,6 +1554,20 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		}
 		return locatedObj
 	}
+
+	// Structures, enumerations and structure initializers such as `(PT := T#1s)`.
+	if structured, handled := evalStructuredDeclaration(node, env); handled {
+		if isError(structured) {
+			return structured
+		}
+		if node.IsConstant {
+			env.Set(node.Name.Value, &object.Constant{Value: structured})
+		} else {
+			env.Set(node.Name.Value, structured)
+		}
+		return structured
+	}
+
 	var val object.Object
 	if node.Value != nil {
 		val = Eval(node.Value, env)
@@ -1860,72 +1886,6 @@ func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	return FALSE
 }
 
-// getResultIntegerType determines the result type for an integer infix operation
-// based on the standard IEC 61131-3 type promotion rules (e.g., INT + DINT results
-// in a DINT).
-func getResultIntegerType(t1, t2 object.ObjectType) object.ObjectType {
-	// IEC 61131-3 Type Promotion Rules for Integer Arithmetic.
-	// The goal is to find the smallest type that can safely hold the result.
-	// If types are the same, the result is of the same type.
-	if t1 == t2 {
-		return t1
-	}
-
-	// Define ranks and signedness for each integer type.
-	typeInfo := map[object.ObjectType]struct {
-		rank     int
-		isSigned bool
-	}{
-		object.SINT_OBJ:  {1, true},
-		object.USINT_OBJ: {1, false},
-		object.INT_OBJ:   {2, true},
-		object.UINT_OBJ:  {2, false},
-		object.DINT_OBJ:  {3, true},
-		object.UDINT_OBJ: {3, false},
-		object.LINT_OBJ:  {4, true},
-		object.ULINT_OBJ: {4, false},
-	}
-
-	info1, ok1 := typeInfo[t1]
-	info2, ok2 := typeInfo[t2]
-
-	// If one of the types is not a standard integer type, fallback to the other.
-	if !ok1 {
-		return t2
-	}
-	if !ok2 {
-		return t1
-	}
-
-	// If ranks are the same but signedness is different, promote to the next larger signed type.
-	if info1.rank == info2.rank && info1.isSigned != info2.isSigned {
-		switch info1.rank {
-		case 1: // SINT vs USINT -> INT
-			return object.INT_OBJ
-		case 2: // INT vs UINT -> DINT
-			return object.DINT_OBJ
-		case 3: // DINT vs UDINT -> LINT
-			return object.LINT_OBJ
-		case 4: // LINT vs ULINT -> LINT (cannot promote further, LINT is largest signed)
-			return object.LINT_OBJ
-		}
-	}
-
-	// Otherwise, promote to the type with the higher rank.
-	if info1.rank > info2.rank {
-		return t1
-	}
-	return t2
-}
-
-// abs is a helper function to get the absolute value of an int64.
-func abs(x int64) int64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 // evalCaseStatement evaluates a CASE statement by first evaluating the selector,
 // then iterating through each case branch to find a match. It handles single
 // values, lists of values, and ranges.
@@ -2151,26 +2111,6 @@ func evalRepeatStatement(rs *ast.RepeatStatement, env *object.Environment) objec
 	}
 
 	return NULL
-}
-
-// evalWStringInfixExpression handles concatenation for wide strings.
-func evalWStringInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftVal := left.(*object.WString).Value
-	rightVal := right.(*object.WString).Value
-	return &object.WString{Value: leftVal + rightVal}
-}
-
-// evalStringInfixExpression handles concatenation for single-byte strings.
-func evalStringInfixExpression(
-	node *ast.InfixExpression,
-	left, right object.Object,
-) object.Object {
-	leftVal := left.(*object.String).Value
-	rightVal := right.(*object.String).Value
-	return &object.String{Value: leftVal + rightVal}
 }
 
 // evalTaskDeclaration evaluates a TASK declaration, creating a runtime Task object.
@@ -2910,6 +2850,20 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			return err
 		}
 
+		// The result starts at its type's default; omitted inputs of a formal call
+		// and the VAR_OUTPUTs start at their initial values or types' defaults.
+		if fn.Name != nil {
+			if result := declareResult(fn.Name, fn.ReturnType, extendedEnv); isError(result) {
+				return result
+			}
+		}
+		if result := declareOmittedInputs(fn.VarInputs, args, extendedEnv); isError(result) {
+			return result
+		}
+		if result := declareOutputs(fn.VarOutputs, extendedEnv); isError(result) {
+			return result
+		}
+
 		// Initialize VAR and VAR_TEMP variables for this specific call.
 		// This ensures statelessness for each function invocation.
 		for _, varDecl := range fn.Vars {
@@ -2935,10 +2889,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			// Assign this value to the target variable in the *calling* scope.
 			// We need to evaluate the target variable node in the calling environment.
 			// For now, assuming it's an identifier.
-			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
-				callEnv.Set(targetIdent.Value, val)
-			} else {
-				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
+				return result
 			}
 		}
 
@@ -3032,10 +2984,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			if !ok {
 				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in program scope", mapping.SourceParamName)
 			}
-			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
-				callEnv.Set(targetIdent.Value, val)
-			} else {
-				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
+				return result
 			}
 		}
 
@@ -3104,10 +3054,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			if !ok {
 				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in program scope", mapping.SourceParamName)
 			}
-			if targetIdent, ok := mapping.TargetVarNode.(*ast.Identifier); ok {
-				callEnv.Set(targetIdent.Value, val)
-			} else {
-				return newError(mapping.TargetVarNode, "unsupported target for output argument: %T", mapping.TargetVarNode)
+			if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
+				return result
 			}
 		}
 
@@ -3222,40 +3170,10 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				return newError(mapping.TargetVarNode, "internal error: output parameter %s not found in FB scope", mapping.SourceParamName)
 			}
 
-			// Assign the value to the target in the calling environment.
-			switch targetNode := mapping.TargetVarNode.(type) {
-			case *ast.Identifier:
-				// Use Assign to correctly update variables in outer scopes.
-				callEnv.Assign(targetNode.Value, val)
-
-			case *ast.IndexExpression:
-				// Handle assignment to an array element, e.g., Out => MyArray[1]
-				// This requires evaluating the array and index in the callEnv.
-				arrayObj := Eval(targetNode.Left, callEnv)
-				if isError(arrayObj) {
-					return arrayObj
-				}
-				array, ok := arrayObj.(*object.Array) // cspell:disable-line
-				if !ok {
-					return newError(targetNode.Left, "left side of index expression for output argument must be an ARRAY, got %s", arrayObj.Type())
-				}
-
-				indexObj := Eval(targetNode.Index, callEnv)
-				if isError(indexObj) {
-					return indexObj
-				}
-				idx, _, ok := object.GetIntegerObjectValue(indexObj)
-				if !ok {
-					return newError(targetNode.Index, "array index for output argument must be an integer, got %s", indexObj.Type())
-				}
-
-				if idx < 0 || idx >= int64(len(array.Elements)) {
-					return newError(targetNode, "index out of bounds for output assignment: %d", idx)
-				}
-				array.Elements[idx] = val
-
-			default:
-				return newError(mapping.TargetVarNode, "unsupported target for FB output argument: %T", mapping.TargetVarNode)
+			// Assign the value to the target in the calling environment: a
+			// variable, an array element or a structure member.
+			if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
+				return result
 			}
 		}
 
@@ -3313,13 +3231,30 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 				}
 				methodEnv.Set(namedArg.Name.Value, val)
 			} else { // Positional argument
+				if positionalParamIndex >= len(paramDecls) {
+					return newError(argNode, "too many arguments in call to method '%s'", fn.Definition.Name.Value)
+				}
 				val := Eval(argNode, callEnv)
+				if isError(val) {
+					return val
+				}
 				methodEnv.Set(paramDecls[positionalParamIndex].Name.Value, val)
 				positionalParamIndex++
 			}
 		}
-		// Pre-declare the method name as a variable for the return value.
-		methodEnv.Set(fn.Definition.Name.Value, NULL)
+		// The result starts at its type's default, omitted inputs of a formal call
+		// take their defaults, and the method's local VARs are declared.
+		if result := declareResult(fn.Definition.Name, typeSpecifierExpression(fn.Definition.ReturnType), methodEnv); isError(result) {
+			return result
+		}
+		if result := declareOmittedInputs(fn.Definition.VarInputs, args, methodEnv); isError(result) {
+			return result
+		}
+		for _, local := range fn.Definition.Vars {
+			if result := evalVarDeclStatement(local, methodEnv); isError(result) {
+				return result
+			}
+		}
 
 		// Evaluate the method body.
 		evaluated := Eval(fn.Definition.Body, methodEnv)
@@ -3569,6 +3504,12 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 	}
 
 	switch l := left.(type) {
+	case *object.Hash:
+		// A structure value.
+		if key, ok := hashMemberKey(l, node.Member.Value); ok {
+			return l.Pairs[key].Value
+		}
+		return newError(node, "structure has no member '%s'", node.Member.Value)
 	case *object.Namespace:
 		member := node.Member.Value
 		val, ok := l.Env.Get(member)
@@ -3780,127 +3721,6 @@ func applyNumericConversion(value, typeName string) object.Object {
 	}
 }
 
-// isAnyBit checks if an object's type is part of the ANY_BIT family.
-func isAnyBit(obj object.Object) bool {
-	t := obj.Type() // cspell:disable-line
-	return t == object.BOOLEAN_OBJ || t == object.BITSTRING_OBJ
-}
-
-// evalComparisonInfix handles comparison operations for types not covered by specific infix evaluators.
-func evalComparisonInfix(node *ast.InfixExpression, left, right object.Object) object.Object {
-	// This function provides a fallback for comparing types that don't have a dedicated
-	// infix evaluation function, such as strings, booleans, and time types.
-	// Handle NULL comparisons
-	if left == NULL || right == NULL {
-		if node.Operator == "=" {
-			return nativeBoolToBooleanObject(left == right)
-		}
-		if node.Operator == "!=" {
-			return nativeBoolToBooleanObject(left != right)
-		}
-		return newError(node, "unsupported operator for NULL: %s", node.Operator)
-	}
-
-	// Handle Boolean comparisons
-	if left.Type() == object.BOOLEAN_OBJ && right.Type() == object.BOOLEAN_OBJ {
-		leftVal := left.(*object.Boolean).Value
-		rightVal := right.(*object.Boolean).Value
-		switch node.Operator {
-		case "=":
-			return nativeBoolToBooleanObject(leftVal == rightVal)
-		case "!=":
-			return nativeBoolToBooleanObject(leftVal != rightVal)
-		default:
-			return newError(node, "unknown operator: %s %s %s", left.Type(), node.Operator, right.Type())
-		}
-	}
-
-	// Handle String comparisons
-	if left.Type() == object.STRING_OBJ && right.Type() == object.STRING_OBJ {
-		leftVal := left.(*object.String).Value
-		rightVal := right.(*object.String).Value
-		// For strings, all comparison operators are valid.
-		return evalGenericComparison(node.Operator, leftVal, rightVal)
-	}
-
-	// Handle WString comparisons
-	if left.Type() == object.WSTRING_OBJ && right.Type() == object.WSTRING_OBJ {
-		leftVal := left.(*object.WString).Value
-		rightVal := right.(*object.WString).Value
-		return evalGenericComparison(node.Operator, leftVal, rightVal)
-	}
-
-	// Handle Time comparisons
-	if left.Type() == object.TIME_OBJ && right.Type() == object.TIME_OBJ {
-		leftVal := left.(*object.Time).Value
-		rightVal := right.(*object.Time).Value
-		return evalGenericComparison(node.Operator, int64(leftVal), int64(rightVal))
-	}
-
-	// Handle Date comparisons
-	if left.Type() == object.DATE_OBJ && right.Type() == object.DATE_OBJ {
-		leftVal := left.(*object.Date).Value
-		rightVal := right.(*object.Date).Value
-		// Compare using Unix nanoseconds for a consistent integer-based comparison
-		return evalGenericComparison(node.Operator, leftVal.UnixNano(), rightVal.UnixNano())
-	}
-
-	// Handle EnumeratedValue comparisons
-	if left.Type() == object.ENUMERATED_VALUE_OBJ && right.Type() == object.ENUMERATED_VALUE_OBJ {
-		leftVal := left.(*object.EnumeratedValue)
-		rightVal := right.(*object.EnumeratedValue)
-		// For enums, only equality and inequality are meaningful.
-		// They must be of the same type and have the same value.
-		isEqual := leftVal.TypeName == rightVal.TypeName && leftVal.Value == rightVal.Value
-		switch node.Operator {
-		case "=":
-			return nativeBoolToBooleanObject(isEqual)
-		case "!=":
-			return nativeBoolToBooleanObject(!isEqual)
-		default:
-			return newError(node, "unknown operator for enumerated types: %s", node.Operator)
-		}
-	}
-
-	// Handle TimeOfDay comparisons
-	if left.Type() == object.TIME_OF_DAY_OBJ && right.Type() == object.TIME_OF_DAY_OBJ {
-		leftVal := left.(*object.TimeOfDay).Value
-		rightVal := right.(*object.TimeOfDay).Value
-		// Convert to nanoseconds since midnight for comparison, ignoring date part
-		leftNs := int64(leftVal.Hour())*int64(time.Hour) + int64(leftVal.Minute())*int64(time.Minute) + int64(leftVal.Second())*int64(time.Second) + int64(leftVal.Nanosecond())
-		rightNs := int64(rightVal.Hour())*int64(time.Hour) + int64(rightVal.Minute())*int64(time.Minute) + int64(rightVal.Second())*int64(time.Second) + int64(rightVal.Nanosecond())
-		return evalGenericComparison(node.Operator, leftNs, rightNs)
-	}
-
-	// Handle DateAndTime comparisons
-	if left.Type() == object.DATE_AND_TIME_OBJ && right.Type() == object.DATE_AND_TIME_OBJ {
-		leftVal := left.(*object.DateAndTime).Value
-		rightVal := right.(*object.DateAndTime).Value
-		// Compare using Unix nanoseconds for a consistent integer-based comparison
-		return evalGenericComparison(node.Operator, leftVal.UnixNano(), rightVal.UnixNano())
-	}
-
-	// Handle EnumeratedValue comparisons
-	if left.Type() == object.ENUMERATED_VALUE_OBJ && right.Type() == object.ENUMERATED_VALUE_OBJ {
-		leftVal := left.(*object.EnumeratedValue)
-		rightVal := right.(*object.EnumeratedValue)
-		// For enums, only equality and inequality are meaningful.
-		// They must be of the same type and have the same value.
-		isEqual := leftVal.TypeName == rightVal.TypeName && leftVal.Value == rightVal.Value
-		switch node.Operator {
-		case "=":
-			return nativeBoolToBooleanObject(isEqual)
-		case "!=":
-			return nativeBoolToBooleanObject(!isEqual)
-		default:
-			return newError(node, "unknown operator for enumerated types: %s", node.Operator)
-		}
-	}
-
-	// If types are different, it's a type mismatch for comparison
-	return newError(node, "type mismatch for comparison: %s %s %s", left.Type(), node.Operator, right.Type())
-}
-
 // NewScheduler is a placeholder for a function that would create a runtime
 // scheduler from a fully evaluated configuration environment, organizing tasks
 // and their associated programs.
@@ -3983,85 +3803,68 @@ func RunScheduler(s *object.Scheduler, env *object.Environment, scanCycle time.D
 	fmt.Println("Scheduler started. Press Ctrl+C to stop.")
 
 	for range ticker.C {
-		now := time.Now()
-		readyTasks := []*object.Task{}
-
-		// 1. Check for triggers and identify ready tasks
-		for _, task := range s.Tasks {
-			isReady := false
-			if task.Interval > 0 {
-				// Periodic task
-				if now.Sub(task.LastExecution) >= task.Interval {
-					isReady = true
-					task.LastExecution = now
-				}
-			} else if task.Trigger != nil {
-				// Event-driven task
-				triggerValObj := Eval(task.Trigger, env) // cspell:disable-line
-				currentTriggerVal := isTruthy(triggerValObj)
-				// Check for rising edge
-				if currentTriggerVal && !task.LastTriggerValue {
-					isReady = true
-				}
-				task.LastTriggerValue = currentTriggerVal
-			}
-
-			if isReady {
-				readyTasks = append(readyTasks, task)
-			}
-		}
-
-		// No need to re-sort, as the main list is already prioritized.
-		// We just need to execute them in the order they appear in s.Tasks.
-
-		// 2. Execute ready tasks according to priority
-		for _, task := range s.Tasks {
-			isTaskReady := false
-			for _, readyTask := range readyTasks {
-				if task == readyTask {
-					isTaskReady = true
-					break
-				}
-			}
-
-			if isTaskReady {
-				fmt.Printf("Executing Task: %s (Priority: %d)\n", task.Name, task.Priority)
-				for _, prog := range task.Programs {
-					// Execute the program body in its own instance environment
-					Eval(prog.Definition.Body, prog.Env)
-
-					// Handle output mappings (=>)
-					for _, mapping := range prog.OutputMappings {
-						val, _ := prog.Env.Get(mapping.SourceParamName)
-						env.Set(mapping.TargetVarName, val) // Set in the global/resource scope
-					}
-				}
-			}
-		}
+		runSchedulerCycle(s, env, time.Now())
 	}
 }
 
-// evalGenericComparison provides a centralized comparison logic for types that
-// can be represented as either `string` or `int64`, handling all standard
-// comparison operators.
-func evalGenericComparison[T ~string | ~int64](op string, leftVal, rightVal T) object.Object {
-	switch op {
-	case "=":
-		return nativeBoolToBooleanObject(leftVal == rightVal) // This now works for strings too
-	case "!=", "<>":
-		return nativeBoolToBooleanObject(leftVal != rightVal)
-	case "<":
-		return nativeBoolToBooleanObject(leftVal < rightVal)
-	case ">":
-		return nativeBoolToBooleanObject(leftVal > rightVal)
-	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal)
-	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal)
-	default:
-		// This path should ideally not be hit if called from evalComparisonInfix,
-		// but it's here for robustness.
-		return object.NewBuiltinError("unknown operator '%s' for generic comparison", op)
+// runSchedulerCycle runs one scan cycle of a scheduler at time now: it finds
+// the tasks that are due (periodic tasks whose interval has passed, and event
+// tasks whose trigger has a rising edge) and runs their programs in priority
+// order.
+func runSchedulerCycle(s *object.Scheduler, env *object.Environment, now time.Time) {
+	readyTasks := []*object.Task{}
+
+	// 1. Check for triggers and identify ready tasks
+	for _, task := range s.Tasks {
+		isReady := false
+		if task.Interval > 0 {
+			// Periodic task
+			if now.Sub(task.LastExecution) >= task.Interval {
+				isReady = true
+				task.LastExecution = now
+			}
+		} else if task.Trigger != nil {
+			// Event-driven task
+			triggerValObj := Eval(task.Trigger, env) // cspell:disable-line
+			currentTriggerVal := isTruthy(triggerValObj)
+			// Check for rising edge
+			if currentTriggerVal && !task.LastTriggerValue {
+				isReady = true
+			}
+			task.LastTriggerValue = currentTriggerVal
+		}
+
+		if isReady {
+			readyTasks = append(readyTasks, task)
+		}
+	}
+
+	// No need to re-sort, as the main list is already prioritized.
+	// We just need to execute them in the order they appear in s.Tasks.
+
+	// 2. Execute ready tasks according to priority
+	for _, task := range s.Tasks {
+		isTaskReady := false
+		for _, readyTask := range readyTasks {
+			if task == readyTask {
+				isTaskReady = true
+				break
+			}
+		}
+
+		if isTaskReady {
+			fmt.Printf("Executing Task: %s (Priority: %d)\n", task.Name, task.Priority)
+			for _, prog := range task.Programs {
+				// Execute the program body in its own instance environment
+				Eval(prog.Definition.Body, prog.Env)
+
+				// Handle output mappings (=>)
+				for _, mapping := range prog.OutputMappings {
+					val, _ := prog.Env.Get(mapping.SourceParamName)
+					env.Set(mapping.TargetVarName, val) // Set in the global/resource scope
+				}
+			}
+		}
 	}
 }
 
@@ -4146,25 +3949,25 @@ func evalMinusPrefixOperatorExpression(node *ast.PrefixExpression, right object.
 	return newError(node, "unknown operator: -%s", right.Type())
 }
 
-// getParamDecls is a helper function to get all parameter declarations (VAR_INPUT)
-// from a POU definition object.
+// getParamDecls returns the parameters of a POU that a non-formal (positional)
+// call supplies, in order: its VAR_INPUTs, then its VAR_IN_OUTs.
 func getParamDecls(def object.Object) []*ast.VarDeclStatement {
 	switch d := def.(type) {
 	case *object.FunctionBlock:
 		if d == nil {
 			return nil
 		}
-		return d.VarInputs
+		return append(append([]*ast.VarDeclStatement{}, d.VarInputs...), d.VarInOuts...)
 	case *object.Function:
 		if d == nil {
 			return nil
 		}
-		return d.VarInputs
+		return append(append([]*ast.VarDeclStatement{}, d.VarInputs...), d.VarInOuts...)
 	case *object.Program:
 		if d == nil {
 			return nil
 		}
-		return d.VarInputs
+		return append(append([]*ast.VarDeclStatement{}, d.VarInputs...), d.VarInOuts...)
 	default:
 		return nil
 	}

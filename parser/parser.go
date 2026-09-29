@@ -2261,15 +2261,20 @@ func (p *Parser) parseTypedLiteralExpression(left ast.Expression) ast.Expression
 	// If it's a time/date type, return the specific literal node
 	if isTimeDateKeyword(lit.TypeName) {
 		lit.Value = p.parseIecLiteralValue(lit.TypeName) // Parse the value part
+		value, ok := lit.Value.(*ast.Identifier)
+		if !ok {
+			// No value follows the '#', e.g. `T#;`; parseIecLiteralValue reported it.
+			return nil
+		}
 		switch strings.ToUpper(lit.TypeName) {
 		case "TIME", "T":
-			return &ast.TimeLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+			return &ast.TimeLiteral{Token: lit.Token, Value: value.Value}
 		case "DATE", "D":
-			return &ast.DateLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+			return &ast.DateLiteral{Token: lit.Token, Value: value.Value}
 		case "TIME_OF_DAY", "TOD":
-			return &ast.TimeOfDayLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+			return &ast.TimeOfDayLiteral{Token: lit.Token, Value: value.Value}
 		case "DATE_AND_TIME", "DT":
-			return &ast.DateAndTimeLiteral{Token: lit.Token, Value: lit.Value.(*ast.Identifier).Value}
+			return &ast.DateAndTimeLiteral{Token: lit.Token, Value: value.Value}
 		}
 	}
 

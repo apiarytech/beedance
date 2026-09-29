@@ -223,6 +223,7 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		(IsRealType(fromType) && IsRealType(actualType)) ||
 		(IsStringType(fromType) && IsStringType(actualType)) ||
 		(IsBitStringType(fromType) && IsBitStringType(actualType)) ||
+		(IsBitStringType(fromType) && isBitStringOfWidth(input, fromType)) ||
 		(fromType == "ANY_INT" && IsIntegerType(actualType)) ||
 		(fromType == "ANY_REAL" && IsNumeric(input)) ||
 		(fromType == "BCD" && actualType == string(BITSTRING_OBJ)) ||
@@ -261,6 +262,8 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		case *LReal:
 			rounded := int64(math.Round(val.Value))
 			return checkAndCreateIntegerObject(ObjectType(toType), rounded, uint64(rounded), false)
+		case *BitString:
+			return checkAndCreateIntegerObject(ObjectType(toType), int64(val.Value), val.Value, true)
 		case *String:
 			// Trim whitespace before parsing, as per IEC standard for STRING_TO_*
 			i, err := strconv.ParseInt(strings.TrimSpace(val.Value), 10, 64)
@@ -316,6 +319,8 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		case *Real, *LReal:
 			fVal, _ := GetFloat64Value(input)
 			return nativeBoolToBooleanObject(fVal != 0.0)
+		case *BitString:
+			return nativeBoolToBooleanObject(input.(*BitString).Value != 0)
 		}
 		return NewBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 	}
@@ -332,6 +337,11 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 				return NewBuiltinError("value %d is out of range for type %s (0 to %d)", iVal, toType, maxVal)
 			}
 			return &BitString{Value: uint64(iVal), Width: width}
+		case *BitString:
+			if val.Value > maxVal {
+				return NewBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, maxVal)
+			}
+			return &BitString{Value: val.Value, Width: width}
 		default:
 			return NewBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 		}
@@ -426,7 +436,13 @@ func checkAndCreateIntegerObject(t ObjectType, val int64, uval uint64, isUnsigne
 		}
 	}
 
-	// If checks pass, create the object
+	// If checks pass, create the object from whichever value was given; the
+	// checks above guarantee it fits the target type.
+	if isUnsigned {
+		val = int64(uval)
+	} else {
+		uval = uint64(val)
+	}
 	switch t {
 	case SINT_OBJ:
 		return &SInt{Value: int8(val)}
@@ -505,6 +521,18 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		return evalTimeInfix(left, operator, right)
 	case left.Type() == BITSTRING_OBJ && right.Type() == BITSTRING_OBJ:
 		return evalBitStringInfix(left, operator, right)
+	case left.Type() == ENUMERATED_VALUE_OBJ && right.Type() == ENUMERATED_VALUE_OBJ:
+		// Enumerated values support equality only. They are equal when they
+		// name the same value of the same type; names are case-insensitive.
+		l, r := left.(*EnumeratedValue), right.(*EnumeratedValue)
+		same := strings.EqualFold(l.TypeName, r.TypeName) && strings.EqualFold(l.Value, r.Value)
+		switch operator {
+		case "=", "EQ":
+			return nativeBoolToBooleanObject(same)
+		case "<>", "!=", "NE":
+			return nativeBoolToBooleanObject(!same)
+		}
+		return NewBuiltinError("operator '%s' is not defined for enumerated values", operator)
 	case left.Type() == NULL_OBJ || right.Type() == NULL_OBJ:
 		if operator == "=" {
 			return nativeBoolToBooleanObject(left.Type() == right.Type())
@@ -925,4 +953,12 @@ func IsTruthy(obj Object) bool {
 		// Any non-boolean result is implicitly not "truthy".
 		return false
 	}
+}
+
+// isBitStringOfWidth reports whether obj is a bit string that fits the
+// bit-string type typeName (BYTE, WORD, DWORD or LWORD).
+func isBitStringOfWidth(obj Object, typeName string) bool {
+	bs, ok := obj.(*BitString)
+	width, known := GetBitStringWidth(typeName)
+	return ok && known && bs.Width <= width
 }

@@ -126,9 +126,11 @@ type Transpiler struct {
 	mainGenerated    bool                            // Flag to ensure main is only generated once
 	globalVars       map[string]bool                 // Set of global variable names
 	typeInfo         map[string]ast.Node
-	currentSetter    *ast.PropertyDeclaration     // The current property setter being transpiled
-	isDereferencing  bool                         // Flag to prevent double-dereferencing
-	macroDefinitions map[string]*ast.MacroLiteral // Stores macro definitions for expansion
+	currentSetter    *ast.PropertyDeclaration               // The current property setter being transpiled
+	isDereferencing  bool                                   // Flag to prevent double-dereferencing
+	macroDefinitions map[string]*ast.MacroLiteral           // Stores macro definitions for expansion
+	localVars        map[string]bool                        // Parameters, results and locals of the current function or method
+	initVisiting     map[*ast.FunctionBlockDeclaration]bool // Function blocks whose Init is being generated
 }
 
 // New creates a new Transpiler instance with the given io.Writer.
@@ -255,16 +257,9 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		// This handles VAR blocks that might appear as statements inside a body.
 		// We treat them as local variable declarations.
 		for _, decl := range node.Declarations {
-			t.write("\tvar %s %s", decl.Name.Value, t.mapIecTypeToGo(decl.DataType))
-			if decl.Value != nil {
-				t.write(" = ")
-				// Use a temporary transpiler to avoid carrying over receiver context.
-				valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars} // This will call transpileNode recursively
-				if err := valT.transpileExpression(decl.Value); err != nil {
-					return err
-				}
+			if err := t.transpileLocalVar(decl); err != nil {
+				return err
 			}
-			t.write("\n")
 		}
 		return nil
 	default:
@@ -335,9 +330,15 @@ func (t *Transpiler) transpileGlobalVarBlocks(blocks []*ast.GlobalVarDeclaration
 		for _, decl := range block.Vars {
 			goType := t.mapIecTypeToGo(decl.DataType)
 			t.write("var %s %s", decl.Name.Value, goType)
-			if decl.Value != nil {
-				t.write(" = ")
-				t.transpileExpression(decl.Value)
+			// Global starting values have no receiver.
+			originalReceiver := t.programVarName
+			t.programVarName = ""
+			v, err := t.initialValue(decl.DataType, decl.Value)
+			t.programVarName = originalReceiver
+			if err != nil {
+				log.Printf("Error transpiling initial value of global '%s': %v", decl.Name.Value, err)
+			} else if v != "" {
+				t.write(" = %s", v)
 			}
 			t.write("\n")
 		}
@@ -589,43 +590,18 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	t.write("func New%sFactory(params map[string]string) (func(time.Time), error) {\n", prog.Name.Value)
 	t.write("\tinstance := &%s{}\n", prog.Name.Value)
 
-	// Transpile initial values and perform other initializations in declaration order.
+	// Set starting values in declaration order. Initial values may refer to
+	// variables declared before them, which are fields of instance.
+	t.programVarName = "instance"
 	for _, varBlock := range allVarBlocks {
 		for _, varDecl := range varBlock {
-			// Handle array allocation for arrays without an explicit initial value.
-			if arrayDef, ok := varDecl.DataType.(*ast.ArrayDefinition); ok && varDecl.Value == nil {
-				// Only apply this simplified initialization for multi-dimensional arrays for now.
-				// This is a workaround for a specific test case.
-				if len(arrayDef.Ranges) > 1 {
-					// This is a simplified initialization for testing. A full implementation
-					// would parse the ranges from the AST to get the correct dimensions.
-					t.write("\tinstance.%s = make(%s, 3)\n", varDecl.Name.Value, t.mapIecTypeToGo(varDecl.DataType))
-					t.write("\tfor i := range instance.%s {\n", varDecl.Name.Value)
-					t.write("\t\tinstance.%s[i] = make([]%s, 4)\n", varDecl.Name.Value, t.mapIecTypeToGo(arrayDef.DataType))
-					t.write("\t}\n")
-				}
-			}
-
-			// Handle explicit initial values.
-			if varDecl.Value != nil {
-				// Skip macro definitions, as they have no runtime initial value.
-				if _, ok := varDecl.Value.(*ast.MacroLiteral); ok {
-					continue
-				}
-				t.write("\tinstance.%s = ", varDecl.Name.Value)
-				valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
-				if err := valT.transpileExpression(varDecl.Value); err != nil {
-					return err
-				}
-				t.write("\n")
-			}
-
-			// For FBs, initialize their EN input to TRUE by default.
-			if t.isFunctionBlockType(varDecl.DataType) {
-				t.write("\tinstance.%s.EN = true\n", varDecl.Name.Value)
+			if err := t.transpileProgramVarInit(varDecl); err != nil {
+				t.programVarName = "p"
+				return err
 			}
 		}
 	}
+	t.programVarName = "p"
 
 	// If it's an SFC program, set the initial step in the factory.
 	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
@@ -663,7 +639,9 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	// Transpile VAR_TEMP as local variables inside the Logic method.
 	for _, tempBlock := range prog.VarTemp {
 		for _, decl := range tempBlock.Vars {
-			t.transpileVarDeclAsLocal(decl)
+			if err := t.transpileLocalVar(decl); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1412,9 +1390,15 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	// VAR_TEMP variables are local to the Logic() call, not fields of the struct.
 	t.write("}\n\n")
 
-	// 2. Generate the Logic method for the Function Block.
 	// The receiver name is specific to this FB.
 	receiverName := strings.ToLower(fb.Name.Value[:1])
+
+	// Generate the Init method, which sets the starting values of an instance.
+	if err := t.transpileFunctionBlockInit(fb, receiverName); err != nil {
+		return err
+	}
+
+	// 2. Generate the Logic method for the Function Block.
 	originalProgramVarName := t.programVarName
 	t.programVarName = receiverName // Set context for transpiling the body
 
@@ -1436,7 +1420,9 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	// Transpile VAR_TEMP as local variables inside the Logic method.
 	for _, tempBlock := range fb.VarTemp {
 		for _, decl := range tempBlock.Vars {
-			t.transpileVarDeclAsLocal(decl)
+			if err := t.transpileLocalVar(decl); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1525,19 +1511,22 @@ func (t *Transpiler) transpilePropertyDeclaration(fb *ast.FunctionBlockDeclarati
 	// Transpile the GET block
 	if prop.Getter != nil {
 		t.write("// Get%s is the getter for the %s property.\n", propName, propName)
-		t.write("func (%s *%s) Get%s() %s {\n", receiverName, fb.Name.Value, propName, goType)
+		t.write("func (%s *%s) Get%s() (%s %s) {\n", receiverName, fb.Name.Value, propName, propName, goType)
 
 		// Temporarily set the current function context so that assignments to the
-		// property name are treated as return statements.
+		// property name set the getter's result, a named Go result.
 		originalFunc := t.currentFunc
 		t.currentFunc = &ast.FunctionDeclaration{Name: prop.Name}
 
-		if err := t.transpileNode(prop.Getter.Body); err != nil { // This will call transpileNode recursively
-			t.currentFunc = originalFunc // Restore on error
+		err := t.transpileResultValues(prop.Name, prop.DataType, nil)
+		if err == nil {
+			err = t.transpileNode(prop.Getter.Body) // This will call transpileNode recursively
+		}
+		t.currentFunc = originalFunc
+		if err != nil {
 			return err
 		}
-
-		t.currentFunc = originalFunc
+		t.write("\treturn\n")
 		t.write("}\n\n")
 	}
 
@@ -1652,46 +1641,40 @@ func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration
 	t.write("%s", strings.Join(params, ", "))
 	t.write(") ")
 
-	// Transpile return type.
+	// Named results, as for a function: the method's value, named after the
+	// method, then its VAR_OUTPUTs.
+	var returnType ast.Expression
 	if method.ReturnType != nil {
-		// A non-nil return type is a valid type to be returned.
-		t.write("%s", t.mapIecTypeToGo(method.ReturnType))
+		returnType = method.ReturnType
 	}
-	t.write(" {\n")
+	hasResults := t.transpileResultDeclarations(method.Name.Value, returnType, method.VarOutputs)
+	t.write("{\n")
 
-	// Transpile local variables (VAR).
-	for _, varDecl := range method.Vars {
-		t.transpileVarDeclAsLocal(varDecl)
-	}
-
-	// Transpile the method body.
-	// Set a temporary function context so that `MyMethod := ...` is treated as a return.
+	// Set a temporary function context so that `MyMethod := ...` sets the result.
 	originalFunc := t.currentFunc
 	t.currentFunc = &ast.FunctionDeclaration{Name: method.Name, ReturnType: method.ReturnType}
 	defer func() { t.currentFunc = originalFunc }()
 
-	if err := t.transpileNode(method.Body); err != nil { // This will call transpileNode recursively
-		return err
-	}
-
-	t.write("}\n\n")
-	return nil
-}
-
-// transpileVarDeclAsLocal transpiles a variable declaration as a local `var` statement
-// inside a function body, used for VAR_TEMP.
-func (t *Transpiler) transpileVarDeclAsLocal(varDecl *ast.VarDeclStatement) {
-	t.write("\tvar %s %s", varDecl.Name.Value, t.mapIecTypeToGo(varDecl.DataType)) // This will call transpileNode recursively
-	if varDecl.Value != nil {
-		t.write(" = ")
-		// Use a temporary transpiler to avoid carrying over receiver context.
-		valT := &Transpiler{w: t.w, typeInfo: t.typeInfo, globalVars: t.globalVars}
-		if err := valT.transpileExpression(varDecl.Value); err != nil {
-			// This is not ideal as we can't return an error here. Log it.
-			log.Printf("Error transpiling initial value for temp var: %v", err)
+	return t.withLocals(declNames(method.VarInputs, method.VarOutputs, method.VarInOuts, method.Vars), func() error {
+		// Starting values of the results and local variables (VAR).
+		if err := t.transpileResultValues(method.Name, returnType, method.VarOutputs); err != nil {
+			return err
 		}
-	}
-	t.write("\n")
+		for _, varDecl := range method.Vars {
+			if err := t.transpileLocalVar(varDecl); err != nil {
+				return err
+			}
+		}
+
+		if err := t.transpileNode(method.Body); err != nil { // This will call transpileNode recursively
+			return err
+		}
+		if hasResults && !endsWithReturn(method.Body) {
+			t.write("\treturn\n")
+		}
+		t.write("}\n\n")
+		return nil
+	})
 }
 
 // isTransitionFromStep checks if a given transition statement originates from a specific step.
@@ -1854,35 +1837,38 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	t.write("%s", strings.Join(params, ", "))
 	t.write(") ")
 
-	// Return values (primary return type + VAR_OUTPUT)
-	returns := []string{}
+	// Named results: the function's value, named after the function, then its
+	// VAR_OUTPUTs. Assigning to the function's name sets its value without
+	// returning; RETURN, or the end of the body, returns every result.
+	var returnType ast.Expression
 	if fd.ReturnType != nil {
-		returns = append(returns, t.mapIecTypeToGo(fd.ReturnType))
+		returnType = fd.ReturnType
 	}
-	for _, p := range fd.VarOutputs {
-		returns = append(returns, t.mapIecTypeToGo(p.DataType))
-	}
-	if len(returns) > 1 {
-		t.write("(%s)", strings.Join(returns, ", "))
-	} else if len(returns) == 1 {
-		t.write("%s", returns[0])
-	}
+	hasResults := t.transpileResultDeclarations(fd.Name.Value, returnType, fd.VarOutputs)
+	t.write("{\n")
 
-	t.write(" {\n")
+	return t.withLocals(declNames(fd.VarInputs, fd.VarOutputs, fd.VarInOuts, fd.Vars), func() error {
+		// --- 2. Starting values of the results and local variables (VAR) ---
+		if err := t.transpileResultValues(fd.Name, returnType, fd.VarOutputs); err != nil {
+			return err
+		}
+		for _, v := range fd.Vars {
+			if err := t.transpileLocalVar(v); err != nil {
+				return err
+			}
+		}
+		t.write("\n")
 
-	// --- 2. Transpile local variables (VAR) ---
-	for _, v := range fd.Vars {
-		t.write("\tvar %s %s\n", v.Name.Value, t.mapIecTypeToGo(v.DataType))
-	}
-	t.write("\n")
-
-	// --- 3. Transpile the function body ---
-	if err := t.transpileNode(fd.Body); err != nil {
-		return err
-	}
-
-	t.write("}\n\n")
-	return nil
+		// --- 3. Transpile the function body ---
+		if err := t.transpileNode(fd.Body); err != nil {
+			return err
+		}
+		if hasResults && !endsWithReturn(fd.Body) {
+			t.write("\treturn\n")
+		}
+		t.write("}\n\n")
+		return nil
+	})
 }
 
 // transpileVarDecl transpiles a single variable declaration (VAR, VAR_INPUT, VAR_OUTPUT, VAR_TEMP)
@@ -2129,9 +2115,18 @@ func (t *Transpiler) isBitwiseType(expr ast.Expression) bool {
 // transpileAssignmentStatement transpiles an IEC 61131-3 assignment (`:=`) into a Go assignment (`=`).
 // transpileAssignmentStatement transpiles an IEC `:=` assignment to a Go `=` assignment.
 func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement) error {
-	// Special case: Assignment to the function name is a return statement.
+	// Assignment to the function's name sets its result, which is a named Go
+	// result of the same name; it does not return.
 	if ident, ok := stmt.Left.(*ast.Identifier); ok && t.currentFunc != nil && ident.Value == t.currentFunc.Name.Value {
-		t.write("\treturn ")
+		t.write("\t%s = ", ident.Value)
+		if lit, isLit := stmt.Value.(*ast.StructLiteral); isLit && t.currentFunc.ReturnType != nil {
+			v, err := t.initialValue(t.currentFunc.ReturnType, lit)
+			if err != nil {
+				return err
+			}
+			t.write("%s\n", v)
+			return nil
+		}
 		if err := t.transpileExpression(stmt.Value); err != nil {
 			return err
 		}
@@ -2182,12 +2177,26 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 		}
 	}
 
-	// Special handling for struct literals to prepend the type name
-	if _, ok := stmt.Value.(*ast.StructLiteral); ok {
-		t.transpileExpression(stmt.Left)
-		t.write(" = ")
-		t.transpileExpression(stmt.Value)
-		t.write("\n")
+	// A structure initializer takes its type from the assignment's target.
+	if lit, ok := stmt.Value.(*ast.StructLiteral); ok {
+		if typeDecl == nil {
+			return fmt.Errorf("cannot determine the type of %s for the initializer %s", stmt.Left.String(), lit.String())
+		}
+		dataType := ast.Expression(typeDecl.Name)
+		if _, isStruct := typeDecl.DataType.(*ast.StructDefinition); !isStruct {
+			dataType = typeDecl.DataType
+		}
+		v, err := t.initialValue(dataType, lit)
+		if err != nil {
+			return err
+		}
+		if v == "" {
+			return fmt.Errorf("%s is not a structure, so it cannot be assigned the initializer %s", stmt.Left.String(), lit.String())
+		}
+		if err := t.transpileExpression(stmt.Left); err != nil {
+			return err
+		}
+		t.write(" = %s\n", v)
 		return nil
 	}
 
@@ -2256,6 +2265,11 @@ func (t *Transpiler) resolveAssignmentTargetType(expr ast.Expression) *ast.TypeD
 		structVarType := t.resolveAssignmentTargetType(e.Struct)
 		if structVarType == nil {
 			return nil // Can't resolve the struct's type.
+		}
+
+		// A structure variable's type declaration is the structure type itself.
+		if _, isStruct := structVarType.DataType.(*ast.StructDefinition); isStruct {
+			return t.findMemberType(structVarType, e.Member.Value)
 		}
 
 		// Get the type name from the variable's type declaration (e.g., "MyStruct")
@@ -2446,6 +2460,15 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 			t.write("value") // The name of the setter's parameter
 			return nil       // This will call transpileNode recursively
 		}
+		// A parameter, result or local of the current function or method.
+		if t.localVars[exp.Value] || (t.currentFunc != nil && exp.Value == t.currentFunc.Name.Value) {
+			if t.inOutVars[exp.Value] {
+				t.write("(*%s)", exp.Value)
+			} else {
+				t.write("%s", exp.Value)
+			}
+			return nil
+		}
 		// If it's a located or access variable, it's a pointer and must be dereferenced.
 		if t.locatedVars[exp.Value] {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
@@ -2581,6 +2604,11 @@ func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration
 			t.write("// %s is a subrange of %s.\n", decl.Name.Value, baseType)
 			t.write("type %s %s\n\n", decl.Name.Value, baseType)
 			// Note: Runtime range checks are not added by the transpiler at this stage.
+		} else if decl.DataType != nil {
+			// An alias of another type, such as `MyInt : INT := 42`. Its initial
+			// value is the starting value of its variables.
+			t.write("// %s is an alias of %s.\n", decl.Name.Value, decl.DataType.String())
+			t.write("type %s %s\n\n", decl.Name.Value, t.mapIecTypeToGo(decl.DataType))
 		}
 	}
 	return nil
@@ -2789,23 +2817,9 @@ func (t *Transpiler) transpilePrefixExpression(exp *ast.PrefixExpression) error 
 
 // transpileStructLiteral transpiles a struct literal e.g., `(A := 1, B := TRUE)`
 func (t *Transpiler) transpileStructLiteral(lit *ast.StructLiteral) error {
-	// We need to find the type of the struct being initialized.
-	// This is a simplification; a more robust solution would use type inference from the assignment target.
-	// For now, we'll assume the type is `MY_STRUCT` for the test case.
-	t.write("MY_STRUCT")
-
-	t.write("{")
-	for i, init := range lit.Initializers {
-		if i > 0 {
-			t.write(", ")
-		}
-		if arg, ok := init.(*ast.NamedArgument); ok {
-			t.write("%s: ", arg.Name.Value)
-			t.transpileExpression(arg.Value)
-		}
-	}
-	t.write("}")
-	return nil
+	// An initializer takes its type from where it is used: a variable's
+	// declaration or an assignment's target, which transpile it themselves.
+	return fmt.Errorf("cannot determine the type of the initializer %s here", lit.String())
 }
 
 // transpileCallExpression transpiles an IEC 61131-3 function call or function block invocation.
@@ -2856,6 +2870,11 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 				return nil // SUPER call handled.
 			}
 		}
+	}
+	// A call to a user-defined function or method puts its arguments in
+	// declaration order and fills omitted inputs with their defaults.
+	if sig, ok := t.lookupCallSignature(exp.Function); ok {
+		return t.transpileUserCall(exp, sig)
 	}
 	// A call expression can be a standard function (e.g., SIN(X)) or a Function Block invocation (e.g., MyTimer(IN:=...)).
 	// We'll treat calls with named arguments as potential FB calls.

@@ -56,71 +56,50 @@ func TestSFCCompilation(t *testing.T) {
 			`,
 			// We expect the ACTION to be compiled into a closure,
 			// and the entire SFC to be compiled into a data structure (a hash).
-			expectedConstants: []interface{}{
-				// Constant 0: Compiled function for MyAction
-				[]code.Instructions{
-					code.Make(code.OpTrue),
-					code.Make(code.OpSetGlobal, 0),
-					code.Make(code.OpReturn),
-				},
-				// Constant 1: Compiled function for the transition condition
-				[]code.Instructions{
-					code.Make(code.OpGetGlobal, 0),
-					code.Make(code.OpReturnValue),
-				},
-				// Constants for building the SFC hash
-				"initial_step",
-				"S1",
-				"actions",
-				"MyAction",
-				"transitions",
-				"condition",
-				"from",
-				"to",
-				"S2",
-				"steps",
-				"name",
-				"qualifier",
-				"N",
-			},
-			expectedInstructions: []code.Instructions{
-				// Init for VAR cond: BOOL;
-				code.Make(code.OpNull),
+			expectedConstants: []interface{}{[]code.Instructions{
+				code.Make(code.OpTrue),
 				code.Make(code.OpSetGlobal, 0),
-				// --- Start building the SFC Hash ---
-				code.Make(code.OpConstant, 2), // "initial_step"
-				code.Make(code.OpConstant, 3), // "S1"
-				code.Make(code.OpConstant, 4), // "actions"
-				code.Make(code.OpConstant, 5), // "MyAction"
+				code.Make(code.OpReturn),
+			}, []code.Instructions{
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpReturnValue),
+			}, "initial_step", "S1", "actions", "MyAction", "transitions", "condition", "from", "to", "S2", "steps", "name", "qualifier", "N"},
+			expectedInstructions: []code.Instructions{
+				code.Make(code.OpFalse),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpConstant, 5),
 				code.Make(code.OpClosure, 0, 0),
 				code.Make(code.OpHash, 2),
-				code.Make(code.OpConstant, 6), // "transitions"
-				code.Make(code.OpConstant, 7), // "condition"
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpConstant, 7),
 				code.Make(code.OpClosure, 1, 0),
-				code.Make(code.OpConstant, 8), // "from"
-				code.Make(code.OpConstant, 3), // "S1"
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpConstant, 3),
 				code.Make(code.OpArray, 1),
-				code.Make(code.OpConstant, 9),  // "to"
-				code.Make(code.OpConstant, 10), // "S2"
+				code.Make(code.OpConstant, 9),
+				code.Make(code.OpConstant, 10),
 				code.Make(code.OpArray, 1),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpArray, 1),
-				code.Make(code.OpConstant, 11), // "steps"
-				code.Make(code.OpConstant, 3),  // "S1" (key)
-				code.Make(code.OpConstant, 4),  // "actions" (key)
-				code.Make(code.OpConstant, 12), // "name"
-				code.Make(code.OpConstant, 5),  // "MyAction"
-				code.Make(code.OpConstant, 13), // "qualifier"
-				code.Make(code.OpConstant, 14), // "N"
+				code.Make(code.OpConstant, 11),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpConstant, 12),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpConstant, 13),
+				code.Make(code.OpConstant, 14),
 				code.Make(code.OpHash, 4),
 				code.Make(code.OpArray, 1),
-				code.Make(code.OpHash, 2),      // S1 props hash
-				code.Make(code.OpConstant, 10), // "S2" (key)
-				code.Make(code.OpConstant, 4),  // "actions" (key)
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpConstant, 10),
+				code.Make(code.OpConstant, 4),
 				code.Make(code.OpArray, 0),
-				code.Make(code.OpHash, 2), // S2 props hash
-				code.Make(code.OpHash, 4), // steps hash
-				code.Make(code.OpHash, 8), // final SFC hash
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpHash, 8),
 				code.Make(code.OpPop),
 			},
 		},

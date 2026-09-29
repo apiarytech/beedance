@@ -252,7 +252,10 @@ var deleteFn = func(args ...object.Object) object.Object {
 		if end > arrLen { // If deletion goes past the end, truncate to the end.
 			end = arrLen
 		}
-		newElements := append(in1.Elements[:start], in1.Elements[end:]...)
+		// Build a new array; the input array is left unchanged.
+		newElements := make([]object.Object, 0, arrLen-(end-start))
+		newElements = append(newElements, in1.Elements[:start]...)
+		newElements = append(newElements, in1.Elements[end:]...)
 		return &object.Array{Elements: newElements}
 	case *object.String:
 		strLen := int64(len(in1.Value))

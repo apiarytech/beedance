@@ -209,19 +209,21 @@ func TestFunctionsWithReturnStatement(t *testing.T) {
 	runVmTests(t, tests)
 }
 
+// TestFunctionsWithoutReturnValue checks that a function which never assigns its
+// result returns the default value of its return type (0 for INT).
 func TestFunctionsWithoutReturnValue(t *testing.T) {
 	tests := []vmTestCase{
 		{
 			input: `FUNCTION noReturn : INT END_FUNCTION;
 					noReturn();`,
-			expected: Null,
+			expected: 0,
 		},
 		{
 			input: `FUNCTION noReturn : INT END_FUNCTION;
 					FUNCTION noReturnTwo : INT noReturnTwo := noReturn(); END_FUNCTION;
 					noReturn();
 					noReturnTwo();`,
-			expected: Null,
+			expected: 0,
 		},
 	}
 
@@ -375,15 +377,14 @@ func TestCallingFunctionsWithArgumentsAndBindings(t *testing.T) {
 	runVmTests(t, tests)
 }
 
+// TestCallingFunctionsWithWrongArguments covers non-formal (positional) calls,
+// which must supply every input. A formal call such as `f()` or `f(a := 1)` may
+// omit inputs, which then take their defaults; see vm_functions_test.go.
 func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	tests := []vmTestCase{
 		{
 			input:    `FUNCTION f:INT f:=1; END_FUNCTION; f(1);`,
 			expected: `wrong number of arguments: want=0, got=1`,
-		},
-		{
-			input:    `FUNCTION f:INT VAR_INPUT a:INT; END_VAR f:=a; END_FUNCTION; f();`,
-			expected: `wrong number of arguments: want=1, got=0`,
 		},
 		{
 			input:    `FUNCTION f:INT VAR_INPUT a:INT;b:INT; END_VAR f:=a+b; END_FUNCTION; f(1);`,

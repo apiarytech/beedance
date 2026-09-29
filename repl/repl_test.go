@@ -66,18 +66,22 @@ func TestReplStatePersistsAcrossLines(t *testing.T) {
 func TestReplRecoversFromFailedLines(t *testing.T) {
 	lines := []string{
 		"FUNCTION_BLOCK ABSTRACT Shape END_FUNCTION_BLOCK",
-		"VAR sh : Shape; END_VAR", // fails: abstract FB, but `sh` is left defined
-		"sh;",                     // must not crash the session
+		"VAR sh : Shape; END_VAR",            // fails before `sh` is defined
+		"VAR kept : INT := 5; END_VAR nope;", // fails after `kept` is defined, before it is set
+		"kept;",                              // must not crash the session
 		"1 + 1;",
 	}
 	results := runSession(t, "vm", lines)
 	if !strings.Contains(results[1], "cannot instantiate abstract function block 'Shape'") {
 		t.Fatalf("expected a compilation error for line 2, got %q", results[1])
 	}
-	if results[2] != "null" {
-		t.Fatalf("expected the unassigned variable to read as null, got %q", results[2])
+	if !strings.Contains(results[2], "undefined variable nope") {
+		t.Fatalf("expected a compilation error for line 3, got %q", results[2])
 	}
-	if results[3] != "2" {
-		t.Fatalf("expected the session to continue, got %q", results[3])
+	if results[3] != "null" {
+		t.Fatalf("expected the unassigned variable to read as null, got %q", results[3])
+	}
+	if results[4] != "2" {
+		t.Fatalf("expected the session to continue, got %q", results[4])
 	}
 }

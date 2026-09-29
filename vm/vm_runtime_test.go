@@ -304,3 +304,18 @@ func TestUnknownAndMalformedInstructions(t *testing.T) {
 		t.Fatalf("expected %q, got %v", want, err)
 	}
 }
+
+// TestUnknownNamedArgument covers the VM's own check. The compiler rejects an
+// unknown input name when it knows the callee, so this is assembled directly.
+func TestUnknownNamedArgument(t *testing.T) {
+	fn := compiledFunction(1, 1, code.Make(code.OpGetLocal, 0), code.Make(code.OpReturnValue))
+	fn.ParameterNames = []string{"a"}
+	constants := []object.Object{fn, &object.LInt{Value: 1}, &object.String{Value: "z"}}
+	_, err := runBytecode(constants, nil,
+		code.Make(code.OpClosure, 0, 0),
+		code.Make(code.OpConstant, 1), code.Make(code.OpMakeNamedArg, 2),
+		code.Make(code.OpCall, 1))
+	if err == nil || err.Error() != "unknown named argument: z" {
+		t.Fatalf("expected an unknown named argument error, got %v", err)
+	}
+}

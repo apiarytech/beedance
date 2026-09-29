@@ -72,8 +72,9 @@ func (b *BaseFB) Logic(now time.Time) {
 }
 
 // MyMethod is a method on the BaseFB FUNCTION_BLOCK.
-func (b *BaseFB) MyMethod() iec.INT {
-	return 10
+func (b *BaseFB) MyMethod() (MyMethod iec.INT) {
+	MyMethod = 10
+	return
 }
 
 // DerivedFB is the transpiled struct for the FUNCTION_BLOCK of the same name.
@@ -95,8 +96,9 @@ func (d *DerivedFB) Logic(now time.Time) {
 }
 
 // MyMethod is a method on the DerivedFB FUNCTION_BLOCK.
-func (d *DerivedFB) MyMethod() iec.INT {
-	return (d.BaseFB.MyMethod() + 5)
+func (d *DerivedFB) MyMethod() (MyMethod iec.INT) {
+	MyMethod = (d.BaseFB.MyMethod() + 5)
+	return
 }
 
 // Statically assert that DerivedFB implements IMyInterface.
@@ -224,10 +226,11 @@ func (a *AbstractMotor) Logic(now time.Time) {
 }
 
 // Stop is a method on the AbstractMotor FUNCTION_BLOCK.
-func (a *AbstractMotor) Stop() iec.BOOL {
+func (a *AbstractMotor) Stop() (Stop iec.BOOL) {
 	a.IsRunning = false
 	a.internalSpeed = 0.000000
-	return true
+	Stop = true
+	return
 }
 
 // DCMotor is the transpiled struct for the FUNCTION_BLOCK of the same name.
@@ -250,18 +253,20 @@ func (d *DCMotor) Logic(now time.Time) {
 }
 
 // Start is a method on the DCMotor FUNCTION_BLOCK.
-func (d *DCMotor) Start() iec.BOOL {
+func (d *DCMotor) Start() (Start iec.BOOL) {
 	if (d.Voltage > 0.000000) {
 		d.IsRunning = true
-		return true
+		Start = true
 	} else {
-		return false
+		Start = false
 	}
+	return
 }
 
 // GetSpeed is the getter for the Speed property.
-func (d *DCMotor) GetSpeed() iec.LREAL {
-	return d.internalSpeed
+func (d *DCMotor) GetSpeed() (Speed iec.LREAL) {
+	Speed = d.internalSpeed
+	return
 }
 
 // SetSpeed is the setter for the Speed property.
@@ -370,8 +375,9 @@ func (c *Counter) Increment() {
 }
 
 // GetValue is the getter for the Value property.
-func (c *Counter) GetValue() iec.INT {
-	return c.currentValue
+func (c *Counter) GetValue() (Value iec.INT) {
+	Value = c.currentValue
+	return
 }
 
 // SetValue is the setter for the Value property.

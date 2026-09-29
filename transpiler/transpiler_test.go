@@ -172,12 +172,13 @@ FUNCTION MyFunc : INT
 END_FUNCTION
 `
 	expected := `
-func MyFunc(A iec.INT, C *iec.REAL) iec.INT {
+func MyFunc(A iec.INT, C *iec.REAL) (MyFunc iec.INT) {
 	var Local iec.INT
 
 	Local = (A * 2)
 	(*C) = ((*C) + 1.000000)
-	return Local
+	MyFunc = Local
+	return
 }
 `
 	transpileAndCheck(t, "TestFunctionTranspilation", input, expected)
@@ -342,6 +343,7 @@ type SubrangeTest struct {
 // NewSubrangeTestFactory creates a new instance of the SubrangeTest program.
 func NewSubrangeTestFactory(params map[string]string) (func(time.Time), error) {
     instance := &SubrangeTest{}
+    instance.mySmallInt = -100
     instance.inputVal = 200
     return instance.Logic, nil
 }
@@ -1542,6 +1544,7 @@ type AssignmentWorkaround struct {
 // NewAssignmentWorkaroundFactory creates a new instance of the AssignmentWorkaround program.
 func NewAssignmentWorkaroundFactory(params map[string]string) (func(time.Time), error) {
 	instance := &AssignmentWorkaround{}
+	instance.myArray = make([]iec.INT, 5)
 	instance.i = 0
 	return instance.Logic, nil
 }
@@ -1795,7 +1798,7 @@ const (
 	MyColor_GREEN
 )
 
-func MyFunc() iec.INT {
+func MyFunc() (MyFunc iec.INT) {
 	return 123
 }
 
