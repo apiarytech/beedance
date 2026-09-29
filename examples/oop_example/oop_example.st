@@ -106,6 +106,9 @@ PROGRAM OopTestProgram
 
     Motor1(Voltage := 12.0);
     Motor1.Start();
+    // Run the FB body again, as the next PLC scan would: now that the motor is
+    // running, its logic sets the speed from the voltage (12.0 * 100.0).
+    Motor1(Voltage := 12.0);
     TestSpeed := Motor1.Speed;
     IsMotor1Running := Motor1.IsRunning;
 

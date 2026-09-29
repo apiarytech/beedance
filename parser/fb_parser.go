@@ -74,12 +74,19 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 	}
 
 	p.nextToken()
+	if p.curTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
 
 	// Loop to parse all variable declaration blocks
 var_loop:
 	for {
 		// Consume any comments before the next var block.
 		p.consumeLeadingComments()
+		if p.curTokenIs(token.SEMICOLON) {
+			p.nextToken()
+			continue
+		}
 
 		// This switch handles the various types of variable blocks that can appear
 		// at the start of a function block declaration.
@@ -117,12 +124,23 @@ var_loop:
 	for {
 		p.consumeLeadingComments()
 
+		// An access specifier may also be written before the keyword,
+		// e.g. `PRIVATE METHOD X` as well as `METHOD PRIVATE X`.
+		prefixAccess := ""
+		if (p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) || p.curTokenIs(token.INTERNAL)) &&
+			(p.peekTokenIs(token.METHOD) || p.peekTokenIs(token.PROPERTY)) {
+			prefixAccess = p.curToken.Literal
+			p.nextToken()
+		}
+
 		isMethod := p.curTokenIs(token.METHOD)
 		isProperty := p.curTokenIs(token.PROPERTY)
-		isComment := p.curTokenIs(token.COMMENT)
 
 		if isMethod {
 			method := p.parseMethodImplementation()
+			if method != nil && prefixAccess != "" && method.AccessSpecifier == "" {
+				method.AccessSpecifier = prefixAccess
+			}
 			if method != nil {
 				if method.IsAbstract && !stmt.IsAbstract {
 					p.currentError("abstract members are not allowed in a non-abstract function block")
@@ -132,6 +150,9 @@ var_loop:
 			}
 		} else if isProperty {
 			prop := p.parsePropertyDeclaration(false)
+			if prop != nil && prefixAccess != "" && prop.AccessSpecifier == "" {
+				prop.AccessSpecifier = prefixAccess
+			}
 			if prop != nil {
 				if prop.IsAbstract && !stmt.IsAbstract {
 					p.currentError("abstract members are not allowed in a non-abstract function block")
@@ -139,9 +160,6 @@ var_loop:
 					stmt.Properties = append(stmt.Properties, prop)
 				}
 			}
-		} else if isComment {
-			p.nextToken()
-			continue
 		} else {
 			// No more methods or properties, break to parse the main body
 			break
@@ -173,6 +191,5 @@ var_loop:
 	} else {
 		p.nextToken() // Consume END_FUNCTION_BLOCK
 	}
-
 	return stmt
 }

@@ -80,7 +80,7 @@ func TestArrayBoundsCheckWithConstantExpressions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			program := parse(tt.input)
+			program := parse(t, tt.input)
 			err := compiler.Compile(program)
 
 			if tt.expectedError == "" {

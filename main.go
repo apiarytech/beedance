@@ -140,7 +140,7 @@ func executeFile(filepath string, out io.Writer, engine string) {
 		}
 		globals := make([]object.Object, vm.GlobalsSize)
 
-		comp := compiler.NewWithState(symbolTable, nil, nil)
+		comp := compiler.NewWithState(symbolTable, nil, nil, nil)
 
 		// Since we are executing a file, which is likely a full PROGRAM,
 		// we use the new CompileProgram function to get separated bytecode.
@@ -203,7 +203,7 @@ func executeString(input string, out io.Writer, engine string) {
 		}
 		globals := make([]object.Object, vm.GlobalsSize)
 
-		comp := compiler.NewWithState(symbolTable, nil, nil)
+		comp := compiler.NewWithState(symbolTable, nil, nil, nil)
 		err := comp.Compile(program)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)

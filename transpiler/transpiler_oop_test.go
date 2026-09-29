@@ -305,7 +305,7 @@ func (p *OopTestProgram) Logic(now time.Time) {
 func TestInterfaceWithPropertyTranspilation(t *testing.T) {
 	input := `
 INTERFACE ICounter
-	METHOD Increment : VOID;
+	METHOD Increment;
 	PROPERTY Value : INT;
 END_INTERFACE
 
@@ -314,7 +314,7 @@ FUNCTION_BLOCK Counter IMPLEMENTS ICounter
 		currentValue : INT;
 	END_VAR
 
-	METHOD Increment : VOID
+	METHOD Increment
 		currentValue := currentValue + 1;
 	END_METHOD
 

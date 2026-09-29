@@ -2,6 +2,7 @@ package vm
 
 import (
 	"beedance/ast"
+	"beedance/code"
 	"beedance/compiler"
 	"beedance/evaluator"
 	"beedance/lexer"
@@ -9,6 +10,7 @@ import (
 	"beedance/parser"
 	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -282,26 +284,31 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 		{
 			input: `
 			VAR_GLOBAL globalSeed : INT := 50; END_VAR;
+			// IEC 61131-3 does not allow VAR_EXTERNAL in a FUNCTION, so the
+			// PROGRAM binds the global and passes it to the functions.
 			FUNCTION minusOne : INT
-				VAR_EXTERNAL
-					globalSeed : INT;
+				VAR_INPUT
+					seed : INT;
 				END_VAR
 				VAR
 					num : INT := 1;
 				END_VAR
-				minusOne := globalSeed - num;
+				minusOne := seed - num;
 			END_FUNCTION;
 			FUNCTION minusTwo : INT
-				VAR_EXTERNAL
-					globalSeed : INT;
+				VAR_INPUT
+					seed : INT;
 				END_VAR
 				VAR
 					num : INT := 2;
 				END_VAR
-				minusTwo := globalSeed - num;
+				minusTwo := seed - num;
 			END_FUNCTION;
 			PROGRAM TestProgram
-				minusOne() + minusTwo();
+				VAR_EXTERNAL
+					globalSeed : INT;
+				END_VAR
+				minusOne(globalSeed) + minusTwo(globalSeed);
 			END_PROGRAM;`,
 			expected: 97,
 		},
@@ -388,7 +395,7 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 	object.FinalizeBuiltins()
 
 	for _, tt := range tests {
-		program := parse(tt.input)
+		program := parse(t, tt.input)
 
 		// The object.Builtins slice is now correctly indexed, so no sorting is needed.
 		comp := compiler.NewCompilerWithBuiltins(object.Builtins)
@@ -614,7 +621,7 @@ func runVmTestsWithMacros(t *testing.T, tests []vmTestCase) {
 	}
 
 	for i, tt := range tests {
-		program := parse(tt.input)
+		program := parse(t, tt.input)
 		env := object.NewEnvironment()
 		evaluator.DefineMacros(program, env)
 		expanded := evaluator.ExpandMacros(program, env)
@@ -660,7 +667,7 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 	}
 
 	for i, tt := range tests {
-		program := parse(tt.input)
+		program := parse(t, tt.input)
 
 		comp := compiler.NewCompilerWithBuiltins(builtinEntries)
 		err := comp.Compile(program)
@@ -680,10 +687,16 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 	}
 }
 
-func parse(input string) *ast.Program {
-	l := lexer.New(input)
-	p := parser.New(l)
-	return p.ParseProgram()
+// parse parses input and fails the test immediately if the parser reports any
+// errors, so tests never compile a partially parsed AST.
+func parse(t testing.TB, input string) *ast.Program {
+	t.Helper()
+	p := parser.New(lexer.New(input))
+	program := p.ParseProgram()
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Fatalf("parser has %d error(s) for input:\n%s\nerrors:\n  %s", len(errs), input, strings.Join(errs, "\n  "))
+	}
+	return program
 }
 
 func testExpectedObject(
@@ -848,4 +861,66 @@ func testStringObject(expected string, actual object.Object) error {
 	}
 
 	return nil
+}
+
+// vmErrorTestCase is an input that compiles but must fail when run.
+type vmErrorTestCase struct {
+	input         string
+	expectedError string
+}
+
+// runVmErrorTests compiles each input and checks that running it fails with
+// exactly the expected error.
+func runVmErrorTests(t *testing.T, tests []vmErrorTestCase) {
+	t.Helper()
+	object.FinalizeBuiltins()
+	for i, tt := range tests {
+		comp := compiler.New()
+		if err := comp.Compile(parse(t, tt.input)); err != nil {
+			t.Fatalf("test #%d on input %q: compiler error: %s", i, tt.input, err)
+		}
+		err := New(comp.Bytecode()).Run()
+		if err == nil {
+			t.Fatalf("test #%d on input %q: expected VM error %q, got none", i, tt.input, tt.expectedError)
+		}
+		if err.Error() != tt.expectedError {
+			t.Fatalf("test #%d on input %q: wrong VM error.\nwant: %s\ngot:  %s", i, tt.input, tt.expectedError, err)
+		}
+	}
+}
+
+// runBytecode runs hand-assembled instructions with the given constants and
+// built-ins. It returns the VM so tests can inspect its state.
+func runBytecode(constants []object.Object, builtins []*object.Builtin, instructions ...[]byte) (*VM, error) {
+	var ins code.Instructions
+	for _, i := range instructions {
+		ins = append(ins, i...)
+	}
+	machine := NewWithBuiltins(&compiler.Bytecode{Instructions: ins, Constants: constants}, builtins)
+	return machine, machine.Run()
+}
+
+// compiledFunction wraps instructions in a CompiledFunction constant.
+func compiledFunction(numLocals, numParams int, instructions ...[]byte) *object.CompiledFunction {
+	var ins code.Instructions
+	for _, i := range instructions {
+		ins = append(ins, i...)
+	}
+	return &object.CompiledFunction{Instructions: ins, NumLocals: numLocals, NumParameters: numParams}
+}
+
+// compileForTest compiles input, failing the test on a parser or compiler error.
+func compileForTest(t *testing.T, input string) *compiler.Bytecode {
+	t.Helper()
+	object.FinalizeBuiltins()
+	comp := compiler.New()
+	if err := comp.Compile(parse(t, input)); err != nil {
+		t.Fatalf("compiler error for %q: %s", input, err)
+	}
+	return comp.Bytecode()
+}
+
+// emptyBytecode returns an empty program, for tests that drive VM internals directly.
+func emptyBytecode() *compiler.Bytecode {
+	return &compiler.Bytecode{Instructions: code.Instructions{}, Constants: []object.Object{}}
 }

@@ -54,7 +54,7 @@ const (
 	GT        = ">"
 	GE        = ">="
 	EQ        = "="
-	NEQ       = "<>"
+	NE        = "<>"
 	EXPONENT  = "**"
 	ARROW     = "=>"
 	AMPERSAND = "&"

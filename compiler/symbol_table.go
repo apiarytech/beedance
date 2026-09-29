@@ -10,6 +10,11 @@
 
 package compiler
 
+import (
+	"beedance/ast"
+	"strings"
+)
+
 // SymbolScope represents the scope in which a symbol is defined (e.g., global, local).
 type SymbolScope string
 
@@ -43,6 +48,13 @@ type SymbolTable struct {
 	numDefinitions int               // The number of symbols defined in this scope.
 
 	FreeSymbols []Symbol // A list of symbols that are "free" (captured from an outer scope).
+
+	// classes maps each function block declaration to the global symbol holding
+	// its class hash. Types and variables are separate namespaces in IEC
+	// 61131-3, so this registry is kept apart from store: a variable named like
+	// its type (`counter : Counter`) cannot shadow the class. It is only used on
+	// the outermost table and persists with it, e.g. across REPL lines.
+	classes map[*ast.FunctionBlockDeclaration]Symbol
 }
 
 // NewEnclosedSymbolTable creates a new symbol table that is enclosed by an outer one,
@@ -74,7 +86,7 @@ func (s *SymbolTable) Define(name string, isConstant bool, typeName ...string) S
 		symbol.Scope = LocalScope
 	}
 
-	s.store[name] = symbol
+	s.store[strings.ToUpper(name)] = symbol
 	s.numDefinitions++
 	return symbol
 }
@@ -85,7 +97,7 @@ func (s *SymbolTable) DefineExternal(name string, index int) Symbol {
 	// For external variables, the "Index" refers to the index of the access
 	// path string in the constants table.
 	symbol := Symbol{Name: name, Scope: ExternalScope, Index: index}
-	s.store[name] = symbol
+	s.store[strings.ToUpper(name)] = symbol
 	return symbol
 }
 
@@ -93,7 +105,7 @@ func (s *SymbolTable) DefineExternal(name string, index int) Symbol {
 // searching outer scopes. If a symbol is found in an outer scope (but not
 // global, builtin, or external), it is added to the current table's `FreeSymbols` list.
 func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
-	obj, ok := s.store[name]
+	obj, ok := s.store[strings.ToUpper(name)]
 	if !ok && s.Outer != nil {
 		obj, ok = s.Outer.Resolve(name)
 		if !ok {
@@ -113,15 +125,15 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 
 // DefineVarInput defines a symbol for a VAR_INPUT parameter, marking it as read-only.
 // This is crucial for enforcing the semantics of IEC 61131-3 functions.
-func (s *SymbolTable) DefineVarInput(name string) Symbol {
-	symbol := Symbol{Name: name, Index: s.numDefinitions, IsReadOnly: true}
+func (s *SymbolTable) DefineVarInput(name string, typeName string) Symbol {
+	symbol := Symbol{Name: name, Index: s.numDefinitions, IsReadOnly: true, TypeName: typeName}
 	if s.Outer == nil {
 		// This case is unlikely for a VAR_INPUT but included for robustness.
 		symbol.Scope = GlobalScope
 	} else {
 		symbol.Scope = LocalScope
 	}
-	s.store[name] = symbol
+	s.store[strings.ToUpper(name)] = symbol
 	s.numDefinitions++
 	return symbol
 }
@@ -129,7 +141,7 @@ func (s *SymbolTable) DefineVarInput(name string) Symbol {
 // DefineBuiltin adds a symbol for a built-in function to the symbol table.
 func (s *SymbolTable) DefineBuiltin(index int, name string) Symbol {
 	symbol := Symbol{Name: name, Index: index, Scope: BuiltinScope}
-	s.store[name] = symbol
+	s.store[strings.ToUpper(name)] = symbol
 	return symbol
 }
 
@@ -137,7 +149,7 @@ func (s *SymbolTable) DefineBuiltin(index int, name string) Symbol {
 // This is used to implement recursive function calls.
 func (s *SymbolTable) DefineFunctionName(name string) Symbol {
 	symbol := Symbol{Name: name, Index: 0, Scope: FunctionScope}
-	s.store[name] = symbol
+	s.store[strings.ToUpper(name)] = symbol
 	return symbol
 }
 
@@ -149,6 +161,29 @@ func (s *SymbolTable) defineFree(original Symbol) Symbol {
 	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, IsConstant: original.IsConstant, TypeName: original.TypeName}
 	symbol.Scope = FreeScope
 
-	s.store[original.Name] = symbol
+	s.store[strings.ToUpper(original.Name)] = symbol
 	return symbol
+}
+
+// outermost returns the global (outermost) symbol table.
+func (s *SymbolTable) outermost() *SymbolTable {
+	for s.Outer != nil {
+		s = s.Outer
+	}
+	return s
+}
+
+// DefineClass records the global symbol that holds fbDef's class hash.
+func (s *SymbolTable) DefineClass(fbDef *ast.FunctionBlockDeclaration, symbol Symbol) {
+	global := s.outermost()
+	if global.classes == nil {
+		global.classes = make(map[*ast.FunctionBlockDeclaration]Symbol)
+	}
+	global.classes[fbDef] = symbol
+}
+
+// ResolveClass returns the global symbol that holds fbDef's class hash.
+func (s *SymbolTable) ResolveClass(fbDef *ast.FunctionBlockDeclaration) (Symbol, bool) {
+	symbol, ok := s.outermost().classes[fbDef]
+	return symbol, ok
 }

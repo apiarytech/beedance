@@ -108,6 +108,7 @@ type VarDeclStatement struct {
 	IsFallingEdge   bool
 	IsFinal         bool
 	AccessSpecifier string // PUBLIC, PRIVATE, PROTECTED for VAR blocks
+	Scope           string // The declaration block type, e.g., "VAR", "VAR_INPUT"
 	AccessType      string // "READ_ONLY", "READ_WRITE", or ""
 }
 
@@ -267,6 +268,10 @@ type ResourceDeclaration struct {
 	GlobalVars   []*GlobalVarDeclaration
 	Tasks        []*TaskDeclaration
 	Programs     []*ProgramConfiguration
+	// IsImplicit marks the resource the parser creates for the single-resource form,
+	// where TASK and PROGRAM appear directly inside CONFIGURATION with no RESOURCE
+	// block. Its Name is the configuration's name and ResourceType is nil.
+	IsImplicit bool
 }
 
 // statementNode marks ResourceDeclaration as a statement node.
@@ -281,6 +286,19 @@ func (rd *ResourceDeclaration) TokenLiteral() string { return rd.Token.Literal }
 // String returns the string representation of the resource declaration.
 func (rd *ResourceDeclaration) String() string {
 	var out bytes.Buffer
+	if rd.IsImplicit {
+		// The single-resource form has no RESOURCE wrapper.
+		for _, task := range rd.Tasks {
+			out.WriteString(task.String() + "\n")
+		}
+		for i, prog := range rd.Programs {
+			if i > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString(prog.String())
+		}
+		return out.String()
+	}
 	out.WriteString("RESOURCE " + rd.Name.String() + " ON " + rd.ResourceType.String() + "\n")
 	for _, gv := range rd.GlobalVars {
 		out.WriteString(gv.String() + "\n")

@@ -108,7 +108,11 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	// We check for EOF again just in case.
 	if !p.peekTokenIs(token.EOF) {
 		p.nextToken() // Consume the operator, move to the operand
-		stmt.Operand = p.parseExpression(LOWEST)
+		// The operand of an IL instruction is a "simple expression".
+		// We parse it with a precedence that is higher than logical operators
+		// to prevent the parser from greedily consuming the next IL instruction
+		// (like AND, OR) as part of the current operand's expression.
+		stmt.Operand = p.parseExpression(LOGICAL_AND)
 	}
 
 	return stmt

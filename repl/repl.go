@@ -31,7 +31,8 @@ const PROMPT = ">> "
 // Start initializes and runs the Read-Eval-Print Loop. It reads user input,
 // sends it to the selected execution engine (evaluator or VM), and prints the result.
 func Start(in io.Reader, out io.Writer, engine string) {
-	if flag.Lookup("go").Value.String() != "" {
+	// The -go flag is defined by main; it may be absent when Start is called elsewhere.
+	if goFlag := flag.Lookup("go"); goFlag != nil && goFlag.Value.String() != "" {
 		io.WriteString(out, "Transpilation to Go (-go) is not supported in REPL mode.\n")
 		io.WriteString(out, "Please use it with an input file: beedance -iec <input.st> -go <output.go>\n")
 	}
@@ -44,13 +45,16 @@ func Start(in io.Reader, out io.Writer, engine string) {
 	globals := make([]object.Object, vm.GlobalsSize)
 
 	symbolTable := compiler.NewSymbolTable()
-	for i, v := range object.Builtins {
-		symbolTable.DefineBuiltin(i, v.Name)
+	// Use each built-in's own index, as the compiler and VM do.
+	for _, v := range object.Builtins {
+		symbolTable.DefineBuiltin(v.Index, v.Name)
 	}
+	// Type and namespace information persist across lines, like the symbol table.
 	typeInfo := make(map[string]ast.Node)
+	pouNamespaces := make(map[string]*ast.NamespaceDeclaration)
 
 	for {
-		fmt.Fprintf(out, PROMPT)
+		fmt.Fprint(out, PROMPT)
 		scanned := scanner.Scan()
 		if !scanned {
 			return
@@ -66,36 +70,39 @@ func Start(in io.Reader, out io.Writer, engine string) {
 			continue
 		}
 
-		if engine == "vm" {
-			comp := compiler.NewWithState(symbolTable, constants, typeInfo)
-			err := comp.Compile(program)
-			if err != nil {
-				fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
-				continue
-			}
+		runLine(out, func() {
+			if engine == "vm" {
+				comp := compiler.NewWithState(symbolTable, constants, typeInfo, pouNamespaces)
+				err := comp.Compile(program)
+				if err != nil {
+					fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
+					return
+				}
 
-			code := comp.Bytecode()
-			constants = code.Constants
+				code := comp.Bytecode()
+				constants = code.Constants
 
-			machine := vm.NewWithGlobalsStore(code, globals)
-			err = machine.Run()
-			if err != nil {
-				fmt.Fprintf(out, "Woops! Executing bytecode failed:\n %s\n", err)
-				continue
-			}
+				machine := vm.NewWithGlobalsStore(code, globals)
+				err = machine.Run()
+				if err != nil {
+					fmt.Fprintf(out, "Woops! Executing bytecode failed:\n %s\n", err)
+					return
+				}
 
-			lastPopped := machine.LastPoppedStackElem()
-			io.WriteString(out, lastPopped.Inspect())
-			io.WriteString(out, "\n")
-		} else {
-			evaluator.DefineMacros(program, macroEnv)
-			expanded := evaluator.ExpandMacros(program, macroEnv)
-			evaluated := evaluator.Eval(expanded, env)
-			if evaluated != nil {
-				io.WriteString(out, evaluated.Inspect())
-				io.WriteString(out, "\n")
+				if lastPopped := machine.LastPoppedStackElem(); lastPopped != nil {
+					io.WriteString(out, lastPopped.Inspect())
+					io.WriteString(out, "\n")
+				}
+			} else {
+				evaluator.DefineMacros(program, macroEnv)
+				expanded := evaluator.ExpandMacros(program, macroEnv)
+				evaluated := evaluator.Eval(expanded, env)
+				if evaluated != nil {
+					io.WriteString(out, evaluated.Inspect())
+					io.WriteString(out, "\n")
+				}
 			}
-		}
+		})
 	}
 }
 
@@ -125,4 +132,15 @@ func printParserErrors(out io.Writer, errors []string) {
 	for _, msg := range errors {
 		io.WriteString(out, "\t"+msg+"\n")
 	}
+}
+
+// runLine runs one REPL line. If the line panics, the error is reported and
+// the session continues, instead of the whole REPL exiting.
+func runLine(out io.Writer, run func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(out, "Woops! Internal error while running this line:\n %v\n", r)
+		}
+	}()
+	run()
 }

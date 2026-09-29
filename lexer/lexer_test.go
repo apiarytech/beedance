@@ -75,7 +75,7 @@ myVar <> 10;
 		{token.SEMICOLON, ";", 10, 42}, // ;
 		{token.END_IF, "END_IF", 11, 1},
 		{token.IDENT, "myVar", 13, 1},
-		{token.NEQ, "<>", 13, 7},
+		{token.NE, "<>", 13, 7},
 		{token.INT, "10", 13, 10},
 		{token.SEMICOLON, ";", 13, 12},
 		{token.EOF, "", 14, 1},

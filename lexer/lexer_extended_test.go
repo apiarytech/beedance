@@ -28,7 +28,7 @@ func TestMiscellaneousAndEdgeCases(t *testing.T) {
 		expectedLiteral string
 	}{
 		{token.ARROW, "=>"},
-		{token.NEQ, "!="},
+		{token.NE, "!="},
 		{token.NOT, "!"},
 		{token.RANGE, ".."},
 		{token.DOT, "."},

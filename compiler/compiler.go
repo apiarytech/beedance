@@ -39,12 +39,14 @@ type Compiler struct {
 	scopes     []CompilationScope
 	scopeIndex int
 
-	functionStack []*ast.FunctionDeclaration
-	loopCtxStack  []*loopContext
-	currentFB     *ast.FunctionBlockDeclaration
-	typeInfo      map[string]ast.Node
-	pouNamespaces map[string]*ast.NamespaceDeclaration // Maps POU name to its namespace
-	currentNS     *ast.NamespaceDeclaration            // The namespace currently being compiled
+	functionStack   []*ast.FunctionDeclaration
+	functionResults []functionResult // Parallel to functionStack.
+	loopCtxStack    []*loopContext
+	currentFB       *ast.FunctionBlockDeclaration
+	typeInfo        map[string]ast.Node
+	pouNamespaces   map[string]*ast.NamespaceDeclaration // Maps POU name to its namespace
+	currentNS       *ast.NamespaceDeclaration            // The namespace currently being compiled
+	rootProgram     *ast.Program                         // Reference to the root program node
 }
 
 // NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
@@ -72,6 +74,7 @@ func NewCompilerWithBuiltins(builtins []object.BuiltinEntry) *Compiler {
 		currentFB:     nil,
 		typeInfo:      make(map[string]ast.Node),
 		pouNamespaces: make(map[string]*ast.NamespaceDeclaration),
+		rootProgram:   nil,
 	}
 }
 
@@ -84,18 +87,22 @@ func New() *Compiler {
 }
 
 // NewWithState creates a new Compiler with a pre-existing symbol table and
-// constant pool, which is useful for testing or for a REPL environment.
-func NewWithState(s *SymbolTable, constants []object.Object, typeInfo map[string]ast.Node) *Compiler {
+// constant pool, type info, and namespace info, which is useful for testing or for a REPL environment.
+func NewWithState(s *SymbolTable, constants []object.Object, typeInfo map[string]ast.Node, pouNamespaces map[string]*ast.NamespaceDeclaration) *Compiler {
 	mainScope := CompilationScope{
 		instructions:        code.Instructions{},
 		lastInstruction:     EmittedInstruction{},
 		previousInstruction: EmittedInstruction{},
 		varDecls:            make(map[string]*ast.VarDeclStatement),
 	}
+	// Ensure typeInfo and pouNamespaces are not nil, even if passed as nil.
+	// This allows sharing existing maps or creating new ones if none are provided.
 	if typeInfo == nil {
 		typeInfo = make(map[string]ast.Node)
 	}
-	pouNamespaces := make(map[string]*ast.NamespaceDeclaration)
+	if pouNamespaces == nil {
+		pouNamespaces = make(map[string]*ast.NamespaceDeclaration)
+	}
 
 	return &Compiler{
 		constants:     constants,
@@ -107,6 +114,7 @@ func NewWithState(s *SymbolTable, constants []object.Object, typeInfo map[string
 		currentFB:     nil,
 		typeInfo:      typeInfo,
 		pouNamespaces: pouNamespaces,
+		rootProgram:   nil,
 	}
 }
 
@@ -121,12 +129,45 @@ type loopContext struct {
 // which is necessary for handling recursion and return values correctly.
 func (c *Compiler) pushFunction(fn *ast.FunctionDeclaration) {
 	c.functionStack = append(c.functionStack, fn)
+	c.functionResults = append(c.functionResults, functionResult{})
 }
 
 // popFunction removes the current function declaration from the top of the function stack.
 func (c *Compiler) popFunction() {
 	if len(c.functionStack) > 0 {
 		c.functionStack = c.functionStack[:len(c.functionStack)-1]
+		c.functionResults = c.functionResults[:len(c.functionResults)-1]
+	}
+}
+
+// functionResult describes how the function being compiled returns its result.
+type functionResult struct {
+	symbol     Symbol // The local variable named after the function, if hasResult.
+	hasResult  bool
+	hasOutputs bool // The function has VAR_OUTPUTs, returned alongside the result.
+}
+
+// setFunctionResult records the current function's result variable and
+// whether it also returns VAR_OUTPUT values.
+func (c *Compiler) setFunctionResult(symbol Symbol, hasOutputs bool) {
+	c.functionResults[len(c.functionResults)-1] = functionResult{symbol: symbol, hasResult: true, hasOutputs: hasOutputs}
+}
+
+// emitFunctionReturn returns from the current function. In IEC 61131-3,
+// assigning to the function's name only sets the result; the function returns
+// that value when it ends or at RETURN. Functions with VAR_OUTPUTs return the
+// result and the outputs together, and the caller unpacks them.
+func (c *Compiler) emitFunctionReturn() {
+	if len(c.functionResults) == 0 || !c.functionResults[len(c.functionResults)-1].hasResult {
+		c.emit(code.OpReturn)
+		return
+	}
+	result := c.functionResults[len(c.functionResults)-1]
+	c.loadSymbol(result.symbol)
+	if result.hasOutputs {
+		c.emit(code.OpReturnValueMulti)
+	} else {
+		c.emit(code.OpReturnValue)
 	}
 }
 
@@ -137,6 +178,87 @@ func (c *Compiler) currentFunction() *ast.FunctionDeclaration {
 		return nil
 	}
 	return c.functionStack[len(c.functionStack)-1]
+}
+
+// emitForCondition emits the test that decides whether a FOR loop runs another
+// iteration, leaving a BOOL on the stack. The loop continues while the control
+// variable has not passed the end value in the direction of the step: `<=` for
+// a positive step (the default) and `>=` for a negative one. A step that is
+// not a constant has its sign checked at runtime.
+func (c *Compiler) emitForCondition(control Symbol, node *ast.ForLoopStatement) error {
+	compare := func(op code.Opcode) error {
+		c.loadSymbol(control)
+		if err := c.Compile(node.EndValue); err != nil {
+			return err
+		}
+		c.emit(op)
+		return nil
+	}
+
+	if node.StepValue == nil {
+		return compare(code.OpLessThanOrEqual)
+	}
+	if step, err := c.evaluateConstantInteger(node.StepValue); err == nil {
+		if step < 0 {
+			return compare(code.OpGreaterThanOrEqual)
+		}
+		return compare(code.OpLessThanOrEqual)
+	}
+
+	// step >= 0 ? control <= end : control >= end
+	if err := c.Compile(node.StepValue); err != nil {
+		return err
+	}
+	c.emitConstant(c.addConstant(&object.LInt{Value: 0}))
+	c.emit(code.OpGreaterThanOrEqual)
+	negativeStep := c.emit(code.OpJumpNotTruthy, 9999)
+	if err := compare(code.OpLessThanOrEqual); err != nil {
+		return err
+	}
+	done := c.emit(code.OpJump, 9999)
+	c.changeOperand(negativeStep, len(c.currentInstructions()))
+	if err := compare(code.OpGreaterThanOrEqual); err != nil {
+		return err
+	}
+	c.changeOperand(done, len(c.currentInstructions()))
+	return nil
+}
+
+// emitCaseValueTest emits a test of one CASE label against the selector on top
+// of the stack, jumping to the branch body when it matches and falling through
+// otherwise. The selector stays on the stack either way. A label is a value or
+// a range `low..high`. It returns the positions of jumps to the body.
+func (c *Compiler) emitCaseValueTest(value ast.Expression) ([]int, error) {
+	if rng, ok := value.(*ast.InfixExpression); ok && rng.Operator == ".." {
+		// selector >= low AND selector <= high
+		c.emit(code.OpDup)
+		if err := c.Compile(rng.Left); err != nil {
+			return nil, err
+		}
+		c.emit(code.OpGreaterThanOrEqual)
+		belowRange := c.emit(code.OpJumpNotTruthy, 9999)
+		c.emit(code.OpDup)
+		if err := c.Compile(rng.Right); err != nil {
+			return nil, err
+		}
+		c.emit(code.OpLessThanOrEqual)
+		aboveRange := c.emit(code.OpJumpNotTruthy, 9999)
+		toBody := c.emit(code.OpJump, 9999)
+		next := len(c.currentInstructions())
+		c.changeOperand(belowRange, next)
+		c.changeOperand(aboveRange, next)
+		return []int{toBody}, nil
+	}
+
+	c.emit(code.OpDup)
+	if err := c.Compile(value); err != nil {
+		return nil, err
+	}
+	c.emit(code.OpEqual)
+	noMatch := c.emit(code.OpJumpNotTruthy, 9999)
+	toBody := c.emit(code.OpJump, 9999)
+	c.changeOperand(noMatch, len(c.currentInstructions()))
+	return []int{toBody}, nil
 }
 
 // enterLoop pushes a new loop context onto the loop context stack. This is
@@ -198,7 +320,7 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	// --- Cyclic Phase ---
 	// Create a new, clean compiler for the cyclic part to ensure it doesn't
 	// re-declare variables. It shares the same symbol table and constants.
-	cyclicCompiler := NewWithState(c.symbolTable, c.constants, c.typeInfo)
+	cyclicCompiler := NewWithState(c.symbolTable, c.constants, c.typeInfo, c.pouNamespaces)
 
 	// Compile VAR_TEMP at the start of the cyclic code so they are re-initialized on each scan.
 	for _, tempBlock := range node.VarTemp {
@@ -241,9 +363,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.Program:
 		// First pass: recursively build POU info, including namespaces.
 		c.buildPouInfo(node)
+		c.rootProgram = node // Set the root program node
+		c.predefineFunctionBlocks(node.Statements)
 
-		// Second pass: compile all statements.
-		for _, s := range node.Statements {
+		// Second pass: compile all statements. Function blocks are ordered so that a
+		// parent is always compiled before any FB that EXTENDS it, because the derived
+		// FB's hash references the parent's hash at runtime.
+		for _, s := range c.orderByInheritance(node.Statements) {
 			err := c.Compile(s)
 			if err != nil {
 				return err
@@ -260,7 +386,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.NamespaceDeclaration:
 		originalNS := c.currentNS
 		c.currentNS = node
-		for _, s := range node.Statements {
+		for _, s := range c.orderByInheritance(node.Statements) {
 			if err := c.Compile(s); err != nil {
 				return err
 			}
@@ -286,7 +412,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// A type declaration defines a "template" that gets stored in a global variable.
 		// The actual instantiation happens when a VAR of this type is declared.
 		symbol := c.symbolTable.Define(node.Name.Value, false)
-		c.typeInfo[node.Name.Value] = node
 
 		var typeDefObject object.Object
 
@@ -316,20 +441,35 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		if typeDefObject != nil {
-			constIndex := c.addConstant(typeDefObject)
-			c.emit(code.OpConstant, constIndex)
+			c.emitConstant(c.addConstant(typeDefObject))
 		}
-		c.emit(code.OpSetGlobal, symbol.Index)
+		return c.setSymbol(symbol)
 
 	case *ast.InterfaceDeclaration:
 		// Define the interface name in the symbol table and store its AST node for type checking.
 		symbol := c.symbolTable.Define(node.Name.Value, false)
-		c.typeInfo[node.Name.Value] = node
+
+		// Check for extending a FINAL interface.
+		if node.Extends != nil {
+			for _, parentIdent := range node.Extends {
+				parentName := c.flattenExpressionToString(parentIdent)
+				parentDefNode, ok := c.resolveTypeNode(parentIdent)
+				if !ok {
+					return fmt.Errorf("parent interface '%s' not found", parentName)
+				}
+				parentIface, ok := parentDefNode.(*ast.InterfaceDeclaration)
+				if !ok {
+					return fmt.Errorf("parent '%s' is not an interface", parentName)
+				}
+				if parentIface.IsFinal {
+					return fmt.Errorf("cannot extend from FINAL interface '%s'", parentIface.Name.Value)
+				}
+			}
+		}
 		// Interfaces don't generate executable code, they are for compile-time checks.
 		// We emit a null and set it to a global var to have a placeholder.
 		c.emit(code.OpNull)
-		c.emit(code.OpSetGlobal, symbol.Index)
-		return nil
+		return c.setSymbol(symbol)
 
 	// A FunctionBlockDeclaration is compiled into a callable closure, similar to a function,
 	// representing the FB "template" or class.
@@ -360,13 +500,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// An FB declaration compiles into a hash of its constituent parts:
-		// the main logic body, and each method.
-		symbol := c.symbolTable.Define(node.Name.Value, false)
-		c.typeInfo[node.Name.Value] = node
+		// the main logic body, and each method. Its global symbol may already
+		// have been pre-defined so that it can be instantiated before this point.
+		symbol, predefined := c.symbolTable.ResolveClass(node)
+		if !predefined || c.scopeIndex != 0 {
+			symbol = c.symbolTable.Define(node.Name.Value, false)
+			c.symbolTable.DefineClass(node, symbol)
+		}
 
 		// If the FB extends another, we need to add a "__parent__" key to the hash.
 		// The VM will use this to walk the inheritance chain.
 		var parentSymbol *Symbol
+		var parentFB *ast.FunctionBlockDeclaration
 		if node.Extends != nil {
 			// --- FINAL Function Block Check ---
 			parentName := c.flattenExpressionToString(node.Extends)
@@ -374,12 +519,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if !ok {
 				return fmt.Errorf("parent function block '%s' definition not found", parentName)
 			}
-			parentFB, ok := parentDefNode.(*ast.FunctionBlockDeclaration)
+			parentFB, ok = parentDefNode.(*ast.FunctionBlockDeclaration)
 			if !ok {
 				return fmt.Errorf("parent '%s' is not a function block", parentName)
 			}
 			if parentFB.IsFinal {
-				return fmt.Errorf("cannot extend from FINAL function block '%s'", parentName)
+				return fmt.Errorf("cannot extend from FINAL function block '%s'", parentFB.Name.Value)
 			}
 			// Resolve the parent symbol by its flattened name
 			resolved, ok := c.symbolTable.Resolve(parentName)
@@ -416,61 +561,41 @@ func (c *Compiler) Compile(node ast.Node) error {
 		mainBody := &ast.BlockStatement{Statements: mainLogicStmts}
 
 		// --- FINAL Method Override Check ---
-		if node.Extends != nil {
-			_ = c.flattenExpressionToString(node.Extends)
-			parentDefNode, ok := c.resolveTypeNode(node.Extends)
-			if ok {
-				if parentFB, ok := parentDefNode.(*ast.FunctionBlockDeclaration); ok {
-					for _, derivedMethod := range methods {
-						if parentMethod, ownerFB := c.findMethodOnFBChain(parentFB, derivedMethod.Name.Value); parentMethod != nil {
-							if parentMethod.IsFinal {
-								return fmt.Errorf("cannot override FINAL method '%s' from function block '%s'", parentMethod.Name.Value, ownerFB.Name.Value)
-							}
-							// --- Method Signature Validation ---
-							if err := c.validateMethodOverride(derivedMethod, parentMethod); err != nil {
-								return err
-							}
-						}
+		if parentFB != nil {
+			for _, derivedMethod := range methods {
+				if parentMethod, ownerFB := c.findMethodOnFBChain(parentFB, derivedMethod.Name.Value); parentMethod != nil {
+					// The 'ownerFB' returned here is the specific function block in the
+					// inheritance chain that defines the parent method. This is crucial for
+					// providing clear error messages, e.g., "cannot override FINAL method 'X'
+					// from function block 'Y'", where 'Y' is ownerFB.Name.Value.
+					if parentMethod.IsFinal {
+						return fmt.Errorf("cannot override FINAL Method '%s' from function block '%s'", parentMethod.Name.Value, ownerFB.Name.Value)
+					}
+					// --- Method Signature Validation ---
+					if err := c.validateMethodOverride(derivedMethod, parentMethod); err != nil {
+						return err
 					}
 				}
 			}
 		}
 
 		// --- FINAL Property Override Check ---
-		if node.Extends != nil {
-			_ = c.flattenExpressionToString(node.Extends)
-			parentDefNode, ok := c.resolveTypeNode(node.Extends)
-			if ok {
-				if parentFB, ok := parentDefNode.(*ast.FunctionBlockDeclaration); ok {
-					for _, derivedProp := range node.Properties {
-						parentProp, ownerFB := c.findPropertyOnFBChain(parentFB, derivedProp.Name.Value)
-						if parentProp != nil && parentProp.IsFinal {
-							return fmt.Errorf("cannot override FINAL property '%s' from function block '%s'", parentProp.Name.Value, ownerFB.Name.Value)
-						}
-					}
+		if parentFB != nil {
+			for _, derivedProp := range node.Properties {
+				parentProp, ownerFB := c.findPropertyOnFBChain(parentFB, derivedProp.Name.Value)
+				if parentProp != nil && parentProp.IsFinal {
+					return fmt.Errorf("cannot override FINAL property '%s' from function block '%s'", parentProp.Name.Value, ownerFB.Name.Value)
 				}
 			}
 		}
 
 		// --- FINAL Variable Override Check ---
-		if node.Extends != nil {
-			_ = c.flattenExpressionToString(node.Extends)
-			parentDefNode, ok := c.resolveTypeNode(node.Extends)
-			if ok {
-				if parentFB, ok := parentDefNode.(*ast.FunctionBlockDeclaration); ok {
-					// We need to check all variable declarations in the current FB
-					// This includes VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT, VAR
-					allVars := [][]*ast.VarDeclStatement{
-						node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars,
-					}
-					for _, varBlock := range allVars {
-						for _, derivedVar := range varBlock {
-							parentVar, ownerFB := c.findVarDeclOnFBChain(parentFB, derivedVar.Name.Value)
-							if parentVar != nil && parentVar.IsFinal {
-								return fmt.Errorf("cannot override FINAL variable '%s' from function block '%s'", parentVar.Name.Value, ownerFB.Name.Value)
-							}
-						}
-					}
+		// A derived FB may not redeclare a variable that an ancestor declared FINAL.
+		if parentFB != nil {
+			for _, derivedVar := range node.Vars {
+				parentVar, ownerFB := c.findVarDeclOnFBChain(parentFB, derivedVar.Name.Value)
+				if parentVar != nil && parentVar.IsFinal {
+					return fmt.Errorf("cannot override FINAL variable '%s' from function block '%s'", parentVar.Name.Value, ownerFB.Name.Value)
 				}
 			}
 		}
@@ -556,8 +681,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Create the hash that represents the FB class.
 		// The parent, if it exists, is always added first and is not part of the sorted keys.
 		if parentSymbol != nil {
-			c.emit(code.OpConstant, c.addConstant(&object.String{Value: "__parent__"}))
-			c.loadSymbol(*parentSymbol)
+			c.emitConstant(c.addConstant(&object.String{Value: "__parent__"}))
+			c.loadSymbol(*parentSymbol) // Load the parent FB's hash
 		}
 		// Sort the method/property names to ensure deterministic bytecode generation,
 		// which is crucial for stable testing.
@@ -577,12 +702,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// By pairing the name and index together before sorting, we ensure
 			// that the key-value pairs for the hash are emitted correctly and
 			// deterministically, preventing scrambled outputs.
-			c.emit(code.OpConstant, c.addConstant(&object.String{Value: pair.name})) // cspell:disable-line
-			c.emit(code.OpClosure, pair.index, 0)                                    // cspell:disable-line
+			c.emitConstant(c.addConstant(&object.String{Value: pair.name})) // cspell:disable-line
+			c.emit(code.OpClosure, pair.index, 0)                           // cspell:disable-line
 		}
 		c.emit(code.OpHash, numHashPairs*2)
-		c.emit(code.OpSetGlobal, symbol.Index)
-		return nil
+		return c.setSymbol(symbol)
 
 	// An SFCProgram is compiled into a static data structure (a hash).
 	case *ast.SFCProgram:
@@ -618,11 +742,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		fnIndex := c.addConstant(fn)
 
 		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
-		if symbol.Scope == GlobalScope {
-			c.emit(code.OpSetGlobal, symbol.Index)
-		} else {
-			c.emit(code.OpSetLocal, symbol.Index)
-		}
+		return c.setSymbol(symbol)
 
 	// Step and Transition statements are only valid within an SFC program body.
 	case *ast.StepStatement, *ast.TransitionStatement:
@@ -633,6 +753,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// A ProgramDeclaration compiles all its variable blocks and then its body.
 	case *ast.ProgramDeclaration:
+		// When a PROGRAM is encountered at the top level (scopeIndex 0), it's treated as a
+		// POU definition if a CONFIGURATION block is also present at the root. In that
+		// case, we only register its type information. It doesn't generate executable
+		// code itself; it's a template for instances.
+		if c.scopeIndex == 0 {
+			hasConfig := false // cspell:disable-line
+			if c.rootProgram != nil {
+				for _, stmt := range c.rootProgram.Statements {
+					if _, ok := stmt.(*ast.ConfigurationDeclaration); ok {
+						hasConfig = true
+						break
+					}
+				}
+			}
+
+			if hasConfig {
+				c.typeInfo[strings.ToUpper(node.Name.Value)] = node
+				return nil
+			}
+		}
+
 		// This case handles compiling a PROGRAM POU. It processes all variable
 		// declarations first to populate the symbol table, then compiles the program body.
 		// This is a single-pass compilation suitable for the current test setup.
@@ -677,7 +818,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// This is a statement that defines a function in the current scope.
 		// First, define the function name in the current scope so it can be captured in a closure.
 		symbol := c.symbolTable.Define(node.Name.Value, false)
-		c.typeInfo[node.Name.Value] = node
 
 		// Then, compile the function body itself.
 		c.enterScope()
@@ -688,7 +828,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		paramNames := make([]string, len(node.VarInputs))
 		// Define input parameters first, as they are the first locals in the stack frame.
 		for i, p := range node.VarInputs {
-			c.symbolTable.DefineVarInput(p.Name.Value)
+			typeName := c.flattenExpressionToString(p.DataType)
+			c.symbolTable.DefineVarInput(p.Name.Value, typeName)
 			paramNames[i] = p.Name.Value
 		}
 
@@ -711,6 +852,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			symbol := c.symbolTable.Define(p.Name.Value, false)
 			outputIndices[i] = symbol.Index
 		}
+		c.setFunctionResult(returnSymbol, len(node.VarOutputs) > 0)
 
 		// Compile local variable declarations (VAR ... END_VAR) to define them
 		// in the function's scope.
@@ -724,19 +866,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
-		// If the last statement in a function body is an expression, its result
-		// should be the return value. We replace the OpPop with OpReturnValue.
-		if c.lastInstructionIs(code.OpPop) {
-			c.replaceLastPopWithReturn()
-		}
-
-		// If the function body did not already emit a return value (e.g., via
-		// an assignment to the function name, which is compiled as a return),
-		// we add an implicit return of the function's return variable.
-		if !c.lastInstructionIs(code.OpReturnValue) {
-			// If the function "falls off the end" without an explicit return,
-			// implicitly return NULL.
-			c.emit(code.OpReturn)
+		if block, ok := node.Body.(*ast.BlockStatement); ok && isIlBlock(block) {
+			// An IL function that falls off the end returns its current result,
+			// the value left on the stack.
+			if !c.lastInstructionIs(code.OpReturnValue) {
+				if len(c.currentInstructions()) > 0 && !c.lastInstructionIs(code.OpReturn) {
+					c.emit(code.OpReturnValue)
+				} else if !c.lastInstructionIs(code.OpReturn) {
+					c.emit(code.OpReturn)
+				}
+			}
+		} else {
+			// Return the function's result variable (and any VAR_OUTPUTs).
+			c.emitFunctionReturn()
 		}
 
 		freeSymbols := c.symbolTable.FreeSymbols
@@ -756,11 +898,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Create the closure and assign it to the variable in the outer scope.
 		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
-		if symbol.Scope == GlobalScope {
-			c.emit(code.OpSetGlobal, symbol.Index)
-		} else {
-			c.emit(code.OpSetLocal, symbol.Index)
-		}
+		return c.setSymbol(symbol)
 
 	// An ExpressionStatement's result is unused, so it's popped from the stack.
 	// An ExpressionStatement's result is unused, so it's popped from the stack.
@@ -778,40 +916,56 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// and prevent panics if the parser produces an unexpected AST node.
 		switch target := node.Left.(type) {
 		case *ast.Identifier:
-			// Check if this is an assignment to the current function's name,
-			// which is the IEC 61131-3 way of setting a return value.
-			if currentFn := c.currentFunction(); currentFn != nil && target.Value == currentFn.Name.Value {
-				if err := c.Compile(node.Value); err != nil {
-					return err
+			// An assignment to the current function's name sets its result. It
+			// does not return: the rest of the body still runs, and the function
+			// returns the result when it ends or at RETURN.
+			if currentFn := c.currentFunction(); currentFn != nil && strings.EqualFold(target.Value, currentFn.Name.Value) {
+				result := c.functionResults[len(c.functionResults)-1]
+				if result.hasResult {
+					if err := c.Compile(node.Value); err != nil {
+						return err
+					}
+					return c.setSymbol(result.symbol)
 				}
-				c.emit(code.OpReturnValue)
-				return nil
 			}
 
-			// Check if this is an assignment to an instance variable, which needs
-			// to be implicitly treated as an assignment to `THIS.variable`.
-			isInstanceVar := false
+			// Check if this is an assignment to an instance variable (VAR) or a parameter (VAR_INPUT/VAR_OUTPUT/VAR_IN_OUT)
+			// of the current function block.
 			if c.currentFB != nil {
-				for _, varDecl := range c.currentFB.Vars {
-					if varDecl.Name.Value == target.Value {
-						isInstanceVar = true
-						break
+				if varDecl, ownerFB := c.findVarDeclOnFBChain(c.currentFB, target.Value); varDecl != nil {
+					// Check for FINAL variable override.
+					if varDecl.IsFinal {
+						return fmt.Errorf("cannot assign to FINAL variable '%s' from function block '%s'", varDecl.Name.Value, ownerFB.Name.Value)
+					}
+					// Check for read-only (VAR_INPUT)
+					if varDecl.Scope == "VAR_INPUT" {
+						return fmt.Errorf("cannot assign to read-only variable '%s'", target.Value)
+					}
+
+					// If it's an instance variable (VAR, VAR_TEMP, VAR_GLOBAL in FB), compile as THIS.variable := value
+					// VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT are handled as local symbols.
+					if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" {
+						// Compile as `THIS.variable := value`
+						thisSymbol, _ := c.symbolTable.Resolve("THIS")
+						c.loadSymbol(thisSymbol)
+						c.emitConstant(c.addConstant(&object.String{Value: target.Value}))
+						if err := c.Compile(node.Value); err != nil {
+							return err
+						}
+						c.emit(code.OpSetIndex)
+						return nil
 					}
 				}
-			}
 
-			if isInstanceVar {
-				// Compile as `THIS.variable := value`
-				if err := c.Compile(node.Value); err != nil {
-					return err
+				// Inside a function block, assigning to one of its properties by
+				// name calls the property's setter on THIS, just as reading it
+				// by name calls the getter.
+				if propDecl, _ := c.findPropertyOnFBChain(c.currentFB, target.Value); propDecl != nil {
+					if propDecl.Setter == nil {
+						return fmt.Errorf("property '%s' is read-only", propDecl.Name.Value)
+					}
+					return c.compilePropertySet(&ast.ThisExpression{Token: target.Token}, propDecl.Name.Value, node.Value)
 				}
-				// The 'THIS' symbol is always local 0 in a method/FB body.
-				thisSymbol, _ := c.symbolTable.Resolve("THIS")
-				c.loadSymbol(thisSymbol)
-				// The member name becomes a constant index for the set operation.
-				c.emit(code.OpConstant, c.addConstant(&object.String{Value: target.Value}))
-				c.emit(code.OpSetIndex)
-				return nil
 			}
 
 			// Otherwise, it's a regular variable assignment.
@@ -825,10 +979,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return c.setSymbol(symbol)
 
 		case *ast.IndexExpression:
-			// Compile the value to be assigned (RHS)
-			if err := c.Compile(node.Value); err != nil {
-				return err
-			}
 			// Compile the array/hash (LHS of index expression)
 			if err := c.Compile(target.Left); err != nil {
 				return err
@@ -837,13 +987,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(target.Index); err != nil {
 				return err
 			}
+			// Compile the value to be assigned (RHS)
+			if err := c.Compile(node.Value); err != nil {
+				return err
+			}
 			c.emit(code.OpSetIndex)
 			return nil
 		case *ast.MemberAccessExpression:
 			// Check if this is an assignment to a property.
 			// --- Start of new access control logic for assignment ---
 			if structTypeName, ok := c.getExpressionTypeName(target.Struct); ok {
-				if structTypeNode, ok := c.typeInfo[structTypeName]; ok {
+				if structTypeNode, ok := c.resolveTypeName(structTypeName); ok {
 					if fbDef, isFB := structTypeNode.(*ast.FunctionBlockDeclaration); isFB {
 						member := target.Member.Value
 
@@ -914,13 +1068,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				// It's a regular field assignment.
-				if err := c.Compile(node.Value); err != nil {
-					return err
-				}
 				if err := c.Compile(target.Struct); err != nil {
 					return err
 				}
-				c.emit(code.OpConstant, c.addConstant(&object.String{Value: target.Member.Value}))
+				c.emitConstant(c.addConstant(&object.String{Value: target.Member.Value}))
+				if err := c.Compile(node.Value); err != nil {
+					return err
+				}
 				c.emit(code.OpSetIndex)
 				return nil
 			}
@@ -949,9 +1103,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-	// ExternalVarDeclaration compiles each external variable.
+	// ExternalVarDeclaration compiles each external variable. A VAR_EXTERNAL
+	// refers to a VAR_GLOBAL, so when a matching global already exists it is
+	// bound to that symbol and no code is emitted. Otherwise a placeholder
+	// variable is defined, to be bound later (e.g. by a configuration).
 	case *ast.ExternalVarDeclaration:
 		for _, decl := range node.Vars {
+			if existing, ok := c.symbolTable.Resolve(decl.Name.Value); ok && existing.Scope == GlobalScope {
+				continue
+			}
 			err := c.Compile(decl)
 			if err != nil {
 				return err
@@ -1032,32 +1192,44 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		} else {
 			// If no initial value is provided, check if we are trying to instantiate an abstract FB.
+			instantiated := false
 			if typeName != "" { // This check will now work correctly.
 				if typeDef, ok := c.resolveTypeNode(node.DataType); ok {
 					if fbDef, isFB := typeDef.(*ast.FunctionBlockDeclaration); isFB {
 						if fbDef.IsAbstract {
-							return fmt.Errorf("cannot instantiate abstract function block '%s'", typeName)
+							return fmt.Errorf("cannot instantiate abstract function block '%s'", fbDef.Name.Value)
 						}
 						// Check for INTERNAL access
 						if fbDef.AccessSpecifier == "INTERNAL" {
-							defNS := c.pouNamespaces[fbDef.Name.Value]
+							var defFqn string
+							for fqn, n := range c.typeInfo {
+								if n == fbDef {
+									defFqn = fqn
+									break
+								}
+							}
+
+							defNS := c.pouNamespaces[defFqn]
 							callerNS := c.currentNS
 							if defNS != callerNS {
-								return fmt.Errorf("cannot access INTERNAL function block '%s' from a different namespace", typeName)
+								return fmt.Errorf("cannot access INTERNAL function block '%s' from a different namespace", fbDef.Name.Value)
 							}
 						}
+						// Declaring a variable of an FB type creates an instance of it.
+						if err := c.emitFBInstance(fbDef, map[*ast.FunctionBlockDeclaration]bool{}); err != nil {
+							return err
+						}
+						instantiated = true
 					}
 				}
 			}
-			// If no initial value is provided, push null onto the stack.
-			c.emit(code.OpNull)
+			if !instantiated {
+				// If no initial value is provided, push null onto the stack.
+				c.emit(code.OpNull)
+			}
 		}
 
-		if symbol.Scope == GlobalScope {
-			c.emit(code.OpSetGlobal, symbol.Index)
-		} else {
-			c.emit(code.OpSetLocal, symbol.Index)
-		}
+		return c.setSymbol(symbol)
 
 	// An InfixExpression compiles the left and right sides, then emits the operator instruction.
 	case *ast.InfixExpression:
@@ -1070,6 +1242,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		rightType, err := c.getExpressionType(node.Right)
 		if err != nil {
 			return err
+		}
+		// Untyped integer literals act as bit strings in logical operations.
+		if isLogicalOperator(node.Operator) {
+			leftType, rightType = literalAsBitString(node.Left, leftType, rightType), literalAsBitString(node.Right, rightType, leftType)
 		}
 		// Then, check if the operator is valid for these types.
 		if _, err := c.getResultingType(node.Operator, leftType, rightType); err != nil {
@@ -1133,12 +1309,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// An IntegerLiteral is added to the constant pool and an OpConstant instruction is emitted.
 	case *ast.IntegerLiteral:
 		lint := &object.LInt{Value: node.Value}
-		c.emit(code.OpConstant, c.addConstant(lint))
+		c.emitConstant(c.addConstant(lint))
 
 	// A RealLiteral is added to the constant pool and an OpConstant instruction is emitted.
 	case *ast.RealLiteral:
 		lreal := &object.LReal{Value: node.Value}
-		c.emit(code.OpConstant, c.addConstant(lreal))
+		c.emitConstant(c.addConstant(lreal))
 
 	// A Boolean literal emits either OpTrue or OpFalse directly.
 	case *ast.Boolean:
@@ -1212,23 +1388,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.changeOperand(jumpPos, afterAlternativePos)
 
 	case *ast.UnsignedIntegerLiteral:
-		c.emit(code.OpConstant, c.addConstant(&object.ULInt{Value: node.Value}))
+		c.emitConstant(c.addConstant(&object.ULInt{Value: node.Value}))
 
 	// An LRealLiteral is added to the constant pool.
 	case *ast.LRealLiteral:
-		c.emit(code.OpConstant, c.addConstant(&object.LReal{Value: node.Value}))
+		c.emitConstant(c.addConstant(&object.LReal{Value: node.Value}))
 
 	// A WStringLiteral is added to the constant pool.
 	case *ast.WStringLiteral:
-		c.emit(code.OpConstant, c.addConstant(&object.WString{Value: node.Value}))
+		c.emitConstant(c.addConstant(&object.WString{Value: node.Value}))
 
 	// A BitStringLiteral is added to the constant pool.
 	case *ast.BitStringLiteral:
-		c.emit(code.OpConstant, c.addConstant(&object.BitString{Value: node.Value, Width: node.Width}))
+		c.emitConstant(c.addConstant(&object.BitString{Value: node.Value, Width: node.Width}))
 
 	// An EnumeratedValueLiteral is added to the constant pool.
 	case *ast.EnumeratedValueLiteral:
-		c.emit(code.OpConstant, c.addConstant(&object.EnumeratedValue{
+		c.emitConstant(c.addConstant(&object.EnumeratedValue{
 			TypeName: node.TypeName.Value,
 			Value:    node.Value.Value,
 		}))
@@ -1283,26 +1459,32 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// check, body, increment, and jump instructions to create the loop structure.
 	// It uses its own scope for the loop control variable.
 	case *ast.ForLoopStatement:
-		c.enterScope() // Scope for the control variable
 		c.enterLoop()
 
-		// 1. Initialization
-		controlVarName := node.ControlVar.Left.(*ast.Identifier).Value
+		// 1. Initialization. The control variable is an ordinary declared
+		// variable; one that was not declared is defined here.
+		controlIdent, ok := node.ControlVar.Left.(*ast.Identifier)
+		if !ok {
+			return fmt.Errorf("FOR control variable must be an identifier, got %T", node.ControlVar.Left)
+		}
 		if err := c.Compile(node.ControlVar.Value); err != nil {
 			return err
 		}
-		symbol := c.symbolTable.Define(controlVarName, false)
-		c.emit(code.OpSetLocal, symbol.Index)
+		symbol, ok := c.symbolTable.Resolve(controlIdent.Value)
+		if !ok {
+			symbol = c.symbolTable.Define(controlIdent.Value, false)
+		}
+		if err := c.setSymbol(symbol); err != nil {
+			return err
+		}
 
 		loopStartPos := len(c.currentInstructions())
 
-		// 2. Condition check (control_var <= end_value)
-		c.loadSymbol(symbol)
-		if err := c.Compile(node.EndValue); err != nil {
+		// 2. Condition check: control_var <= end for a positive step, and
+		// control_var >= end for a negative one.
+		if err := c.emitForCondition(symbol, node); err != nil {
 			return err
 		}
-		// Assuming positive step for now. A full implementation would check the step value.
-		c.emit(code.OpLessThanOrEqual)
 		jumpToEndPos := c.emit(code.OpJumpNotTruthy, 9999)
 
 		// 3. Body
@@ -1317,7 +1499,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				return err
 			}
 		} else {
-			c.emit(code.OpConstant, c.addConstant(&object.LInt{Value: 1}))
+			c.emitConstant(c.addConstant(&object.LInt{Value: 1}))
 		}
 		c.emit(code.OpAdd)
 		if err := c.setSymbol(symbol); err != nil {
@@ -1330,13 +1512,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// 6. After loop
 		afterLoopPos := len(c.currentInstructions())
 		c.changeOperand(jumpToEndPos, afterLoopPos)
-
-		loop := c.leaveLoop()
-		for _, pos := range loop.breakPositions {
-			c.changeOperand(pos, afterLoopPos)
-		}
-
-		c.leaveScope() // Pop control variable scope
+		c.patchLoopBreaks(afterLoopPos)
 
 	// A WhileStatement is compiled into a condition check, a jump to the end if
 	// the condition is false, the loop body, and a jump back to the start.
@@ -1357,11 +1533,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		afterLoopPos := len(c.currentInstructions())
 		c.changeOperand(jumpToEndPos, afterLoopPos)
-
-		loop := c.leaveLoop()
-		for _, pos := range loop.breakPositions {
-			c.changeOperand(pos, afterLoopPos)
-		}
+		c.patchLoopBreaks(afterLoopPos)
 
 	// A RepeatStatement is compiled into the loop body followed by a condition
 	// check. If the condition is false, it jumps back to the start of the body.
@@ -1380,46 +1552,45 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpJumpNotTruthy, loopStartPos)
 
 		afterLoopPos := len(c.currentInstructions())
-		loop := c.leaveLoop()
-		for _, pos := range loop.breakPositions {
-			c.changeOperand(pos, afterLoopPos)
-		}
+		c.patchLoopBreaks(afterLoopPos)
 
 	// A CaseStatement compiles the selector expression, then for each branch, it
 	// compares the selector to the case value and jumps to the branch's body if
 	// they are equal. It also handles the optional ELSE block.
 	case *ast.CaseStatement:
+		// The selector stays on the stack while each branch's labels are
+		// tested. A branch runs when any of its labels (values or ranges)
+		// matches; otherwise the ELSE block, if any, runs.
 		if err := c.Compile(node.Expression); err != nil {
 			return err
 		}
 
 		exitJumps := []int{}
-		nextCaseJumpPos := -1
-
 		for _, branch := range node.Cases {
-			if nextCaseJumpPos != -1 {
-				c.changeOperand(nextCaseJumpPos, len(c.currentInstructions()))
+			toBody := []int{}
+			for _, value := range branch.Values {
+				jumps, err := c.emitCaseValueTest(value)
+				if err != nil {
+					return err
+				}
+				toBody = append(toBody, jumps...)
 			}
-			// Simplified: only handles one value per case branch for now.
-			c.emit(code.OpDup)
-			if err := c.Compile(branch.Values[0]); err != nil {
-				return err
-			}
-			c.emit(code.OpEqual)
-			nextCaseJumpPos = c.emit(code.OpJumpNotTruthy, 9999)
+			// No label matched: skip this branch's body.
+			nextBranch := c.emit(code.OpJump, 9999)
 
+			bodyPos := len(c.currentInstructions())
+			for _, pos := range toBody {
+				c.changeOperand(pos, bodyPos)
+			}
 			c.emit(code.OpPop) // Pop selector
 			if err := c.Compile(branch.Consequence); err != nil {
 				return err
 			}
 			exitJumps = append(exitJumps, c.emit(code.OpJump, 9999))
+			c.changeOperand(nextBranch, len(c.currentInstructions()))
 		}
 
-		if nextCaseJumpPos != -1 {
-			c.changeOperand(nextCaseJumpPos, len(c.currentInstructions()))
-		}
-		c.emit(code.OpPop) // Pop selector if no cases matched
-
+		c.emit(code.OpPop) // Pop selector: no branch matched
 		if node.Alternative != nil {
 			if err := c.Compile(node.Alternative); err != nil {
 				return err
@@ -1443,10 +1614,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A BlockStatement compiles each of its inner statements.
 	case *ast.BlockStatement:
 		// Check if this is an IL program body by inspecting the first statement.
-		if len(node.Statements) > 0 {
-			if _, ok := node.Statements[0].(*ast.IlInstructionStatement); ok {
-				return c.compileIlProgram(node)
+		isIlBlock := false
+		for _, stmt := range node.Statements {
+			if _, ok := stmt.(*ast.IlInstructionStatement); ok {
+				isIlBlock = true
+				break
 			}
+		}
+
+		if isIlBlock {
+			return c.compileIlProgram(node)
 		}
 
 		// Otherwise, it's a standard ST block.
@@ -1459,33 +1636,45 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// An Identifier resolves the symbol and emits an instruction to load it.
 	case *ast.Identifier:
+		// First, try to resolve as a local/global/free variable.
+		// This is important to correctly find parameters like 'value' in a setter
+		// before attempting to interpret it as an implicit property access on THIS.
+		symbol, ok := c.symbolTable.Resolve(node.Value)
+		if ok {
+			c.loadSymbol(symbol)
+			return nil // Symbol found and loaded, we are done.
+		}
+
+		// If not found, check if it's an implicit THIS access (property or instance var).
 		// Check if this identifier refers to an instance variable of the current function block.
-		// If so, implicitly transform it into a `THIS.Identifier` access. This only
-		// applies to `VAR` instance variables, not I/O vars which are locals/params.
+		// If so, implicitly transform it into a `THIS.Identifier` access.
 		if c.currentFB != nil {
-			// We only check the `Vars` list, which contains the instance variables
-			// (from VAR...END_VAR blocks). Input, output, and in-out variables are
-			// handled as local symbols within the scope of the FB's main body or methods,
-			// so they should not be checked here.
-			for _, varDecl := range c.currentFB.Vars {
-				if varDecl.Name.Value == node.Value {
+			// Check for instance variables (VAR, VAR_TEMP, VAR_GLOBAL in FB)
+			if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, node.Value); varDecl != nil {
+				// If it's a VAR_INPUT/VAR_OUTPUT/VAR_IN_OUT, it's a local symbol, so it should have been found above.
+				// This logic is for instance variables (VAR, VAR_TEMP, VAR_GLOBAL).
+				if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" {
 					thisExpr := &ast.ThisExpression{Token: node.Token}
 					memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
 					return c.Compile(memberAccess)
 				}
 			}
-		}
-		symbol, ok := c.symbolTable.Resolve(node.Value)
-		if !ok {
-			return fmt.Errorf("undefined variable %s", node.Value)
+
+			// Check for properties. If it's a property, implicitly transform to THIS.Property.
+			if propDecl, _ := c.findPropertyOnFBChain(c.currentFB, node.Value); propDecl != nil {
+				thisExpr := &ast.ThisExpression{Token: node.Token}
+				memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
+				return c.Compile(memberAccess)
+			}
 		}
 
-		c.loadSymbol(symbol)
+		// If we are here, the symbol was not found in any scope and is not an implicit THIS member.
+		return fmt.Errorf("undefined variable %s", node.Value)
 
 	// A StringLiteral is added to the constant pool.
 	case *ast.StringLiteral:
 		str := &object.String{Value: node.Value}
-		c.emit(code.OpConstant, c.addConstant(str))
+		c.emitConstant(c.addConstant(str))
 
 	// An ArrayLiteral compiles all its elements and then emits an OpArray instruction.
 	case *ast.ArrayLiteral:
@@ -1553,7 +1742,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.MemberAccessExpression:
 		// --- Start of new access control logic for read access ---
 		if structTypeName, ok := c.getExpressionTypeName(node.Struct); ok {
-			if structTypeNode, ok := c.typeInfo[structTypeName]; ok {
+			if structTypeNode, ok := c.resolveTypeName(structTypeName); ok {
 				if fbDef, isFB := structTypeNode.(*ast.FunctionBlockDeclaration); isFB {
 					member := node.Member.Value
 
@@ -1586,45 +1775,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// --- End of new access control logic ---
 
-		// Handle SUPER calls first, as they are a special form of member access.
-		if deref, ok := node.Struct.(*ast.DereferenceExpression); ok {
-			if _, ok := deref.Pointer.(*ast.SuperExpression); ok {
-				// This is a SUPER^.Method access.
-				// We push the current instance ('THIS') and the method name,
-				// then use a special opcode to tell the VM to do a lookup on the parent.
-				c.emit(code.OpGetLocal, 0) // Get THIS instance
-				c.emit(code.OpConstant, c.addConstant(&object.String{Value: node.Member.Value}))
-				c.emit(code.OpSuperIndex) // New opcode for super-method lookup
-				return nil
-			}
-		}
-
 		// Check if this is a property access (read).
-		isProperty := false
-		// A more robust implementation would inspect the type of `node.Struct`.
-		// For now, we check if we are inside an FB and the access is on `THIS`.
-		if c.currentFB != nil {
-			if _, ok := node.Struct.(*ast.ThisExpression); ok {
-				for _, prop := range c.currentFB.Properties {
-					if prop.Name.Value == node.Member.Value {
-						isProperty = true
-						break
-					}
-				}
-			}
-		}
-
-		if isProperty {
+		if isProperty, propName := c.isPropertyAccess(node); isProperty {
 			// It's a property get. Compile as a call to the getter method.
-			// e.g., `x := p.MyProp` is compiled as `x := p.get_MyProp()`
 			getterCall := &ast.CallExpression{
 				Function: &ast.MemberAccessExpression{
 					Struct: node.Struct,
-					Member: &ast.Identifier{Value: "get_" + node.Member.Value},
+					Member: &ast.Identifier{Value: "get_" + propName},
 				},
 				Arguments: []ast.Expression{}, // Getter has no arguments
 			}
 			return c.Compile(getterCall)
+		}
+
+		// Handle SUPER calls for METHODS (not properties, which are handled above).
+		if deref, ok := node.Struct.(*ast.DereferenceExpression); ok {
+			if _, ok := deref.Pointer.(*ast.SuperExpression); ok {
+				thisSymbol, ok := c.symbolTable.Resolve("THIS")
+				if !ok {
+					return fmt.Errorf("cannot use SUPER outside of a function block context")
+				}
+				c.loadSymbol(thisSymbol)
+				c.emitConstant(c.addConstant(&object.String{Value: node.Member.Value}))
+				c.emit(code.OpSuperIndex)
+				return nil
+			}
 		}
 
 		// It's a regular field access.
@@ -1683,17 +1858,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 			Parameters: node.Parameters,
 			Body:       node.Body,
 		}
-		constIndex := c.addConstant(macro)
-		c.emit(code.OpConstant, constIndex)
+		c.emitConstant(c.addConstant(macro))
 
 	// A ReturnStatement compiles the return value and emits OpReturnValue.
 	case *ast.ReturnStatement:
+		inFunction := len(c.functionResults) > 0 && c.functionResults[len(c.functionResults)-1].hasResult
 		if node.ReturnValue == nil {
-			c.emit(code.OpReturn)
+			// RETURN in a function returns its current result.
+			c.emitFunctionReturn()
 			return nil
 		}
 		if err := c.Compile(node.ReturnValue); err != nil {
 			return err
+		}
+		if inFunction {
+			// `RETURN value` sets the result first, so VAR_OUTPUTs are still returned.
+			if err := c.setSymbol(c.functionResults[len(c.functionResults)-1].symbol); err != nil {
+				return err
+			}
+			c.emitFunctionReturn()
+			return nil
 		}
 		c.emit(code.OpReturnValue)
 
@@ -1737,7 +1921,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return err
 				}
 				// Add the name as a constant and emit the new opcode.
-				nameIndex := c.addConstant(&object.String{Value: named.Name.Value})
+				nameIndex := c.addConstant(&object.String{Value: named.Name.Value}) // cspell:disable-line
 				c.emit(code.OpMakeNamedArg, nameIndex)
 			} else {
 				// It's a positional argument.
@@ -1747,18 +1931,48 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
+		// A user function with VAR_OUTPUTs returns a hash holding its result
+		// ("__return__") and each output. Check the `=>` names against it.
+		var calleeFn *ast.FunctionDeclaration
+		if ident, ok := node.Function.(*ast.Identifier); ok {
+			if def, found := c.resolveTypeName(ident.Value); found {
+				calleeFn, _ = def.(*ast.FunctionDeclaration)
+			}
+		}
+		if calleeFn != nil {
+			for _, out := range outputArgs {
+				declared := false
+				for _, o := range calleeFn.VarOutputs {
+					if strings.EqualFold(o.Name.Value, out.Source.Value) {
+						declared = true
+						break
+					}
+				}
+				if !declared {
+					return fmt.Errorf("function '%s' has no output '%s'", calleeFn.Name.Value, out.Source.Value)
+				}
+			}
+		}
+
 		c.emit(code.OpCall, len(inputArgs))
 
 		// --- Part 2: Compile output assignments ---
 		// The result of the call (FB instance or return value hash) is now on the stack.
-		for i, out := range outputArgs {
-			// If we have more assignments to make, duplicate the function result on the stack.
-			if i < len(outputArgs) {
-				c.emit(code.OpDup)
-			}
+		for _, out := range outputArgs {
+			// Keep the call's result for the next output and the return value.
+			c.emit(code.OpDup)
 
-			// Compile member access: <func_result>.<source_name>
-			c.emit(code.OpConstant, c.addConstant(&object.String{Value: out.Source.Value}))
+			// Compile member access: <func_result>.<source_name>. Outputs are
+			// keyed by their declared name, since identifiers are case-insensitive.
+			outputName := out.Source.Value
+			if calleeFn != nil {
+				for _, o := range calleeFn.VarOutputs {
+					if strings.EqualFold(o.Name.Value, outputName) {
+						outputName = o.Name.Value
+					}
+				}
+			}
+			c.emitConstant(c.addConstant(&object.String{Value: outputName}))
 			c.emit(code.OpIndex)
 
 			// Compile assignment to the target variable.
@@ -1776,6 +1990,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
+		// Leave the function's own result as the call's value.
+		if calleeFn != nil && len(calleeFn.VarOutputs) > 0 {
+			c.emitConstant(c.addConstant(&object.String{Value: "__return__"}))
+			c.emit(code.OpIndex)
+		}
+
+	case *ast.IlInstructionStatement:
+		return fmt.Errorf("IL instruction '%s' found in a Structured Text context", node.Operator)
+
 	}
 
 	return nil
@@ -1784,39 +2007,54 @@ func (c *Compiler) Compile(node ast.Node) error {
 // validateMethodOverride checks if a derived method has a signature compatible with its parent.
 func (c *Compiler) validateMethodOverride(derived, parent *ast.MethodImplementation) error {
 	// 1. Check return type
-	derivedReturn := "VOID"
-	if derived.ReturnType != nil {
-		derivedReturn = derived.ReturnType.String()
-	}
-	parentReturn := "VOID"
-	if parent.ReturnType != nil {
-		parentReturn = parent.ReturnType.String()
-	}
+	derivedHasReturn := derived.ReturnType != nil
+	parentHasReturn := parent.ReturnType != nil
 
-	if derivedReturn != parentReturn {
-		// If types are different, check for covariance (only for function blocks).
-		parentTypeNode, parentTypeFound := c.typeInfo[parentReturn]
-		derivedTypeNode, derivedTypeFound := c.typeInfo[derivedReturn]
-
-		// If either type is not a defined type (i.e., it's a primitive like INT, BOOL), then they must be identical.
-		// The initial `derivedReturn != parentReturn` check already covers this.
-		if !parentTypeFound || !derivedTypeFound {
-			return fmt.Errorf("return type mismatch for method '%s': derived is '%s', parent is '%s'", derived.Name.Value, derivedReturn, parentReturn)
-		}
-
-		parentFBDef, isParentFB := parentTypeNode.(*ast.FunctionBlockDeclaration)
-		derivedFBDef, isDerivedFB := derivedTypeNode.(*ast.FunctionBlockDeclaration)
-
-		// Covariance is only allowed if both return types are function blocks.
-		if isParentFB && isDerivedFB {
-			// Check if the derived return type is a subclass of the parent return type.
-			if !c.isSubclassOf(derivedFBDef, parentFBDef) {
-				return fmt.Errorf("incompatible return types for method '%s': '%s' is not a subclass of '%s'", derived.Name.Value, derivedReturn, parentReturn)
-			}
-			// If it is a subclass, this is a valid covariant return.
+	if derivedHasReturn != parentHasReturn {
+		var derivedStr, parentStr string
+		if derivedHasReturn {
+			derivedStr = derived.ReturnType.String()
 		} else {
-			// If one or both are not function blocks (e.g., INTERFACE, STRUCT, or primitive), types must be identical.
-			return fmt.Errorf("return type mismatch for method '%s': derived is '%s', parent is '%s'", derived.Name.Value, derivedReturn, parentReturn)
+			derivedStr = "no return type"
+		}
+		if parentHasReturn {
+			parentStr = parent.ReturnType.String()
+		} else {
+			parentStr = "no return type"
+		}
+		return fmt.Errorf("return type mismatch for method '%s': derived has %s, parent has %s", derived.Name.Value, derivedStr, parentStr)
+	}
+
+	// If both have return types, check if they are compatible.
+	if derivedHasReturn { // and parentHasReturn is implied
+		derivedReturnStr := derived.ReturnType.String()
+		parentReturnStr := parent.ReturnType.String()
+
+		if !strings.EqualFold(derivedReturnStr, parentReturnStr) {
+			// If types are different, check for covariance (only for function blocks).
+			parentTypeNode, parentTypeFound := c.resolveTypeNode(parent.ReturnType)
+			derivedTypeNode, derivedTypeFound := c.resolveTypeNode(derived.ReturnType)
+
+			// If either type is not a defined type (i.e., it's a primitive like INT, BOOL), then they must be identical.
+			// The initial `derivedReturn != parentReturn` check already covers this.
+			if !parentTypeFound || !derivedTypeFound {
+				return fmt.Errorf("return type mismatch for method '%s': derived is '%s', parent is '%s'", derived.Name.Value, derivedReturnStr, parentReturnStr)
+			}
+
+			parentFBDef, isParentFB := parentTypeNode.(*ast.FunctionBlockDeclaration)
+			derivedFBDef, isDerivedFB := derivedTypeNode.(*ast.FunctionBlockDeclaration)
+
+			// Covariance is only allowed if both return types are function blocks.
+			if isParentFB && isDerivedFB {
+				// Check if the derived return type is a subclass of the parent return type.
+				if !c.isSubclassOf(derivedFBDef, parentFBDef) {
+					return fmt.Errorf("incompatible return types for method '%s': '%s' is not a subclass of '%s'", derived.Name.Value, derivedReturnStr, parentReturnStr)
+				}
+				// If it is a subclass, this is a valid covariant return.
+			} else {
+				// If one or both are not function blocks (e.g., INTERFACE, STRUCT, or primitive), types must be identical.
+				return fmt.Errorf("return type mismatch for method '%s': derived is '%s', parent is '%s'", derived.Name.Value, derivedReturnStr, parentReturnStr)
+			}
 		}
 	}
 
@@ -1831,10 +2069,10 @@ func (c *Compiler) validateMethodOverride(derived, parent *ast.MethodImplementat
 		derivedParamTypeStr := derivedParam.DataType.String()
 		parentParamTypeStr := parentParam.DataType.String()
 
-		if derivedParamTypeStr != parentParamTypeStr {
+		if !strings.EqualFold(derivedParamTypeStr, parentParamTypeStr) {
 			// If types are different, check for contravariance (only for function blocks).
-			parentTypeNode, parentTypeFound := c.typeInfo[parentParamTypeStr]
-			derivedTypeNode, derivedTypeFound := c.typeInfo[derivedParamTypeStr]
+			parentTypeNode, parentTypeFound := c.resolveTypeNode(parentParam.DataType)
+			derivedTypeNode, derivedTypeFound := c.resolveTypeNode(derivedParam.DataType)
 
 			// If either type is not a defined type (i.e., it's a primitive), they must be identical.
 			if !parentTypeFound || !derivedTypeFound {
@@ -1857,7 +2095,6 @@ func (c *Compiler) validateMethodOverride(derived, parent *ast.MethodImplementat
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -1874,8 +2111,31 @@ func (c *Compiler) findVarDeclOnFBChain(fbDef *ast.FunctionBlockDeclaration, var
 	}
 	for _, varBlock := range allVarBlocks {
 		for _, decl := range varBlock {
-			if decl.Name.Value == varName {
+			if strings.EqualFold(decl.Name.Value, varName) { // Case-insensitive comparison
 				return decl, fbDef // Found it.
+			}
+		}
+	}
+
+	// Also search in the body, as the parser may place VAR blocks there,
+	// and the parent FB's AST node is not pre-processed like the current one.
+	if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
+		for _, stmt := range body.Statements {
+			// Explicitly skip methods to avoid any ambiguity. This function
+			// should only ever find variable declarations.
+			if _, isMethod := stmt.(*ast.MethodImplementation); isMethod {
+				continue
+			}
+			if varDecl, isVarDecl := stmt.(*ast.VarDeclStatement); isVarDecl {
+				if strings.EqualFold(varDecl.Name.Value, varName) {
+					return varDecl, fbDef
+				}
+			} else if varBlock, isVarBlock := stmt.(*ast.VarBlockDeclaration); isVarBlock {
+				for _, decl := range varBlock.Declarations {
+					if strings.EqualFold(decl.Name.Value, varName) {
+						return decl, fbDef
+					}
+				}
 			}
 		}
 	}
@@ -1894,6 +2154,31 @@ func (c *Compiler) findVarDeclOnFBChain(fbDef *ast.FunctionBlockDeclaration, var
 	return nil, nil // Reached the top of the chain without finding the var.
 }
 
+// findMemberType searches within a STRUCT or FB definition for a member and returns its type.
+func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.ObjectType, error) {
+	switch def := typeNode.(type) {
+	case *ast.FunctionBlockDeclaration:
+		// It's a function block. Look for the member.
+		// Check properties first.
+		if prop, _ := c.findPropertyOnFBChain(def, memberName); prop != nil {
+			return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(prop.DataType))), nil
+		}
+		// Check variables.
+		if varDecl, _ := c.findVarDeclOnFBChain(def, memberName); varDecl != nil {
+			return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(varDecl.DataType))), nil
+		}
+		// Check for methods. If found, it means user is trying to get value of method.
+		if method, _ := c.findMethodOnFBChain(def, memberName); method != nil {
+			return "", fmt.Errorf("cannot take value of method '%s'", memberName)
+		}
+		return "", fmt.Errorf("member '%s' not found on function block '%s'", memberName, def.Name.Value)
+
+	case *ast.TypeDeclaration:
+		// TODO: Handle struct member access
+	}
+	return "", fmt.Errorf("member access on non-composite type '%T'", typeNode)
+}
+
 // getExpressionType recursively determines the data type of an AST expression node.
 func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, error) {
 	switch e := expr.(type) {
@@ -1907,15 +2192,56 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 		return object.STRING_OBJ, nil
 	case *ast.WStringLiteral:
 		return object.WSTRING_OBJ, nil
+	case *ast.ThisExpression:
+		if c.currentFB == nil {
+			return "", fmt.Errorf("cannot use THIS outside of a function block context")
+		}
+		return object.ObjectType(c.currentFB.Name.Value), nil
+	case *ast.SuperExpression:
+		if c.currentFB == nil || c.currentFB.Extends == nil {
+			return "", fmt.Errorf("SUPER used outside of a derived function block")
+		}
+		return object.ObjectType(c.flattenExpressionToString(c.currentFB.Extends)), nil
+	case *ast.DereferenceExpression:
+		return c.getExpressionType(e.Pointer)
 	case *ast.Identifier:
+		if c.currentFB != nil {
+			// Check only instance variables (VAR), not I/O vars.
+			for _, varDecl := range c.currentFB.Vars {
+				if varDecl.Name.Value == e.Value {
+					thisExpr := &ast.ThisExpression{Token: e.Token}
+					memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: e}
+					return c.getExpressionType(memberAccess)
+				}
+			}
+			// A property of the enclosing FB, read by name.
+			if _, isSymbol := c.symbolTable.Resolve(e.Value); !isSymbol {
+				if prop, _ := c.findPropertyOnFBChain(c.currentFB, e.Value); prop != nil {
+					return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(prop.DataType))), nil
+				}
+			}
+		}
 		symbol, ok := c.symbolTable.Resolve(e.Value)
 		if !ok {
 			return "", fmt.Errorf("undefined identifier: %s", e.Value)
 		}
 		if symbol.TypeName == "" {
-			return "", fmt.Errorf("cannot determine type of identifier: %s", e.Value)
+			// This is a fallback for untyped identifiers, which can occur with
+			// non-standard language extensions like 'fn' literals where parameter
+			// types are not captured in the AST. Assume LINT to allow arithmetic.
+			return object.LINT_OBJ, nil
 		}
 		return object.ObjectType(strings.ToUpper(symbol.TypeName)), nil
+	case *ast.MemberAccessExpression:
+		structType, err := c.getExpressionType(e.Struct)
+		if err != nil {
+			return "", err
+		}
+		typeNode, ok := c.resolveTypeNode(&ast.Identifier{Value: string(structType)})
+		if !ok {
+			return "", fmt.Errorf("type definition not found for '%s'", structType)
+		}
+		return c.findMemberType(typeNode, e.Member.Value)
 	case *ast.InfixExpression:
 		leftType, err := c.getExpressionType(e.Left)
 		if err != nil {
@@ -1925,6 +2251,12 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 		if err != nil {
 			return "", err
 		}
+		// An untyped integer literal takes its type from context, so in a
+		// bitwise/logical operation it is treated as a bit string (e.g. `10 AND 12`
+		// or `myWord AND 16#FF`). Typed integer variables are still rejected.
+		if isLogicalOperator(e.Operator) {
+			leftType, rightType = literalAsBitString(e.Left, leftType, rightType), literalAsBitString(e.Right, rightType, leftType)
+		}
 		return c.getResultingType(e.Operator, leftType, rightType)
 	case *ast.PrefixExpression:
 		// For prefix expressions, the type is usually the same as the operand's type.
@@ -1932,20 +2264,175 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 	case *ast.CallExpression:
 		// This requires looking up the function's return type.
 		if ident, ok := e.Function.(*ast.Identifier); ok {
-			if funcDefNode, ok := c.typeInfo[ident.Value]; ok {
+			if funcDefNode, ok := c.resolveTypeName(ident.Value); ok {
 				if funcDef, isFunc := funcDefNode.(*ast.FunctionDeclaration); isFunc {
 					if funcDef.ReturnType != nil {
 						return object.ObjectType(strings.ToUpper(funcDef.ReturnType.String())), nil
 					}
-					return object.NULL_OBJ, nil // VOID function
+					return object.NULL_OBJ, nil
 				}
 			}
 		}
-		// Fallback for built-ins or complex expressions. This would need to be expanded.
-		return "", fmt.Errorf("type inference for function call '%s' not yet implemented", e.Function.String())
+		if memberAccess, ok := e.Function.(*ast.MemberAccessExpression); ok {
+			baseType, err := c.getExpressionType(memberAccess.Struct)
+			if err != nil {
+				return "", err
+			}
+			typeNode, ok := c.resolveTypeNode(&ast.Identifier{Value: string(baseType)})
+			if !ok {
+				return "", fmt.Errorf("type definition not found for '%s'", baseType)
+			}
+			if fbDef, isFB := typeNode.(*ast.FunctionBlockDeclaration); isFB {
+				methodName := memberAccess.Member.Value
+				if method, _ := c.findMethodOnFBChain(fbDef, methodName); method != nil {
+					if method.ReturnType != nil {
+						return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(method.ReturnType))), nil
+					}
+					return object.NULL_OBJ, nil // Method with no return value
+				}
+				return "", fmt.Errorf("method '%s' not found on type '%s'", methodName, baseType)
+			}
+		}
+		// Built-in functions have no declared return type here; their result
+		// is checked by the VM when the program runs.
+		return anyType, nil
+	case *ast.UnsignedIntegerLiteral:
+		return object.ULINT_OBJ, nil
+	case *ast.LRealLiteral:
+		return object.LREAL_OBJ, nil
+	case *ast.BitStringLiteral:
+		return bitStringTypeForWidth(e.Width), nil
+	case *ast.TimeLiteral:
+		return object.TIME_OBJ, nil
+	case *ast.DateLiteral:
+		return object.DATE_OBJ, nil
+	case *ast.TimeOfDayLiteral:
+		return object.TIME_OF_DAY_OBJ, nil
+	case *ast.DateAndTimeLiteral:
+		return object.DATE_AND_TIME_OBJ, nil
+	case *ast.EnumeratedValueLiteral:
+		return object.ObjectType(strings.ToUpper(e.TypeName.Value)), nil
+	case *ast.TypedLiteral:
+		return typedLiteralType(e.TypeName), nil
+	case *ast.IndexExpression:
+		return c.indexElementType(e), nil
 	default:
 		return "", fmt.Errorf("cannot determine type of expression: %T", expr)
 	}
+}
+
+// anyType is the type of an operand the compiler cannot determine statically,
+// such as a built-in function's result. Operations on it are not rejected at
+// compile time; the VM checks the actual values when the program runs.
+const anyType = object.ObjectType("ANY")
+
+// typedLiteralType returns the type of a typed literal such as INT#5, T#1s or
+// Color#Red, normalizing the short forms of the time and date types.
+func typedLiteralType(typeName string) object.ObjectType {
+	switch upper := strings.ToUpper(typeName); upper {
+	case "T":
+		return object.TIME_OBJ
+	case "D":
+		return object.DATE_OBJ
+	case "TOD":
+		return object.TIME_OF_DAY_OBJ
+	case "DT":
+		return object.DATE_AND_TIME_OBJ
+	default:
+		return object.ObjectType(upper)
+	}
+}
+
+// bitStringTypeForWidth returns the bit-string type with the given width.
+func bitStringTypeForWidth(width int) object.ObjectType {
+	switch width {
+	case 8:
+		return object.BYTE_OBJ
+	case 16:
+		return object.WORD_OBJ
+	case 32:
+		return object.DWORD_OBJ
+	default:
+		return object.LWORD_OBJ
+	}
+}
+
+// indexElementType returns the element type of an indexed array variable, as
+// declared, or anyType when it cannot be determined statically.
+func (c *Compiler) indexElementType(e *ast.IndexExpression) object.ObjectType {
+	ident, ok := e.Left.(*ast.Identifier)
+	if !ok {
+		return anyType
+	}
+	// Look for the declaration from the innermost scope outwards.
+	for i := c.scopeIndex; i >= 0; i-- {
+		for name, decl := range c.scopes[i].varDecls {
+			if !strings.EqualFold(name, ident.Value) {
+				continue
+			}
+			if arrayDef, ok := decl.DataType.(*ast.ArrayDefinition); ok && arrayDef.DataType != nil {
+				if elementType := c.flattenExpressionToString(arrayDef.DataType); elementType != "" {
+					return object.ObjectType(elementType)
+				}
+			}
+			return anyType
+		}
+	}
+	return anyType
+}
+
+// isTemporalType reports whether t is a time or date type.
+func isTemporalType(t object.ObjectType) bool {
+	switch t {
+	case object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ:
+		return true
+	}
+	return false
+}
+
+// temporalResultType returns the type of an arithmetic operation involving a
+// time or date operand, following IEC 61131-3, and false if it is not defined.
+func temporalResultType(op string, left, right object.ObjectType) (object.ObjectType, bool) {
+	isNumeric := func(t object.ObjectType) bool {
+		return object.IsIntegerType(string(t)) || object.IsRealType(string(t))
+	}
+	switch {
+	case left == object.TIME_OBJ && right == object.TIME_OBJ && (op == "+" || op == "-"):
+		return object.TIME_OBJ, true
+	case left == object.TIME_OBJ && isNumeric(right) && (op == "*" || op == "/"):
+		return object.TIME_OBJ, true
+	case isNumeric(left) && right == object.TIME_OBJ && op == "*":
+		return object.TIME_OBJ, true
+	case left == object.DATE_OBJ && right == object.DATE_OBJ && op == "-":
+		return object.TIME_OBJ, true
+	case (left == object.TIME_OF_DAY_OBJ || left == object.DATE_AND_TIME_OBJ) && right == object.TIME_OBJ && (op == "+" || op == "-"):
+		return left, true
+	case (left == object.TIME_OF_DAY_OBJ || left == object.DATE_AND_TIME_OBJ) && right == left && op == "-":
+		return object.TIME_OBJ, true
+	}
+	return "", false
+}
+
+// isLogicalOperator reports whether op is one of the IEC 61131-3 logical/bitwise operators.
+func isLogicalOperator(op string) bool {
+	switch strings.ToUpper(op) {
+	case "AND", "OR", "XOR", "NAND", "NOR", "&":
+		return true
+	}
+	return false
+}
+
+// literalAsBitString returns the type an operand should have in a logical
+// operation. An untyped integer literal adopts the other operand's bit-string
+// type if it has one, and LWORD otherwise. Any other operand keeps its type.
+func literalAsBitString(operand ast.Expression, operandType, otherType object.ObjectType) object.ObjectType {
+	if _, isLiteral := operand.(*ast.IntegerLiteral); !isLiteral {
+		return operandType
+	}
+	if object.IsBitStringType(string(otherType)) && otherType != object.BOOLEAN_OBJ {
+		return otherType
+	}
+	return object.LWORD_OBJ
 }
 
 // getResultingType checks if an operator is valid for the given operand types
@@ -1956,8 +2443,23 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		return object.IsIntegerType(string(t)) || object.IsRealType(string(t))
 	}
 
+	// An operand whose type is only known at runtime is not rejected here.
+	if left == anyType || right == anyType {
+		switch op {
+		case ">", "<", ">=", "<=", "=", "<>", "==", "!=":
+			return object.BOOLEAN_OBJ, nil
+		}
+		if left == anyType {
+			return right, nil
+		}
+		return left, nil
+	}
+
 	switch op {
-	case "+", "-", "*", "/":
+	case "+", "-", "*", "/", "**":
+		if resultType, ok := temporalResultType(op, left, right); ok {
+			return resultType, nil
+		}
 		if isNumeric(left) && isNumeric(right) {
 			// Simplified type promotion: if either is REAL, the result is REAL.
 			if object.IsRealType(string(left)) || object.IsRealType(string(right)) {
@@ -1974,7 +2476,13 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		}
 		return "", fmt.Errorf("operator '%s' not defined for types %s and %s", op, left, right)
 
-	case ">", "<", ">=", "<=", "=", "<>":
+	case "MOD":
+		if object.IsIntegerType(string(left)) && object.IsIntegerType(string(right)) {
+			return object.LINT_OBJ, nil
+		}
+		return "", fmt.Errorf("operator '%s' not defined for types %s and %s", op, left, right)
+
+	case ">", "<", ">=", "<=", "=", "<>", "==", "!=":
 		// Comparisons are generally valid between any two numeric types.
 		if isNumeric(left) && isNumeric(right) {
 			return object.BOOLEAN_OBJ, nil
@@ -1983,9 +2491,21 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		if (left == object.STRING_OBJ || left == object.WSTRING_OBJ) && (right == object.STRING_OBJ || right == object.WSTRING_OBJ) {
 			return object.BOOLEAN_OBJ, nil
 		}
+		// Also allow boolean comparison
+		if left == object.BOOLEAN_OBJ && right == object.BOOLEAN_OBJ {
+			return object.BOOLEAN_OBJ, nil
+		}
+		// Times, dates and bit strings compare with values of the same type.
+		if left == right && (isTemporalType(left) || object.IsBitStringType(string(left))) {
+			return object.BOOLEAN_OBJ, nil
+		}
+		// Any two values of the same type (e.g. an enumeration) can be tested for equality.
+		if left == right && (op == "=" || op == "<>" || op == "==" || op == "!=") {
+			return object.BOOLEAN_OBJ, nil
+		}
 		return "", fmt.Errorf("comparison operator '%s' not defined for types %s and %s", op, left, right)
 
-	case "AND", "OR", "XOR":
+	case "AND", "OR", "XOR", "NAND", "NOR":
 		if (left == object.BOOLEAN_OBJ && right == object.BOOLEAN_OBJ) || (object.IsBitStringType(string(left)) && object.IsBitStringType(string(right))) {
 			return left, nil // Result type is the same as operand type
 		}
@@ -2159,6 +2679,17 @@ func (c *Compiler) removeLastPop() {
 	c.scopes[c.scopeIndex].lastInstruction = previous
 }
 
+// patchLoopBreaks pops the current loop context and patches all accumulated
+// EXIT jumps to point to the instruction immediately following the loop.
+func (c *Compiler) patchLoopBreaks(afterLoopPos int) {
+	loop := c.leaveLoop()
+	if loop != nil {
+		for _, pos := range loop.breakPositions {
+			c.changeOperand(pos, afterLoopPos)
+		}
+	}
+}
+
 // replaceInstruction overwrites the instruction at a given position with a new one.
 func (c *Compiler) replaceInstruction(pos int, newInstruction []byte) {
 	ins := c.currentInstructions()
@@ -2318,35 +2849,35 @@ func (c *Compiler) compileSFCProgram(node *ast.SFCProgram) error {
 			break
 		}
 	}
-	c.emit(code.OpConstant, addStringConst("initial_step"))
-	c.emit(code.OpConstant, addStringConst(initialStepName))
+	c.emitConstant(addStringConst("initial_step"))
+	c.emitConstant(addStringConst(initialStepName))
 
 	// Key: "actions"
-	c.emit(code.OpConstant, addStringConst("actions"))
+	c.emitConstant(addStringConst("actions"))
 	for name, fnIndex := range actionClosures {
-		c.emit(code.OpConstant, addStringConst(name))
+		c.emitConstant(addStringConst(name))
 		c.emit(code.OpClosure, fnIndex, 0)
 	}
 	c.emit(code.OpHash, len(actionClosures)*2)
 
 	// Key: "transitions"
-	c.emit(code.OpConstant, addStringConst("transitions"))
+	c.emitConstant(addStringConst("transitions"))
 	numTransitions := 0
 	for _, stmt := range node.Elements {
 		if trans, ok := stmt.(*ast.TransitionStatement); ok {
 			numTransitions++
 			fnIndex := transitionClosures[trans]
 
-			c.emit(code.OpConstant, addStringConst("condition"))
+			c.emitConstant(addStringConst("condition"))
 			c.emit(code.OpClosure, fnIndex, 0)
-			c.emit(code.OpConstant, addStringConst("from"))
+			c.emitConstant(addStringConst("from"))
 			for _, from := range trans.From {
-				c.emit(code.OpConstant, addStringConst(from.Value))
+				c.emitConstant(addStringConst(from.Value))
 			}
 			c.emit(code.OpArray, len(trans.From))
-			c.emit(code.OpConstant, addStringConst("to"))
+			c.emitConstant(addStringConst("to"))
 			for _, to := range trans.To {
-				c.emit(code.OpConstant, addStringConst(to.Value))
+				c.emitConstant(addStringConst(to.Value))
 			}
 			c.emit(code.OpArray, len(trans.To))
 			c.emit(code.OpHash, 6)
@@ -2355,23 +2886,23 @@ func (c *Compiler) compileSFCProgram(node *ast.SFCProgram) error {
 	c.emit(code.OpArray, numTransitions)
 
 	// Key: "steps"
-	c.emit(code.OpConstant, addStringConst("steps"))
+	c.emitConstant(addStringConst("steps"))
 	numSteps := 0
 	for _, stmt := range node.Elements {
 		if step, ok := stmt.(*ast.StepStatement); ok {
 			numSteps++
-			c.emit(code.OpConstant, addStringConst(step.Name.Value))
-			c.emit(code.OpConstant, addStringConst("actions"))
+			c.emitConstant(addStringConst(step.Name.Value))
+			c.emitConstant(addStringConst("actions"))
 			for _, actionAssoc := range step.Actions {
-				c.emit(code.OpConstant, addStringConst("name"))
-				c.emit(code.OpConstant, addStringConst(actionAssoc.ActionName.Value))
+				c.emitConstant(addStringConst("name"))
+				c.emitConstant(addStringConst(actionAssoc.ActionName.Value))
 
 				qualifier := "N"
 				if actionAssoc.Qualifier != nil {
 					qualifier = actionAssoc.Qualifier.Value
 				}
-				c.emit(code.OpConstant, addStringConst("qualifier"))
-				c.emit(code.OpConstant, addStringConst(qualifier))
+				c.emitConstant(addStringConst("qualifier"))
+				c.emitConstant(addStringConst(qualifier))
 				c.emit(code.OpHash, 4)
 			}
 			c.emit(code.OpArray, len(step.Actions))
@@ -2403,14 +2934,20 @@ func (c *Compiler) compileConfiguration(config *ast.ConfigurationDeclaration) er
 
 	// Build the final configuration hash object.
 	// Key: "name"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: config.Name.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "name"}))
+	c.emitConstant(c.addConstant(&object.String{Value: config.Name.Value}))
 
 	// Key: "resources"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "resources"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "resources"}))
+	// Match each VAR_CONFIG entry to the program instance it configures.
+	configEntries, unmatched := config.ResolveConfigVars()
+	if len(unmatched) > 0 {
+		return fmt.Errorf("VAR_CONFIG path '%s' does not name a variable of a program instance in configuration '%s'", unmatched[0].AccessPath.String(), config.Name.Value)
+	}
+
 	// Compile each resource, leaving a resource hash object on the stack.
 	for _, res := range config.Resources {
-		if err := c.compileResource(res, config.VarConfigs); err != nil {
+		if err := c.compileResource(res, configEntries); err != nil {
 			return err
 		}
 	}
@@ -2420,24 +2957,28 @@ func (c *Compiler) compileConfiguration(config *ast.ConfigurationDeclaration) er
 	c.emit(code.OpHash, 2*2) // 2 key-value pairs
 
 	// Store the final configuration hash in its global variable.
-	c.emit(code.OpSetGlobal, symbol.Index)
-	return nil
+	return c.setSymbol(symbol)
 }
 
 // compileResource compiles a RESOURCE block into a hash object containing its
 // tasks and program instances.
-func (c *Compiler) compileResource(res *ast.ResourceDeclaration, varConfigs []*ast.ConfigVarDeclaration) error {
+func (c *Compiler) compileResource(res *ast.ResourceDeclaration, configEntries []*ast.ConfigVarEntry) error {
 	// Build the resource hash by compiling its key-value pairs in order.
 	// Key: "name"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.Name.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "name"}))
+	c.emitConstant(c.addConstant(&object.String{Value: res.Name.Value}))
 
 	// Key: "type"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "type"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: res.ResourceType.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "type"}))
+	// The implicit resource of the single-resource form has no type.
+	resourceType := ""
+	if res.ResourceType != nil {
+		resourceType = res.ResourceType.Value
+	}
+	c.emitConstant(c.addConstant(&object.String{Value: resourceType}))
 
 	// Key: "tasks"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "tasks"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "tasks"}))
 	// Value: Compile tasks and create an array of task hashes.
 	for _, task := range res.Tasks {
 		if err := c.compileTask(task); err != nil {
@@ -2447,17 +2988,16 @@ func (c *Compiler) compileResource(res *ast.ResourceDeclaration, varConfigs []*a
 	c.emit(code.OpArray, len(res.Tasks))
 
 	// Key: "programs"
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "programs"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "programs"}))
 	// Value: Compile program instances and create an array of program hashes.
 	for _, prog := range res.Programs {
-		var matchingConfig *ast.ConfigVarDeclaration
-		for _, vc := range varConfigs {
-			if vc.ProgramInstanceName.Value == prog.InstanceName.Value {
-				matchingConfig = vc
-				break
+		var progEntries []*ast.ConfigVarEntry
+		for _, entry := range configEntries {
+			if entry.Resource == res && entry.Program == prog {
+				progEntries = append(progEntries, entry)
 			}
 		}
-		if err := c.compileProgramConfig(prog, matchingConfig); err != nil {
+		if err := c.compileProgramConfig(prog, progEntries); err != nil {
 			return err
 		}
 	}
@@ -2470,10 +3010,10 @@ func (c *Compiler) compileResource(res *ast.ResourceDeclaration, varConfigs []*a
 // compileTask compiles a TASK declaration into a hash object.
 func (c *Compiler) compileTask(task *ast.TaskDeclaration) error { // cspell:disable-line
 	// Build the task hash object.
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "name"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: task.Name.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "name"}))
+	c.emitConstant(c.addConstant(&object.String{Value: task.Name.Value}))
 
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "interval"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "interval"}))
 	if err := c.Compile(task.Interval); err != nil {
 		return err
 	}
@@ -2481,7 +3021,7 @@ func (c *Compiler) compileTask(task *ast.TaskDeclaration) error { // cspell:disa
 		c.emit(code.OpNull)
 	}
 
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "priority"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "priority"}))
 	if err := c.Compile(task.Priority); err != nil {
 		return err
 	}
@@ -2494,38 +3034,38 @@ func (c *Compiler) compileTask(task *ast.TaskDeclaration) error { // cspell:disa
 }
 
 // compileProgramConfig compiles a PROGRAM configuration instance into a hash
-// object, including its parameters from any associated VAR_CONFIG block.
-func (c *Compiler) compileProgramConfig(prog *ast.ProgramConfiguration, varConfig *ast.ConfigVarDeclaration) error {
+// object. Its "params" hash maps each VAR_CONFIG path, relative to the
+// instance, to the configured initial value. Entries that only assign a
+// location (`AT %...`) have no value and are not included.
+func (c *Compiler) compileProgramConfig(prog *ast.ProgramConfiguration, configEntries []*ast.ConfigVarEntry) error {
 	// Build the program configuration hash object.
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "instance"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: prog.InstanceName.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "instance"}))
+	c.emitConstant(c.addConstant(&object.String{Value: prog.InstanceName.Value}))
 
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "task"}))
+	c.emitConstant(c.addConstant(&object.String{Value: "task"}))
 	taskName := ""
 	if prog.TaskName != nil {
 		taskName = prog.TaskName.Value
 	}
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: taskName}))
+	c.emitConstant(c.addConstant(&object.String{Value: taskName}))
 
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "type"}))
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: prog.TypeName.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: "type"}))
+	c.emitConstant(c.addConstant(&object.String{Value: prog.TypeName.Value}))
 
 	// Add the parameters from VAR_CONFIG as a nested hash.
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: "params"}))
-	if varConfig != nil {
-		for _, decl := range varConfig.Declarations {
-			// The parser for VAR_CONFIG puts the variable path into AccessPath.
-			// We use its string representation as the key.
-			paramName := decl.AccessPath.String()
-			c.emit(code.OpConstant, c.addConstant(&object.String{Value: paramName}))
-			if err := c.Compile(decl.Value); err != nil {
-				return err
-			}
+	c.emitConstant(c.addConstant(&object.String{Value: "params"}))
+	numParams := 0
+	for _, entry := range configEntries {
+		if entry.Decl.Value == nil {
+			continue // Location-only entry; see the doc comment above.
 		}
-		c.emit(code.OpHash, len(varConfig.Declarations)*2)
-	} else {
-		c.emit(code.OpHash, 0) // Empty hash if no VAR_CONFIG
+		c.emitConstant(c.addConstant(&object.String{Value: entry.RelativePath()}))
+		if err := c.Compile(entry.Decl.Value); err != nil {
+			return err
+		}
+		numParams++
 	}
+	c.emit(code.OpHash, numParams*2)
 
 	c.emit(code.OpHash, 4*2) // 4 key-value pairs
 	return nil
@@ -2577,14 +3117,14 @@ func (c *Compiler) parseTypedLiteralValue(node *ast.TypedLiteral) (object.Object
 	case "SINT", "INT", "DINT", "LINT":
 		val, err := c.parseBasedInteger(valueStr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid %s literal '%s': %w", typeName, valueStr, err)
 		}
 		// The VM uses LINT for all integer operations for simplicity.
 		return &object.LInt{Value: val}, nil
 	case "USINT", "UINT", "UDINT", "ULINT":
 		val, err := c.parseBasedUnsignedInteger(valueStr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid %s literal '%s': %w", typeName, valueStr, err)
 		}
 		return &object.ULInt{Value: val}, nil
 
@@ -2611,7 +3151,10 @@ func (c *Compiler) parseTypedLiteralValue(node *ast.TypedLiteral) (object.Object
 		}
 		val, err := c.parseBasedUnsignedInteger(valueStr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid %s literal '%s': %w", typeName, valueStr, err)
+		}
+		if width < 64 && val>>uint(width) != 0 {
+			return nil, fmt.Errorf("%s literal '%s' does not fit in %d bits", typeName, valueStr, width)
 		}
 		return &object.BitString{Value: val, Width: width}, nil
 
@@ -2632,7 +3175,7 @@ func (c *Compiler) compileTypedLiteral(node *ast.TypedLiteral) error {
 		return fmt.Errorf("internal compiler error: parseTypedLiteralValue returned nil object without error for %s", node.String())
 	}
 
-	c.emit(code.OpConstant, c.addConstant(obj))
+	c.emitConstant(c.addConstant(obj))
 	return nil
 }
 
@@ -2714,6 +3257,11 @@ func (c *Compiler) compileArrayRepetition(ar *ast.ArrayRepetition) (int, error) 
 	return totalElements, nil
 }
 
+// emitConstant emits an OpConstant instruction for a given constant pool index.
+func (c *Compiler) emitConstant(index int) {
+	c.emit(code.OpConstant, index)
+}
+
 // Bytecode holds the compiled instructions and the constant pool for a program or function.
 type Bytecode struct {
 	Instructions code.Instructions
@@ -2778,7 +3326,12 @@ func (c *Compiler) checkArrayBounds(arrayExpr, indexExpr ast.Expression) error {
 	// 1. We can only check if the index is a compile-time constant integer.
 	indexValue, err := c.evaluateConstantInteger(indexExpr)
 	if err != nil {
-		return nil // Index is not a constant, cannot check at compile time.
+		// If evaluation fails because it's not a constant, we can't check at compile time, which is fine.
+		// However, if evaluation fails due to a semantic error like division by zero, we must report it.
+		if err.Error() == "division by zero in constant expression" {
+			return err
+		}
+		return nil // For other errors (e.g., not a constant), we can't check, so we proceed.
 	}
 
 	// 2. Resolve the array expression to an identifier to find its declaration.
@@ -2854,13 +3407,15 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 	// The order is important: THIS, then input params, then the return var, then other locals.
 	c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
 	for _, p := range method.VarInputs {
-		c.symbolTable.DefineVarInput(p.Name.Value)
+		typeName := c.flattenExpressionToString(p.DataType)
+		c.symbolTable.DefineVarInput(p.Name.Value, typeName)
 	}
 
 	// Define and initialize the implicit return variable.
 	returnSymbol := c.symbolTable.Define(method.Name.Value, false)
 	c.emit(code.OpNull)
 	c.emit(code.OpSetLocal, returnSymbol.Index)
+	c.setFunctionResult(returnSymbol, false)
 
 	for _, v := range method.Vars {
 		if err := c.Compile(v); err != nil {
@@ -2868,24 +3423,31 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 		}
 	}
 
-	if err := c.Compile(method.Body); err != nil {
-		return nil, err
+	// Abstract methods have no body; they compile to a stub that just returns.
+	if method.Body != nil {
+		if err := c.Compile(method.Body); err != nil {
+			return nil, err
+		}
 	}
 
-	if c.lastInstructionIs(code.OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(code.OpReturnValue) {
-		c.emit(code.OpReturn)
-	}
+	// Return the result variable (getters and methods) or nothing (setters).
+	c.emitFunctionReturn()
 
 	numLocals := c.symbolTable.numDefinitions
 	instructions := c.leaveScope()
 
+	// Parameter names let callers pass named arguments, e.g. `fb.M(b := 1, a := 2)`.
+	// THIS is parameter 0, so the inputs follow it.
+	paramNames := []string{"THIS"}
+	for _, p := range method.VarInputs {
+		paramNames = append(paramNames, p.Name.Value)
+	}
+
 	return &object.CompiledFunction{
-		Instructions:  instructions,
-		NumLocals:     numLocals,
-		NumParameters: len(method.VarInputs),
+		Instructions:   instructions,
+		NumLocals:      numLocals,
+		NumParameters:  len(method.VarInputs) + 1, // THIS is passed as the first argument
+		ParameterNames: paramNames,
 	}, nil
 }
 
@@ -2911,22 +3473,19 @@ func (c *Compiler) compilePropertyAccessor(prop *ast.PropertyDeclaration, body *
 		returnSymbol := c.symbolTable.Define(prop.Name.Value, false)
 		c.emit(code.OpNull)
 		c.emit(code.OpSetLocal, returnSymbol.Index)
-		numParams = 0
+		c.setFunctionResult(returnSymbol, false)
+		numParams = 1 // THIS
 	} else {
 		c.symbolTable.Define("value", false) // Implicit 'value' parameter for setters
-		numParams = 1
+		numParams = 2                        // THIS and value
 	}
 
 	if err := c.Compile(body); err != nil {
 		return nil, err
 	}
 
-	if c.lastInstructionIs(code.OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(code.OpReturnValue) {
-		c.emit(code.OpReturn)
-	}
+	// Return the result variable (getters and methods) or nothing (setters).
+	c.emitFunctionReturn()
 
 	numLocals := c.symbolTable.numDefinitions
 	instructions := c.leaveScope()
@@ -2944,25 +3503,41 @@ func (c *Compiler) compileMemberAccess(node *ast.MemberAccessExpression) error {
 		return err
 	}
 	// Then, treat the member name as a string constant to be used as an index.
-	c.emit(code.OpConstant, c.addConstant(&object.String{Value: node.Member.Value}))
+	c.emitConstant(c.addConstant(&object.String{Value: node.Member.Value}))
 	c.emit(code.OpIndex)
 	return nil
 }
 
 func (c *Compiler) isPropertyAccess(expr ast.Expression) (bool, string) {
-	if memberAccess, ok := expr.(*ast.MemberAccessExpression); ok {
-		if c.currentFB != nil {
-			// This is a simplification. A real implementation would need to know the type
-			// of `target.Struct` to check its properties. For now, we assume access on `THIS`.
-			if _, ok := memberAccess.Struct.(*ast.ThisExpression); ok {
-				for _, prop := range c.currentFB.Properties {
-					if prop.Name.Value == memberAccess.Member.Value {
-						return true, prop.Name.Value
-					}
-				}
-			}
-		}
+	memberAccess, ok := expr.(*ast.MemberAccessExpression)
+	if !ok {
+		return false, ""
 	}
+
+	// Get the type name of the struct/FB instance being accessed.
+	structTypeName, ok := c.getExpressionTypeName(memberAccess.Struct)
+	if !ok {
+		return false, ""
+	}
+
+	// Find the AST node that defines this type.
+	structTypeNode, ok := c.resolveTypeNode(&ast.Identifier{Value: structTypeName})
+	if !ok {
+		return false, ""
+	}
+
+	// Check if the type is a function block.
+	fbDef, isFB := structTypeNode.(*ast.FunctionBlockDeclaration)
+	if !isFB {
+		return false, ""
+	}
+
+	// Search the FB and its parents for a property with the matching name.
+	prop, _ := c.findPropertyOnFBChain(fbDef, memberAccess.Member.Value)
+	if prop != nil {
+		return true, prop.Name.Value
+	}
+
 	return false, ""
 }
 
@@ -2991,7 +3566,15 @@ func (c *Compiler) getExpressionTypeName(expr ast.Expression) (string, bool) {
 		return symbol.TypeName, symbol.TypeName != ""
 	case *ast.ThisExpression:
 		if c.currentFB != nil {
-			return c.currentFB.Name.Value, true
+			return strings.ToUpper(c.currentFB.Name.Value), true
+		}
+	case *ast.DereferenceExpression:
+		// This handles cases like `SUPER^`
+		return c.getExpressionTypeName(e.Pointer)
+	case *ast.SuperExpression:
+		// This resolves the type of `SUPER` to the parent FB's name.
+		if c.currentFB != nil && c.currentFB.Extends != nil {
+			return c.flattenExpressionToString(c.currentFB.Extends), true
 		}
 		// Other complex cases like `getMotor().Speed` are hard to analyze statically
 		// without a full type system and are not handled here.
@@ -3001,12 +3584,37 @@ func (c *Compiler) getExpressionTypeName(expr ast.Expression) (string, bool) {
 
 // resolveTypeNode finds the AST definition for a type, handling qualified names.
 func (c *Compiler) resolveTypeNode(typeExpr ast.Expression) (ast.Node, bool) {
-	fqn := c.flattenExpressionToString(typeExpr)
-	// For now, we assume all lookups use the fully qualified name,
-	// which `buildPouInfo` now registers. A more advanced resolver
-	// would also check relative to the current namespace.
-	node, ok := c.typeInfo[fqn]
-	return node, ok
+	return c.resolveTypeName(c.flattenExpressionToString(typeExpr))
+}
+
+// resolveTypeName finds the AST definition for a type given its (possibly
+// qualified) name. An unqualified name also matches a type declared inside a
+// namespace, as long as the match is unambiguous.
+func (c *Compiler) resolveTypeName(fqn string) (ast.Node, bool) {
+	// IEC 61131-3 identifiers are case-insensitive. Always lookup in uppercase.
+	upperFqn := strings.ToUpper(fqn)
+	node, ok := c.typeInfo[upperFqn]
+	if ok {
+		return node, true
+	}
+
+	// 2. If not found, and it's an unqualified name, search for it.
+	// This is a simplified resolution strategy for when `USING` is not present.
+	if !strings.Contains(upperFqn, ".") {
+		var foundNode ast.Node
+		for key, val := range c.typeInfo {
+			if strings.HasSuffix(key, "."+upperFqn) {
+				if foundNode != nil {
+					// Ambiguous reference. For now, we can't resolve it.
+					return nil, false
+				}
+				foundNode = val
+			}
+		}
+		return foundNode, foundNode != nil
+	}
+
+	return nil, false
 }
 
 // isSubclassOf checks if 'child' is a subclass of 'target' by traversing the
@@ -3041,6 +3649,26 @@ func (c *Compiler) checkAccessPermission(accessSpecifier string, ownerDef *ast.F
 		return nil
 	}
 
+	// INTERNAL members: accessible only from within the same namespace. This
+	// depends on the caller's namespace, not on whether the caller is an FB.
+	if accessSpecifier == "INTERNAL" {
+		var ownerFQN string
+		for fqn, node := range c.typeInfo {
+			if node == ownerDef {
+				ownerFQN = fqn
+				break
+			}
+		}
+		if ownerFQN == "" {
+			// Cannot determine namespace, so we cannot enforce INTERNAL.
+			return nil
+		}
+		if c.pouNamespaces[ownerFQN] != c.currentNS {
+			return fmt.Errorf("member is internal")
+		}
+		return nil
+	}
+
 	callerFB := c.currentFB
 	if callerFB == nil {
 		// Call is from outside any FB (e.g., a PROGRAM). Only PUBLIC is allowed.
@@ -3063,16 +3691,6 @@ func (c *Compiler) checkAccessPermission(accessSpecifier string, ownerDef *ast.F
 		return fmt.Errorf("member is protected")
 	}
 
-	// INTERNAL members: accessible only from within the same namespace.
-	if accessSpecifier == "INTERNAL" {
-		ownerNS := c.pouNamespaces[ownerDef.Name.Value]
-		callerNS := c.currentNS
-		if ownerNS != callerNS {
-			return fmt.Errorf("member is internal")
-		}
-		return nil
-	}
-
 	return nil // Should not be reached
 }
 
@@ -3083,11 +3701,20 @@ func (c *Compiler) findMethodOnFBChain(fbDef *ast.FunctionBlockDeclaration, meth
 		return nil, nil
 	}
 
+	// Check if the body itself is the method we are looking for. This can happen
+	// if the FB contains only a single method declaration and the parser sets
+	// the Body field directly to that node instead of a BlockStatement.
+	if method, isMethod := fbDef.Body.(*ast.MethodImplementation); isMethod {
+		if method.Name != nil && strings.EqualFold(method.Name.Value, methodName) {
+			return method, fbDef
+		}
+	}
+
 	// Search for the method in the current FB's body.
 	if body, ok := fbDef.Body.(*ast.BlockStatement); ok {
 		for _, stmt := range body.Statements {
 			if method, isMethod := stmt.(*ast.MethodImplementation); isMethod {
-				if method.Name != nil && method.Name.Value == methodName {
+				if method.Name != nil && strings.EqualFold(method.Name.Value, methodName) { // Case-insensitive comparison
 					return method, fbDef // Found it.
 				}
 			}
@@ -3117,7 +3744,7 @@ func (c *Compiler) findPropertyOnFBChain(fbDef *ast.FunctionBlockDeclaration, pr
 
 	// Search for the property in the current FB's definition.
 	for _, prop := range fbDef.Properties {
-		if prop.Name.Value == propName {
+		if strings.EqualFold(prop.Name.Value, propName) { // Case-insensitive comparison
 			return prop, fbDef // Found it.
 		}
 	}
@@ -3284,6 +3911,9 @@ func (c *Compiler) buildPouInfo(program *ast.Program) {
 			case *ast.FunctionBlockDeclaration:
 				pouName = node.Name.Value
 				pouNode = node
+			case *ast.ProgramDeclaration:
+				pouName = node.Name.Value
+				pouNode = node
 			case *ast.FunctionDeclaration:
 				pouName = node.Name.Value
 				pouNode = node
@@ -3317,8 +3947,8 @@ func (c *Compiler) buildPouInfo(program *ast.Program) {
 			if prefix != "" {
 				fqn = prefix + "." + pouName
 			}
-			c.typeInfo[fqn] = pouNode
-			c.pouNamespaces[fqn] = ns
+			c.typeInfo[strings.ToUpper(fqn)] = pouNode // Store FQN in uppercase
+			c.pouNamespaces[strings.ToUpper(fqn)] = ns
 		}
 	}
 	recursiveBuild(program.Statements, nil, "")
@@ -3327,14 +3957,188 @@ func (c *Compiler) buildPouInfo(program *ast.Program) {
 // flattenExpressionToString converts a potentially nested MemberAccessExpression into a single qualified string.
 func (c *Compiler) flattenExpressionToString(expr ast.Expression) string {
 	if ident, ok := expr.(*ast.Identifier); ok {
-		return ident.Value
+		return strings.ToUpper(ident.Value) // Return uppercase for consistency
 	}
 	if member, ok := expr.(*ast.MemberAccessExpression); ok {
 		// Recursively flatten the struct part and append the member.
-		return c.flattenExpressionToString(member.Struct) + "." + member.Member.Value
+		return c.flattenExpressionToString(member.Struct) + "." + strings.ToUpper(member.Member.Value) // Uppercase member
 	}
 	if ts, ok := expr.(*ast.TypeSpecifier); ok {
-		return ts.Token.Literal
+		return strings.ToUpper(ts.Token.Literal) // Uppercase type literal
 	}
-	return "" // Should not happen for valid type names
+	return "" // Should not happen for valid type names, but return empty string for safety.
+}
+
+// orderByInheritance returns the statements with function block declarations
+// moved ahead of all other statements, and ordered so that each parent FB
+// defined in the same statement list precedes the FBs that extend it. IEC
+// 61131-3 declarations are order-independent, but at runtime a derived FB's
+// hash loads its parent's hash, and an FB instance loads its class hash, so
+// those must already exist. Other statements keep their relative order.
+// Inheritance cycles are left in source order; the FB compile step reports them.
+func (c *Compiler) orderByInheritance(stmts []ast.Statement) []ast.Statement {
+	inList := make(map[*ast.FunctionBlockDeclaration]bool)
+	for _, s := range stmts {
+		if fb, ok := s.(*ast.FunctionBlockDeclaration); ok {
+			inList[fb] = true
+		}
+	}
+	if len(inList) == 0 {
+		return stmts
+	}
+
+	fbs := make([]ast.Statement, 0, len(inList))
+	others := make([]ast.Statement, 0, len(stmts)-len(inList))
+	done := make(map[*ast.FunctionBlockDeclaration]bool)
+	inProgress := make(map[*ast.FunctionBlockDeclaration]bool)
+	hasCycle := false
+	var visit func(fb *ast.FunctionBlockDeclaration)
+	visit = func(fb *ast.FunctionBlockDeclaration) {
+		if inProgress[fb] {
+			hasCycle = true
+			return
+		}
+		if done[fb] {
+			return
+		}
+		inProgress[fb] = true
+		if fb.Extends != nil {
+			if parentNode, ok := c.resolveTypeNode(fb.Extends); ok {
+				if parentFB, ok := parentNode.(*ast.FunctionBlockDeclaration); ok && inList[parentFB] {
+					visit(parentFB)
+				}
+			}
+		}
+		delete(inProgress, fb)
+		done[fb] = true
+		fbs = append(fbs, fb)
+	}
+
+	for _, s := range stmts {
+		if fb, ok := s.(*ast.FunctionBlockDeclaration); ok {
+			visit(fb)
+			continue
+		}
+		others = append(others, s)
+	}
+	if hasCycle {
+		// Keep source order so the cycle is reported from the first FB written.
+		return stmts
+	}
+	return append(fbs, others...)
+}
+
+// predefineFunctionBlocks defines a global symbol for every function block in
+// stmts, including those inside namespaces, before any code is compiled. This
+// lets an FB be instantiated (e.g. in a method's VAR block) by code compiled
+// before the FB's own declaration, since IEC 61131-3 declarations are
+// order-independent. The FB compile step later fills the symbol in.
+func (c *Compiler) predefineFunctionBlocks(stmts []ast.Statement) {
+	if c.scopeIndex != 0 {
+		return
+	}
+	for _, s := range stmts {
+		switch node := s.(type) {
+		case *ast.FunctionBlockDeclaration:
+			if _, ok := c.symbolTable.ResolveClass(node); !ok {
+				c.symbolTable.DefineClass(node, c.symbolTable.Define(node.Name.Value, false))
+			}
+		case *ast.NamespaceDeclaration:
+			c.predefineFunctionBlocks(node.Statements)
+		}
+	}
+}
+
+// emitFBInstance emits code that builds a new instance of fbDef and leaves it on
+// the stack. An instance is a hash with a "__class__" entry holding the FB's
+// class hash (so the VM can find methods and SUPER targets), plus one entry per
+// variable declared along the inheritance chain, set to its initial value.
+// A variable redeclared in a derived FB takes the derived declaration.
+// Variables of FB type without an initializer become nested instances.
+func (c *Compiler) emitFBInstance(fbDef *ast.FunctionBlockDeclaration, visiting map[*ast.FunctionBlockDeclaration]bool) error {
+	if visiting[fbDef] {
+		return fmt.Errorf("function block '%s' contains an instance of itself", fbDef.Name.Value)
+	}
+	visiting[fbDef] = true
+	defer delete(visiting, fbDef)
+
+	classSymbol, ok := c.symbolTable.ResolveClass(fbDef)
+	if !ok {
+		return fmt.Errorf("function block '%s' must be declared before it is instantiated", fbDef.Name.Value)
+	}
+
+	// Build the inheritance chain root-first, so derived declarations win.
+	chain := []*ast.FunctionBlockDeclaration{}
+	for current := fbDef; current != nil; {
+		chain = append([]*ast.FunctionBlockDeclaration{current}, chain...)
+		if current.Extends == nil {
+			break
+		}
+		parentNode, ok := c.resolveTypeNode(current.Extends)
+		if !ok {
+			break
+		}
+		parentFB, ok := parentNode.(*ast.FunctionBlockDeclaration)
+		if !ok || visiting[parentFB] {
+			break
+		}
+		current = parentFB
+	}
+
+	var order []string
+	fields := make(map[string]*ast.VarDeclStatement)
+	for _, fb := range chain {
+		for _, group := range [][]*ast.VarDeclStatement{fb.VarInputs, fb.VarOutputs, fb.VarInOuts, fb.Vars} {
+			for _, v := range group {
+				key := strings.ToUpper(v.Name.Value)
+				if _, seen := fields[key]; !seen {
+					order = append(order, key)
+				}
+				fields[key] = v
+			}
+		}
+	}
+
+	c.emitConstant(c.addConstant(&object.String{Value: "__class__"}))
+	c.loadSymbol(classSymbol)
+	for _, key := range order {
+		v := fields[key]
+		c.emitConstant(c.addConstant(&object.String{Value: v.Name.Value}))
+		switch {
+		case v.Value != nil:
+			if err := c.Compile(v.Value); err != nil {
+				return err
+			}
+		default:
+			nested := false
+			if v.DataType != nil {
+				if typeNode, ok := c.resolveTypeNode(v.DataType); ok {
+					if nestedFB, isFB := typeNode.(*ast.FunctionBlockDeclaration); isFB {
+						if err := c.emitFBInstance(nestedFB, visiting); err != nil {
+							return err
+						}
+						nested = true
+					}
+				}
+			}
+			if !nested {
+				c.emit(code.OpNull)
+			}
+		}
+	}
+	c.emit(code.OpHash, (len(order)+1)*2)
+	return nil
+}
+
+// isIlBlock checks if a given block statement contains IL instructions.
+func isIlBlock(block *ast.BlockStatement) bool {
+	if block == nil {
+		return false
+	}
+	for _, stmt := range block.Statements {
+		if _, isIL := stmt.(*ast.IlInstructionStatement); isIL {
+			return true
+		}
+	}
+	return false
 }

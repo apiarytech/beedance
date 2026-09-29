@@ -55,17 +55,18 @@ func TestOopExample(t *testing.T) {
 	if !ok {
 		t.Fatal("variable 'IsMotor1Running' not found in environment")
 	}
-	if isMotor1Running.(*object.Boolean).Value != true {
-		t.Errorf("expected IsMotor1Running to be TRUE, got FALSE")
+	if running, ok := isMotor1Running.(*object.Boolean); !ok || !running.Value {
+		t.Errorf("expected IsMotor1Running to be BOOL TRUE, got %T %v", isMotor1Running, isMotor1Running.Inspect())
 	}
 
 	testSpeed, ok := prog.Env.Get("TestSpeed")
 	if !ok {
 		t.Fatal("variable 'TestSpeed' not found in environment")
 	}
-	// The logic `internalSpeed := Voltage * 100.0` runs, so the speed should be 12.0 * 100.0 = 1200.0
-	if testSpeed.(*object.Real).Value != 1200.0 {
-		t.Errorf("expected TestSpeed to be 1200.0, got %f", testSpeed.(*object.Real).Value)
+	// TestSpeed is declared LREAL. The second Motor1 call runs the FB body while
+	// the motor is running, so `internalSpeed := Voltage * 100.0` gives 1200.0.
+	if speed, ok := testSpeed.(*object.LReal); !ok || speed.Value != 1200.0 {
+		t.Errorf("expected TestSpeed to be LREAL 1200.0, got %T %v", testSpeed, testSpeed.Inspect())
 	}
 
 	// Check Motor2 state from the ST file (which is not present in this version)

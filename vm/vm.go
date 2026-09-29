@@ -17,6 +17,7 @@ import (
 	"beedance/object"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // StackSize defines the maximum number of objects that can be on the stack.
@@ -51,6 +52,11 @@ type VM struct {
 	framesIndex int
 
 	builtins []*object.Builtin
+
+	// io is the I/O image: the values of located variables (e.g. `x AT %IX0.0`)
+	// and external access paths, keyed by address. A host reads outputs from
+	// it and writes inputs to it between runs; see IO.
+	io map[string]object.Object
 }
 
 // New creates a new VM instance with the given bytecode.
@@ -94,6 +100,7 @@ func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *V
 		frames:      frames,
 		framesIndex: 1,
 		builtins:    builtins,
+		io:          make(map[string]object.Object),
 	}
 }
 
@@ -102,6 +109,25 @@ func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object) *VM {
 	vm := New(bytecode)
 	vm.globals = s
 	return vm
+}
+
+// IO returns the VM's I/O image: the values of located variables and external
+// access paths, keyed by address (e.g. "%IX0.0"). A host sets inputs in it
+// before Run and reads outputs from it afterwards.
+func (vm *VM) IO() map[string]object.Object {
+	return vm.io
+}
+
+// externalAddress reads the 2-byte constant index operand of an external
+// access instruction at ip and returns the address string it names.
+func (vm *VM) externalAddress(ins code.Instructions, ip int) (string, error) {
+	constIndex := code.ReadUint16(ins[ip+1:])
+	vm.currentFrame().ip += 2
+	address, ok := vm.constants[constIndex].(*object.String)
+	if !ok {
+		return "", fmt.Errorf("external variable operand must be an address string constant, got %T", vm.constants[constIndex])
+	}
+	return address.Value, nil
 }
 
 // Globals returns the global variable store of the VM.
@@ -115,7 +141,15 @@ func (vm *VM) LastPoppedStackElem() object.Object {
 }
 
 // Run is the main execution loop of the VM. It fetches, decodes, and executes instructions.
-func (vm *VM) Run() error {
+// Malformed bytecode that would crash the host process, such as popping an
+// empty stack, is reported as an error instead.
+func (vm *VM) Run() (runErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			runErr = fmt.Errorf("vm runtime error: %v", r)
+		}
+	}()
+
 	var ins code.Instructions
 	var err error
 
@@ -187,7 +221,14 @@ func (vm *VM) Run() error {
 			// OpGetGlobal retrieves a value from the globals slice and pushes it onto the stack.
 			globalIndex := code.ReadUint16(ins[ip+1:])
 			vm.currentFrame().ip += 2 // Advance past operand
-			err = vm.push(vm.globals[globalIndex])
+			value := vm.globals[globalIndex]
+			if value == nil {
+				// A global that was defined but never assigned reads as NULL. This
+				// happens when a declaration's code did not run, e.g. after a
+				// failed REPL line, and would otherwise crash later instructions.
+				value = Null
+			}
+			err = vm.push(value)
 
 		// OpArray creates an array object from a number of elements on the stack.
 		case code.OpArray:
@@ -213,6 +254,12 @@ func (vm *VM) Run() error {
 			index := vm.pop()
 			left := vm.pop()
 			err = vm.executeIndexExpression(left, index)
+
+		case code.OpSetIndex:
+			val := vm.pop()
+			index := vm.pop()
+			left := vm.pop()
+			err = vm.executeSetIndex(left, index, val)
 
 		case code.OpCall:
 			// OpCall executes a function or closure call.
@@ -316,12 +363,43 @@ func (vm *VM) Run() error {
 			// OpSuperIndex finds a method on a parent class. It expects the instance ('this')
 			// and the method name on the stack. It uses the currently executing closure
 			// to determine the correct parent class for the lookup.
+			// It leaves the parent's method bound to the instance, so the call
+			// that follows passes the instance as THIS.
 			methodName := vm.pop()
 			instance := vm.pop()
 			err = vm.executeSuperIndex(instance, methodName)
-			if err == nil {
-				err = vm.push(instance)
+
+		case code.OpGetExternal:
+			// Reads a located variable or access path from the I/O image. The
+			// operand is the constant holding its address, e.g. "%IX0.0".
+			address, addrErr := vm.externalAddress(ins, ip)
+			if addrErr != nil {
+				return addrErr
 			}
+			value, ok := vm.io[address]
+			if !ok {
+				value = Null
+			}
+			err = vm.push(value)
+
+		case code.OpSetExternal:
+			// Writes a located variable or access path to the I/O image.
+			address, addrErr := vm.externalAddress(ins, ip)
+			if addrErr != nil {
+				return addrErr
+			}
+			vm.io[address] = vm.pop()
+
+		case code.OpSetFree:
+			// Assigns to a variable captured by the current closure.
+			freeIndex := code.ReadUint8(ins[ip+1:])
+			vm.currentFrame().ip += 1
+			vm.currentFrame().cl.Free[freeIndex] = vm.pop()
+
+		default:
+			// Skipping an unknown opcode would run its operand bytes as
+			// instructions, so it is an error.
+			return fmt.Errorf("unknown opcode %d at position %d", op, ip)
 		}
 		if err != nil {
 			return err
@@ -371,7 +449,7 @@ func (vm *VM) executeBinaryBooleanOperation(
 	case code.OpNor:
 		result = !(leftValue || rightValue)
 	default:
-		return fmt.Errorf("unknown boolean operator: %d", op)
+		return fmt.Errorf("unknown boolean operator: %s", opcodeName(op))
 	}
 	return vm.push(nativeBoolToBooleanObject(result))
 }
@@ -389,8 +467,12 @@ func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 		return vm.executeBinaryBooleanOperation(op, left, right)
 	case isInteger(left) && isInteger(right):
 		return vm.executeBinaryIntegerOperation(op, left, right)
-	case leftType == object.STRING_OBJ && rightType == object.STRING_OBJ:
+	case isReal(left) && isReal(right):
+		return vm.executeBinaryRealOperation(op, left, right)
+	case isString(left) && isString(right):
 		return vm.executeBinaryStringOperation(op, left, right)
+	case usesSharedOperations(left) || usesSharedOperations(right):
+		return vm.executeSharedOperation(op, left, right)
 	default:
 		return fmt.Errorf("unsupported types for binary operation: %s %s",
 			leftType, rightType)
@@ -443,10 +525,56 @@ func (vm *VM) executeBinaryIntegerOperation(
 	case code.OpNor:
 		result = ^(leftValue | rightValue)
 	default:
-		return fmt.Errorf("unknown integer operator: %d", op)
+		return fmt.Errorf("unknown integer operator: %s", opcodeName(op))
 	}
 
 	return vm.push(&object.LInt{Value: result})
+}
+
+// executeBinaryRealOperation performs a binary operation on two real-number objects.
+func (vm *VM) executeBinaryRealOperation(
+	op code.Opcode,
+	left, right object.Object,
+) error {
+	// Promote both to float64 for the operation
+	var leftValue, rightValue float64
+	if l, ok := left.(*object.Real); ok {
+		leftValue = l.Value
+	} else if l, ok := left.(*object.LReal); ok {
+		leftValue = l.Value
+	} else {
+		return fmt.Errorf("left operand is not a real: %s", left.Type())
+	}
+
+	if r, ok := right.(*object.Real); ok {
+		rightValue = r.Value
+	} else if r, ok := right.(*object.LReal); ok {
+		rightValue = r.Value
+	} else {
+		return fmt.Errorf("right operand is not a real: %s", right.Type())
+	}
+
+	var result float64
+
+	switch op {
+	case code.OpAdd:
+		result = leftValue + rightValue
+	case code.OpSub:
+		result = leftValue - rightValue
+	case code.OpMul:
+		result = leftValue * rightValue
+	case code.OpDiv:
+		if rightValue == 0.0 {
+			return fmt.Errorf("division by zero")
+		}
+		result = leftValue / rightValue
+	case code.OpExponent:
+		result = math.Pow(leftValue, rightValue)
+	default:
+		return fmt.Errorf("unknown real operator: %s", opcodeName(op))
+	}
+
+	return vm.push(&object.LReal{Value: result})
 }
 
 // executeComparison dispatches to the correct comparison operation based on operand types.
@@ -458,15 +586,98 @@ func (vm *VM) executeComparison(op code.Opcode) error {
 		return vm.executeIntegerComparison(op, left, right)
 	}
 
+	if isReal(left) && isReal(right) {
+		return vm.executeRealComparison(op, left, right)
+	}
+
+	if isString(left) && isString(right) {
+		return vm.executeStringComparison(op, stringValue(left), stringValue(right))
+	}
+
+	if usesSharedOperations(left) && usesSharedOperations(right) {
+		return vm.executeSharedOperation(op, left, right)
+	}
+
+	// Enumerated values are equal when they name the same value of the same
+	// type, even if they are separate objects (e.g. two Color#Red constants).
+	leftEnum, leftIsEnum := left.(*object.EnumeratedValue)
+	rightEnum, rightIsEnum := right.(*object.EnumeratedValue)
+	if leftIsEnum && rightIsEnum && (op == code.OpEqual || op == code.OpNotEqual) {
+		same := strings.EqualFold(leftEnum.TypeName, rightEnum.TypeName) && strings.EqualFold(leftEnum.Value, rightEnum.Value)
+		return vm.push(nativeBoolToBooleanObject(same == (op == code.OpEqual)))
+	}
+
 	switch op {
 	case code.OpEqual:
 		return vm.push(nativeBoolToBooleanObject(right == left))
 	case code.OpNotEqual:
 		return vm.push(nativeBoolToBooleanObject(right != left))
 	default:
-		return fmt.Errorf("unknown operator: %d (%s %s)",
-			op, left.Type(), right.Type())
+		return fmt.Errorf("unsupported operator %s for types %s and %s",
+			opcodeName(op), left.Type(), right.Type())
 	}
+}
+
+// executeStringComparison compares two strings, character by character.
+func (vm *VM) executeStringComparison(op code.Opcode, left, right string) error {
+	switch op {
+	case code.OpEqual:
+		return vm.push(nativeBoolToBooleanObject(left == right))
+	case code.OpNotEqual:
+		return vm.push(nativeBoolToBooleanObject(left != right))
+	case code.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(left > right))
+	case code.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(left < right))
+	case code.OpGreaterThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(left >= right))
+	case code.OpLessThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(left <= right))
+	default:
+		return fmt.Errorf("unknown string comparison operator: %s", opcodeName(op))
+	}
+}
+
+// sharedOperators maps opcodes to the operator names used by object.EvalInfix.
+var sharedOperators = map[code.Opcode]string{
+	code.OpAdd: "+", code.OpSub: "-", code.OpMul: "*", code.OpDiv: "/", code.OpMod: "MOD",
+	code.OpAnd: "AND", code.OpOr: "OR", code.OpXor: "XOR",
+	code.OpEqual: "=", code.OpNotEqual: "<>",
+	code.OpGreaterThan: ">", code.OpLessThan: "<",
+	code.OpGreaterThanOrEqual: ">=", code.OpLessThanOrEqual: "<=",
+}
+
+// usesSharedOperations reports whether obj is a time, date or bit-string value.
+// Operations on these use the object package's implementation, which the
+// evaluator also uses, so both engines follow the same IEC 61131-3 rules.
+func usesSharedOperations(obj object.Object) bool {
+	switch obj.Type() {
+	case object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ, object.BITSTRING_OBJ:
+		return true
+	}
+	return false
+}
+
+// executeSharedOperation performs an arithmetic, logical or comparison
+// operation on time, date or bit-string operands with object.EvalInfix.
+func (vm *VM) executeSharedOperation(op code.Opcode, left, right object.Object) error {
+	operator, ok := sharedOperators[op]
+	if !ok {
+		return fmt.Errorf("unsupported operator %s for types %s and %s", opcodeName(op), left.Type(), right.Type())
+	}
+	result := object.EvalInfix(left, operator, right)
+	if errObj, isErr := result.(*object.Error); isErr {
+		return fmt.Errorf("%s", strings.TrimPrefix(errObj.Message, "BUILTIN ERROR: "))
+	}
+	return vm.push(result)
+}
+
+// opcodeName returns the name of an opcode for error messages, e.g. "OpAdd".
+func opcodeName(op code.Opcode) string {
+	if def, err := code.Lookup(byte(op)); err == nil {
+		return def.Name
+	}
+	return fmt.Sprintf("opcode %d", op)
 }
 
 // executeIntegerComparison performs a comparison operation on two integer objects.
@@ -497,7 +708,47 @@ func (vm *VM) executeIntegerComparison(
 	case code.OpLessThanOrEqual:
 		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
 	default:
-		return fmt.Errorf("unknown operator: %d", op)
+		return fmt.Errorf("unknown integer comparison operator: %s", opcodeName(op))
+	}
+}
+
+// executeRealComparison performs a comparison operation on two real-number objects.
+func (vm *VM) executeRealComparison(
+	op code.Opcode,
+	left, right object.Object,
+) error {
+	var leftValue, rightValue float64
+	if l, ok := left.(*object.Real); ok {
+		leftValue = l.Value
+	} else if l, ok := left.(*object.LReal); ok {
+		leftValue = l.Value
+	} else {
+		return fmt.Errorf("left operand is not a real: %s", left.Type())
+	}
+
+	if r, ok := right.(*object.Real); ok {
+		rightValue = r.Value
+	} else if r, ok := right.(*object.LReal); ok {
+		rightValue = r.Value
+	} else {
+		return fmt.Errorf("right operand is not a real: %s", right.Type())
+	}
+
+	switch op {
+	case code.OpEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue == rightValue))
+	case code.OpNotEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue != rightValue))
+	case code.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case code.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+	case code.OpGreaterThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue >= rightValue))
+	case code.OpLessThanOrEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
+	default:
+		return fmt.Errorf("unknown real comparison operator: %s", opcodeName(op))
 	}
 }
 
@@ -553,13 +804,31 @@ func (vm *VM) executeBinaryStringOperation(
 	left, right object.Object,
 ) error {
 	if op != code.OpAdd {
-		return fmt.Errorf("unknown string operator: %d", op)
+		return fmt.Errorf("unknown string operator: %s", opcodeName(op))
 	}
 
-	leftValue := left.(*object.String).Value
-	rightValue := right.(*object.String).Value
+	joined := stringValue(left) + stringValue(right)
+	// Joining with a WSTRING gives a WSTRING, matching the compiler's typing.
+	if left.Type() == object.WSTRING_OBJ || right.Type() == object.WSTRING_OBJ {
+		return vm.push(&object.WString{Value: joined})
+	}
+	return vm.push(&object.String{Value: joined})
+}
 
-	return vm.push(&object.String{Value: leftValue + rightValue})
+// isString reports whether obj is a STRING or WSTRING.
+func isString(obj object.Object) bool {
+	return obj.Type() == object.STRING_OBJ || obj.Type() == object.WSTRING_OBJ
+}
+
+// stringValue returns the text of a STRING or WSTRING object.
+func stringValue(obj object.Object) string {
+	switch s := obj.(type) {
+	case *object.String:
+		return s.Value
+	case *object.WString:
+		return s.Value
+	}
+	return ""
 }
 
 // buildArray creates an array object from elements on the stack.
@@ -633,10 +902,87 @@ func (vm *VM) executeHashIndex(hash, index object.Object) error {
 
 	pair, ok := hashObject.Pairs[key.HashKey()]
 	if !ok {
+		// A name missing from an FB instance may be a method or property
+		// accessor, which live on the instance's class hierarchy.
+		if name, isString := index.(*object.String); isString {
+			if class, isInstance := instanceClass(hashObject); isInstance {
+				if method, err := vm.findMethodInHierarchy(class, name); err == nil {
+					if cl, isClosure := method.(*object.Closure); isClosure {
+						return vm.push(&BoundMethod{Fn: cl, Receiver: hashObject})
+					}
+					return vm.push(method)
+				}
+			}
+		}
 		return vm.push(Null)
 	}
 
 	return vm.push(pair.Value)
+}
+
+// BoundMethod is a method closure paired with the function block instance it
+// was looked up on. Calling it passes the instance as the first argument,
+// which is the method's THIS local.
+type BoundMethod struct {
+	Fn       *object.Closure
+	Receiver object.Object
+}
+
+// Type returns the object type of a bound method.
+func (b *BoundMethod) Type() object.ObjectType { return "BOUND_METHOD" }
+
+// Inspect returns a string representation of a bound method.
+func (b *BoundMethod) Inspect() string { return "bound method" }
+
+// instanceClass returns the class hash of an FB instance, which is stored
+// under the "__class__" key. It reports false if hash is not an instance.
+func instanceClass(hash *object.Hash) (*object.Hash, bool) {
+	pair, ok := hash.Pairs[(&object.String{Value: "__class__"}).HashKey()]
+	if !ok {
+		return nil, false
+	}
+	class, ok := pair.Value.(*object.Hash)
+	return class, ok
+}
+
+// executeSetIndex executes a set index operation on an array or hash.
+func (vm *VM) executeSetIndex(left, index, val object.Object) error {
+	switch {
+	case left.Type() == object.ARRAY_OBJ && isInteger(index):
+		return vm.executeArraySetIndex(left, index, val)
+	case left.Type() == object.HASH_OBJ:
+		return vm.executeHashSetIndex(left, index, val)
+	default:
+		return fmt.Errorf("index operator not supported for setting on: %s", left.Type())
+	}
+}
+
+// executeArraySetIndex executes a set index operation on an array.
+func (vm *VM) executeArraySetIndex(array, index, val object.Object) error {
+	arrayObject := array.(*object.Array)
+	i, _, ok := object.GetIntegerObjectValue(index)
+	if !ok {
+		return fmt.Errorf("array index must be an integer, got %s", index.Type())
+	}
+	max := int64(len(arrayObject.Elements) - 1)
+
+	if i < 0 || i > max {
+		return fmt.Errorf("array index out of bounds: %d", i)
+	}
+
+	arrayObject.Elements[i] = val
+	return nil
+}
+
+// executeHashSetIndex executes a set index operation on a hash.
+func (vm *VM) executeHashSetIndex(hash, index, val object.Object) error {
+	hashObject := hash.(*object.Hash)
+	key, ok := index.(object.Hashable)
+	if !ok {
+		return fmt.Errorf("unusable as hash key: %s", index.Type())
+	}
+	hashObject.Pairs[key.HashKey()] = object.HashPair{Key: index, Value: val}
+	return nil
 }
 
 // currentFrame returns the currently executing frame.
@@ -664,6 +1010,18 @@ func (vm *VM) executeCall(numArgs int) error {
 		return vm.callClosure(callee, numArgs)
 	case *object.Builtin:
 		return vm.callBuiltin(callee, numArgs)
+	case *BoundMethod:
+		// Insert the receiver as the first argument (THIS): shift the
+		// arguments up one slot and replace the callee with the closure.
+		calleePos := vm.sp - 1 - numArgs
+		if vm.sp >= StackSize {
+			return fmt.Errorf("stack overflow")
+		}
+		copy(vm.stack[calleePos+2:vm.sp+1], vm.stack[calleePos+1:vm.sp])
+		vm.stack[calleePos] = callee.Fn
+		vm.stack[calleePos+1] = callee.Receiver
+		vm.sp++
+		return vm.callClosure(callee.Fn, numArgs+1)
 	default:
 		return fmt.Errorf("calling non-closure and non-builtin")
 	}
@@ -700,20 +1058,26 @@ func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 
 	// Handle named arguments.
 	// Create a map of parameter names to their index for quick lookup.
+	// Names are matched case-insensitively, as IEC 61131-3 identifiers are.
 	paramIndexMap := make(map[string]int)
 	for i, name := range cl.Fn.ParameterNames {
-		paramIndexMap[name] = i
+		paramIndexMap[strings.ToUpper(name)] = i
 	}
 
-	// Iterate through the arguments that were passed on the stack.
-	for i := 0; i < numArgs; i++ {
-		arg := vm.stack[basePointer+i] // Get the argument from its current position
+	// Read every argument before placing any of them: a named argument may
+	// belong in a slot that still holds another argument that has not been
+	// read yet, e.g. `f(b := 1, a := 10)`.
+	args := make([]object.Object, numArgs)
+	copy(args, vm.stack[basePointer:basePointer+numArgs])
+	for i, arg := range args {
 		if namedArg, ok := arg.(*object.NamedArgument); ok {
-			idx, exists := paramIndexMap[namedArg.Name]
+			idx, exists := paramIndexMap[strings.ToUpper(namedArg.Name)]
 			if !exists {
 				return fmt.Errorf("unknown named argument: %s", namedArg.Name)
 			}
 			vm.stack[frame.basePointer+idx] = namedArg.Value
+		} else {
+			vm.stack[frame.basePointer+i] = arg
 		}
 	}
 
@@ -803,6 +1167,16 @@ func isInteger(obj object.Object) bool {
 	}
 }
 
+// isReal checks if an object is one of the real-number types.
+func isReal(obj object.Object) bool {
+	switch obj.Type() {
+	case object.REAL_OBJ, object.LREAL_OBJ:
+		return true
+	default:
+		return false
+	}
+}
+
 // executeSuperIndex finds a method on a parent class and pushes the corresponding closure onto the stack.
 // It is used to implement `SUPER^.Method()`. It consumes the instance and method name from the stack
 // and pushes the parent's method closure. The instance is pushed back on by the caller (`Run` loop).
@@ -858,7 +1232,10 @@ func (vm *VM) executeSuperIndex(instance, methodName object.Object) error {
 		return err
 	}
 
-	// Push the found parent method closure onto the stack.
+	// Push the parent method, bound to the instance so it receives THIS.
+	if cl, ok := method.(*object.Closure); ok {
+		return vm.push(&BoundMethod{Fn: cl, Receiver: instance})
+	}
 	return vm.push(method)
 }
 

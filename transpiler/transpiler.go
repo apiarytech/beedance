@@ -354,11 +354,10 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 	}
 	t.mainGenerated = true
 
-	// Group VAR_CONFIG parameters by their program instance name, as they are now at the config level.
-	paramsByInstance := make(map[string][]*ast.VarDeclStatement)
-	for _, varConfig := range config.VarConfigs {
-		instanceName := varConfig.ProgramInstanceName.Value
-		paramsByInstance[instanceName] = varConfig.Declarations
+	// Match each VAR_CONFIG entry to the program instance it configures.
+	configEntries, unmatched := config.ResolveConfigVars()
+	if len(unmatched) > 0 {
+		return fmt.Errorf("VAR_CONFIG path '%s' does not name a variable of a program instance in configuration '%s'", unmatched[0].AccessPath.String(), config.Name.Value)
 	}
 
 	t.write("// --- Generated Main Function from CONFIGURATION ---\n")
@@ -384,7 +383,7 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 	t.write("\t\tResources: []*config.Resource{\n")
 
 	for _, res := range config.Resources {
-		t.transpileResourceDeclaration(res, paramsByInstance)
+		t.transpileResourceDeclaration(res, configEntries)
 	}
 
 	t.write("\t\t},\n")
@@ -400,10 +399,13 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 
 // transpileResourceDeclaration transpiles an IEC 61131-3 RESOURCE block within a CONFIGURATION.
 // It generates Go code to define tasks and program instances associated with that resource.
-func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, paramsByInstance map[string][]*ast.VarDeclStatement) {
+func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, configEntries []*ast.ConfigVarEntry) {
 	// Group program instances by their assigned task.
 	programsByTask := make(map[string][]*ast.ProgramConfiguration)
 	for _, progConfig := range res.Programs {
+		if progConfig.TaskName == nil {
+			continue // No WITH clause: the instance is not assigned to a task.
+		}
 		taskName := progConfig.TaskName.Value
 		programsByTask[taskName] = append(programsByTask[taskName], progConfig)
 	}
@@ -423,7 +425,13 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, 
 		t.write("\t\t\t\t\t%q: {\n", progConfig.InstanceName.Value)
 		t.write("\t\t\t\t\t\tType: %q,\n", progConfig.TypeName.Value)
 		t.write("\t\t\t\t\t\tParams: map[string]string{\n")
-		t.transpileVarConfigParams(paramsByInstance[progConfig.InstanceName.Value])
+		var progEntries []*ast.ConfigVarEntry
+		for _, entry := range configEntries {
+			if entry.Resource == res && entry.Program == progConfig {
+				progEntries = append(progEntries, entry)
+			}
+		}
+		t.transpileVarConfigParams(progEntries)
 		t.write("\t\t\t\t\t\t},\n\t\t\t\t\t},\n")
 	}
 	t.write("\t\t\t\t},\n")
@@ -432,11 +440,9 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, 
 
 // transpileVarConfigParams transpiles the variable declarations from a VAR_CONFIG block
 // into key-value pairs for a Go map[string]string literal.
-func (t *Transpiler) transpileVarConfigParams(params []*ast.VarDeclStatement) {
-	if params == nil {
-		return
-	}
-	for _, p := range params {
+func (t *Transpiler) transpileVarConfigParams(entries []*ast.ConfigVarEntry) {
+	for _, entry := range entries {
+		p := entry.Decl
 		if p.Value == nil {
 			continue
 		}
@@ -451,7 +457,7 @@ func (t *Transpiler) transpileVarConfigParams(params []*ast.VarDeclStatement) {
 			// For other literals (INT, REAL, BOOL, TIME, etc.), the String() method gives a suitable representation.
 			valueStr = p.Value.String()
 		}
-		t.write("\t\t\t\t\t\t\t%q: %q,\n", p.AccessPath.String(), valueStr)
+		t.write("\t\t\t\t\t\t\t%q: %q,\n", entry.RelativePath(), valueStr)
 	}
 }
 
@@ -460,10 +466,24 @@ func (t *Transpiler) transpileVarConfigParams(params []*ast.VarDeclStatement) {
 func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, programs []*ast.ProgramConfiguration) {
 	t.write("\t\t\t\t\t{\n")
 	t.write("\t\t\t\t\t\tName: %q,\n", task.Name.Value)
-	t.write("\t\t\t\t\t\tPriority: %s,\n", task.Priority.String())
+	// A missing PRIORITY defaults to 0 and a missing INTERVAL to 0 (no periodic
+	// scheduling), matching the evaluator.
+	if task.Priority != nil {
+		t.write("\t\t\t\t\t\tPriority: %s,\n", task.Priority.String())
+	} else {
+		t.write("\t\t\t\t\t\tPriority: 0,\n")
+	}
 	t.write("\t\t\t\t\t\tInterval: ")
-	t.transpileExpression(task.Interval)
+	if task.Interval != nil {
+		t.transpileExpression(task.Interval)
+	} else {
+		t.write("0")
+	}
 	t.write(",\n")
+	if task.Single != nil {
+		// The generated configuration has no field for an event trigger.
+		t.write("\t\t\t\t\t\t// SINGLE := %s (event trigger is not supported by the generated configuration)\n", task.Single.String())
+	}
 
 	t.write("\t\t\t\t\t\tPrograms: []string{")
 	for i, prog := range programs {
@@ -982,12 +1002,17 @@ func (t *Transpiler) transpileIlFunctionCall(callExpr *ast.CallExpression) error
 
 // isIlBlock checks if a given block statement contains IL instructions, indicating it's an IL program body.
 func isIlBlock(block *ast.BlockStatement) bool {
-	if len(block.Statements) == 0 {
+	if block == nil {
 		return false
 	}
-	_, isIL := block.Statements[0].(*ast.IlInstructionStatement)
-	// A more robust check might involve looking at all statements or a specific marker.
-	return isIL
+	// A more robust check involves looking at all statements, as a function
+	// declaration might appear before the first IL instruction.
+	for _, stmt := range block.Statements {
+		if _, isIL := stmt.(*ast.IlInstructionStatement); isIL {
+			return true
+		}
+	}
+	return false
 }
 
 // getBaseTypeFamily categorizes an IEC data type into a broad family (e.g., LINT, LREAL, BOOL)
@@ -1565,11 +1590,8 @@ func (t *Transpiler) transpileInterfaceDeclaration(iface *ast.InterfaceDeclarati
 		// Build return type string for the primary return type and all VAR_OUTPUTs.
 		returns := []string{}
 		if method.ReturnType != nil {
-			// Check if return type is VOID, if so, it's an empty return string.
-			// The parser ensures ReturnType is *ast.TypeSpecifier, so we can access it directly.
-			if strings.ToUpper(method.ReturnType.Token.Literal) != "VOID" {
-				returns = append(returns, t.mapIecTypeToGo(method.ReturnType))
-			}
+			// A non-nil return type is a valid type to be returned.
+			returns = append(returns, t.mapIecTypeToGo(method.ReturnType))
 		}
 		for _, p := range method.VarOutputs {
 			returns = append(returns, t.mapIecTypeToGo(p.DataType))
@@ -1632,11 +1654,8 @@ func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration
 
 	// Transpile return type.
 	if method.ReturnType != nil {
-		// Check for VOID return type, which means no return value in Go.
-		// The parser ensures ReturnType is *ast.TypeSpecifier, so we can access it directly.
-		if strings.ToUpper(method.ReturnType.Token.Literal) != "VOID" {
-			t.write("%s", t.mapIecTypeToGo(method.ReturnType))
-		}
+		// A non-nil return type is a valid type to be returned.
+		t.write("%s", t.mapIecTypeToGo(method.ReturnType))
 	}
 	t.write(" {\n")
 
@@ -1922,7 +1941,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 			t.write("%s", strings.Join(params, ", "))
 			t.write(")")
 
-			if returnTypeSpec, ok := fnLit.ReturnType.(*ast.TypeSpecifier); !ok || strings.ToUpper(returnTypeSpec.Token.Literal) != "VOID" {
+			if fnLit.ReturnType != nil {
 				t.write(" %s", t.mapIecTypeToGo(fnLit.ReturnType))
 			}
 			t.write("\n")

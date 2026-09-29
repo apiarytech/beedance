@@ -295,7 +295,7 @@ func ReadOperands(def *Definition, ins Instructions) ([]int, int) {
 // ReadUint8 reads a single byte from an instruction stream as a uint8.
 func ReadUint8(ins Instructions) uint8 { return uint8(ins[0]) }
 
-// ReadUint16 reads two bytes from an instruction stream as a uint16 in big-endian format.
+// ReadUint16 reads two bytes from an instruction stream as a uint16 in little-endian format.
 func ReadUint16(ins Instructions) uint16 {
 	return binary.LittleEndian.Uint16(ins)
 }

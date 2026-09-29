@@ -8,6 +8,7 @@ import (
 	"beedance/parser"
 	_ "beedance/stdlib"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -339,7 +340,9 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpConstant, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpAdd),
-					code.Make(code.OpReturnValue), // Optimized return via assignment
+					code.Make(code.OpSetLocal, 0), // MyFunc := 5 + 10 sets the result
+					code.Make(code.OpGetLocal, 0), // return the result at the end
+					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -376,7 +379,10 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpGetLocal, 2), // Get OutVar (index 2)
 					code.Make(code.OpConstant, 1), // Push 1
 					code.Make(code.OpAdd),
-					code.Make(code.OpReturnValue), // Optimized return
+					code.Make(code.OpSetLocal, 1), // set the result
+					// Return the result and the VAR_OUTPUTs together.
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValueMulti),
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -392,7 +398,9 @@ func TestFunctions(t *testing.T) {
 					code.Make(code.OpNull),        // Initialize return var
 					code.Make(code.OpSetLocal, 0), //
 					code.Make(code.OpConstant, 0), // MyFunc := 2
-					code.Make(code.OpReturnValue), // Optimized return
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpGetLocal, 0), // return the result at the end
+					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -481,6 +489,7 @@ func TestVarAccess(t *testing.T) {
 }
 
 type compilerTestCase struct {
+	name                 string
 	input                string
 	expectedConstants    []interface{}
 	expectedInstructions []code.Instructions
@@ -509,34 +518,39 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 	t.Helper()
 
 	for i, tt := range tests {
-		program := parse(tt.input)
-
-		// The test setup is now much simpler. No sorting is required because
-		// getTestBuiltins provides the built-ins in their final, indexed order.
-		compiler := NewCompilerWithBuiltins(getTestBuiltins())
-		err := compiler.Compile(program)
-		if err != nil {
-			t.Fatalf("compiler error on test #%d/%d: %s", i+1, len(tests), err)
+		testName := tt.name
+		if testName == "" {
+			testName = fmt.Sprintf("test #%d/%d", i+1, len(tests))
 		}
 
-		bytecode := compiler.Bytecode()
+		t.Run(testName, func(t *testing.T) {
+			program := parse(t, tt.input)
 
-		err = testInstructions(tt.expectedInstructions, bytecode.Instructions)
-		if err != nil {
-			t.Fatalf("test #%d/%d: testInstructions failed: %s", i+1, len(tests), err)
-		}
+			compiler := NewCompilerWithBuiltins(getTestBuiltins())
+			err := compiler.Compile(program)
+			if err != nil {
+				t.Fatalf("compiler error: %s", err)
+			}
 
-		err = testConstants(t, tt.expectedConstants, bytecode.Constants)
-		if err != nil {
-			t.Fatalf("test #%d/%d: testConstants failed: %s", i+1, len(tests), err)
-		}
+			bytecode := compiler.Bytecode()
+
+			err = testInstructions(tt.expectedInstructions, bytecode.Instructions)
+			if err != nil {
+				t.Fatalf("testInstructions failed: %s", err)
+			}
+
+			err = testConstants(t, tt.expectedConstants, bytecode.Constants)
+			if err != nil {
+				t.Fatalf("testConstants failed: %s", err)
+			}
+		})
 	}
 }
 
 func TestStringExpressions(t *testing.T) {
 	tests := []compilerTestCase{
 		{
-			input:             `VAR str: STRING := 'monkey' END_VAR str;`,
+			input:             `VAR str: STRING := 'monkey'; END_VAR str;`,
 			expectedConstants: []interface{}{"monkey"},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),  //0000
@@ -687,7 +701,7 @@ func TestIndexExpressions(t *testing.T) {
 func TestFunctionsWithoutReturnValue(t *testing.T) {
 	tests := []compilerTestCase{
 		{
-			input: `fn() : VOID { }`,
+			input: `fn() { }`,
 			expectedConstants: []interface{}{
 				[]code.Instructions{
 					code.Make(code.OpReturn),
@@ -731,8 +745,10 @@ func TestFunctionCalls(t *testing.T) {
 					// where the function name acts as a return variable.
 					code.Make(code.OpNull),        // Initialize return var
 					code.Make(code.OpSetLocal, 0), //
-					code.Make(code.OpConstant, 0), // Push 24 for return
-					code.Make(code.OpReturnValue), // Optimized return
+					code.Make(code.OpConstant, 0), // noArg := 24
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpGetLocal, 0), // return the result at the end
+					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
@@ -753,8 +769,10 @@ func TestFunctionCalls(t *testing.T) {
 					// where the function name acts as a return variable.
 					code.Make(code.OpNull),        // Initialize return var 'oneArg'
 					code.Make(code.OpSetLocal, 1), // (a is 0, oneArg is 1)
-					code.Make(code.OpGetLocal, 0), // Get input 'a' for return
-					code.Make(code.OpReturnValue), // Optimized return
+					code.Make(code.OpGetLocal, 0), // oneArg := a
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1), // return the result at the end
+					code.Make(code.OpReturnValue),
 				},
 				24,
 			},
@@ -781,8 +799,10 @@ func TestFunctionCalls(t *testing.T) {
 					code.Make(code.OpPop), // a;
 					code.Make(code.OpGetLocal, 1),
 					code.Make(code.OpPop),         // b;
-					code.Make(code.OpGetLocal, 2), // Get input 'c' for return
-					code.Make(code.OpReturnValue), // Optimized return
+					code.Make(code.OpGetLocal, 2), // manyArg := c
+					code.Make(code.OpSetLocal, 3),
+					code.Make(code.OpGetLocal, 3), // return the result at the end
+					code.Make(code.OpReturnValue),
 				},
 				24,
 				25,
@@ -1227,9 +1247,9 @@ func TestClosures(t *testing.T) {
 		{
 			input: `
 			VAR global: INT := 55; END_VAR
-			fn() : VOID {
+			fn() {
 				VAR a: INT := 66; END_VAR
-				fn() : VOID {
+				fn() {
 					VAR b: INT := 77; END_VAR
 					fn() : INT {
 						VAR c: INT := 88; END_VAR
@@ -1304,15 +1324,17 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
 					code.Make(code.OpEqual),
-					code.Make(code.OpJumpNotTruthy, 19),
+					code.Make(code.OpJumpNotTruthy, 20),
 					code.Make(code.OpConstant, 0),
-					code.Make(code.OpReturnValue),
-					code.Make(code.OpJump, 29),
+					code.Make(code.OpSetLocal, 1), // countDown := 0 (no early return)
+					code.Make(code.OpJump, 31),
 					code.Make(code.OpCurrentClosure),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpSub),
 					code.Make(code.OpCall, 1),
+					code.Make(code.OpSetLocal, 1), // countDown := countDown(x - 1)
+					code.Make(code.OpGetLocal, 1), // return the result at the end
 					code.Make(code.OpReturnValue),
 				},
 			},
@@ -1343,15 +1365,17 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 0),
 					code.Make(code.OpEqual),
-					code.Make(code.OpJumpNotTruthy, 19),
+					code.Make(code.OpJumpNotTruthy, 20),
 					code.Make(code.OpConstant, 0),
-					code.Make(code.OpReturnValue),
-					code.Make(code.OpJump, 29),
+					code.Make(code.OpSetLocal, 1), // countDown := 0 (no early return)
+					code.Make(code.OpJump, 31),
 					code.Make(code.OpCurrentClosure),
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpSub),
 					code.Make(code.OpCall, 1),
+					code.Make(code.OpSetLocal, 1), // countDown := countDown(x - 1)
+					code.Make(code.OpGetLocal, 1), // return the result at the end
 					code.Make(code.OpReturnValue),
 				},
 				[]code.Instructions{ // Body of outer wrapper
@@ -1362,6 +1386,8 @@ func TestRecursiveFunctions(t *testing.T) {
 					code.Make(code.OpGetLocal, 1), // Load 'countDown' for call
 					code.Make(code.OpConstant, 1), // Call with constant 1
 					code.Make(code.OpCall, 1),     // Call countDown(1)
+					code.Make(code.OpSetLocal, 0), // wrapper := countDown(1)
+					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpReturnValue),
 				},
 			},
@@ -1389,7 +1415,7 @@ func TestVarInputIsReadOnly(t *testing.T) {
 	END_FUNCTION
 	`
 	compiler := New()
-	err := compiler.Compile(parse(input))
+	err := compiler.Compile(parse(t, input))
 
 	expectedError := "cannot assign to read-only variable 'InVar'"
 	if err == nil || err.Error() != expectedError {
@@ -1397,10 +1423,23 @@ func TestVarInputIsReadOnly(t *testing.T) {
 	}
 }
 
-func parse(input string) *ast.Program {
-	l := lexer.New(input)
-	p := parser.New(l)
-	return p.ParseProgram()
+// parse parses input and fails the test immediately if the parser reports any
+// errors, so tests never compile a partially parsed AST.
+func parse(t testing.TB, input string) *ast.Program {
+	t.Helper()
+	program, errs := parseWithErrors(input)
+	if len(errs) > 0 {
+		t.Fatalf("parser has %d error(s) for input:\n%s\nerrors:\n  %s", len(errs), input, strings.Join(errs, "\n  "))
+	}
+	return program
+}
+
+// parseWithErrors parses input and returns the parser errors instead of
+// failing, for tests that deliberately exercise invalid syntax.
+func parseWithErrors(input string) (*ast.Program, []string) {
+	p := parser.New(lexer.New(input))
+	program := p.ParseProgram()
+	return program, p.Errors()
 }
 
 func testInstructions(

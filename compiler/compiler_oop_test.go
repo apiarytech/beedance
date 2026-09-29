@@ -1,18 +1,9 @@
-/*
- * Copyright (C) 2026 Franklin D. Amador
- *
- * This software is dual-licensed under the terms of the GPL v2.0 and
- * a commercial license. You may choose to use this software under either
- * license.
- *
- * See the LICENSE files in the project root for full license text.
- */
-
 package compiler
 
 import (
 	"beedance/code"
 	_ "beedance/stdlib"
+	"strings"
 	"testing"
 )
 
@@ -36,44 +27,44 @@ func TestFunctionBlockWithMethod(t *testing.T) {
 			END_FUNCTION_BLOCK
 			`,
 			expectedConstants: []interface{}{
-				int64(2), // const[0] for the * 2 in the method
-				[]code.Instructions{ // const[1] Method Body
+				int64(2), // 0: for the * 2 in the method
+				[]code.Instructions{ // 1: Method Body
 					// THIS=0, MethodIn=1, MyMethod=2(ret)
 					code.Make(code.OpNull),        // init return var
 					code.Make(code.OpSetLocal, 2), // Set MyMethod (ret var)
 					code.Make(code.OpGetLocal, 1), // Get MethodIn
-					code.Make(code.OpConstant, 0), // Push 2
+					code.Make(code.OpConstant, 0), // Push 2 (const 0)
 					code.Make(code.OpMul),
+					code.Make(code.OpSetLocal, 2), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 2), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
-				"MyMethod",    // const[2]
-				"Internalvar", // const[3]
-				int64(1),      // const[4] for the +1
-				[]code.Instructions{ // const[5] Main Body
+				"Internalvar", // 2
+				"MyMethod",    // 3
+				int64(1),      // 4: for the +1
+				[]code.Instructions{ // 5: Main Body
 					// THIS=0
-					// THIS.Internalvar := THIS.MyMethod(THIS.Internalvar) + 1;
+					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
+					code.Make(code.OpConstant, 2), // "Internalvar"
 					// RHS:
 					code.Make(code.OpGetLocal, 0), // Get THIS for method call
-					code.Make(code.OpConstant, 2), // "MyMethod"
+					code.Make(code.OpConstant, 3), // "MyMethod"
 					code.Make(code.OpIndex),       // Get method closure
 					code.Make(code.OpGetLocal, 0), // Get THIS for argument
-					code.Make(code.OpConstant, 3), // "Internalvar"
+					code.Make(code.OpConstant, 2), // "Internalvar"
 					code.Make(code.OpIndex),       // Get value of Internalvar
 					code.Make(code.OpCall, 1),     // Call method
-					code.Make(code.OpConstant, 4), // Push 1
+					code.Make(code.OpConstant, 4), // Push 1 (const 4)
 					code.Make(code.OpAdd),         // Add
-					// Assignment:
-					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
-					code.Make(code.OpConstant, 3), // "Internalvar"
 					code.Make(code.OpSetIndex),    // Set member
 					code.Make(code.OpReturn),
 				},
-				"main", // const[6]
+				"main", // 6
 			},
 			expectedInstructions: []code.Instructions{
 				// The compiler sorts keys before creating the hash.
 				// "MyMethod" comes before "main" alphabetically.
-				code.Make(code.OpConstant, 2),   // "MyMethod"
+				code.Make(code.OpConstant, 3),   // "MyMethod"
 				code.Make(code.OpClosure, 1, 0), // Method closure
 				code.Make(code.OpConstant, 6),   // "main"
 				code.Make(code.OpClosure, 5, 0), // Main body closure
@@ -114,22 +105,26 @@ func TestFunctionBlockThreeLevelInheritance(t *testing.T) {
 					code.Make(code.OpNull),
 					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				[]code.Instructions{code.Make(code.OpReturn)}, // 2: C.main (reused by B and A)
-				"main",     // 3
-				"GetValue", // 4
+				"GetValue", // 3
+				"main",     // 4
 				// B's constants
 				int64(20), // 5
 				[]code.Instructions{ // 6: B.GetValue
 					code.Make(code.OpNull),
 					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 4), // "GetValue"
+					code.Make(code.OpConstant, 3), // "GetValue"
 					code.Make(code.OpSuperIndex),
 					code.Make(code.OpCall, 0),
 					code.Make(code.OpConstant, 5), // 20
 					code.Make(code.OpAdd),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				"__parent__", // 7
@@ -139,28 +134,30 @@ func TestFunctionBlockThreeLevelInheritance(t *testing.T) {
 					code.Make(code.OpNull),
 					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0), // THIS
-					code.Make(code.OpConstant, 4), // "GetValue"
+					code.Make(code.OpConstant, 3), // "GetValue"
 					code.Make(code.OpSuperIndex),
 					code.Make(code.OpCall, 0),
 					code.Make(code.OpConstant, 8), // 30
 					code.Make(code.OpAdd),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 			},
 			expectedInstructions: []code.Instructions{
-				// C compilation (main, then GetValue)
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 1, 0),
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 2, 0),
+				// C compilation (sorted: GetValue, main)
+				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpHash, 4), code.Make(code.OpSetGlobal, 0),
 				// B compilation (__parent__, then sorted: GetValue, main)
 				code.Make(code.OpConstant, 7), code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 6, 0),
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 6, 0),
+				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 1),
 				// A compilation (__parent__, then sorted: GetValue, main)
 				code.Make(code.OpConstant, 7), code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 9, 0),
-				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpConstant, 3), code.Make(code.OpClosure, 9, 0),
+				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 2),
 			},
 		},
@@ -205,12 +202,14 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 					code.Make(code.OpGetLocal, 0), // THIS
 					code.Make(code.OpConstant, 0), // "_val"
 					code.Make(code.OpIndex),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				[]code.Instructions{ // 2: BaseProp.set_Value
-					code.Make(code.OpGetLocal, 1), // value
 					code.Make(code.OpGetLocal, 0), // THIS
 					code.Make(code.OpConstant, 0), // "_val"
+					code.Make(code.OpGetLocal, 1), // value
 					code.Make(code.OpSetIndex),
 					code.Make(code.OpReturn),
 				},
@@ -220,7 +219,7 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 				"set_Value", // 6
 				// DerivedProp constants
 				int64(2), // 7
-				[]code.Instructions{ // 8: DerivedProp.get_Value
+				[]code.Instructions{ // 8: DerivedProp.get_Value body
 					code.Make(code.OpNull), code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0), // THIS
 					code.Make(code.OpConstant, 4), // "get_Value"
@@ -228,10 +227,12 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 					code.Make(code.OpCall, 0),
 					code.Make(code.OpConstant, 7), // 2
 					code.Make(code.OpMul),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				int64(1), // 9
-				[]code.Instructions{ // 10: DerivedProp.set_Value
+				[]code.Instructions{ // 10: DerivedProp.set_Value body
 					code.Make(code.OpGetLocal, 0), // THIS
 					code.Make(code.OpConstant, 6), // "set_Value"
 					code.Make(code.OpSuperIndex),
@@ -249,13 +250,11 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 				code.Make(code.OpConstant, 5), code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpConstant, 6), code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpHash, 6), code.Make(code.OpSetGlobal, 0),
-				// DerivedProp compilation (__parent__, then sorted: get_Value, main, set_Value)
-				// Note: The test failure indicates a bug causing an off-by-one error in constants.
-				// This test expectation is based on the intended correct output.
-				code.Make(code.OpConstant, 11), code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 8, 0),
+				// DerivedProp compilation (sorted: __parent__, get_Value, main, set_Value)
+				code.Make(code.OpConstant, 11), code.Make(code.OpGetGlobal, 0), // __parent__
+				code.Make(code.OpConstant, 4), code.Make(code.OpClosure, 8, 0), // get_Value
 				code.Make(code.OpConstant, 5), code.Make(code.OpClosure, 3, 0),
-				code.Make(code.OpConstant, 6), code.Make(code.OpClosure, 10, 0),
+				code.Make(code.OpConstant, 6), code.Make(code.OpClosure, 10, 0), // set_Value
 				code.Make(code.OpHash, 8), code.Make(code.OpSetGlobal, 1),
 			},
 		},
@@ -288,23 +287,21 @@ func TestFunctionBlockWithMixedVars(t *testing.T) {
 				[]code.Instructions{ // const[1] Main Body
 					// THIS=0, InVar=1, OutVar=2
 					// InstanceVar := InstanceVar + InVar;
+					// Assignment:
+					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
+					code.Make(code.OpConstant, 0), // "InstanceVar"
 					// RHS:
 					code.Make(code.OpGetLocal, 0), // Get THIS (for implicit InstanceVar)
 					code.Make(code.OpConstant, 0), // "InstanceVar"
 					code.Make(code.OpIndex),       // Get value of InstanceVar
 					code.Make(code.OpGetLocal, 1), // Get InVar
 					code.Make(code.OpAdd),         // Add
-					// Assignment:
-					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
-					code.Make(code.OpConstant, 0), // "InstanceVar"
 					code.Make(code.OpSetIndex),    // Set member
 
 					// OutVar := InstanceVar;
-					// RHS:
 					code.Make(code.OpGetLocal, 0), // Get THIS (for implicit InstanceVar)
 					code.Make(code.OpConstant, 0), // "InstanceVar"
 					code.Make(code.OpIndex),       // Get value of InstanceVar
-					// Assignment:
 					code.Make(code.OpSetLocal, 2), // Set OutVar
 
 					code.Make(code.OpReturn),
@@ -325,6 +322,7 @@ func TestFunctionBlockWithMixedVars(t *testing.T) {
 func TestFunctionBlockInheritanceAndSuper(t *testing.T) {
 	tests := []compilerTestCase{
 		{
+			name: "Override FINAL method",
 			input: `
 			FUNCTION_BLOCK BaseFB
 				METHOD DoSomething : INT
@@ -345,40 +343,44 @@ func TestFunctionBlockInheritanceAndSuper(t *testing.T) {
 					code.Make(code.OpNull),
 					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				[]code.Instructions{code.Make(code.OpReturn)}, // 2: BaseFB.main (reused)
-				"main",        // 3
-				"DoSomething", // 4
+				"DoSomething", // 3
+				"main",        // 4
 				// DerivedFB constants
 				int64(5), // 5
 				[]code.Instructions{ // 6: DerivedFB.DoSomething
 					code.Make(code.OpNull),
 					code.Make(code.OpSetLocal, 1),
 					code.Make(code.OpGetLocal, 0), // Get THIS for SUPER call
-					code.Make(code.OpConstant, 4), // "DoSomething"
+					code.Make(code.OpConstant, 3), // "DoSomething"
 					code.Make(code.OpSuperIndex),  // Get parent method
 					code.Make(code.OpCall, 0),     // Call SUPER^.DoSomething()
 					code.Make(code.OpConstant, 5), // 5
 					code.Make(code.OpAdd),         // +
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue), // Return the result
 				},
 				"__parent__", // 7
 			},
 			expectedInstructions: []code.Instructions{
 				// BaseFB compilation (sorted: DoSomething, main)
-				code.Make(code.OpConstant, 4),   // "DoSomething"
+				code.Make(code.OpConstant, 3),   // "DoSomething"
 				code.Make(code.OpClosure, 1, 0), // BaseFB.DoSomething
-				code.Make(code.OpConstant, 3),   // "main"
+				code.Make(code.OpConstant, 4),   // "main"
 				code.Make(code.OpClosure, 2, 0), // BaseFB.main
 				code.Make(code.OpHash, 4),
 				code.Make(code.OpSetGlobal, 0),
 				// DerivedFB compilation (__parent__, then sorted: DoSomething, main)
 				code.Make(code.OpConstant, 7),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpConstant, 4),   // "DoSomething"
+				code.Make(code.OpConstant, 3),   // "DoSomething"
 				code.Make(code.OpClosure, 6, 0), // DerivedFB.DoSomething
-				code.Make(code.OpConstant, 3),   // "main"
+				code.Make(code.OpConstant, 4),   // "main"
 				code.Make(code.OpClosure, 2, 0), // main (reused)
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
@@ -419,29 +421,31 @@ func TestFunctionBlockProperty(t *testing.T) {
 					code.Make(code.OpIndex),       // Get internal var
 					code.Make(code.OpConstant, 1), // The constant '2'
 					code.Make(code.OpMul),
+					code.Make(code.OpSetLocal, 1), // assigning the name sets the result
+					code.Make(code.OpGetLocal, 1), // which is returned at the end
 					code.Make(code.OpReturnValue),
 				},
 				[]code.Instructions{ // const[3] SET body (global)
 					// THIS=0, value=1
-					code.Make(code.OpGetLocal, 1), // Get value
 					code.Make(code.OpGetLocal, 0), // Get THIS
 					code.Make(code.OpConstant, 0), // "internalvar"
+					code.Make(code.OpGetLocal, 1), // value
 					code.Make(code.OpSetIndex),
 					code.Make(code.OpReturn),
 				},
 				[]code.Instructions{ // const[4] Main body (empty) (global)
 					code.Make(code.OpReturn),
 				},
-				"main",       // const[5] (global)
-				"get_MyProp", // const[6] (global)
+				"get_MyProp", // const[5] (global)
+				"main",       // const[6] (global)
 				"set_MyProp", // const[7] (global)
 			},
 			expectedInstructions: []code.Instructions{
 				// The order of hash elements is now deterministic due to sorting keys.
 				// Alphabetical order: get_MyProp, main, set_MyProp
-				code.Make(code.OpConstant, 6),   // "get_MyProp"
+				code.Make(code.OpConstant, 5),   // "get_MyProp"
 				code.Make(code.OpClosure, 2, 0), // Getter closure
-				code.Make(code.OpConstant, 5),   // "main"
+				code.Make(code.OpConstant, 6),   // "main"
 				code.Make(code.OpClosure, 4, 0), // Main body closure
 				code.Make(code.OpConstant, 7),   // "set_MyProp"
 				code.Make(code.OpClosure, 3, 0), // Setter closure
@@ -463,7 +467,11 @@ func TestAccessSpecifierErrors(t *testing.T) {
 				privateVar : INT := 100;
 			END_VAR
 		END_FUNCTION_BLOCK
+	`
 
+	// derivedProgram reads Base's PRIVATE variable. It is only added to the case that
+	// tests that error, so every other case contains exactly one error.
+	derivedProgram := `
 		FUNCTION_BLOCK Derived EXTENDS Base
 			METHOD AccessPrivate : INT
 				// This should fail because privateVar is PRIVATE to Base
@@ -494,7 +502,7 @@ func TestAccessSpecifierErrors(t *testing.T) {
 					VAR myDerived : Derived; END_VAR
 					myDerived.AccessPrivate();
 				END_PROGRAM
-			` + baseProgram,
+			` + baseProgram + derivedProgram,
 			expectedError: "cannot access member variable 'privateVar': member is private",
 		},
 		{
@@ -512,7 +520,7 @@ func TestAccessSpecifierErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -535,19 +543,19 @@ func TestFinalKeywordErrors(t *testing.T) {
 		{
 			name: "Override FINAL method",
 			input: `
-				FUNCTION_BLOCK BaseWithFinalMethod
-					METHOD FINAL MyMethod : INT
-						MyMethod := 1;
-					END_METHOD
-				END_FUNCTION_BLOCK
+			FUNCTION_BLOCK BaseFinal
+				METHOD FINAL DoSomething : INT
+					DoSomething := 10;
+				END_METHOD
+			END_FUNCTION_BLOCK
 
-				FUNCTION_BLOCK DerivedOverridingFinal EXTENDS BaseWithFinalMethod
-					METHOD MyMethod : INT
-						MyMethod := 2;
-					END_METHOD
-				END_FUNCTION_BLOCK
+			FUNCTION_BLOCK DerivedFinal EXTENDS BaseFinal
+				METHOD DoSomething : INT
+					DoSomething := 20; // This method should be ignored
+				END_METHOD
+			END_FUNCTION_BLOCK
 			`,
-			expectedError: "cannot override FINAL method 'MyMethod' from function block 'BaseWithFinalMethod'",
+			expectedError: "cannot override FINAL Method 'DoSomething' from function block 'BaseFinal'",
 		},
 		{
 			name: "Override FINAL property",
@@ -600,7 +608,7 @@ func TestFinalKeywordErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -673,7 +681,7 @@ func TestOverridingMethodSignatureErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -767,7 +775,7 @@ func TestCovariantReturnTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			if tt.expectedError == "" {
 				if err != nil {
 					t.Fatalf("expected no error, but got: %s", err)
@@ -794,6 +802,8 @@ func TestAbstractMemberErrors(t *testing.T) {
 		name          string
 		input         string
 		expectedError string
+		// expectParseError marks input the parser itself must reject.
+		expectParseError bool
 	}{
 		{
 			name: "Instantiate abstract function block",
@@ -815,7 +825,7 @@ func TestAbstractMemberErrors(t *testing.T) {
 						END_GET
 					END_PROPERTY
 				END_FUNCTION_BLOCK
-			`,
+			` + baseProgram,
 			expectedError: "function block 'ConcreteFB' must implement abstract method 'DoSomething'",
 		},
 		{
@@ -827,7 +837,7 @@ func TestAbstractMemberErrors(t *testing.T) {
 					END_METHOD
 					// Missing implementation for Value property
 				END_FUNCTION_BLOCK
-			`,
+			` + baseProgram,
 			expectedError: "function block 'ConcreteFB' must implement abstract property 'Value'",
 		},
 		{
@@ -837,15 +847,24 @@ func TestAbstractMemberErrors(t *testing.T) {
 					METHOD ABSTRACT DoSomething : INT // Still abstract
 					END_METHOD
 				END_FUNCTION_BLOCK
-			`,
-			expectedError: "function block 'ConcreteFB' must implement abstract method 'DoSomething'",
+			` + baseProgram,
+			// The parser rejects abstract members in a concrete FB before the compiler runs.
+			expectParseError: true,
+			expectedError:    "abstract members are not allowed in a non-abstract function block",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.expectParseError {
+				_, errs := parseWithErrors(tt.input)
+				if len(errs) == 0 || !strings.HasPrefix(errs[0], tt.expectedError) {
+					t.Fatalf("expected parser error %q, got %v", tt.expectedError, errs)
+				}
+				return
+			}
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -929,7 +948,7 @@ func TestContravariantParameterTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			if tt.expectedError == "" {
 				if err != nil {
 					t.Fatalf("expected no error, but got: %s", err)
@@ -1019,7 +1038,7 @@ func TestInterfaceInheritance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			if tt.expectedError == "" {
 				if err != nil {
 					t.Fatalf("expected no error, but got: %s", err)
@@ -1069,7 +1088,7 @@ func TestCircularInterfaceInheritanceError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -1110,7 +1129,7 @@ func TestCircularFunctionBlockInheritanceError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -1171,7 +1190,7 @@ func TestMethodAccessSpecifierErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			checkCompilerError(t, err, tt.expectedError)
 		})
 	}
@@ -1235,7 +1254,7 @@ func TestProtectedMemberAccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			if tt.expectedError == "" {
 				if err != nil {
 					t.Fatalf("expected no error, but got: %s", err)
@@ -1258,9 +1277,11 @@ func TestInternalAccessSpecifiers(t *testing.T) {
 			input: `
 				NAMESPACE MyLib
 					INTERNAL FUNCTION_BLOCK InternalFB END_FUNCTION_BLOCK
-					PROGRAM MyProg
+					// PROGRAM is not a valid namespace element in IEC 61131-3, so a FUNCTION is used.
+					FUNCTION MyFunc : INT
 						VAR myFb: InternalFB; END_VAR // OK: Same namespace
-					END_PROGRAM
+						MyFunc := 0;
+					END_FUNCTION
 				END_NAMESPACE
 			`,
 			expectedError: "",
@@ -1288,10 +1309,11 @@ func TestInternalAccessSpecifiers(t *testing.T) {
 						END_METHOD
 					END_FUNCTION_BLOCK
 
-					PROGRAM MyProg
-						VAR fb: FBWithInternal; res: INT; END_VAR
-						res := fb.MyInternalMethod(); // OK: Same namespace
-					END_PROGRAM
+					// PROGRAM is not a valid namespace element in IEC 61131-3, so a FUNCTION is used.
+					FUNCTION MyFunc : INT
+						VAR fb: FBWithInternal; END_VAR
+						MyFunc := fb.MyInternalMethod(); // OK: Same namespace
+					END_FUNCTION
 				END_NAMESPACE
 			`,
 			expectedError: "",
@@ -1319,7 +1341,7 @@ func TestInternalAccessSpecifiers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			compiler := New()
-			err := compiler.Compile(parse(tt.input))
+			err := compiler.Compile(parse(t, tt.input))
 			if tt.expectedError == "" {
 				if err != nil {
 					t.Fatalf("expected no error, but got: %s", err)
@@ -1349,7 +1371,7 @@ func TestQualifiedNameResolution(t *testing.T) {
 		END_PROGRAM
 	`
 	compiler := New()
-	err := compiler.Compile(parse(input))
+	err := compiler.Compile(parse(t, input))
 	if err != nil {
 		t.Fatalf("Compiler failed with qualified name resolution: %s", err)
 	}

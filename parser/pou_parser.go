@@ -79,6 +79,9 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	stmt.ReturnType = ts
 
 	p.nextToken() // Consume return type
+	if p.curTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
 
 	// Consume any comments between the header and the variable blocks.
 	p.consumeLeadingComments()
@@ -86,6 +89,10 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	// Loop to parse all variable declaration blocks allowed within a FUNCTION.
 	// Loop to parse all variable declaration blocks
 	for !p.curTokenIs(token.END_FUNCTION) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.COMMENT) || p.curTokenIs(token.SEMICOLON) {
+			p.nextToken()
+			continue
+		}
 		if p.curTokenIs(token.VAR_INPUT) {
 			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
 		} else if p.curTokenIs(token.VAR_OUTPUT) {
@@ -119,7 +126,13 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 
 	// After var blocks, we have the body
-	stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
+	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
+		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION)
+	} else if p.isSFC() {
+		stmt.Body = p.parseSFCProgram(token.END_FUNCTION)
+	} else {
+		stmt.Body = p.parseBlockStatementUntil(token.END_FUNCTION)
+	}
 
 	if p.curTokenIs(token.END_FUNCTION) {
 		p.nextToken() // Consume END_FUNCTION
@@ -142,11 +155,18 @@ func (p *Parser) parseProgramDeclaration() ast.Statement {
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 	p.nextToken()
+	if p.curTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
 
 	// Loop to parse all variable declaration blocks.
 var_loop:
 	for {
 		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.SEMICOLON) {
 			p.nextToken()
 			continue
 		}
@@ -408,11 +428,31 @@ func (p *Parser) parseVarAccessBlock(blockType token.TokenType) *ast.AccessVarDe
 func (p *Parser) parseInterfaceDeclaration() ast.Statement {
 	stmt := &ast.InterfaceDeclaration{Token: p.curToken, LeadingComments: p.leadingComments}
 
+	isFinal := false
+	if p.curTokenIs(token.FINAL) {
+		isFinal = true
+		p.nextToken()
+	}
+
+	if p.peekTokenIs(token.FINAL) {
+		isFinal = true
+		p.nextToken()
+	}
+
 	if !p.expectPeek(token.IDENT) {
 		return nil
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
+	stmt.IsFinal = isFinal
+
+	// Check for optional EXTENDS clause for interface inheritance
+	if p.peekTokenIs(token.EXTENDS) {
+		p.nextToken() // move to EXTENDS
+		p.nextToken() // consume EXTENDS, move to first parent identifier
+		stmt.Extends = p.parseTypeNameList()
+	}
+
+	p.nextToken() // Consume the name or the end of the extends list to move to the body
 
 	for !p.curTokenIs(token.END_INTERFACE) && !p.curTokenIs(token.EOF) {
 		switch p.curToken.Type {
@@ -421,13 +461,20 @@ func (p *Parser) parseInterfaceDeclaration() ast.Statement {
 			if method != nil {
 				stmt.Methods = append(stmt.Methods, method)
 			}
-			p.nextToken() // consume semicolon
+			if p.curTokenIs(token.SEMICOLON) || p.curTokenIs(token.END_METHOD) {
+				p.nextToken()
+			}
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken()
+			}
 		case token.PROPERTY:
 			prop := p.parsePropertyDeclaration(true) // true for prototype
 			if prop != nil {
 				stmt.Properties = append(stmt.Properties, prop)
 			}
-			p.nextToken() // consume semicolon
+			if p.curTokenIs(token.SEMICOLON) {
+				p.nextToken()
+			}
 		case token.COMMENT:
 			p.nextToken()
 		default:
@@ -504,14 +551,19 @@ func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
 	}
 	p.nextToken() // consume METHOD
 
-	// Optional access specifier
-	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) || p.curTokenIs(token.INTERNAL) {
-		stmt.AccessSpecifier = p.curToken.Literal
-		p.nextToken()
-	}
-
-	if p.curTokenIs(token.ABSTRACT) {
-		stmt.IsAbstract = true
+	// Optional modifiers: access specifier, ABSTRACT and FINAL, in any order.
+modifiers:
+	for {
+		switch p.curToken.Type {
+		case token.PUBLIC, token.PRIVATE, token.PROTECTED, token.INTERNAL:
+			stmt.AccessSpecifier = p.curToken.Literal
+		case token.ABSTRACT:
+			stmt.IsAbstract = true
+		case token.FINAL:
+			stmt.IsFinal = true
+		default:
+			break modifiers
+		}
 		p.nextToken()
 	}
 
@@ -539,21 +591,24 @@ func (p *Parser) parseMethodImplementation() *ast.MethodImplementation {
 	}
 
 	// Parse VAR blocks
-	for !isStatementStartKeyword(p.curToken.Type) && !p.curTokenIs(token.END_METHOD) && !p.curTokenIs(token.EOF) {
+	// VAR is a statement-start keyword elsewhere, but here it opens the method's local
+	// variable block, so it must not end the declaration loop.
+	for (p.curTokenIs(token.VAR) || !isStatementStartKeyword(p.curToken.Type)) && !p.curTokenIs(token.END_METHOD) && !p.curTokenIs(token.EOF) {
 		switch p.curToken.Type {
 		case token.VAR_INPUT:
-			stmt.VarInputs = p.parseVarBlock(token.VAR_INPUT)
+			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
 		case token.VAR_OUTPUT:
-			stmt.VarOutputs = p.parseVarBlock(token.VAR_OUTPUT)
+			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
 		case token.VAR_IN_OUT:
-			stmt.VarInOuts = p.parseVarBlock(token.VAR_IN_OUT)
+			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
 		case token.VAR:
 			if stmt.IsAbstract {
 				p.currentError("abstract method cannot have VAR declarations")
 			}
-			stmt.Vars = p.parseVarBlock(token.VAR)
+			stmt.Vars = append(stmt.Vars, p.parseVarBlock(token.VAR)...)
 		case token.COMMENT:
 			p.nextToken()
+			continue
 		default:
 			goto method_body_loop
 		}
@@ -648,14 +703,19 @@ func (p *Parser) parsePropertyDeclaration(isPrototype bool) *ast.PropertyDeclara
 	}
 	p.nextToken() // consume PROPERTY
 
-	// Optional access specifier
-	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) || p.curTokenIs(token.INTERNAL) {
-		stmt.AccessSpecifier = p.curToken.Literal
-		p.nextToken()
-	}
-
-	if p.curTokenIs(token.ABSTRACT) {
-		stmt.IsAbstract = true
+	// Optional modifiers: access specifier, ABSTRACT and FINAL, in any order.
+modifiers:
+	for {
+		switch p.curToken.Type {
+		case token.PUBLIC, token.PRIVATE, token.PROTECTED, token.INTERNAL:
+			stmt.AccessSpecifier = p.curToken.Literal
+		case token.ABSTRACT:
+			stmt.IsAbstract = true
+		case token.FINAL:
+			stmt.IsFinal = true
+		default:
+			break modifiers
+		}
 		p.nextToken()
 	}
 
@@ -693,8 +753,10 @@ func (p *Parser) parsePropertyDeclaration(isPrototype bool) *ast.PropertyDeclara
 			stmt.Setter = &ast.PropertySetter{Token: p.curToken}
 			p.nextToken()
 		}
-		if !p.curTokenIs(token.SEMICOLON) {
-			p.currentError("expected ; at end of property prototype, got %s", p.curToken.Type)
+		if p.curTokenIs(token.END_PROPERTY) {
+			p.nextToken()
+		} else if !p.curTokenIs(token.SEMICOLON) {
+			p.currentError("expected ; or END_PROPERTY at end of property prototype, got %s", p.curToken.Type)
 		}
 	} else {
 		// Handle abstract property with body error

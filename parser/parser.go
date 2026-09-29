@@ -48,7 +48,7 @@ var precedences = map[token.TokenType]int{
 	token.AMPERSAND: LOGICAL_AND,
 	token.NAND:      LOGICAL_AND,
 	token.EQ:        EQUALS,
-	token.NEQ:       EQUALS,
+	token.NE:        EQUALS,
 	token.LT:        LESSGREATER,
 	token.GT:        LESSGREATER,
 	token.LE:        LESSGREATER,
@@ -167,7 +167,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.EQ, p.parseIdentifier)
 	p.registerPrefix(token.LE, p.parseIdentifier)
 	p.registerPrefix(token.LT, p.parseIdentifier)
-	p.registerPrefix(token.NEQ, p.parseIdentifier)
+	p.registerPrefix(token.NE, p.parseIdentifier)
 	p.registerPrefix(token.MIN, p.parseIdentifier)
 	p.registerPrefix(token.MAX, p.parseIdentifier)
 	p.registerPrefix(token.MOVE, p.parseIdentifier)
@@ -214,7 +214,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.EXPONENT, p.parseInfixExpression)
 	p.registerInfix(token.EQ, p.parseInfixExpression)
 	p.registerInfix(token.EQ, p.parseInfixExpression)
-	p.registerInfix(token.NEQ, p.parseInfixExpression)
+	p.registerInfix(token.NE, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)
 	p.registerInfix(token.GT, p.parseInfixExpression)
 	p.registerInfix(token.LE, p.parseInfixExpression)
@@ -325,6 +325,19 @@ func (p *Parser) isIlInstruction() bool {
 		return false
 	}
 
+	// Special case for NOT: if it's followed by an expression operand,
+	// it's an ST prefix operator. If it's followed by a semicolon or
+	// end of block, it's the IL instruction.
+	if p.curToken.Type == token.NOT {
+		switch p.peekToken.Type {
+		case token.SEMICOLON, token.END_PROGRAM, token.END_FUNCTION, token.END_FUNCTION_BLOCK, token.RPAREN, token.EOF:
+			return true // It's the IL `NOT` instruction.
+		default:
+			// It's likely the ST `NOT` prefix operator.
+			return false
+		}
+	}
+
 	// The token is a known IL mnemonic. Now, we must resolve the ambiguity between
 	// an ST function call like `ADD(5)` and a deferred IL operation like `ADD(LD A)`.
 	if p.peekTokenIs(token.LPAREN) {
@@ -332,8 +345,17 @@ func (p *Parser) isIlInstruction() bool {
 		// If it's an unambiguous IL keyword, it's a deferred IL operation.
 		// Otherwise, we assume it's a standard ST function call.
 		nextTokenAfterParen := p.peek2Token
+		// ADD, SUB, MUL and DIV are ordinary identifiers (they are also standard
+		// function names and may name user functions), so match them by spelling.
+		switch strings.ToUpper(nextTokenAfterParen.Literal) {
+		case "ADD", "SUB", "MUL", "DIV":
+			if nextTokenAfterParen.Type == token.IDENT {
+				return true
+			}
+		}
 		switch nextTokenAfterParen.Type {
-		case token.LD, token.ST, token.S, token.R, token.JMP, token.CAL, token.RET:
+		case token.LD, token.ST, token.S, token.R, token.JMP, token.CAL, token.RET,
+			token.AND, token.OR, token.XOR, token.GT, token.GE, token.EQ, token.NE, token.LE, token.LT:
 			// e.g., ADD(LD A) -> This is IL
 			return true
 		default:
@@ -481,17 +503,9 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
 	if p.isIlInstruction() {
-		// This switch resolves ambiguity for tokens that are both IL mnemonics and ST operators.
-		// For example, `AND` can be an infix operator in ST or an instruction in IL.
-		switch p.curToken.Type {
-		// These mnemonics are also ST operators. In an ST context, they should be parsed as expressions.
-		case token.AND, token.OR, token.XOR, token.NOT, token.MOD:
-			return p.parseExpressionStatement()
-		// These mnemonics are unambiguous or are handled as function calls by the expression parser.
-		// If isIlInstruction is true, it means they are not function calls, so we treat them as IL.
-		default:
-			return p.parseIlInstruction()
-		}
+		// The isIlInstruction heuristic is now robust enough to handle this.
+		// We can directly call parseIlInstruction.
+		return p.parseIlInstruction()
 	}
 
 	// If it's not an IL instruction, parse as a standard ST statement.
@@ -541,6 +555,13 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseExpressionStatement() // Fallback to get "no prefix" error
 	case token.FINAL:
 		return p.parsePoulDeclaration()
+	case token.PUBLIC, token.INTERNAL:
+		// An access specifier may prefix a function block declaration,
+		// e.g. `INTERNAL FUNCTION_BLOCK X` inside a NAMESPACE.
+		if p.peekTokenIs(token.FUNCTION_BLOCK) || p.peekTokenIs(token.ABSTRACT) {
+			return p.parsePoulDeclaration()
+		}
+		return p.parseExpressionStatement() // Fallback to get "no prefix" error
 	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
@@ -839,6 +860,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 		// e.g., Station_1.P1.COUNT : INT := 1;
 		// e.g., Station_2.P4.FB1.C2 AT %QB25 : BYTE;
 		// Use LOWEST precedence to parse the full member access path (e.g., a.b.c)
+		pathToken := p.curToken // Start of the path, used for error positions.
 		varPath := p.parseExpression(LOWEST)
 
 		var initialValue ast.Expression
@@ -872,6 +894,7 @@ func (p *Parser) parseConfigVarDeclStatement() *ast.ConfigVarDeclaration {
 		}
 
 		decl := &ast.VarDeclStatement{
+			Token:      pathToken,
 			AccessPath: varPath,
 			Location:   atDecl,
 			DataType:   dataType,
@@ -1201,6 +1224,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 				IsNonRetain:     isNonRetain,
 				IsRisingEdge:    isRisingEdge,
 				IsFallingEdge:   isFallingEdge,
+				Scope:           string(blockType),
 				LeadingComments: p.leadingComments,
 			}
 			varDecls = append(varDecls, decl)
@@ -1266,15 +1290,65 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken()
 
+	// implicit holds the tasks and programs of the single-resource form, where
+	// they appear directly in the CONFIGURATION with no RESOURCE block. The
+	// grammar allows either that form or RESOURCE blocks, not both.
+	var implicit *ast.ResourceDeclaration
+	implicitResource := func() *ast.ResourceDeclaration {
+		if implicit == nil {
+			implicit = &ast.ResourceDeclaration{Token: p.curToken, Name: stmt.Name, IsImplicit: true}
+			stmt.Resources = append(stmt.Resources, implicit)
+		}
+		return implicit
+	}
+	mixedFormsReported := false
+	checkMixedForms := func() {
+		hasExplicit := false
+		for _, r := range stmt.Resources {
+			if !r.IsImplicit {
+				hasExplicit = true
+			}
+		}
+		if implicit != nil && hasExplicit && !mixedFormsReported {
+			p.currentError("a CONFIGURATION must use either RESOURCE blocks or TASK/PROGRAM declarations directly, not both")
+			mixedFormsReported = true
+		}
+	}
+
 	for !p.curTokenIs(token.END_CONFIGURATION) && !p.curTokenIs(token.EOF) {
 		switch p.curToken.Type {
 		case token.VAR_GLOBAL:
 			// A configuration can have global variable blocks.
 			stmt.GlobalVars = append(stmt.GlobalVars, p.parseGlobalVarDeclStatement())
+		case token.TASK:
+			// Single-resource form: TASK directly inside CONFIGURATION.
+			res := implicitResource()
+			if task := p.parseTaskDeclaration(); task != nil {
+				res.Tasks = append(res.Tasks, task)
+			}
+			checkMixedForms()
+			p.expectPeek(token.SEMICOLON)
+			p.nextToken()
+		case token.PROGRAM:
+			// Single-resource form: PROGRAM directly inside CONFIGURATION.
+			res := implicitResource()
+			if progConfig := p.parseProgramConfiguration(); progConfig != nil {
+				res.Programs = append(res.Programs, progConfig)
+			}
+			checkMixedForms()
+			p.expectPeek(token.SEMICOLON)
+			p.nextToken()
 		case token.RESOURCE:
 			res := p.parseResourceDeclaration()
 			if res != nil {
 				stmt.Resources = append(stmt.Resources, res)
+			}
+			checkMixedForms()
+			// parseResourceDeclaration stops on END_RESOURCE without consuming it.
+			if p.curTokenIs(token.END_RESOURCE) {
+				p.nextToken()
+			} else if res != nil {
+				p.currentError("missing 'END_RESOURCE' for resource '%s'", res.Name.Value)
 			}
 		case token.VAR_ACCESS:
 			// Access variable declarations for communication.
@@ -1284,10 +1358,11 @@ func (p *Parser) parseConfigurationDeclaration() ast.Statement {
 			if cfgVar != nil {
 				stmt.VarConfigs = append(stmt.VarConfigs, cfgVar)
 			}
-		case token.COMMENT:
+		case token.COMMENT, token.SEMICOLON:
 			p.nextToken()
 		default:
-			// If we encounter a token we don't recognize at this level, we advance past it to avoid an infinite loop.
+			// Report the unexpected token, then advance past it to avoid an infinite loop.
+			p.currentError("unexpected token '%s' in CONFIGURATION block", p.curToken.Literal)
 			p.nextToken()
 		}
 	}
@@ -1627,6 +1702,13 @@ func (p *Parser) isDataTypeToken(tok token.Token) bool {
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	defer untrace(trace("parseReturnStatement"))
 	stmt := &ast.ReturnStatement{Token: p.curToken}
+
+	// The IEC 61131-3 form is a bare `RETURN;`. A value (`RETURN x;`) is
+	// also accepted.
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken() // Consume semicolon
+		return stmt
+	}
 
 	p.nextToken()
 
@@ -2230,10 +2312,13 @@ func (p *Parser) parseIecLiteralValue(typeName string) ast.Expression {
 			builder.WriteString(p.curToken.Literal)
 
 			// Peek ahead to see if the next token could also be part of the literal.
+			// It must also follow with no gap: a literal's value contains no
+			// spaces, so in `D#2024-01-02 - D#2024-01-01` the minus is an operator.
 			peekIsAllowed := false
 			switch p.peekToken.Type {
 			case token.INT, token.REAL, token.IDENT, token.DOT, token.MINUS, token.S, token.DATE, token.COLON:
-				peekIsAllowed = true
+				peekIsAllowed = p.peekToken.Row == p.curToken.Row &&
+					p.peekToken.Column == p.curToken.Column+len(p.curToken.Literal)
 			}
 
 			if peekIsAllowed {
@@ -2381,10 +2466,21 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 
 	// Check for an optional access specifier (PUBLIC, PRIVATE, PROTECTED)
 	// which is valid for VAR blocks inside a FUNCTION_BLOCK.
+	// FINAL may also appear (e.g. `VAR FINAL`), marking the variables as not
+	// redeclarable in derived function blocks. Modifiers may come in any order.
 	var accessSpecifier string
-	if p.curTokenIs(token.PUBLIC) || p.curTokenIs(token.PRIVATE) || p.curTokenIs(token.PROTECTED) {
-		accessSpecifier = p.curToken.Literal
-		p.nextToken() // consume the access specifier
+	isFinal := false
+modifiers:
+	for {
+		switch p.curToken.Type {
+		case token.PUBLIC, token.PRIVATE, token.PROTECTED:
+			accessSpecifier = p.curToken.Literal
+		case token.FINAL:
+			isFinal = true
+		default:
+			break modifiers
+		}
+		p.nextToken() // consume the modifier
 	}
 
 	// We are at the start of a VAR block, parseVarDeclarations expects to be after the block token
@@ -2392,6 +2488,9 @@ func (p *Parser) parseVarBlock(blockType token.TokenType) []*ast.VarDeclStatemen
 
 	for _, decl := range decls {
 		decl.AccessSpecifier = accessSpecifier
+		if isFinal {
+			decl.IsFinal = true
+		}
 	}
 	// After parsing declarations, we should be on the END_VAR token.
 	// We consume it here so the caller doesn't have to.
@@ -2494,7 +2593,7 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		if !isBlockStatement(stmt) {
+		if !isBlockStatement(stmt) && !p.isIlInstruction() {
 			p.nextToken()
 		}
 	}
@@ -2774,32 +2873,45 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	list := []ast.Expression{}
 
 	// Handle empty list case: `()`
-	if p.peekTokenIs(end) {
-		p.nextToken() // consume ')'
+	if p.peekTokenIs(end) { // e.g. `()`
+		p.nextToken() // move to `)`
 		return list
 	}
 
 	p.nextToken() // Consume the opening token (e.g., '(' or '[')
 
-	// Parse a comma-separated list of arguments
-	if !p.curTokenIs(end) {
-		list = append(list, p.parseCallArgument())
-		for {
-			if p.peekTokenIs(token.COMMA) {
-				p.nextToken()
-				p.nextToken() // consume comma
-				for p.curTokenIs(token.COMMENT) {
-					p.nextToken()
-				}
-				list = append(list, p.parseCallArgument())
-			} else if p.peekTokenIs(token.COMMENT) {
-				p.nextToken() // Skip comment and re-evaluate
-			} else {
-				break
-			}
-		}
+	if p.curTokenIs(end) { // Handles `()` case if `peekTokenIs` was false (e.g. `( )`)
+		return list
 	}
-	p.expectPeek(end) // Consume the closing token
+
+	for {
+		// Skip any comments that might be between arguments
+		for p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+		}
+		// If we've skipped to the end, break
+		if p.curTokenIs(end) {
+			break
+		}
+
+		list = append(list, p.parseCallArgument())
+		p.nextToken() // consume argument's last token
+
+		// Skip any comments after an argument, before a comma or end token
+		for p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+		}
+
+		if p.curTokenIs(end) {
+			break
+		}
+		if !p.curTokenIs(token.COMMA) {
+			p.currentError("missing ',' in argument list")
+			p.synchronize(end) // Skip to the end token to recover
+			break
+		}
+		p.nextToken() // consume comma
+	}
 	return list
 }
 

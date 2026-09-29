@@ -1472,6 +1472,53 @@ func evalGenericVarBlock(decls []*ast.VarDeclStatement, env *object.Environment)
 // evalVarDeclStatement handles a single variable declaration. If an initial value
 // is provided, it's evaluated and set. If the type is a function block, a new
 // instance of that FB is created and stored.
+// aliasTypeDeclaration returns the declaration node should be evaluated as when
+// its type is a user-defined alias or subrange of another type and it has no
+// initial value, or nil if that does not apply. The returned declaration uses
+// the underlying type and, as its value, the TYPE's initial value; for a
+// subrange without one, IEC 61131-3 specifies the lower limit. Struct, enum and
+// array types are left to the caller.
+func aliasTypeDeclaration(node *ast.VarDeclStatement, env *object.Environment) *ast.VarDeclStatement {
+	typeName := node.DataType.String()
+	quoteObj, ok := env.Get("_type_" + typeName)
+	if !ok {
+		return nil
+	}
+	quote, ok := quoteObj.(*object.Quote)
+	if !ok {
+		return nil
+	}
+	typeDecl, ok := quote.Node.(*ast.TypeDeclaration)
+	if !ok || typeDecl.DataType == nil {
+		return nil
+	}
+	switch typeDecl.DataType.(type) {
+	case *ast.TypeSpecifier, *ast.Identifier:
+		// An alias of an elementary type or of another named type.
+	default:
+		return nil
+	}
+	if strings.EqualFold(typeDecl.DataType.String(), typeName) {
+		return nil // A type defined as itself would recurse forever.
+	}
+
+	value := typeDecl.InitialValue
+	if value == nil {
+		if subrange, ok := typeDecl.Subrange.(*ast.InfixExpression); ok && subrange.Operator == ".." {
+			value = subrange.Left
+		}
+	}
+	return &ast.VarDeclStatement{
+		Token:           node.Token,
+		Name:            node.Name,
+		DataType:        typeDecl.DataType,
+		Value:           value,
+		IsConstant:      node.IsConstant,
+		AccessSpecifier: node.AccessSpecifier,
+		Scope:           node.Scope,
+	}
+}
+
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
 	// Handle located variables (AT %) first.
 	if node.Location != nil {
@@ -1536,6 +1583,13 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 				object.IsTimeDateKeyword(upperTypeName)
 
 			if !isPrimitive {
+				// A user-defined alias or subrange of another type (e.g.
+				// `MyString : STRING := 'Hi'` or `Small : INT(-5..5)`) is declared
+				// as its underlying type with the type's initial value.
+				if aliased := aliasTypeDeclaration(node, env); aliased != nil {
+					return evalVarDeclStatement(aliased, env)
+				}
+
 				// It's not a primitive type, so it could be a user-defined FB, a built-in FB, or a user-defined type.
 				// Evaluate the data type expression to resolve it.
 				typeObj := Eval(node.DataType, env)
@@ -2178,11 +2232,10 @@ func evalConfigurationDeclaration(config *ast.ConfigurationDeclaration, env *obj
 			return err
 		}
 	}
-	// 4. Evaluate VAR_CONFIG to link program variables to hardware addresses. This must be done after resources are created.
-	for _, varConfigBlock := range config.VarConfigs {
-		if err := Eval(varConfigBlock, env); isError(err) {
-			return err
-		}
+	// 4. Apply VAR_CONFIG locations and initial values to the program instances.
+	// This must be done after resources are created.
+	if err := evalConfigVars(config, env); isError(err) {
+		return err
 	}
 	return NULL
 }
@@ -2260,8 +2313,13 @@ func evalAccessVarDeclaration(node *ast.AccessVarDeclaration, env *object.Enviro
 // evalResourceDeclaration evaluates a RESOURCE block within a configuration,
 // setting up the environment for its tasks and program instances.
 func evalResourceDeclaration(res *ast.ResourceDeclaration, parentEnv *object.Environment) object.Object {
-	// Each resource has its own scope, which encloses the parent (configuration) scope.
-	resourceEnv := object.NewEnclosedEnvironment(parentEnv)
+	// Each resource has its own scope, which encloses the parent (configuration)
+	// scope. The implicit resource of the single-resource form has no scope of
+	// its own: its tasks and programs live directly in the configuration.
+	resourceEnv := parentEnv
+	if !res.IsImplicit {
+		resourceEnv = object.NewEnclosedEnvironment(parentEnv)
+	}
 
 	// Evaluate resource-scoped global variables.
 	for _, globalVarBlock := range res.GlobalVars {
@@ -2284,6 +2342,10 @@ func evalResourceDeclaration(res *ast.ResourceDeclaration, parentEnv *object.Env
 		}
 	}
 
+	if res.IsImplicit {
+		return NULL // Its tasks and programs are already in the configuration's environment.
+	}
+
 	// To store the resource's environment, we wrap it in an object that implements
 	// the object.Object interface. A FunctionBlockInstance is a suitable container.
 	resourceInstance := &object.FunctionBlockInstance{
@@ -2295,30 +2357,112 @@ func evalResourceDeclaration(res *ast.ResourceDeclaration, parentEnv *object.Env
 	return NULL
 }
 
-// evalVarConfigDeclaration evaluates a VAR_CONFIG block, linking unlocated
-// variables within program instances to specific hardware addresses.
+// evalVarConfigDeclaration evaluates a VAR_CONFIG block on its own, outside a
+// CONFIGURATION, resolving each full path from env. Inside a CONFIGURATION,
+// evalConfigVars is used instead, since it also supports the single-resource
+// and program-scoped forms.
 func evalVarConfigDeclaration(config *ast.ConfigVarDeclaration, env *object.Environment) object.Object {
 	for _, decl := range config.Declarations {
 		targetEnv, varName, err := resolveAccessPath(decl.AccessPath, env)
 		if err != nil {
 			return err
 		}
+		if result := applyConfigVar(decl, targetEnv, varName, env); isError(result) {
+			return result
+		}
+	}
+	return NULL
+}
 
-		// The variable should exist in the target environment, but might be uninitialized (nil)
-		if _, ok := targetEnv.Get(varName); !ok {
-			return newError(decl, "variable '%s' in VAR_CONFIG path not found in instance", varName)
+// evalConfigVars applies a configuration's VAR_CONFIG entries to the program
+// instances they address. It must run after the resources are evaluated, so
+// that the instances exist.
+func evalConfigVars(config *ast.ConfigurationDeclaration, configEnv *object.Environment) object.Object {
+	entries, unmatched := config.ResolveConfigVars()
+	if len(unmatched) > 0 {
+		return newError(unmatched[0], "VAR_CONFIG path '%s' does not name a variable of a program instance", unmatched[0].AccessPath.String())
+	}
+	for _, entry := range entries {
+		// The implicit resource of the single-resource form runs in the
+		// configuration's own environment; other resources have their own.
+		resourceEnv := configEnv
+		if !entry.Resource.IsImplicit {
+			resObj, ok := configEnv.Get(entry.Resource.Name.Value)
+			resInstance, isInstance := resObj.(*object.FunctionBlockInstance)
+			if !ok || !isInstance {
+				return newError(config, "resource '%s' not found for VAR_CONFIG", entry.Resource.Name.Value)
+			}
+			resourceEnv = resInstance.Env
+		}
+		progObj, ok := resourceEnv.Get(entry.Program.InstanceName.Value)
+		progInstance, isProgram := progObj.(*object.ProgramInstance)
+		if !ok || !isProgram {
+			return newError(config, "program instance '%s' not found for VAR_CONFIG", entry.Program.InstanceName.Value)
 		}
 
-		address := decl.Location.Location.String()
-		locatedObj := &object.Pointer{Name: address, Env: nil} // Pointer to I/O map
-
-		// Replace the variable in the target environment with the I/O pointer
-		targetEnv.Set(varName, locatedObj)
-
-		// Initialize the I/O map if not present
-		if _, ok := ioMap[address]; !ok {
-			ioMap[address] = NULL
+		// Walk any FB instances on the way to the variable.
+		targetEnv := progInstance.Env
+		for _, part := range entry.Path[:len(entry.Path)-1] {
+			obj, ok := targetEnv.Get(part)
+			fbInstance, isFB := obj.(*object.FunctionBlockInstance)
+			if !ok || !isFB {
+				return newError(config, "'%s' in VAR_CONFIG path '%s' is not a function block instance", part, entry.Decl.AccessPath.String())
+			}
+			targetEnv = fbInstance.Env
 		}
+		varName := entry.Path[len(entry.Path)-1]
+		if result := applyConfigVar(entry.Decl, targetEnv, varName, configEnv); isError(result) {
+			return result
+		}
+	}
+	return NULL
+}
+
+// applyConfigVar applies one VAR_CONFIG declaration to the variable varName in
+// targetEnv. The declaration may assign a location (`AT %...`), an initial
+// value, or, for a function block instance, a structure initialization such as
+// `(PT := T#2.5s)`. Values are evaluated in valueEnv.
+func applyConfigVar(decl *ast.VarDeclStatement, targetEnv *object.Environment, varName string, valueEnv *object.Environment) object.Object {
+	existing, ok := targetEnv.Get(varName)
+	if !ok {
+		return newError(decl, "variable '%s' in VAR_CONFIG path '%s' not found in instance", varName, decl.AccessPath.String())
+	}
+	if decl.Location == nil && decl.Value == nil {
+		return NULL // Nothing to configure; redeclaring would reset the variable.
+	}
+
+	// A structure initialization sets members of an existing FB instance.
+	if structInit, ok := decl.Value.(*ast.StructLiteral); ok && decl.Location == nil {
+		fbInstance, isFB := existing.(*object.FunctionBlockInstance)
+		if !isFB {
+			return newError(decl, "VAR_CONFIG structure initialization requires a function block instance, but '%s' is %s", varName, existing.Type())
+		}
+		for _, init := range structInit.Initializers {
+			named, ok := init.(*ast.NamedArgument)
+			if !ok {
+				return newError(decl, "VAR_CONFIG structure initialization for '%s' must use named members, e.g. (PT := T#1s)", varName)
+			}
+			val := Eval(named.Value, valueEnv)
+			if isError(val) {
+				return val
+			}
+			fbInstance.Env.Set(named.Name.Value, val)
+		}
+		return NULL
+	}
+
+	// Locations and plain initial values are declared like an ordinary
+	// variable in the target environment, which also converts the value to the
+	// declared type and registers located variables in the I/O map.
+	redeclared := &ast.VarDeclStatement{
+		Token:    decl.Token,
+		Name:     &ast.Identifier{Value: varName},
+		DataType: decl.DataType,
+		Location: decl.Location,
+		Value:    decl.Value,
+	}
+	if result := evalVarDeclStatement(redeclared, targetEnv); isError(result) {
+		return result
 	}
 	return NULL
 }
@@ -3766,7 +3910,19 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 	// This assumes a single resource for simplicity. A full implementation would iterate all resources.
 	// Let's find the first resource environment.
 	var resourceEnv *object.Environment
+	// In the single-resource form, tasks live directly in the configuration.
 	for _, name := range configEnv.Names() {
+		if obj, _ := configEnv.Get(name); obj != nil {
+			if _, isTask := obj.(*object.Task); isTask {
+				resourceEnv = configEnv
+				break
+			}
+		}
+	}
+	for _, name := range configEnv.Names() {
+		if resourceEnv != nil {
+			break
+		}
 		obj, _ := configEnv.Get(name)
 		// A resource is stored as a FunctionBlockInstance that holds its environment.
 		if resInstance, ok := obj.(*object.FunctionBlockInstance); ok {
