@@ -328,6 +328,11 @@ func (p *Parser) isIlInstruction() bool {
 	if p.peekTokenIs(token.ASSIGN) {
 		return false
 	}
+	// No IL operand starts with '.' or '[', so a mnemonic followed by one
+	// names a variable, as in `s.Q1` or `r[1] := x`.
+	if p.peekTokenIs(token.DOT) || p.peekTokenIs(token.LBRACKET) {
+		return false
+	}
 
 	// Special case for NOT: if it's followed by an expression operand,
 	// it's an ST prefix operator. If it's followed by a semicolon or
@@ -345,6 +350,12 @@ func (p *Parser) isIlInstruction() bool {
 	// The token is a known IL mnemonic. Now, we must resolve the ambiguity between
 	// an ST function call like `ADD(5)` and a deferred IL operation like `ADD(LD A)`.
 	if p.peekTokenIs(token.LPAREN) {
+		// S and R take no deferred operand, so S( or R( calls something
+		// named S or R, such as an SR instance: s(S1 := TRUE).
+		switch strings.ToUpper(p.curToken.Literal) {
+		case "S", "R":
+			return false
+		}
 		// Heuristic: Look at the token *inside* the parenthesis (peek2Token).
 		// If it's an unambiguous IL keyword, it's a deferred IL operation.
 		// Otherwise, we assume it's a standard ST function call.
@@ -3312,11 +3323,14 @@ func (p *Parser) parseStringLength(dataType ast.Expression) ast.Expression {
 
 // contextualKeywords are keywords only in some places: SET and GET in a
 // PROPERTY, STEP in an SFC, ON in a RESOURCE, and R_EDGE and F_EDGE as
-// qualifiers of an input. Elsewhere, as in CODESYS
+// qualifiers of an input, S and R as action qualifiers and IL operators,
+// and SR and RS as standard function block types. Elsewhere, as in CODESYS
 // code such as OSCAT, they name variables.
 var contextualKeywords = map[token.TokenType]bool{
 	token.SET: true, token.GET: true, token.STEP: true, token.ON: true,
 	token.R_EDGE: true, token.F_EDGE: true,
+	// The standard function blocks SR and RS, and their inputs S and R.
+	token.SR: true, token.RS: true, token.S: true, token.R: true,
 }
 
 // nameInContext makes the current token an identifier when it is a

@@ -171,3 +171,35 @@ func TestCodesysStatements(t *testing.T) {
 		t.Error("expected an error for .5")
 	}
 }
+
+// SR, RS, S and R name the standard bistables and their inputs, so they can
+// name function blocks and variables, while S and R stay IL operators.
+func TestStandardBistableNames(t *testing.T) {
+	for src, want := range map[string]string{
+		"FUNCTION_BLOCK SR VAR_INPUT S1 : BOOL; R : BOOL; END_VAR VAR_OUTPUT Q1 : BOOL; END_VAR Q1 := S1 OR (NOT R AND Q1); END_FUNCTION_BLOCK": "SR",
+		"FUNCTION_BLOCK RS VAR_INPUT S : BOOL; R1 : BOOL; END_VAR END_FUNCTION_BLOCK":                                                           "RS",
+		"VAR s : SR; END_VAR s(S1 := TRUE, R := FALSE); x := s.Q1;":                                                                             "",
+		"VAR s : RS; END_VAR s(S := TRUE, R1 := TRUE); s.Q1;":                                                                                   "",
+		"VAR r : ARRAY[0..1] OF BOOL; END_VAR r[1] := TRUE;":                                                                                    "",
+	} {
+		p := New(lexer.New(src))
+		program := p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Errorf("%s: %v", src, p.Errors())
+			continue
+		}
+		if want == "" {
+			continue
+		}
+		fb, ok := program.Statements[0].(*ast.FunctionBlockDeclaration)
+		if !ok || fb.Name.Value != want {
+			t.Errorf("%s: got %#v", src, program.Statements[0])
+		}
+	}
+	// In IL, S and R still set and reset.
+	p := New(lexer.New("PROGRAM P VAR a, b : BOOL; END_VAR LD a S b R a END_PROGRAM"))
+	p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("IL S and R: %v", p.Errors())
+	}
+}
