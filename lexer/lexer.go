@@ -186,7 +186,9 @@ func (l *Lexer) NextToken() token.Token {
 			l.readChar()
 			literal := string(ch) + string(l.ch)
 			tok = token.Token{Type: token.RANGE, Literal: literal, Row: startLine, Column: startCol, Pos: startPos}
-		} else if isDigit(l.peekChar()) {
+		} else if isDigit(l.peekChar()) && !l.followsOperand() {
+			// A real literal cannot start with a dot, e.g. .5. After a name,
+			// ] or ), the dot is a bit access such as flags.3.
 			tok = newToken(token.ILLEGAL, l.ch, startLine, startCol, startPos)
 		} else {
 			// A single dot is not a valid token on its own in IEC 61131-3,
@@ -503,4 +505,14 @@ func isTypedLiteralPrefix(ident string) bool {
 	default:
 		return false
 	}
+}
+
+// followsOperand reports whether the character before the current one ends
+// an operand: a letter, digit or underscore of a name, or ] or ).
+func (l *Lexer) followsOperand() bool {
+	if l.position == 0 {
+		return false
+	}
+	prev := l.input[l.position-1]
+	return isLetter(prev) || isDigit(prev) || prev == ']' || prev == ')'
 }

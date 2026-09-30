@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"beedance/token"
 )
@@ -789,6 +790,10 @@ func (pe *PrefixExpression) String() string {
 
 	out.WriteString("(")
 	out.WriteString(pe.Operator)
+	// A word operator, NOT, is separated from its operand.
+	if pe.Operator != "" && unicode.IsLetter(rune(pe.Operator[len(pe.Operator)-1])) {
+		out.WriteString(" ")
+	}
 	out.WriteString(pe.Right.String())
 	out.WriteString(")")
 
@@ -1959,6 +1964,9 @@ type ArrayDefinition struct {
 	Token    token.Token // The 'ARRAY' token
 	Ranges   []Expression
 	DataType *TypeSpecifier
+	// ElementLength is the length of STRING or WSTRING elements, e.g.
+	// ARRAY [1..3] OF STRING(10), or nil.
+	ElementLength Expression
 }
 
 // expressionNode marks ArrayDefinition as an expression node.
@@ -1988,6 +1996,9 @@ func (ad *ArrayDefinition) String() string {
 	out.WriteString("] OF ")
 	if ad.DataType != nil {
 		out.WriteString(ad.DataType.String())
+		if ad.ElementLength != nil {
+			out.WriteString("[" + ad.ElementLength.String() + "]")
+		}
 	}
 
 	return out.String()
@@ -2030,6 +2041,7 @@ type FunctionDeclaration struct {
 	Token           token.Token // The 'FUNCTION' token
 	Name            *Identifier
 	ReturnType      *TypeSpecifier
+	ReturnLength    Expression // The length of a STRING or WSTRING result, e.g. STRING(80), or nil
 	VarInputs       []*VarDeclStatement
 	VarOutputs      []*VarDeclStatement
 	VarInOuts       []*VarDeclStatement
@@ -2060,6 +2072,9 @@ func (fd *FunctionDeclaration) String() string {
 	out.WriteString(" : ")
 	if fd.ReturnType != nil {
 		out.WriteString(fd.ReturnType.String())
+		if fd.ReturnLength != nil {
+			out.WriteString("[" + fd.ReturnLength.String() + "]")
+		}
 	}
 	out.WriteString("\n")
 	// Simplified string representation for now
@@ -2608,4 +2623,26 @@ func withLiteralPrefix(tok token.Token, short, value string) string {
 		prefix = short
 	}
 	return prefix + "#" + value
+}
+
+// BitAccessExpression reads or writes one bit of an integer or bit string
+// variable: `flags.3`, which IEC 61131-3 also writes `flags.%X3`. Bit 0 is
+// the least significant.
+type BitAccessExpression struct {
+	Token  token.Token // The '.' token
+	Target Expression
+	Bit    int64
+}
+
+func (ba *BitAccessExpression) expressionNode() {}
+
+// Pos returns the position of the '.' token.
+func (ba *BitAccessExpression) Pos() (int, int) { return ba.Token.Row, ba.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (ba *BitAccessExpression) TokenLiteral() string { return ba.Token.Literal }
+
+// String returns the bit access as written, e.g. flags.3.
+func (ba *BitAccessExpression) String() string {
+	return fmt.Sprintf("%s.%d", ba.Target.String(), ba.Bit)
 }

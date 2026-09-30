@@ -151,3 +151,33 @@ func TestNamespacedEnumLiterals(t *testing.T) {
 		{"NAMESPACE Lib TYPE Mode : (Idle, Busy); END_TYPE END_NAMESPACE VAR m : Lib.Mode; END_VAR m := Lib.Mode#Busy; m = Lib.Mode#Busy;", true},
 	})
 }
+
+// An IF leaves the stack as it found it, whichever branch runs, at the top
+// level and in a loop.
+func TestIfKeepsTheStackBalanced(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR b : BOOL := TRUE; c : INT; END_VAR IF b THEN c := 5; END_IF c;", 5},
+		{"VAR b : BOOL; c : INT := 1; END_VAR IF b THEN c := 5; ELSIF NOT b THEN c := 7; END_IF; c;", 7},
+		// Many IFs that do not run, and many that do, in a loop.
+		{"FUNCTION F : INT VAR i : INT; n : INT; END_VAR FOR i := 1 TO 5000 DO IF i > 9000 THEN n := n + 1; END_IF; IF i > 0 THEN n := n + 1; END_IF; END_FOR F := n; END_FUNCTION F();", 5000},
+	})
+}
+
+// A bit of an integer or bit string is read and written as a BOOL; the
+// variable keeps its type.
+func TestBitAccess(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR x : BYTE := 16#0A; END_VAR x.3;", true},
+		{"VAR x : BYTE := 16#0A; END_VAR x.0;", false},
+		{"VAR x : INT := -1; END_VAR x.15 := FALSE; x;", 32767},
+		{"VAR x : INT := 5; END_VAR x.15 := TRUE; x;", -32763},
+		{"VAR a : ARRAY[0..1] OF INT; END_VAR a[1].2 := TRUE; a[1];", 4},
+		{"FUNCTION_BLOCK Fb VAR_OUTPUT f : INT; END_VAR f.1 := TRUE; END_FUNCTION_BLOCK VAR fb : Fb; END_VAR fb(); fb.f;", 2},
+		{"VAR x : BYTE := 16#0A; b : BOOL; END_VAR IF x.1 AND NOT x.0 THEN b := TRUE; END_IF b;", true},
+	})
+	runVmErrorTests(t, []vmErrorTestCase{
+		{"VAR x : INT; END_VAR x.16;", "bit 16 is outside the 16 bits of INT"},
+		{"VAR x : INT; END_VAR x.20 := TRUE;", "bit 20 is outside the 16 bits of INT"},
+		{"VAR x : REAL; END_VAR x.1;", "bit access needs an integer or bit string, got LREAL"},
+	})
+}

@@ -1090,3 +1090,23 @@ FUNCTION Inc2 : INT VAR_INPUT k : INT; END_VAR Inc2 := k; END_FUNCTION`,
 		"f.o = (((f.Inc(2) + f.Inc(3)) + f.Inc(4)) + f.Twice(1))",
 		"Twice = (f.Inc(k) * 2)")
 }
+
+// A bit is read as a BOOL and written by setting or clearing it.
+func TestBitAccess(t *testing.T) {
+	checkContains(t, `FUNCTION_BLOCK Fb VAR_OUTPUT f : INT; END_VAR f.1 := TRUE; END_FUNCTION_BLOCK
+PROGRAM P VAR x : BYTE := 16#0A; a : ARRAY[0..1] OF WORD; b : BOOL; fb : Fb; END_VAR
+  b := x.3 AND NOT x.0; a[1].15 := b; b := fb.f.1;
+END_PROGRAM`,
+		"f.f = iec.INT(uint64(f.f) | 1<<1)",
+		"p.b = (iec.BOOL(uint64(p.x)>>3&1 == 1) && (!iec.BOOL(uint64(p.x)>>0&1 == 1)))",
+		"p.a[1] = iec.WORD(uint64(p.a[1]) | 1<<15)", "p.a[1] = iec.WORD(uint64(p.a[1]) &^ (1 << 15))",
+		"p.b = iec.BOOL(uint64(p.fb.f)>>1&1 == 1)")
+	for _, tt := range []struct{ src, want string }{
+		{"PROGRAM P VAR r : REAL; b : BOOL; END_VAR b := r.1; END_PROGRAM", "needs an integer or bit string"},
+		{"PROGRAM P VAR x : BYTE; END_VAR x.8 := TRUE; END_PROGRAM", "bit 8 is outside the 8 bits of x"},
+	} {
+		if _, err := transpileSource(t, tt.src); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: expected an error containing %q, got %v", tt.src, tt.want, err)
+		}
+	}
+}

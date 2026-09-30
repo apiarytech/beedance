@@ -49,6 +49,9 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		node.Struct, _ = Modify(node.Struct, modifier).(Expression)
 		node.Member, _ = Modify(node.Member, modifier).(*Identifier)
 
+	case *BitAccessExpression:
+		node.Target, _ = Modify(node.Target, modifier).(Expression)
+
 	case *PrefixExpression:
 		node.Right, _ = Modify(node.Right, modifier).(Expression)
 
