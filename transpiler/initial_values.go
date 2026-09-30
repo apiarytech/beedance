@@ -808,6 +808,15 @@ type callSignature struct {
 // lookupCallSignature returns the signature of a call's callee when it is a
 // user-defined function, or a method of a function block instance.
 func (t *Transpiler) lookupCallSignature(callee ast.Expression) (*callSignature, bool) {
+	// A method of the function block being transpiled, called by name or
+	// through THIS.
+	if method := t.ownMethod(callee); method != nil {
+		sig := &callSignature{name: method.Name.Value, inputs: method.VarInputs, inOuts: method.VarInOuts, outputs: method.VarOutputs}
+		if method.ReturnType != nil {
+			sig.returnType = method.ReturnType
+		}
+		return sig, true
+	}
 	switch fn := callee.(type) {
 	case *ast.Identifier:
 		fd, ok := t.lookupType(fn.Value).(*ast.FunctionDeclaration)
@@ -983,6 +992,9 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 // calleeString transpiles the function part of a call: a function name as
 // written, or a method with its instance.
 func (t *Transpiler) calleeString(fn ast.Expression) (string, error) {
+	if method := t.ownMethod(fn); method != nil {
+		return t.programVarName + "." + method.Name.Value, nil
+	}
 	if ident, ok := fn.(*ast.Identifier); ok {
 		if node, ok := t.lookupType(ident.Value).(*ast.FunctionDeclaration); ok {
 			return node.Name.Value, nil
@@ -1145,4 +1157,26 @@ func (t *Transpiler) indexLowerBound(exp ast.Expression) int64 {
 	}
 	low, _ := constantInteger(infix.Left)
 	return low
+}
+
+// ownMethod returns the method a call names when it calls a method of the
+// function block being transpiled, by its name (Inc) or through THIS
+// (THIS.Inc), or nil. A function of the same name takes precedence over a
+// bare name.
+func (t *Transpiler) ownMethod(callee ast.Expression) *ast.MethodImplementation {
+	if t.currentFuncBlock == nil {
+		return nil
+	}
+	switch fn := callee.(type) {
+	case *ast.Identifier:
+		if _, isFunction := t.lookupType(fn.Value).(*ast.FunctionDeclaration); isFunction {
+			return nil
+		}
+		return t.findMethodOnFBChain(t.currentFuncBlock, fn.Value)
+	case *ast.MemberAccessExpression:
+		if _, isThis := fn.Struct.(*ast.ThisExpression); isThis {
+			return t.findMethodOnFBChain(t.currentFuncBlock, fn.Member.Value)
+		}
+	}
+	return nil
 }

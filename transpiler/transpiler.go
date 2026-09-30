@@ -179,6 +179,8 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		expandedAST := evaluator.ExpandMacros(node, macroEnv).(*ast.Program)
 		// Go has no namespaces within a package; see namespaces.go.
 		expandedAST = flattenNamespaces(expandedAST)
+		// Names Go cannot use, such as `go` or `len`; see go_names.go.
+		expandedAST = renameForGo(expandedAST)
 
 		// Now, continue with code generation on the expanded AST.
 		t.buildTypeInfo(expandedAST) // First pass to collect type definitions
