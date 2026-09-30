@@ -580,18 +580,10 @@ func dataTypeFromName(name string) DataType {
 	}
 }
 
-// constantText returns a constant as IEC 61131-3 source: a literal with its
-// type prefix, such as T#20ms, and a negative number without parentheses.
+// constantText returns a constant as IEC 61131-3 source: a literal as
+// written, such as T#20ms, and a negative number without parentheses.
 func constantText(expr ast.Expression) string {
 	switch e := expr.(type) {
-	case *ast.TimeLiteral:
-		return "T#" + e.Value
-	case *ast.DateLiteral:
-		return "D#" + e.Value
-	case *ast.TimeOfDayLiteral:
-		return "TOD#" + e.Value
-	case *ast.DateAndTimeLiteral:
-		return "DT#" + e.Value
 	case *ast.PrefixExpression:
 		if e.Operator == "-" || e.Operator == "+" {
 			return e.Operator + constantText(e.Right)
