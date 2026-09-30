@@ -959,6 +959,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.AssignmentStatement:
 		// Arrays and structures are assigned by value.
+		// A bit assignment, flags.3 := value, stores the whole target.
+		node = assignBit(node)
 		node = c.copyAssignedValue(node)
 		// An array assigned to a variable declared with lower bounds, e.g.
 		// ARRAY[1..3], takes those bounds, whatever array it came from.
@@ -1908,6 +1910,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(code.OpReturnValue)
 
+	// A bit of an integer or bit string, e.g. flags.3.
+	case *ast.BitAccessExpression:
+		return c.compileBitAccess(node, nil)
+	case *bitSetValue:
+		return c.compileBitAccess(node.BitAccessExpression, node.value)
+
 	// An assigned array or structure is copied; see copyAssignedValue.
 	case *copiedValue:
 		if err := c.Compile(node.Expression); err != nil {
@@ -2280,6 +2288,10 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 	switch e := expr.(type) {
 	case *copiedValue:
 		return c.getExpressionType(e.Expression)
+	case *ast.BitAccessExpression:
+		return object.BOOLEAN_OBJ, nil
+	case *bitSetValue:
+		return c.getExpressionType(e.Target)
 	case *ast.IntegerLiteral:
 		return object.LINT_OBJ, nil // Default to largest integer type for literals
 	case *ast.RealLiteral:

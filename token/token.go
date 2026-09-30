@@ -301,6 +301,7 @@ var keywords = map[string]TokenType{
 	"FUNCTION":           FUNCTION,
 	"END_FUNCTION":       END_FUNCTION,
 	"FUNCTION_BLOCK":     FUNCTION_BLOCK,
+	"FUNCTIONBLOCK":      FUNCTION_BLOCK, // CODESYS 2.3 also accepts this spelling.
 	"END_FUNCTION_BLOCK": END_FUNCTION_BLOCK,
 	"ACTION":             ACTION,
 	"END_ACTION":         END_ACTION,

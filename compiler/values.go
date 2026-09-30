@@ -16,10 +16,12 @@ package compiler
 // OpCopy makes the copy. Function block instances are not copied.
 
 import (
+	"fmt"
 	"strings"
 
 	"beedance/ast"
 	"beedance/code"
+	"beedance/object"
 )
 
 // copiedValue is an assignment's value that is copied once computed.
@@ -144,5 +146,50 @@ func (c *Compiler) prepareParameters(params []*ast.VarDeclStatement) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// bitSetValue is the value a bit assignment `flags.3 := value` stores in
+// its target: the target with the bit set to value.
+type bitSetValue struct {
+	*ast.BitAccessExpression
+	value ast.Expression
+}
+
+// assignBit rewrites a bit assignment, `flags.3 := value`, as an assignment
+// to the whole target, `flags := <flags with bit 3 set to value>`, which
+// stores it like any other assignment. Other assignments are unchanged.
+func assignBit(node *ast.AssignmentStatement) *ast.AssignmentStatement {
+	bit, ok := node.Left.(*ast.BitAccessExpression)
+	if !ok {
+		return node
+	}
+	rewritten := *node
+	rewritten.Left = bit.Target
+	rewritten.Value = &bitSetValue{BitAccessExpression: bit, value: node.Value}
+	return &rewritten
+}
+
+// compileBitAccess compiles a bit read, or the value of a bit write.
+func (c *Compiler) compileBitAccess(bit *ast.BitAccessExpression, value ast.Expression) error {
+	if bit.Bit < 0 || bit.Bit > 63 {
+		return fmt.Errorf("bit %d is outside any integer, in %s", bit.Bit, bit.String())
+	}
+	// The target's declared type, which the VM may hold in a wider integer.
+	typeOperand := 0
+	if typ, err := c.getExpressionType(bit.Target); err == nil && typ != "" {
+		typeOperand = c.addConstant(&object.String{Value: string(typ)}) + 1
+	}
+	if err := c.Compile(bit.Target); err != nil {
+		return err
+	}
+	if value == nil {
+		c.emit(code.OpGetBit, int(bit.Bit), typeOperand)
+		return nil
+	}
+	if err := c.Compile(value); err != nil {
+		return err
+	}
+	c.emit(code.OpSetBit, int(bit.Bit), typeOperand)
 	return nil
 }

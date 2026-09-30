@@ -365,3 +365,22 @@ func TestLiteralAndIdentifierNodes(t *testing.T) {
 		t.Errorf("a conversion name gives its builtin, got %v", fn)
 	}
 }
+
+// A bit of an integer or bit string is read and written as a BOOL; the
+// variable keeps its type. The VM's TestBitAccess checks the same programs.
+func TestBitAccess(t *testing.T) {
+	checkEval(t, []evalCase{
+		{"VAR x : BYTE := 16#0A; END_VAR x.3;", "true"},
+		{"VAR x : BYTE := 16#0A; END_VAR x.0;", "false"},
+		{"VAR x : INT := -1; END_VAR x.15 := FALSE; x;", "32767"},
+		{"VAR x : INT := 5; END_VAR x.15 := TRUE; x;", "-32763"},
+		{"VAR a : ARRAY[0..1] OF INT; END_VAR a[1].2 := TRUE; a[1];", "4"},
+		{"FUNCTION_BLOCK Fb VAR_OUTPUT f : INT; END_VAR f.1 := TRUE; END_FUNCTION_BLOCK VAR fb : Fb; END_VAR fb(); fb.f;", "2"},
+		{"VAR x : BYTE := 16#0A; b : BOOL; END_VAR IF x.1 AND NOT x.0 THEN b := TRUE; END_IF b;", "true"},
+		{"VAR x : INT := 0; END_VAR x.16;", "ERROR: bit 16 is outside the 16 bits of INT"},
+		{"VAR x : INT := 0; END_VAR x.20 := TRUE;", "ERROR: bit 20 is outside the 16 bits of INT"},
+		{"VAR x : REAL; END_VAR x.1;", "ERROR: bit access needs an integer or bit string"},
+		{"VAR x : BYTE; END_VAR missing.1;", "ERROR: identifier not found: missing"},
+		{"VAR x : BYTE; END_VAR missing.1 := TRUE;", "ERROR: identifier not found: missing"},
+	})
+}

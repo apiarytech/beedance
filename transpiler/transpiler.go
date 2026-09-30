@@ -2067,6 +2067,10 @@ func (t *Transpiler) isBitwiseType(expr ast.Expression) bool {
 // transpileAssignmentStatement transpiles an IEC 61131-3 assignment (`:=`) into a Go assignment (`=`).
 // transpileAssignmentStatement transpiles an IEC `:=` assignment to a Go `=` assignment.
 func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement) error {
+	// A bit assignment, flags.3 := value.
+	if bit, ok := stmt.Left.(*ast.BitAccessExpression); ok {
+		return t.transpileBitWrite(bit, stmt.Value)
+	}
 	// Assignment to the function's name sets its result, which is a named Go
 	// result of the same name; it does not return.
 	if ident, ok := stmt.Left.(*ast.Identifier); ok && t.currentFunc != nil && ident.Value == t.currentFunc.Name.Value {
@@ -2282,6 +2286,13 @@ func (t *Transpiler) getTypeDeclaration(typeName string) *ast.TypeDeclaration {
 // for a member with the given name and returns its `TypeDeclaration`.
 // findMemberType looks inside a STRUCT definition for a specific member and returns its type declaration.
 func (t *Transpiler) findMemberType(structDefNode ast.Node, memberName string) *ast.TypeDeclaration {
+	// A function block's variable, such as an output read as fb.Q.
+	if fb, isFB := structDefNode.(*ast.FunctionBlockDeclaration); isFB {
+		if decl := t.findFunctionBlockVar(fb, memberName); decl != nil {
+			return &ast.TypeDeclaration{Name: decl.Name, DataType: decl.DataType}
+		}
+		return nil
+	}
 	typeDecl, ok := structDefNode.(*ast.TypeDeclaration)
 	if !ok {
 		return nil
@@ -2450,6 +2461,8 @@ func (t *Transpiler) transpileExitStatement(stmt *ast.ExitStatement) error {
 // corresponding Go syntax.
 func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	switch exp := exp.(type) {
+	case *ast.BitAccessExpression:
+		return t.transpileBitRead(exp)
 	case *ast.Identifier:
 		// If we are inside a property setter, check if the identifier is the
 		// property name itself or `value`, which act as the implicit input variable.

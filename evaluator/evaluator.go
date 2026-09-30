@@ -407,6 +407,18 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// A MemberAccessExpression (e.g., MyTimer.Q) accesses a field of a struct or function block instance.
 		return evalMemberAccessExpression(node, env)
 
+	case *ast.BitAccessExpression:
+		// One bit of an integer or bit string, e.g. flags.3.
+		target := Eval(node.Target, env)
+		if isError(target) {
+			return target
+		}
+		bit, err := object.GetBit(target, node.Bit)
+		if err != nil {
+			return newError(node, "%s", err)
+		}
+		return nativeBoolToBooleanObject(bit)
+
 	case *ast.IfStatement:
 		return evalIfStatement(node, env)
 	case *ast.ForLoopStatement:
@@ -1338,6 +1350,17 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 	// Arrays and structures are assigned by value.
 	val = object.CopyValue(val)
 	switch target := left.(type) {
+	case *ast.BitAccessExpression:
+		// Writing one bit sets it in the variable, which keeps its type.
+		current := Eval(target.Target, env)
+		if isError(current) {
+			return current
+		}
+		updated, err := object.SetBit(current, target.Bit, isTruthy(val))
+		if err != nil {
+			return newError(node, "%s", err)
+		}
+		return assignValue(node, target.Target, updated, env)
 	case *ast.Identifier:
 		if existing, ok := env.Get(target.Value); ok {
 			switch v := existing.(type) {

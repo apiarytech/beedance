@@ -77,6 +77,7 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 		return nil
 	}
 	stmt.ReturnType = ts
+	stmt.ReturnLength = p.parseStringLength(ts)
 
 	p.nextToken() // Consume return type
 	if p.curTokenIs(token.SEMICOLON) {

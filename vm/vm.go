@@ -252,6 +252,29 @@ func (vm *VM) Run() (runErr error) {
 			// Arrays and structures are assigned and passed by value.
 			vm.stack[vm.sp-1] = object.CopyValue(vm.stack[vm.sp-1])
 
+		case code.OpGetBit:
+			// A bit of an integer or bit string, e.g. flags.3.
+			n := int64(code.ReadUint8(ins[ip+1:]))
+			typeName := vm.bitTypeName(code.ReadUint16(ins[ip+2:]))
+			vm.currentFrame().ip += 3
+			bit, bitErr := object.GetBitAs(vm.stack[vm.sp-1], n, typeName)
+			if bitErr != nil {
+				return bitErr
+			}
+			vm.stack[vm.sp-1] = nativeBoolToBooleanObject(bit)
+
+		case code.OpSetBit:
+			// The integer or bit string with one bit set: flags.3 := value.
+			n := int64(code.ReadUint8(ins[ip+1:]))
+			typeName := vm.bitTypeName(code.ReadUint16(ins[ip+2:]))
+			vm.currentFrame().ip += 3
+			value := vm.pop()
+			updated, bitErr := object.SetBitAs(vm.stack[vm.sp-1], n, object.IsTruthy(value), typeName)
+			if bitErr != nil {
+				return bitErr
+			}
+			vm.stack[vm.sp-1] = updated
+
 		case code.OpHash:
 			// OpHash creates a hash object from key-value pairs on the stack.
 			numElements := int(code.ReadUint16(ins[ip+1:]))
@@ -1306,4 +1329,16 @@ func setArrayBounds(value object.Object, bounds []object.Object) {
 	for _, element := range array.Elements {
 		setArrayBounds(element, bounds[1:])
 	}
+}
+
+// bitTypeName returns the declared type a bit instruction names: its operand
+// is 1 + the constant index of the type's name, or 0 for none.
+func (vm *VM) bitTypeName(operand uint16) string {
+	if operand == 0 {
+		return ""
+	}
+	if name, ok := vm.constants[operand-1].(*object.String); ok {
+		return name.Value
+	}
+	return ""
 }

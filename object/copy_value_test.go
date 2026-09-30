@@ -46,3 +46,64 @@ func TestCopyValue(t *testing.T) {
 		t.Error("a number was copied")
 	}
 }
+
+func TestBits(t *testing.T) {
+	values := []Object{&SInt{Value: -1}, &Int{Value: -1}, &DInt{Value: -1}, &LInt{Value: -1}, &USInt{Value: 255}, &UInt{Value: 65535},
+		&UDInt{Value: 1<<32 - 1}, &ULInt{Value: 1<<64 - 1}, &Byte{Value: 255}, &Word{Value: 65535}, &DWord{Value: 1<<32 - 1},
+		&LWord{Value: 1<<64 - 1}, &BitString{Value: 255, Width: 8}}
+	for _, v := range values {
+		on, err := GetBit(v, 0)
+		if err != nil || !on {
+			t.Errorf("%T bit 0: %v %v", v, on, err)
+		}
+		off, err := SetBit(v, 0, false)
+		if err != nil || off.Type() != v.Type() {
+			t.Fatalf("%T: %v %v", v, off, err)
+		}
+		if bit, _ := GetBit(off, 0); bit {
+			t.Errorf("%T: bit 0 still set", v)
+		}
+		if _, err := GetBit(v, 64); err == nil {
+			t.Errorf("%T: bit 64 accepted", v)
+		}
+		if _, err := SetBit(v, -1, true); err == nil {
+			t.Errorf("%T: bit -1 accepted", v)
+		}
+	}
+	for _, bad := range []Object{&Real{Value: 1}, &String{Value: "x"}} {
+		if _, err := GetBit(bad, 0); err == nil {
+			t.Errorf("%T: bit access accepted", bad)
+		}
+		if _, err := SetBit(bad, 0, true); err == nil {
+			t.Errorf("%T: bit access accepted", bad)
+		}
+	}
+	// A value held wider than its declared type keeps the type's width and sign.
+	if v, _ := SetBitAs(&LInt{Value: -1}, 15, false, "INT"); v.(*LInt).Value != 32767 {
+		t.Errorf("INT -1 without bit 15 = %v", v)
+	}
+	if v, _ := SetBitAs(&LInt{Value: 5}, 15, true, "INT"); v.(*LInt).Value != -32763 {
+		t.Errorf("INT 5 with bit 15 = %v", v)
+	}
+	if v, _ := SetBitAs(&ULInt{Value: 1}, 7, true, "BYTE"); v.(*ULInt).Value != 129 {
+		t.Errorf("BYTE 1 with bit 7 = %v", v)
+	}
+	if v, _ := SetBitAs(&Int{Value: 1}, 3, true, "INT"); v.(*Int).Value != 9 {
+		t.Errorf("INT 1 with bit 3 = %v", v)
+	}
+	if v, _ := SetBitAs(&LInt{Value: 1}, 63, true, "LINT"); v.(*LInt).Value >= 0 {
+		t.Errorf("LINT with bit 63 = %v", v)
+	}
+	if _, err := SetBitAs(&LInt{}, 16, true, "INT"); err == nil {
+		t.Error("bit 16 of INT accepted")
+	}
+	if _, err := GetBitAs(&LInt{}, 8, "sint"); err == nil {
+		t.Error("bit 8 of SINT accepted")
+	}
+	if on, err := GetBitAs(&LInt{Value: 4}, 2, ""); err != nil || !on {
+		t.Errorf("untyped bit 2: %v %v", on, err)
+	}
+	if got := bitTypeName(&BitString{Value: 0, Width: 16}); got != "WORD" {
+		t.Errorf("bit string name = %s", got)
+	}
+}
