@@ -139,12 +139,9 @@ func (l *Lexer) NextToken() token.Token {
 	case '(':
 		if l.peekChar() == '*' {
 			// This is the start of a comment, skip it and get the next token
-			comment, terminated, nested := l.readBlockComment()
+			comment, terminated := l.readBlockComment()
 			if !terminated {
 				return token.Token{Type: token.UNTERMINATED_COMMENT, Literal: "(*", Row: startLine, Column: startCol, Pos: startPos}
-			}
-			if nested {
-				return token.Token{Type: token.ILLEGAL, Literal: "nested comment", Row: startLine, Column: startCol, Pos: startPos}
 			}
 			tok.Type = token.COMMENT
 			tok.Literal = comment
@@ -240,34 +237,36 @@ func (l *Lexer) NextToken() token.Token {
 	return tok
 }
 
-// readBlockComment consumes a multi-line block comment, which starts with `(*`
-// and ends with `*)`. It returns the content of the comment and flags indicating
-// whether the comment was properly terminated and if it contained nested comments.
-func (l *Lexer) readBlockComment() (string, bool, bool) {
-	isNested := false
+// readBlockComment consumes a block comment, which starts with `(*` and ends
+// with the matching `*)`. Comments nest, as IEC 61131-3 allows and CODESYS
+// does: `(* outer (* inner *) still outer *)` is one comment. It returns the
+// comment's content and whether it was terminated.
+func (l *Lexer) readBlockComment() (string, bool) {
 	l.readChar() // consume '('
 	l.readChar() // consume '*'
 	position := l.position
+	depth := 1
 
 	for l.ch != 0 {
-		// Check for nested comment start
-		if l.ch == '(' && l.peekChar() == '*' {
-			isNested = true
-			// We've found a nested comment, but we continue scanning for the end
-			// to allow the lexer to find its place. The caller will report the error.
-		}
-
-		if l.ch == '*' && l.peekChar() == ')' {
-			comment := l.input[position:l.position]
+		switch {
+		case l.ch == '(' && l.peekChar() == '*':
+			depth++
 			l.readChar()
+		case l.ch == '*' && l.peekChar() == ')':
+			depth--
+			if depth == 0 {
+				comment := l.input[position:l.position]
+				l.readChar()
+				l.readChar()
+				return comment, true
+			}
 			l.readChar()
-			return comment, true, isNested // Terminated successfully. Report if nesting was found.
 		}
 		l.readChar()
 	}
 
-	// If we reach here, it means l.ch is 0 (EOF) but we haven't found '*)'
-	return l.input[position:l.position], false, isNested
+	// The input ended before the comment did.
+	return l.input[position:l.position], false
 }
 
 // readSingleLineComment consumes a single-line comment, which starts with `//` and ends at the newline.
