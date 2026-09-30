@@ -930,6 +930,9 @@ func (fbi *FunctionBlockInstance) Type() ObjectType { return FUNCTION_BLOCK_INST
 
 // Inspect returns a string representation of the function block instance.
 func (fbi *FunctionBlockInstance) Inspect() string {
+	if fbi.Definition == nil || fbi.Definition.Name == nil {
+		return "FUNCTION_BLOCK_INSTANCE(standard)" // An instance of a standard function block, such as TON.
+	}
 	return fmt.Sprintf("FUNCTION_BLOCK_INSTANCE(%s)", fbi.Definition.Name.Value)
 }
 

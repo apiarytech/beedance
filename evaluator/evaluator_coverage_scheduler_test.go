@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -78,5 +79,25 @@ func TestSchedulerCycles(t *testing.T) {
 func TestNewSchedulerWithoutResource(t *testing.T) {
 	if _, err := NewScheduler(object.NewEnvironment()); err == nil || !strings.Contains(err.Message, "no resource found in configuration") {
 		t.Fatalf("expected a missing-resource error, got %v", err)
+	}
+}
+
+// RunScheduler runs scan cycles until its context is done.
+func TestRunScheduler(t *testing.T) {
+	env := object.NewEnvironment()
+	if result := testEvalWithEnv(t, schedulerConfig, env); isError(result) {
+		t.Fatalf("configuration evaluation failed: %s", result.Inspect())
+	}
+	s, err := NewScheduler(env)
+	if err != nil {
+		t.Fatalf("NewScheduler failed: %s", err.Inspect())
+	}
+	env.Set("trig", FALSE)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	RunScheduler(ctx, s, env, time.Millisecond)
+	count, _ := programInstanceEnv(t, env, "R1", "P1").Get("COUNT")
+	if count.Inspect() == "0" {
+		t.Error("the scheduler ran no cycles")
 	}
 }

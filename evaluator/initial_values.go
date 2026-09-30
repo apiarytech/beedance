@@ -23,6 +23,13 @@ import (
 
 // lookupTypeDeclaration finds a user-defined TYPE by name, ignoring case.
 func lookupTypeDeclaration(typeName string, env *object.Environment) (*ast.TypeDeclaration, bool) {
+	// A type qualified by its namespace, such as Lib.Mode, is declared in
+	// that namespace's environment.
+	if nsName, rest, qualified := strings.Cut(typeName, "."); qualified {
+		if ns, ok := lookupNamespace(nsName, env); ok {
+			return lookupTypeDeclaration(rest, ns.Env)
+		}
+	}
 	quoteObj, ok := env.Get("_type_" + strings.ToUpper(typeName))
 	if !ok {
 		return nil, false
@@ -457,4 +464,22 @@ func stampArrayParameters(params []*ast.VarDeclStatement, env *object.Environmen
 			object.SetLowerBounds(value, declaredLowerBounds(def, env))
 		}
 	}
+}
+
+// lookupNamespace finds a namespace by name, ignoring case, in env or an
+// enclosing environment.
+func lookupNamespace(name string, env *object.Environment) (*object.Namespace, bool) {
+	for e := env; e != nil; e = e.Outer() {
+		for _, n := range e.Names() {
+			if !strings.EqualFold(n, name) {
+				continue
+			}
+			if obj, ok := e.GetRaw(n); ok {
+				if ns, isNamespace := obj.(*object.Namespace); isNamespace {
+					return ns, true
+				}
+			}
+		}
+	}
+	return nil, false
 }

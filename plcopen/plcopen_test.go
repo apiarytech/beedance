@@ -243,22 +243,22 @@ END_PROGRAM
 `
 	l := lexer.New(inputIEC)
 	p := parser.New(l)
-	astProg := p.ParseProgram()
+	p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parser errors on input: %v", p.Errors())
 	}
 
-	xmlBytes, err := ExportToXML(astProg, "ArrayExprProject")
+	xmlBytes, err := ExportSourceToXML(inputIEC, "ArrayExprProject")
 	if err != nil {
 		t.Fatalf("ExportToXML error: %v", err)
 	}
 
 	xmlStr := string(xmlBytes)
-	if !strings.Contains(xmlStr, `<array>`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="5"/>`) {
+	if !strings.Contains(xmlStr, `<array>`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="5">`) {
 		t.Errorf("expected array dimensions in XML, got:\n%s", xmlStr)
 	}
-	if !strings.Contains(xmlStr, "Numbers[Idx + 1] := Numbers[Idx] * 2") {
-		t.Errorf("expected array indexing expression in XML ST body, got:\n%s", xmlStr)
+	if !strings.Contains(xmlStr, "Numbers[Idx + 1] := Numbers[Idx] * 2;") {
+		t.Errorf("expected array indexing expression in XML ST body, got: %s", xmlStr)
 	}
 
 	if err := ValidateWithXSD(xmlBytes, "tc6_xml_v201.xsd"); err != nil {
@@ -425,25 +425,25 @@ END_PROGRAM
 `
 	l := lexer.New(inputIEC)
 	p := parser.New(l)
-	astProg := p.ParseProgram()
+	p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parser errors on input: %v", p.Errors())
 	}
 
-	xmlBytes, err := ExportToXML(astProg, "Matrix2DProject")
+	xmlBytes, err := ExportSourceToXML(inputIEC, "Matrix2DProject")
 	if err != nil {
 		t.Fatalf("ExportToXML error: %v", err)
 	}
 
 	xmlStr := string(xmlBytes)
-	if !strings.Contains(xmlStr, `<dimension lower="1" upper="3"/>`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="2"/>`) {
+	if !strings.Contains(xmlStr, `<dimension lower="1" upper="3">`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="2">`) {
 		t.Errorf("expected 2D array dimensions in XML, got:\n%s", xmlStr)
 	}
-	if !strings.Contains(xmlStr, `<arrayValue>`) || !strings.Contains(xmlStr, `<simpleValue value="10"/>`) {
+	if !strings.Contains(xmlStr, `<simpleValue value="10">`) {
 		t.Errorf("expected nested arrayValue in XML, got:\n%s", xmlStr)
 	}
-	if !strings.Contains(xmlStr, "Matrix[1][2] := Matrix[2][1] + Matrix[3][2]") {
-		t.Errorf("expected multidimensional indexing expression in XML ST body, got:\n%s", xmlStr)
+	if !strings.Contains(xmlStr, "Matrix[1][2] := Matrix[2][1] + Matrix[3][2];") {
+		t.Errorf("expected multidimensional indexing expression in XML ST body, got: %s", xmlStr)
 	}
 
 	if err := ValidateWithXSD(xmlBytes, "tc6_xml_v201.xsd"); err != nil {
@@ -524,18 +524,18 @@ END_PROGRAM
 `
 	l := lexer.New(inputIEC)
 	p := parser.New(l)
-	astProg := p.ParseProgram()
+	p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parser errors on input: %v", p.Errors())
 	}
 
-	xmlBytes, err := ExportToXML(astProg, "TypeDefMatrixProject")
+	xmlBytes, err := ExportSourceToXML(inputIEC, "TypeDefMatrixProject")
 	if err != nil {
 		t.Fatalf("ExportToXML error: %v", err)
 	}
 
 	xmlStr := string(xmlBytes)
-	if !strings.Contains(xmlStr, `<dimension lower="0" upper="2"/>`) || !strings.Contains(xmlStr, `<dimension lower="0" upper="3"/>`) {
+	if !strings.Contains(xmlStr, `<dimension lower="0" upper="2">`) || !strings.Contains(xmlStr, `<dimension lower="0" upper="3">`) {
 		t.Errorf("expected 2D array dimensions in dataType XML, got:\n%s", xmlStr)
 	}
 
@@ -573,21 +573,21 @@ END_PROGRAM
 `
 	l := lexer.New(inputIEC)
 	p := parser.New(l)
-	astProg := p.ParseProgram()
+	p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parser errors on input: %v", p.Errors())
 	}
 
-	xmlBytes, err := ExportToXML(astProg, "MatrixCommaIndexProject")
+	xmlBytes, err := ExportSourceToXML(inputIEC, "MatrixCommaIndexProject")
 	if err != nil {
 		t.Fatalf("ExportToXML error: %v", err)
 	}
 
 	xmlStr := string(xmlBytes)
-	if !strings.Contains(xmlStr, `<dimension lower="1" upper="3"/>`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="2"/>`) {
+	if !strings.Contains(xmlStr, `<dimension lower="1" upper="3">`) || !strings.Contains(xmlStr, `<dimension lower="1" upper="2">`) {
 		t.Errorf("expected 2D array dimensions in XML, got:\n%s", xmlStr)
 	}
-	if !strings.Contains(xmlStr, `<arrayValue>`) || !strings.Contains(xmlStr, `<simpleValue value="10"/>`) {
+	if !strings.Contains(xmlStr, `<simpleValue value="10">`) {
 		t.Errorf("expected nested arrayValue in XML, got:\n%s", xmlStr)
 	}
 

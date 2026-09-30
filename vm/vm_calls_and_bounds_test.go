@@ -144,3 +144,10 @@ func TestArrayAndStructureCopies(t *testing.T) {
 		{"FUNCTION F : INT VAR_IN_OUT v : ARRAY[0..2] OF INT; END_VAR v[0] := 100; F := 0; END_FUNCTION VAR a : ARRAY[0..2] OF INT := [1, 2, 3]; END_VAR F(a); a[0];", 100},
 	})
 }
+
+// A type declared in a namespace is named with its namespace.
+func TestNamespacedEnumLiterals(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"NAMESPACE Lib TYPE Mode : (Idle, Busy); END_TYPE END_NAMESPACE VAR m : Lib.Mode; END_VAR m := Lib.Mode#Busy; m = Lib.Mode#Busy;", true},
+	})
+}

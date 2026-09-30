@@ -2247,11 +2247,16 @@ func (p *Parser) parseTypedLiteralExpression(left ast.Expression) ast.Expression
 		return nil
 	}
 
-	// The type name must be an identifier.
+	// The type name must be an identifier, or one qualified by its
+	// namespace, e.g. `Lib.Mode#Busy`.
 	typeIdent, ok := left.(*ast.Identifier)
 	if !ok {
-		p.currentError("left side of # for typed literal must be a type identifier, got %T", left) // cspell:disable-line
-		return nil
+		if qualified, isQualified := qualifiedName(left); isQualified {
+			typeIdent = qualified
+		} else {
+			p.currentError("left side of # for typed literal must be a type identifier, got %T", left) // cspell:disable-line
+			return nil
+		}
 	}
 	lit := &ast.TypedLiteral{Token: typeIdent.Token}
 	lit.TypeName = typeIdent.Value
@@ -3220,4 +3225,20 @@ func (p *Parser) parseSFCBody(end token.TokenType) *ast.SFCProgram {
 		}
 	}
 	return sfc
+}
+
+// qualifiedName returns a dotted name such as `Lib.Inner.Mode`, written as
+// member accesses of identifiers, as one identifier holding the whole name.
+func qualifiedName(e ast.Expression) (*ast.Identifier, bool) {
+	switch v := e.(type) {
+	case *ast.Identifier:
+		return v, true
+	case *ast.MemberAccessExpression:
+		owner, ok := qualifiedName(v.Struct)
+		if !ok || v.Member == nil {
+			return nil, false
+		}
+		return &ast.Identifier{Token: owner.Token, Value: owner.Value + "." + v.Member.Value}, true
+	}
+	return nil, false
 }

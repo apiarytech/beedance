@@ -13,10 +13,10 @@ package plcopen
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
-	"html"
+	"io"
 	"os"
-	"regexp"
 	"strings"
 
 	"beedance/ast"
@@ -33,7 +33,8 @@ func Import(xmlData []byte) (*Project, error) {
 	return &proj, nil
 }
 
-// ImportToIECText converts PLCopen XML into valid IEC 61131-3 Structured Text.
+// ImportToIECText converts PLCopen XML into IEC 61131-3 Structured Text.
+// POUs with graphical (FBD, LD or SFC) bodies cannot be converted.
 func ImportToIECText(xmlData []byte) (string, error) {
 	proj, err := Import(xmlData)
 	if err != nil {
@@ -46,25 +47,33 @@ func ImportToIECText(xmlData []byte) (string, error) {
 	if len(proj.Types.DataTypes.DataTypes) > 0 {
 		buf.WriteString("TYPE\n")
 		for _, dt := range proj.Types.DataTypes.DataTypes {
-			buf.WriteString(fmt.Sprintf("\t%s : %s;\n", dt.Name, dt.BaseType.String()))
+			initVal := ""
+			if s := dt.InitialValue.String(); s != "" {
+				initVal = " := " + s
+			}
+			fmt.Fprintf(&buf, "\t%s : %s%s;\n", dt.Name, dt.BaseType.String(), initVal)
 		}
 		buf.WriteString("END_TYPE\n\n")
 	}
 
 	// 2. POUs
 	for _, pou := range proj.Types.Pous.Pous {
-		pouType := strings.ToLower(pou.PouType)
-		switch pouType {
+		var end string
+		switch pou.PouType {
 		case "function":
-			retType := "BOOL"
-			if pou.Interface != nil && pou.Interface.ReturnType != nil {
-				retType = pou.Interface.ReturnType.String()
+			if pou.Interface == nil || pou.Interface.ReturnType == nil {
+				return "", fmt.Errorf("function '%s' has no return type", pou.Name)
 			}
-			buf.WriteString(fmt.Sprintf("FUNCTION %s : %s\n", pou.Name, retType))
-		case "functionblock":
-			buf.WriteString(fmt.Sprintf("FUNCTION_BLOCK %s\n", pou.Name))
+			fmt.Fprintf(&buf, "FUNCTION %s : %s\n", pou.Name, pou.Interface.ReturnType.String())
+			end = "END_FUNCTION"
+		case "functionBlock":
+			fmt.Fprintf(&buf, "FUNCTION_BLOCK %s\n", pou.Name)
+			end = "END_FUNCTION_BLOCK"
+		case "program":
+			fmt.Fprintf(&buf, "PROGRAM %s\n", pou.Name)
+			end = "END_PROGRAM"
 		default:
-			buf.WriteString(fmt.Sprintf("PROGRAM %s\n", pou.Name))
+			return "", fmt.Errorf("pou '%s': unknown pouType '%s'", pou.Name, pou.PouType)
 		}
 
 		if pou.Interface != nil {
@@ -78,46 +87,54 @@ func ImportToIECText(xmlData []byte) (string, error) {
 			writeVarLists(&buf, "VAR_ACCESS", pou.Interface.AccessVars)
 		}
 
-		bodyText := ""
-		if pou.Body.ST != nil {
-			bodyText = CleanFormattedText(pou.Body.ST.Text)
-		} else if pou.Body.IL != nil {
-			bodyText = CleanFormattedText(pou.Body.IL.Text)
+		var body *FormattedText
+		switch {
+		case pou.Body.ST != nil:
+			body = pou.Body.ST
+		case pou.Body.IL != nil:
+			body = pou.Body.IL
+		case pou.Body.FBD != nil, pou.Body.LD != nil, pou.Body.SFC != nil:
+			return "", fmt.Errorf("pou '%s': graphical bodies (FBD, LD, SFC) cannot be converted to text", pou.Name)
 		}
-
-		if bodyText != "" {
-			lines := strings.Split(bodyText, "\n")
-			for _, line := range lines {
+		if body != nil {
+			text, err := FormattedTextContent(body.Text)
+			if err != nil {
+				return "", fmt.Errorf("pou '%s': %w", pou.Name, err)
+			}
+			for _, line := range strings.Split(text, "\n") {
 				if strings.TrimSpace(line) != "" {
 					buf.WriteString("\t" + line + "\n")
 				}
 			}
 		}
-
-		switch pouType {
-		case "function":
-			buf.WriteString("END_FUNCTION\n\n")
-		case "functionblock":
-			buf.WriteString("END_FUNCTION_BLOCK\n\n")
-		default:
-			buf.WriteString("END_PROGRAM\n\n")
-		}
+		buf.WriteString(end + "\n\n")
 	}
 
 	// 3. Configurations
 	for _, cfg := range proj.Instances.Configurations.Configurations {
-		buf.WriteString(fmt.Sprintf("CONFIGURATION %s\n", cfg.Name))
+		fmt.Fprintf(&buf, "CONFIGURATION %s\n", cfg.Name)
+		writeVarLists(&buf, "VAR_GLOBAL", cfg.GlobalVars)
 		for _, res := range cfg.Resources {
-			buf.WriteString(fmt.Sprintf("\tRESOURCE %s ON PLC\n", res.Name))
+			fmt.Fprintf(&buf, "\tRESOURCE %s ON PLC\n", res.Name)
+			writeVarLists(&buf, "VAR_GLOBAL", res.GlobalVars)
 			for _, task := range res.Tasks {
-				interval := ""
-				if task.Interval != "" {
-					interval = fmt.Sprintf(", INTERVAL := %s", task.Interval)
+				settings := []string{}
+				if task.Single != "" {
+					settings = append(settings, "SINGLE := "+task.Single)
 				}
-				buf.WriteString(fmt.Sprintf("\t\tTASK %s (PRIORITY := %d%s);\n", task.Name, task.Priority, interval))
+				if task.Interval != "" {
+					settings = append(settings, "INTERVAL := "+durationText(task.Interval))
+				}
+				settings = append(settings, fmt.Sprintf("PRIORITY := %d", task.Priority))
+				fmt.Fprintf(&buf, "\t\tTASK %s (%s);\n", task.Name, strings.Join(settings, ", "))
+			}
+			for _, task := range res.Tasks {
+				for _, inst := range task.PouInstances {
+					fmt.Fprintf(&buf, "\t\tPROGRAM %s WITH %s : %s;\n", inst.Name, task.Name, inst.TypeName)
+				}
 			}
 			for _, inst := range res.PouInstances {
-				buf.WriteString(fmt.Sprintf("\t\tPROGRAM %s : %s;\n", inst.Name, inst.TypeName))
+				fmt.Fprintf(&buf, "\t\tPROGRAM %s : %s;\n", inst.Name, inst.TypeName)
 			}
 			buf.WriteString("\tEND_RESOURCE\n")
 		}
@@ -127,6 +144,22 @@ func ImportToIECText(xmlData []byte) (string, error) {
 	return strings.TrimSpace(buf.String()) + "\n", nil
 }
 
+// durationText returns a task interval as an IEC duration. Some tools write
+// the interval without its T# prefix (20ms) or as an XML duration (PT0.02S);
+// a variable name is kept as it is.
+func durationText(interval string) string {
+	upper := strings.ToUpper(interval)
+	switch {
+	case strings.HasPrefix(upper, "T#"), strings.HasPrefix(upper, "TIME#"):
+		return interval
+	case strings.HasPrefix(upper, "PT"):
+		return "T#" + strings.ToLower(interval[2:])
+	case interval != "" && (interval[0] >= '0' && interval[0] <= '9'):
+		return "T#" + interval
+	}
+	return interval
+}
+
 // ImportToAST unmarshals PLCopen XML and parses it into a beedance AST Program.
 func ImportToAST(xmlData []byte) (*ast.Program, error) {
 	iecText, err := ImportToIECText(xmlData)
@@ -134,8 +167,7 @@ func ImportToAST(xmlData []byte) (*ast.Program, error) {
 		return nil, err
 	}
 
-	l := lexer.New(iecText)
-	p := parser.New(l)
+	p := parser.New(lexer.New(iecText))
 	prog := p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		return nil, fmt.Errorf("parsing generated IEC code: %s", strings.Join(p.Errors(), "; "))
@@ -167,30 +199,62 @@ func writeVarLists(buf *bytes.Buffer, sectionName string, lists []VarList) {
 		if list.NonRetain {
 			qualifiers += " NON_RETAIN"
 		}
-		buf.WriteString(fmt.Sprintf("\t%s%s\n", sectionName, qualifiers))
+		fmt.Fprintf(buf, "\t%s%s\n", sectionName, qualifiers)
 		for _, v := range list.Variables {
 			loc := ""
 			if v.Address != "" {
 				loc = fmt.Sprintf(" AT %s", v.Address)
 			}
 			initVal := ""
-			if v.InitialValue != nil && v.InitialValue.String() != "" {
-				initVal = " := " + v.InitialValue.String()
+			if s := v.InitialValue.String(); s != "" {
+				initVal = " := " + s
 			}
-			buf.WriteString(fmt.Sprintf("\t\t%s%s : %s%s;\n", v.Name, loc, v.Type.String(), initVal))
+			fmt.Fprintf(buf, "\t\t%s%s : %s%s;\n", v.Name, loc, v.Type.String(), initVal)
 		}
 		buf.WriteString("\tEND_VAR\n\n")
 	}
 }
 
-// CleanFormattedText strips XHTML wrappers, CDATA blocks, and unescapes entities.
+// FormattedTextContent returns the text of a PLCopen formattedText, given
+// as its inner XML: the character data of its XHTML, with CDATA sections
+// and entities resolved, and a line break for each <br/> and between
+// paragraphs. Tools wrap code differently, e.g. <xhtml:p><![CDATA[...]]>
+// or <xhtml xmlns="http://www.w3.org/1999/xhtml">...</xhtml>.
+func FormattedTextContent(innerXML string) (string, error) {
+	dec := xml.NewDecoder(strings.NewReader("<text xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">" + innerXML + "</text>"))
+	dec.Strict = false
+	var b strings.Builder
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("formatted text: %w", err)
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			b.Write(t)
+		case xml.StartElement:
+			if t.Name.Local == "br" {
+				b.WriteString("\n")
+			}
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "p", "div":
+				b.WriteString("\n")
+			}
+		}
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+// CleanFormattedText returns the text of a PLCopen formattedText, or the
+// input trimmed if it is not well-formed XML.
 func CleanFormattedText(s string) string {
-	s = strings.ReplaceAll(s, "<![CDATA[", "")
-	s = strings.ReplaceAll(s, "]]>", "")
-	reBr := regexp.MustCompile(`(?i)<(xhtml:)?br\s*/?>`)
-	s = reBr.ReplaceAllString(s, "\n")
-	reP := regexp.MustCompile(`(?i)</?(xhtml:)?p[^>]*>`)
-	s = reP.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
-	return strings.TrimSpace(s)
+	text, err := FormattedTextContent(s)
+	if err != nil {
+		return strings.TrimSpace(s)
+	}
+	return text
 }

@@ -141,7 +141,7 @@ func TestVarConfigErrors(t *testing.T) {
 		{
 			name:          "structure initialization on a non-FB variable",
 			config:        `VAR_CONFIG Res.P1.COUNT : INT := (PT := T#1s); END_VAR`,
-			expectedError: "VAR_CONFIG structure initialization requires a function block instance, but 'COUNT' is ",
+			expectedError: "VAR_CONFIG structure initialization requires a function block instance or structure, but 'COUNT' is ",
 		},
 	}
 

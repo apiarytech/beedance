@@ -59,14 +59,25 @@ func TestIlFunction(t *testing.T) {
 	runVmTests(t, tests)
 }
 
-// TestIlConditionalJumpKeepsCurrentResult documents a compiler bug: in IL, a
-// conditional jump (JMPC/JMPCN) tests the current result without consuming it,
-// but the compiler emits a jump that pops it. When the jump is taken, the next
-// instruction finds an empty stack.
-func TestIlConditionalJumpKeepsCurrentResult(t *testing.T) {
-	t.Skip("compiler bug: JMPC/JMPCN consume the IL current result; see this test's comment")
+// In IL, ST, S, R, conditional jumps and calls read the current result
+// without consuming it.
+func TestIlCurrentResultIsKept(t *testing.T) {
 	tests := []vmTestCase{
-		{ilProgram("a : INT; b : BOOL := FALSE;", " LD b\n JMPCN end_it\n LD 10\nend_it:\n ST a", "a"), false},
+		// A taken JMPCN keeps the current result for the instruction at the label.
+		{ilProgram("q : BOOL := TRUE; b : BOOL := FALSE;", " LD b\n JMPCN end_it\n LD TRUE\nend_it:\n ST q", "q"), false},
+		{ilProgram("x : INT; b : BOOL := TRUE;", " LD b\n JMPC end_it\n LD 10\n ST x\nend_it:\n LD 1\n ST x", "x"), 1},
+		// ST leaves the current result for the next instruction.
+		{ilProgram("x : INT; y : INT;", " LD 3\n ST x\n ADD 1\n ST y\n MUL x", "y"), 4},
+		{ilProgram("n : INT; q : BOOL;", " LD n\n ADD 1\n ST n\n GT 0\n S q\n ST n", "q"), true},
+		// A loop runs with a balanced stack.
+		{ilProgram("i : INT;", "again:\n LD i\n ADD 1\n ST i\n LT 1000\n JMPC again", "i"), 1000},
+		// CAL leaves the current result as it was.
+		{"FUNCTION_BLOCK Fb VAR_OUTPUT n : INT; END_VAR n := n + 1; END_FUNCTION_BLOCK PROGRAM P VAR f : Fb; x : INT; END_VAR LD 5 CAL f() ADD 1 ST x END_PROGRAM P(); P.x;", 6},
+		{"FUNCTION_BLOCK Fb VAR_OUTPUT n : INT; END_VAR n := n + 1; END_FUNCTION_BLOCK PROGRAM P VAR f : Fb; END_VAR LD FALSE CALC f() LD TRUE CALC f() CALCN f() END_PROGRAM P(); P.f.n;", 1},
+		// CAL of a function makes its result the current result.
+		{"FUNCTION Seven : INT Seven := 7; END_FUNCTION PROGRAM P VAR x : INT; END_VAR LD 1 CAL Seven() ADD 1 ST x END_PROGRAM P(); P.x;", 8},
+		// RET returns from a function with its result.
+		{"FUNCTION F : INT VAR_INPUT b : BOOL; END_VAR LD 1 ST F LD b RETC LD 2 ST F END_FUNCTION F(TRUE) * 10 + F(FALSE);", 12},
 	}
 	runVmTests(t, tests)
 }

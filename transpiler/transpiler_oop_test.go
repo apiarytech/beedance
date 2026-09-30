@@ -116,11 +116,6 @@ func NewOOP_TestFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *OOP_Test) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *OOP_Test) Logic(now time.Time) {
 	p.result = p.myInstance.MyMethod()
 }
@@ -291,11 +286,6 @@ func NewOopTestProgramFactory(params map[string]string) (func(time.Time), error)
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *OopTestProgram) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *OopTestProgram) Logic(now time.Time) {
 	p.Motor1.Voltage = 12.000000
 	p.Motor1.Logic(now)
@@ -398,11 +388,6 @@ func NewTestCounterProgramFactory(params map[string]string) (func(time.Time), er
 	instance := &TestCounterProgram{}
 	instance.C1.EN = true
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *TestCounterProgram) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *TestCounterProgram) Logic(now time.Time) {

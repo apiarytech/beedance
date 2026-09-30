@@ -42,17 +42,12 @@ func NewStdLibTestFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *StdLibTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *StdLibTest) Logic(now time.Time) {
-	p.r = SQRT(25.000000)
-	p.i = ABS(p.i)
-	p.s3 = CONCAT(p.s1, " ")
-	p.s3 = CONCAT(p.s3, p.s2)
-	p.len_s1 = LEN(p.s1)
+	p.r = iec.REAL(numerical.SQRT(iec.REAL(25.000000)))
+	p.i = iec.INT(numerical.ABS(p.i))
+	p.s3 = iecstrings.CONCAT(iec.STRING(p.s1), iec.STRING(" "))
+	p.s3 = iecstrings.CONCAT(iec.STRING(p.s3), iec.STRING(p.s2))
+	p.len_s1 = iec.INT(iecstrings.LEN(iec.STRING(p.s1)))
 }
 `
 	transpileAndCheck(t, "TestStandardFunctionsTranspilation", input, expected)

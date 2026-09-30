@@ -32,11 +32,6 @@ func NewReferenceTestFactory(params map[string]string) (func(time.Time), error) 
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *ReferenceTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *ReferenceTest) Logic(now time.Time) {
 	p.myRef = &p.myInt
 	p.anotherInt = (*p.myRef)

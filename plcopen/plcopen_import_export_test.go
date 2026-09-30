@@ -141,3 +141,98 @@ END_PROGRAM
 		t.Errorf("expected program name 'ConveyorCtrl', got '%s'", progDecl.Name.Value)
 	}
 }
+
+func TestRoundTripSTAndXML(t *testing.T) {
+	tempDir := t.TempDir()
+	origSTPath := filepath.Join(tempDir, "machine_control.st")
+	xmlPath := filepath.Join(tempDir, "machine_control.xml")
+	roundTripSTPath := filepath.Join(tempDir, "machine_control_reconstructed.st")
+	roundTripXMLPath := filepath.Join(tempDir, "machine_control_reconstructed.xml")
+
+	stContent := `
+TYPE
+	T_Status : (IDLE, ACTIVE, ERROR);
+END_TYPE
+
+PROGRAM MachineCtrl
+	VAR_INPUT
+		Execute : BOOL := FALSE;
+	END_VAR
+
+	VAR_OUTPUT
+		CurrentStatus : T_Status;
+	END_VAR
+
+	VAR
+		StepCounter : INT := 0;
+	END_VAR
+
+	IF Execute THEN
+		CurrentStatus := ACTIVE;
+		StepCounter := StepCounter + 1;
+	ELSE
+		CurrentStatus := IDLE;
+	END_IF;
+END_PROGRAM
+
+CONFIGURATION MachineConfig
+	RESOURCE MachineResource ON PLC
+		TASK MachineTask (INTERVAL := T#20ms, PRIORITY := 1);
+		PROGRAM MachineInst WITH MachineTask : MachineCtrl;
+	END_RESOURCE
+END_CONFIGURATION
+`
+	if err := os.WriteFile(origSTPath, []byte(stContent), 0644); err != nil {
+		t.Fatalf("failed to write original ST file: %v", err)
+	}
+
+	// Step 1: Convert original ST file -> XML file
+	if err := ConvertIECToXMLFile(origSTPath, xmlPath); err != nil {
+		t.Fatalf("ConvertIECToXMLFile failed on original ST: %v", err)
+	}
+
+	xmlBytes, err := os.ReadFile(xmlPath)
+	if err != nil {
+		t.Fatalf("failed to read initial XML file: %v", err)
+	}
+
+	if err := ValidateWithXSD(xmlBytes, "tc6_xml_v201.xsd"); err != nil {
+		t.Fatalf("ValidateWithXSD failed for initial XML: %v", err)
+	}
+
+	// Step 2: Convert XML file -> reconstructed ST file
+	reconstructedST, err := ConvertXMLToIECText(xmlPath)
+	if err != nil {
+		t.Fatalf("ConvertXMLToIECText failed on XML file: %v", err)
+	}
+
+	if err := os.WriteFile(roundTripSTPath, []byte(reconstructedST), 0644); err != nil {
+		t.Fatalf("failed to write reconstructed ST file: %v", err)
+	}
+
+	// Step 3: Re-parse reconstructed ST to verify syntactic validity
+	l := lexer.New(reconstructedST)
+	p := parser.New(l)
+	astReconstructed := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parsing reconstructed ST failed:\n%s\nErrors: %v", reconstructedST, p.Errors())
+	}
+
+	if len(astReconstructed.Statements) != 3 {
+		t.Fatalf("expected 3 declarations (TYPE + PROGRAM + CONFIGURATION), got %d", len(astReconstructed.Statements))
+	}
+
+	// Step 4: Convert reconstructed ST file -> secondary XML file and validate schema
+	if err := ConvertIECToXMLFile(roundTripSTPath, roundTripXMLPath); err != nil {
+		t.Fatalf("ConvertIECToXMLFile failed on reconstructed ST: %v", err)
+	}
+
+	roundTripXMLBytes, err := os.ReadFile(roundTripXMLPath)
+	if err != nil {
+		t.Fatalf("failed to read secondary XML file: %v", err)
+	}
+
+	if err := ValidateWithXSD(roundTripXMLBytes, "tc6_xml_v201.xsd"); err != nil {
+		t.Fatalf("ValidateWithXSD failed for round-trip XML: %v", err)
+	}
+}

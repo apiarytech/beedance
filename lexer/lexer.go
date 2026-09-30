@@ -415,6 +415,15 @@ func (l *Lexer) readString(quote byte) (string, token.TokenType) {
 	position := l.position + 1 // Start after the opening quote
 	for {
 		l.readChar()
+		// A $ escape, such as $' or $$, is kept as written; its second
+		// character does not end the string.
+		if l.ch == '$' {
+			l.readChar()
+			if l.ch == 0 {
+				break
+			}
+			continue
+		}
 		if l.ch == quote || l.ch == 0 {
 			break
 		}

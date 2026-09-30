@@ -132,6 +132,10 @@ type Transpiler struct {
 	arrayDecls       map[string]*ast.ArrayDefinition        // Declared array types of the variables in scope, for their bounds
 	localVars        map[string]bool                        // Parameters, results and locals of the current function or method
 	initVisiting     map[*ast.FunctionBlockDeclaration]bool // Function blocks whose Init is being generated
+	expectedGoType   string                                 // The elementary Go type the expression being transpiled is assigned to, or ""
+	usesStdValue     bool                                   // The output calls stdValue, so it is written at the end
+	usesProcessImage bool                                   // The output uses processImage, so it is declared at the end
+	configuredVars   map[string][]string                    // The variables VAR_CONFIG sets, by program type
 }
 
 // New creates a new Transpiler instance with the given io.Writer.
@@ -173,14 +177,23 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		macroEnv := object.NewEnvironment()
 		evaluator.DefineMacros(node, macroEnv)
 		expandedAST := evaluator.ExpandMacros(node, macroEnv).(*ast.Program)
+		// Go has no namespaces within a package; see namespaces.go.
+		expandedAST = flattenNamespaces(expandedAST)
 
 		// Now, continue with code generation on the expanded AST.
 		t.buildTypeInfo(expandedAST) // First pass to collect type definitions
 		t.buildGlobalVarInfo(expandedAST)
+		t.collectConfiguredVars(expandedAST)
 		for _, stmt := range expandedAST.Statements {
 			if err := t.transpileNode(stmt); err != nil {
 				return err
 			}
+		}
+		if t.usesStdValue {
+			t.write("%s", stdValueHelper)
+		}
+		if t.usesProcessImage {
+			t.write("%s", processImageDecl)
 		}
 		return nil
 	case *ast.ProgramDeclaration:
@@ -349,166 +362,6 @@ func (t *Transpiler) transpileGlobalVarBlocks(blocks []*ast.GlobalVarDeclaration
 	return nil
 }
 
-// transpileConfigurationDeclaration transpiles an IEC 61131-3 CONFIGURATION block into a Go `main` function.
-// This `main` function sets up program factories, resources, and tasks, acting as the entry point
-// for a `royaljelly`-based runtime.
-func (t *Transpiler) transpileConfigurationDeclaration(config *ast.ConfigurationDeclaration) error {
-	if t.mainGenerated {
-		return nil // Main function already generated
-	}
-	t.mainGenerated = true
-
-	// Match each VAR_CONFIG entry to the program instance it configures.
-	configEntries, unmatched := config.ResolveConfigVars()
-	if len(unmatched) > 0 {
-		return fmt.Errorf("VAR_CONFIG path '%s' does not name a variable of a program instance in configuration '%s'", unmatched[0].AccessPath.String(), config.Name.Value)
-	}
-
-	t.write("// --- Generated Main Function from CONFIGURATION ---\n")
-	t.write("func main() {\n")
-
-	// Register all program factories that are used in the configuration.
-	t.write("\t// Register program factories\n")
-	uniqueProgramTypes := make(map[string]bool)
-	for _, res := range config.Resources {
-		for _, progConfig := range res.Programs {
-			uniqueProgramTypes[progConfig.TypeName.Value] = true
-		}
-	}
-	for progType := range uniqueProgramTypes {
-		t.write("\tconfig.RegisterProgramFactory(%q, New%sFactory)\n", progType, progType)
-	}
-	t.write("\n")
-
-	// Build the configuration struct literal
-	t.write("\t// Create the configuration from the IEC 61131-3 source\n")
-	t.write("\tcfg := &config.Configuration{\n")
-	t.write("\t\tName: %q,\n", config.Name.Value)
-	t.write("\t\tResources: []*config.Resource{\n")
-
-	for _, res := range config.Resources {
-		if err := t.transpileResourceDeclaration(res, configEntries); err != nil {
-			return err
-		}
-	}
-
-	t.write("\t\t},\n")
-	t.write("\t}\n\n")
-
-	t.write("\t// This is where you would start the royaljelly scheduler with the generated config.\n")
-	t.write("\tfmt.Println(\"Configuration loaded and ready to run.\")\n")
-	t.write("\t// Example: royaljelly.Start(cfg)\n")
-
-	t.write("}\n\n")
-	return nil
-}
-
-// transpileResourceDeclaration transpiles an IEC 61131-3 RESOURCE block within a CONFIGURATION.
-// It generates Go code to define tasks and program instances associated with that resource.
-func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, configEntries []*ast.ConfigVarEntry) error {
-	// Group program instances by their assigned task.
-	programsByTask := make(map[string][]*ast.ProgramConfiguration)
-	for _, progConfig := range res.Programs {
-		if progConfig.TaskName == nil {
-			continue // No WITH clause: the instance is not assigned to a task.
-		}
-		taskName := progConfig.TaskName.Value
-		programsByTask[taskName] = append(programsByTask[taskName], progConfig)
-	}
-
-	t.write("\t\t\t{\n")
-	t.write("\t\t\t\tName: %q,\n", res.Name.Value)
-	t.write("\t\t\t\tTasks: []*config.Task{\n")
-
-	for _, task := range res.Tasks {
-		// Pass the list of programs for this specific task.
-		if err := t.transpileTaskDeclaration(task, programsByTask[task.Name.Value]); err != nil {
-			return err
-		}
-	}
-
-	t.write("\t\t\t\t},\n")
-	t.write("\t\t\t\tPrograms: map[string]*config.ProgramInstance{\n")
-	for _, progConfig := range res.Programs {
-		t.write("\t\t\t\t\t%q: {\n", progConfig.InstanceName.Value)
-		t.write("\t\t\t\t\t\tType: %q,\n", progConfig.TypeName.Value)
-		t.write("\t\t\t\t\t\tParams: map[string]string{\n")
-		var progEntries []*ast.ConfigVarEntry
-		for _, entry := range configEntries {
-			if entry.Resource == res && entry.Program == progConfig {
-				progEntries = append(progEntries, entry)
-			}
-		}
-		t.transpileVarConfigParams(progEntries)
-		t.write("\t\t\t\t\t\t},\n\t\t\t\t\t},\n")
-	}
-	t.write("\t\t\t\t},\n")
-	t.write("\t\t\t},\n")
-	return nil
-}
-
-// transpileVarConfigParams transpiles the variable declarations from a VAR_CONFIG block
-// into key-value pairs for a Go map[string]string literal.
-func (t *Transpiler) transpileVarConfigParams(entries []*ast.ConfigVarEntry) {
-	for _, entry := range entries {
-		p := entry.Decl
-		if p.Value == nil {
-			continue
-		}
-		var valueStr string
-		// We need the raw string representation of the literal value.
-		switch v := p.Value.(type) {
-		case *ast.StringLiteral:
-			valueStr = v.Value // Value field holds the unquoted string
-		case *ast.WStringLiteral:
-			valueStr = v.Value // Value field holds the unquoted string
-		default:
-			// For other literals (INT, REAL, BOOL, TIME, etc.), the String() method gives a suitable representation.
-			valueStr = p.Value.String()
-		}
-		t.write("\t\t\t\t\t\t\t%q: %q,\n", entry.RelativePath(), valueStr)
-	}
-}
-
-// transpileTaskDeclaration transpiles an IEC 61131-3 TASK definition within a RESOURCE.
-// It generates Go code to configure a task's name, priority, interval, and associated programs.
-func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, programs []*ast.ProgramConfiguration) error {
-	t.write("\t\t\t\t\t{\n")
-	t.write("\t\t\t\t\t\tName: %q,\n", task.Name.Value)
-	// A missing PRIORITY defaults to 0 and a missing INTERVAL to 0 (no periodic
-	// scheduling), matching the evaluator.
-	if task.Priority != nil {
-		t.write("\t\t\t\t\t\tPriority: %s,\n", task.Priority.String())
-	} else {
-		t.write("\t\t\t\t\t\tPriority: 0,\n")
-	}
-	t.write("\t\t\t\t\t\tInterval: ")
-	if task.Interval != nil {
-		if err := t.transpileExpression(task.Interval); err != nil {
-			return err
-		}
-	} else {
-		t.write("0")
-	}
-	t.write(",\n")
-	if task.Single != nil {
-		// The generated configuration has no field for an event trigger.
-		t.write("\t\t\t\t\t\t// SINGLE := %s (event trigger is not supported by the generated configuration)\n", task.Single.String())
-	}
-
-	t.write("\t\t\t\t\t\tPrograms: []string{")
-	for i, prog := range programs {
-		if i > 0 {
-			t.write(", ")
-		}
-		t.write("%q", prog.InstanceName.Value)
-	}
-	t.write("},\n")
-
-	t.write("\t\t\t\t\t},\n")
-	return nil
-}
-
 // transpileProgram transpiles an IEC 61131-3 PROGRAM POU into a Go struct and associated methods.
 // This includes generating the struct definition for program variables, a factory function for instantiation,
 // and a `Logic` method that contains the program's executable code (ST, IL, or SFC).
@@ -624,6 +477,10 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		}
 	}
 	t.programVarName = "p"
+	// Values a configuration gives its variables (VAR_CONFIG).
+	if err := t.transpileConfiguredVars(prog); err != nil {
+		return err
+	}
 
 	// If it's an SFC program, set the initial step in the factory.
 	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
@@ -638,26 +495,14 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	t.write("}\n\n")
 
 	// --- 3. Generate the Logic method for the scheduler ---
-	t.write("// Link connects the program's located variables to the runtime's I/O manager.\n")
-	t.write("func (p *%s) Link(linker config.IOLinker) error {\n", prog.Name.Value)
-	for _, varBlock := range allVarBlocks {
-		for _, varDecl := range varBlock {
-			if varDecl.Location != nil {
-				t.write("\tif err := linker.LinkIO(&p.%s, %q); err != nil {\n", varDecl.Name.Value, varDecl.Location.Location.String())
-				t.write("\t\treturn err\n")
-				t.write("\t}\n")
-			}
-		}
+	if err := t.transpileLinkAccess(prog); err != nil {
+		return err
 	}
-	for _, accessBlock := range prog.VarAccess {
-		for _, decl := range accessBlock.Vars {
-			t.write("\tif err := linker.LinkVar(&p.%s, %q); err != nil {\n", decl.Name.Value, decl.AccessPath.String())
-			t.write("\t\treturn err\n\t}\n")
-		}
-	}
-	t.write("\treturn nil\n}\n\n")
 
 	t.write("func (%s *%s) Logic(now time.Time) {\n", t.programVarName, prog.Name.Value)
+	if err := t.transpileProcessImage(t.programVarName, allVarBlocks...); err != nil {
+		return err
+	}
 	// Transpile VAR_TEMP as local variables inside the Logic method.
 	for _, tempBlock := range prog.VarTemp {
 		for _, decl := range tempBlock.Vars {
@@ -862,7 +707,22 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 				return fmt.Errorf("IL function '%s' used before accumulator was loaded (LD)", op)
 			}
 			// The result of a built-in function updates the accumulator.
-			t.write("\tcr_%s = %s(cr_%s)\n", returnType, op, crType)
+			arg := "cr_" + crType
+			call := op + "(" + arg + ")"
+			if fn, isStd := royaljellyFunctions[op]; isStd {
+				switch {
+				case paramType(fn, 0) != "":
+					arg = paramType(fn, 0) + "(" + arg + ")"
+				case realOnlyFunctions[op] && crType != "LREAL":
+					arg = "iec.LREAL(" + arg + ")"
+				}
+				call = goPackageAlias(fn.pkg) + "." + op + "(" + arg + ")"
+				if fn.err {
+					t.usesStdValue = true
+					call = "stdValue(" + call + ")"
+				}
+			}
+			t.write("\tcr_%s = iec.%s(%s)\n", returnType, returnType, call)
 			t.ilCurrentCRType = returnType
 		} else {
 			// An operator that cannot be transpiled must not be skipped silently.
@@ -946,7 +806,7 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 	if err := t.transpileExpression(callExpr.Function); err != nil {
 		return err
 	}
-	t.write(".Logic(now)\n")
+	t.write(".%s\n", t.functionBlockRun(callExpr.Function))
 
 	// 3. Identify the primary output (first VAR_OUTPUT) to load into the accumulator.
 	fbDef := t.getFunctionBlockDefinition(callExpr.Function)
@@ -1521,6 +1381,9 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	t.write("\t\treturn\n")
 	t.write("\t}\n")
 	t.write("\t%s.ENO = true\n\n", receiverName)
+	if err := t.transpileProcessImage(receiverName, fb.VarInputs, fb.VarOutputs, fb.Vars); err != nil {
+		return err
+	}
 
 	// If this FB extends another, call the parent's Logic method first.
 	if fb.Extends != nil {
@@ -1997,10 +1860,10 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) error {
 	t.transpileLeadingComments(varDecl.LeadingComments)
 
 	// Get the variable name.
-	// If it's a located variable, transpile it as a pointer.
+	// A located variable is copied from and to the process image each scan.
 	if varDecl.Location != nil {
 		goType := t.mapIecTypeToGo(varDecl.DataType)
-		t.write("\t%s *%s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.Location.String())
+		t.write("\t%s %s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.Location.String())
 		return nil
 	}
 
@@ -2046,19 +1909,8 @@ func (t *Transpiler) transpileVarAccess(accessDecl *ast.AccessVarDeclaration) {
 		// Transpile any leading comments associated with this variable declaration.
 		t.transpileLeadingComments(decl.LeadingComments)
 
-		localName := decl.Name.Value
-
-		// Infer the type of the target variable.
-		targetTypeDecl := t.resolveAssignmentTargetType(decl.AccessPath)
-		if targetTypeDecl == nil {
-			log.Printf("Warning: Could not resolve type for VAR_ACCESS target: %s", decl.AccessPath.String())
-			t.write("\t%s *any // Could not resolve type for %s\n", localName, decl.AccessPath.String())
-			continue
-		}
-
-		// Get the Go type and declare the field as a pointer to that type.
-		goType := t.mapIecTypeToGo(targetTypeDecl.DataType)
-		t.write("\t%s *%s\n", localName, goType)
+		// A pointer to the variable the access path names; see LinkAccess.
+		t.write("\t%s *%s // VAR_ACCESS %s\n", decl.Name.Value, t.accessVarGoType(decl), decl.AccessPath.String())
 	}
 }
 
@@ -2327,7 +2179,11 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 		return err
 	}
 	t.write(" = ")
-	if err := t.transpileExpression(stmt.Value); err != nil {
+	// A standard function's value is converted to the target's type.
+	t.expectedGoType = t.elementaryGoType(stmt.Left)
+	err := t.transpileExpression(stmt.Value)
+	t.expectedGoType = ""
+	if err != nil {
 		return err
 	}
 	t.write("\n")
@@ -2608,10 +2464,9 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 			}
 			return nil
 		}
-		// If it's a located or access variable, it's a pointer and must be dereferenced.
-		if t.locatedVars[exp.Value] {
-			t.write("(*%s.%s)", t.programVarName, exp.Value)
-		} else if t.accessVars[exp.Value] {
+		// An access variable is a pointer and must be dereferenced. (A located
+		// variable is a plain field, copied from and to the process image.)
+		if t.accessVars[exp.Value] {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
 		} else if t.inOutVars[exp.Value] {
 			// A VAR_IN_OUT is a pointer and must be dereferenced; in a program or
@@ -2787,6 +2642,13 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 	case *ast.ReferenceType:
 		baseType := t.mapIecTypeToGo(dt.BaseType)
 		return "*" + baseType
+	case *ast.StructDefinition:
+		// A structure declared in place is a Go anonymous struct.
+		fields := make([]string, len(dt.Members))
+		for i, m := range dt.Members {
+			fields[i] = m.Name.Value + " " + t.mapIecTypeToGo(m.DataType)
+		}
+		return "struct{ " + strings.Join(fields, "; ") + " }"
 	default:
 		log.Printf("Warning: Unhandled data type expression in transpiler: %s", dataType.String())
 		return "any /* unhandled type */"
@@ -2797,6 +2659,10 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		if _, isUserDefined := t.typeInfo[typeName]; isUserDefined {
 			// It's a type we've defined in this package, so just use its name.
 			return typeName
+		}
+		// A standard function block is royaljelly's.
+		if fb, ok := standardFunctionBlocks[strings.ToUpper(typeName)]; ok {
+			return fb.goType
 		}
 		// Convert to uppercase to match standard IEC types (e.g., 'int' -> 'INT').
 		iecType := strings.ToUpper(typeName)
@@ -3075,6 +2941,15 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 			isLikelyFB = true
 		}
 	}
+	// A call of a variable declared as a function block, such as `f()`, or
+	// of a standard function, such as SQRT.
+	if td := t.resolveAssignmentTargetType(exp.Function); td != nil {
+		isLikelyFB = t.isFunctionBlockType(td.DataType)
+	} else if ident, ok := exp.Function.(*ast.Identifier); ok {
+		if _, isStd := royaljellyFunctions[strings.ToUpper(ident.Value)]; isStd {
+			isLikelyFB = false
+		}
+	}
 
 	if !isLikelyFB {
 		// Standard function call like SIN(X)
@@ -3126,7 +3001,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 		return err
 	}
 
-	t.write(".Logic(now)") // Pass the 'now' timestamp
+	t.write(".%s", t.functionBlockRun(exp.Function)) // Logic(now), or a standard function block's own call
 	hasWrittenStmt = true
 
 	// 3. Handle output arguments (e.g., Q => MyVar)
@@ -3176,6 +3051,13 @@ func (t *Transpiler) transpileStandardFunctionCall(exp *ast.CallExpression) erro
 		// call that is still here could not be expanded.
 		if _, isMacro := t.macroDefinitions[ident.Value]; isMacro {
 			return fmt.Errorf("the call to macro '%s' could not be expanded", ident.Value)
+		}
+	}
+	// A royaljelly standard function, such as SQRT or CONCAT.
+	if ident, ok := exp.Function.(*ast.Identifier); ok {
+		name := strings.ToUpper(ident.Value)
+		if fn, isStd := royaljellyFunctions[name]; isStd {
+			return t.transpileRoyaljellyCall(name, fn, exp)
 		}
 	}
 	// Don't transpile it as an expression, which would add a receiver prefix.

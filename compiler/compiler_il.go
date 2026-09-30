@@ -34,26 +34,8 @@ func (c *Compiler) compileIlProgram(block *ast.BlockStatement) error {
 	// labelPositions maps a label name to the instruction position where it is defined.
 	labelPositions := make(map[string]int)
 
-	// First pass: just to find label positions without compiling.
-	// This is a simplified approach. A more advanced compiler might calculate
-	// instruction sizes, but for now, we'll do a "dry run" to get positions.
-	// We create a temporary compiler to avoid polluting the main one's instructions.
-	posCounter := len(c.currentInstructions())
-	for _, stmt := range block.Statements {
-		ilStmt, ok := stmt.(*ast.IlInstructionStatement)
-		if !ok {
-			continue // Should not happen in a valid IL block
-		}
-		if ilStmt.Label != nil {
-			labelPositions[ilStmt.Label.Value] = posCounter
-		}
-		// This is a placeholder for instruction size calculation.
-		// For this implementation, we will assume fixed-size estimation is handled
-		// during the actual compilation pass. The back-patching logic below
-		// makes this pre-scan for positions less critical, but it's good for validation.
-	}
-
-	// Second pass: Compile instructions and handle jumps.
+	// Compile the instructions. A jump to a label seen already is set at once;
+	// a jump forward is patched when its label is reached.
 	for _, stmt := range block.Statements {
 		ilStmt, ok := stmt.(*ast.IlInstructionStatement)
 		if !ok {
@@ -69,6 +51,9 @@ func (c *Compiler) compileIlProgram(block *ast.BlockStatement) error {
 		// If the instruction has a label, record its current position.
 		if ilStmt.Label != nil {
 			labelName := ilStmt.Label.Value
+			if _, duplicate := labelPositions[labelName]; duplicate {
+				return fmt.Errorf("duplicate label defined: %s", labelName)
+			}
 			pos := len(c.currentInstructions())
 			labelPositions[labelName] = pos
 
@@ -97,144 +82,162 @@ func (c *Compiler) compileIlProgram(block *ast.BlockStatement) error {
 	return nil
 }
 
+// ilResultName names the hidden variable that holds the IL current result.
+// It is not a valid IEC 61131-3 identifier, so it never clashes with one.
+const ilResultName = "__CR__"
+
+// ilResult returns the current result's variable in the scope being
+// compiled, defining it on first use. Keeping the current result in a
+// variable, rather than on the stack, lets ST, S, R, conditional jumps and
+// calls read it without consuming it, and keeps the stack balanced across
+// jumps and labels.
+func (c *Compiler) ilResult() Symbol {
+	if symbol, ok := c.symbolTable.store[ilResultName]; ok {
+		return symbol
+	}
+	return c.symbolTable.Define(ilResultName, false)
+}
+
+// loadIlResult pushes the current result.
+func (c *Compiler) loadIlResult() {
+	c.loadSymbol(c.ilResult())
+}
+
+// storeIlResult makes the value on top of the stack the current result.
+func (c *Compiler) storeIlResult() error {
+	return c.setSymbol(c.ilResult())
+}
+
 // compileIlInstruction compiles a single IL instruction.
 func (c *Compiler) compileIlInstruction(node *ast.IlInstructionStatement, jumpsToPatch map[string][]int, labelPositions map[string]int) error {
 	op := strings.ToUpper(node.Operator)
 	modifier := strings.ToUpper(node.Modifier)
 	isNegatedOperand := strings.Contains(modifier, "N") && !strings.Contains(modifier, "C")
-
-	// Handle conditional execution for JMP, CAL, RET
 	isConditional := strings.Contains(modifier, "C")
-	if isConditional && (op == "CAL" || op == "RET") { // JMP is handled in its own case
-		isNegated := strings.Contains(modifier, "N")
-		// The CR is on top of the stack. We need to jump if it doesn't meet the condition.
-		var jumpPos int
-		if isNegated { // CALCN, RETCN -> execute if CR is FALSE
-			// We want to skip the instruction if the CR is truthy.
-			// To do this, we invert the CR and jump if it's now not truthy.
+
+	// CALC/CALCN and RETC/RETCN run only when the current result is TRUE
+	// (FALSE for N). JMP handles its own condition.
+	if isConditional && (op == "CAL" || op == "RET") {
+		c.loadIlResult()
+		if strings.Contains(modifier, "N") {
 			c.emit(code.OpBang)
-			jumpPos = c.emit(code.OpJumpNotTruthy, 9999)
-		} else { // CALC, RETC -> execute if CR is TRUE
-			// Skip if CR is not truthy.
-			jumpPos = c.emit(code.OpJumpNotTruthy, 9999)
 		}
+		jumpPos := c.emit(code.OpJumpNotTruthy, 9999)
 		defer func() {
-			// This defer will patch the jump to go to the instruction *after*
-			// the one we are about to compile.
-			afterPos := len(c.currentInstructions())
-			c.changeOperand(jumpPos, afterPos)
+			// Skip to the instruction after this one.
+			c.changeOperand(jumpPos, len(c.currentInstructions()))
 		}()
 	}
 
 	switch op {
 	case "LD":
-		// Compile the operand, which will be loaded onto the stack.
 		if err := c.compileIlOperand(op, node.Operand, isNegatedOperand); err != nil {
 			return err
 		}
-		// Operand is already compiled and on the stack. This becomes the new CR.
-		// break
+		return c.storeIlResult()
 	case "ST":
+		ident, ok := node.Operand.(*ast.Identifier)
+		if !ok {
+			return fmt.Errorf("operand for ST must be a variable identifier")
+		}
+		c.loadIlResult()
 		if isNegatedOperand {
 			c.emit(code.OpBang)
 		}
-		if ident, ok := node.Operand.(*ast.Identifier); ok {
-			if err := c.storeTopInto(ident.Value); err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("operand for ST must be a variable identifier")
-		}
+		return c.storeTopInto(ident.Value)
 	case "S", "R":
-		// These are conditional on the CR.
-		// The CR is consumed by the conditional check, so we DUP it first.
-		c.emit(code.OpDup)
+		// Set (or reset) the operand when the current result is TRUE.
+		ident, ok := node.Operand.(*ast.Identifier)
+		if !ok {
+			return fmt.Errorf("operand for %s must be a variable identifier", op)
+		}
+		c.loadIlResult()
 		jumpPos := c.emit(code.OpJumpNotTruthy, 9999)
-		if ident, ok := node.Operand.(*ast.Identifier); ok {
-			if op == "S" {
-				c.emit(code.OpTrue)
-			} else {
-				c.emit(code.OpFalse)
-			}
-			if err := c.storeTopInto(ident.Value); err != nil {
-				return err
-			}
+		if op == "S" {
+			c.emit(code.OpTrue)
+		} else {
+			c.emit(code.OpFalse)
+		}
+		if err := c.storeTopInto(ident.Value); err != nil {
+			return err
 		}
 		c.changeOperand(jumpPos, len(c.currentInstructions()))
-	case "ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR":
-		// The VM will pop two values, operate, and push one result.
+	case "ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR", "GT", "LT", "EQ", "GE", "LE", "NE":
+		// current result := current result <op> operand
+		c.loadIlResult()
 		if err := c.compileIlOperand(op, node.Operand, isNegatedOperand); err != nil {
 			return err
 		}
-		c.emit(ilArithmeticOpcodes[op])
-
-	case "GT", "LT", "EQ", "GE", "LE", "NE":
-		// The VM will pop two values, operate, and push one result.
-		if err := c.compileIlOperand(op, node.Operand, isNegatedOperand); err != nil {
-			return err
+		if opcode, ok := ilArithmeticOpcodes[op]; ok {
+			c.emit(opcode)
+		} else {
+			c.emit(ilComparisonOpcodes[op])
 		}
-		c.emit(ilComparisonOpcodes[op])
+		return c.storeIlResult()
 	case "JMP":
 		ident, ok := node.Operand.(*ast.Identifier)
 		if !ok {
 			return fmt.Errorf("operand for JMP must be a label identifier")
 		}
-		labelName := ident.Value
 		var pos int
-
-		if isConditional {
-			isNegated := strings.Contains(modifier, "N")
-			if isNegated { // JMPCN: Jump if condition is NOT true (FALSE)
-				pos = c.emit(code.OpJumpNotTruthy, 9999)
-			} else { // JMPC: Jump if condition is TRUE
-				// We don't have OpJumpTruthy, so we invert the condition and use OpJumpNotTruthy
-				c.emit(code.OpBang)
-				pos = c.emit(code.OpJumpNotTruthy, 9999)
-			}
-		} else { // Unconditional JMP
+		switch {
+		case !isConditional:
 			pos = c.emit(code.OpJump, 9999)
+		case strings.Contains(modifier, "N"): // JMPCN: jump when the current result is FALSE.
+			c.loadIlResult()
+			pos = c.emit(code.OpJumpNotTruthy, 9999)
+		default: // JMPC: jump when the current result is TRUE.
+			c.loadIlResult()
+			c.emit(code.OpBang)
+			pos = c.emit(code.OpJumpNotTruthy, 9999)
 		}
-		jumpsToPatch[labelName] = append(jumpsToPatch[labelName], pos)
+		if target, seen := labelPositions[ident.Value]; seen {
+			c.changeOperand(pos, target) // A jump back.
+		} else {
+			jumpsToPatch[ident.Value] = append(jumpsToPatch[ident.Value], pos)
+		}
 	case "CAL":
-		// Compile the CallExpression operand.
+		// A function's result becomes the current result; a function block
+		// or program has none, so the current result stays.
 		if node.Operand != nil {
 			if err := c.Compile(node.Operand); err != nil {
 				return err
 			}
+			if call, ok := node.Operand.(*ast.CallExpression); ok && c.calleeFunctionBlock(call.Function) == nil {
+				return c.storeIlResult()
+			}
+			c.emit(code.OpPop)
 		}
-		// The CallExpression was already compiled, leaving the FB result on the stack.
-		// Per the standard, CAL does not modify the CR. We pop the result to preserve the CR.
-		c.emit(code.OpPop) // This assumes CAL always has an operand to pop.
 	case "RET":
-		c.emit(code.OpReturnValue)
+		// RET returns from the POU: a function returns its result.
+		c.emitFunctionReturn()
 	case "NOT":
-		// NOT negates the current result. It has no operand.
+		c.loadIlResult()
 		c.emit(code.OpBang)
+		return c.storeIlResult()
 	default:
 		return fmt.Errorf("IL operator not yet supported by compiler: %s", op)
 	}
 	return nil
 }
 
-// compileIlOperand compiles the operand for an IL instruction. It handles standard
-// ST expressions as well as deferred IL blocks enclosed in parentheses.
+// compileIlOperand pushes the operand of an IL instruction: an expression,
+// or the result of a parenthesized (deferred) block of IL instructions,
+// which runs with its own current result.
 func (c *Compiler) compileIlOperand(op string, operand ast.Expression, isNegated bool) error {
 	if operand == nil {
 		return fmt.Errorf("%s instruction requires an operand", op)
 	}
 	if block, ok := operand.(*ast.BlockStatement); ok {
-		// It's a deferred block. Compile it as a sub-program.
 		if err := c.compileIlProgram(block); err != nil {
 			return err
 		}
-	} else {
-		// It's a regular ST expression.
-		if err := c.Compile(operand); err != nil {
-			return err
-		}
+		c.loadIlResult()
+	} else if err := c.Compile(operand); err != nil {
+		return err
 	}
 	if isNegated {
-		c.emit(code.OpBang) // 'NOT' operator
+		c.emit(code.OpBang)
 	}
 	return nil
 }

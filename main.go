@@ -12,10 +12,8 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"flag"
 	"fmt"
-	"go/format"
 	"io"
 	"os"
 	"os/exec"
@@ -278,34 +276,15 @@ func transpileFile(inputFile, outputFile string, out io.Writer) {
 		return
 	}
 
-	var buf bytes.Buffer
-	// --- Start of Go file generation ---
-	// 1. Write the file header with package and imports.
-	buf.WriteString("package main\n\n")
-	buf.WriteString("import (\n")
-	buf.WriteString("\t\"time\"\n")
-	buf.WriteString("\n")
-	buf.WriteString("\t\"github.com/apiarytech/royaljelly/config\"\n")
-	buf.WriteString("\t\"github.com/apiarytech/royaljelly/iec\"\n")
-	buf.WriteString(")\n\n")
-
-	// 2. Transpile the IEC 61131-3 code.
-	t := transpiler.New(&buf)
-	// The transpiler will find and process PROGRAM, FUNCTION_BLOCK, etc.
-	if err := t.Transpile(program); err != nil {
+	// Transpile to a complete Go file that imports the royaljelly packages
+	// the generated code uses.
+	formatted, err := transpiler.GoFile(program)
+	if err != nil {
 		fmt.Fprintf(out, "Transpilation error: %s\n", err)
 		return
 	}
 
-	// 3. Format the generated Go source code.
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		fmt.Fprintf(out, "Error formatting generated Go code: %s\n", err)
-		// Even if formatting fails, write the unformatted code for debugging.
-		formatted = buf.Bytes()
-	}
-
-	// 4. Create and write the final, formatted code to the output file.
+	// Write the code to the output file.
 	outFile, err := os.Create(outputFile)
 	if err != nil {
 		fmt.Fprintf(out, "Error creating output file: %s\n", err)

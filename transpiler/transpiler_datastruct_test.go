@@ -45,11 +45,6 @@ func NewDataStructTestFactory(params map[string]string) (func(time.Time), error)
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *DataStructTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *DataStructTest) Logic(now time.Time) {
 	p.matrix[0][1] = 5
 	p.s1 = p.s2

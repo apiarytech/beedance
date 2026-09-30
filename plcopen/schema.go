@@ -13,9 +13,6 @@ package plcopen
 import (
 	"encoding/xml"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -247,6 +244,15 @@ type StructMemberValue struct {
 type POUBody struct {
 	ST *FormattedText `xml:"ST,omitempty"`
 	IL *FormattedText `xml:"IL,omitempty"`
+	// Graphical bodies are kept as they are; beedance cannot import them.
+	FBD *RawXML `xml:"FBD,omitempty"`
+	LD  *RawXML `xml:"LD,omitempty"`
+	SFC *RawXML `xml:"SFC,omitempty"`
+}
+
+// RawXML holds an element's content unparsed.
+type RawXML struct {
+	Inner string `xml:",innerxml"`
 }
 
 type FormattedText struct {
@@ -362,7 +368,7 @@ func (dt DataType) String() string {
 		}
 		return "STRUCT\n" + strings.Join(members, "\n") + "\n\tEND_STRUCT"
 	case dt.Pointer != nil && dt.Pointer.BaseType != nil:
-		return "POINTER TO " + dt.Pointer.BaseType.String()
+		return "REFERENCE TO " + dt.Pointer.BaseType.String()
 	case dt.SubrangeSigned != nil:
 		base := "INT"
 		if dt.SubrangeSigned.BaseType != nil {
@@ -441,13 +447,27 @@ func DataTypeFromAST(expr ast.Expression) DataType {
 		return dataTypeFromName(e.Value)
 	case *ast.TypeSpecifier:
 		return dataTypeFromName(e.Token.Literal)
+	case *ast.IndexExpression:
+		// A string with its length, such as STRING[20].
+		dt := DataTypeFromAST(e.Left)
+		length := &StringType{Length: constantText(e.Index)}
+		switch {
+		case dt.STRING != nil:
+			return DataType{STRING: length}
+		case dt.WSTRING != nil:
+			return DataType{WSTRING: length}
+		}
+		return dataTypeFromName(expr.String())
+	case *ast.ReferenceType:
+		base := DataTypeFromAST(e.BaseType)
+		return DataType{Pointer: &PointerType{BaseType: &base}}
 	case *ast.ArrayDefinition:
 		var dims []Dimension
 		for _, r := range e.Ranges {
 			if infix, ok := r.(*ast.InfixExpression); ok && infix.Operator == ".." {
 				dims = append(dims, Dimension{
-					Lower: infix.Left.String(),
-					Upper: infix.Right.String(),
+					Lower: constantText(infix.Left),
+					Upper: constantText(infix.Right),
 				})
 			}
 		}
@@ -486,10 +506,12 @@ func DataTypeFromAST(expr ast.Expression) DataType {
 	}
 }
 
+// subrangePattern matches a subrange type such as INT(0..100).
+var subrangePattern = regexp.MustCompile(`^([A-Za-z0-9_]*)\s*\(\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\)$`)
+
 func dataTypeFromName(name string) DataType {
 	trimmed := strings.TrimSpace(name)
-	subrangeRegex := regexp.MustCompile(`^([A-Za-z0-9_]*)\s*\(\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\)$`)
-	if matches := subrangeRegex.FindStringSubmatch(trimmed); len(matches) == 4 {
+	if matches := subrangePattern.FindStringSubmatch(trimmed); len(matches) == 4 {
 		base := matches[1]
 		if base == "" {
 			base = "INT"
@@ -558,130 +580,47 @@ func dataTypeFromName(name string) DataType {
 	}
 }
 
-// FindSchemaFile locates the given XSD schema file across common relative locations.
-func FindSchemaFile(filename string) (string, error) {
-	candidates := []string{
-		filename,
-		filepath.Join("plcopen", filename),
-		filepath.Join("..", "plcopen", filename),
-	}
-
-	for _, cand := range candidates {
-		if abs, err := filepath.Abs(cand); err == nil {
-			if info, err := os.Stat(abs); err == nil && !info.IsDir() {
-				return abs, nil
-			}
+// constantText returns a constant as IEC 61131-3 source: a literal with its
+// type prefix, such as T#20ms, and a negative number without parentheses.
+func constantText(expr ast.Expression) string {
+	switch e := expr.(type) {
+	case *ast.TimeLiteral:
+		return "T#" + e.Value
+	case *ast.DateLiteral:
+		return "D#" + e.Value
+	case *ast.TimeOfDayLiteral:
+		return "TOD#" + e.Value
+	case *ast.DateAndTimeLiteral:
+		return "DT#" + e.Value
+	case *ast.PrefixExpression:
+		if e.Operator == "-" || e.Operator == "+" {
+			return e.Operator + constantText(e.Right)
 		}
+	// The lexer keeps a string's $ escapes, such as $' and $$, as written, so
+	// its text only needs its quotes back.
+	case *ast.StringLiteral:
+		return "'" + e.Value + "'"
+	case *ast.WStringLiteral:
+		return `"` + e.Value + `"`
 	}
-	return "", fmt.Errorf("schema file '%s' not found", filename)
+	return expr.String()
 }
 
-// ValidateProject performs structural verification on a Project to ensure it complies
-// with the schema rules defined in tc6_xml_v201.xsd.
-func ValidateProject(proj *Project) error {
-	if proj == nil {
-		return fmt.Errorf("project is nil")
+// constantInt returns the value of a constant integer, such as a task's
+// PRIORITY.
+func constantInt(expr ast.Expression) (int, bool) {
+	var n int
+	if _, err := fmt.Sscanf(constantText(expr), "%d", &n); err != nil || fmt.Sprint(n) != constantText(expr) {
+		return 0, false
 	}
-
-	if proj.XMLName.Local != "" && proj.XMLName.Local != "project" {
-		return fmt.Errorf("invalid root element name '%s', expected 'project'", proj.XMLName.Local)
-	}
-
-	if proj.FileHeader.CompanyName == "" {
-		return fmt.Errorf("fileHeader.companyName is required")
-	}
-	if proj.FileHeader.ProductName == "" {
-		return fmt.Errorf("fileHeader.productName is required")
-	}
-	if proj.FileHeader.ProductVersion == "" {
-		return fmt.Errorf("fileHeader.productVersion is required")
-	}
-	if proj.FileHeader.CreationDateTime == "" {
-		return fmt.Errorf("fileHeader.creationDateTime is required")
-	}
-
-	if proj.ContentHeader.Name == "" {
-		return fmt.Errorf("contentHeader.name is required")
-	}
-	if proj.ContentHeader.CoordinateInfo == nil {
-		return fmt.Errorf("contentHeader.coordinateInfo is required")
-	}
-
-	for i, pou := range proj.Types.Pous.Pous {
-		if pou.Name == "" {
-			return fmt.Errorf("pou[%d].name is required", i)
-		}
-		pType := strings.ToLower(pou.PouType)
-		if pType != "program" && pType != "functionblock" && pType != "function" {
-			return fmt.Errorf("pou '%s': invalid pouType '%s', must be 'program', 'functionBlock', or 'function'", pou.Name, pou.PouType)
-		}
-		if pType == "function" && (pou.Interface == nil || pou.Interface.ReturnType == nil) {
-			return fmt.Errorf("function '%s': returnType is required", pou.Name)
-		}
-	}
-
-	for _, cfg := range proj.Instances.Configurations.Configurations {
-		if cfg.Name == "" {
-			return fmt.Errorf("configuration.name is required")
-		}
-		for j, res := range cfg.Resources {
-			if res.Name == "" {
-				return fmt.Errorf("configuration '%s': resource[%d].name is required", cfg.Name, j)
-			}
-			for k, task := range res.Tasks {
-				if task.Name == "" {
-					return fmt.Errorf("resource '%s': task[%d].name is required", res.Name, k)
-				}
-				if task.Priority < 0 || task.Priority > 65535 {
-					return fmt.Errorf("task '%s': priority %d out of range [0..65535]", task.Name, task.Priority)
-				}
-			}
-			for m, inst := range res.PouInstances {
-				if inst.Name == "" || inst.TypeName == "" {
-					return fmt.Errorf("resource '%s': pouInstance[%d] requires both name and typeName", res.Name, m)
-				}
-			}
-		}
-	}
-
-	return nil
+	return n, true
 }
 
-// ValidateWithXSD validates XML bytes against tc6_xml_v201.xsd using internal structural checks
-// and an external XML validator ('xmllint' or 'xmlstarlet') if installed on the host.
-func ValidateWithXSD(xmlData []byte, xsdPath string) error {
-	var proj Project
-	if err := xml.Unmarshal(xmlData, &proj); err != nil {
-		return fmt.Errorf("XML unmarshal failed: %w", err)
+// isUnsignedName reports whether a type name is an unsigned integer type.
+func isUnsignedName(name string) bool {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "USINT", "UINT", "UDINT", "ULINT":
+		return true
 	}
-
-	if err := ValidateProject(&proj); err != nil {
-		return fmt.Errorf("schema validation failed: %w", err)
-	}
-
-	resolvedSchema, err := FindSchemaFile(xsdPath)
-	if err != nil {
-		return nil
-	}
-
-	if xmllintPath, err := exec.LookPath("xmllint"); err == nil {
-		tmpFile, err := os.CreateTemp("", "plcopen_*.xml")
-		if err != nil {
-			return fmt.Errorf("create temp file: %w", err)
-		}
-		defer os.Remove(tmpFile.Name())
-
-		if _, err := tmpFile.Write(xmlData); err != nil {
-			tmpFile.Close()
-			return fmt.Errorf("write temp XML: %w", err)
-		}
-		tmpFile.Close()
-
-		cmd := exec.Command(xmllintPath, "--noout", "--schema", resolvedSchema, tmpFile.Name())
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("xmllint validation failed: %s\n%w", string(out), err)
-		}
-	}
-	return nil
+	return false
 }

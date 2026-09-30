@@ -22,6 +22,10 @@ func TestStringLiterals(t *testing.T) {
 		{"'a'", token.STRING_LITERAL, "a"},
 		{"'123'", token.STRING_LITERAL, "123"},
 		{"'$$1.00'", token.STRING_LITERAL, "$$1.00"},
+		// A $ escape is kept as written; an escaped quote does not end the string.
+		{"'it$'s'", token.STRING_LITERAL, "it$'s"},
+		{"\"say $\"hi$\"\"", token.WSTRING_LITERAL, "say $\"hi$\""},
+		{"'unterminated $", token.UNTERMINATED_STRING, "unterminated $"},
 		{"'\"'", token.STRING_LITERAL, "\""}, // single-quoted string containing a double quote
 
 		// Double-quoted strings

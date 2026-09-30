@@ -82,3 +82,39 @@ func TestArrayAndStructureCopies(t *testing.T) {
 		testIntegerObject(t, testEval(t, tt.input), tt.input, tt.expected)
 	}
 }
+
+// In IL, ST, S, R, conditional jumps and calls of function blocks read the
+// current result without changing it. The VM's TestIlCurrentResultIsKept
+// checks the same programs.
+func TestIlCurrentResultIsKept(t *testing.T) {
+	il := func(vars, body, result string) string {
+		return "PROGRAM P\n VAR " + vars + " END_VAR\n" + body + "\nEND_PROGRAM\nP();\nP." + result + ";"
+	}
+	const cnt = "FUNCTION_BLOCK Fb VAR_OUTPUT n : INT; END_VAR n := n + 1; END_FUNCTION_BLOCK "
+	integers := []struct {
+		input    string
+		expected int64
+	}{
+		{il("x : INT; b : BOOL := TRUE;", " LD b\n JMPC end_it\n LD 10\n ST x\nend_it:\n LD 1\n ST x", "x"), 1},
+		{il("x : INT; y : INT;", " LD 3\n ST x\n ADD 1\n ST y\n MUL x", "y"), 4},
+		{il("i : INT;", "again:\n LD i\n ADD 1\n ST i\n LT 1000\n JMPC again", "i"), 1000},
+		{cnt + "PROGRAM P VAR f : Fb; x : INT; END_VAR LD 5 CAL f() ADD 1 ST x END_PROGRAM P(); P.x;", 6},
+		{cnt + "PROGRAM P VAR f : Fb; END_VAR LD FALSE CALC f() LD TRUE CALC f() CALCN f() END_PROGRAM P(); P.f.n;", 1},
+		{"FUNCTION Seven : INT Seven := 7; END_FUNCTION PROGRAM P VAR x : INT; END_VAR LD 1 CAL Seven() ADD 1 ST x END_PROGRAM P(); P.x;", 8},
+		{"FUNCTION F : INT VAR_INPUT b : BOOL; END_VAR LD 1 ST F LD b RETC LD 2 ST F END_FUNCTION F(TRUE) * 10 + F(FALSE);", 12},
+	}
+	for _, tt := range integers {
+		testIntegerObject(t, testEval(t, tt.input), tt.input, tt.expected)
+	}
+	testBooleanObject(t, testEval(t, il("q : BOOL := TRUE; b : BOOL := FALSE;", " LD b\n JMPCN end_it\n LD TRUE\nend_it:\n ST q", "q")), "JMPCN", false)
+	testBooleanObject(t, testEval(t, il("n : INT; q : BOOL;", " LD n\n ADD 1\n ST n\n GT 0\n S q\n ST n", "q")), "S", true)
+}
+
+// A type declared in a namespace is named with its namespace, in any case.
+func TestNamespacedTypes(t *testing.T) {
+	const lib = "NAMESPACE Lib TYPE Mode : (Idle, Busy); END_TYPE END_NAMESPACE "
+	testBooleanObject(t, testEval(t, lib+"VAR m : Lib.Mode; END_VAR m := Lib.Mode#Busy; m = Lib.Mode#Busy;"), "qualified", true)
+	testBooleanObject(t, testEval(t, lib+"VAR m : Lib.Mode; END_VAR m = LIB.MODE#Idle;"), "case", true)
+	testErrorObjectContains(t, testEval(t, lib+"VAR m : Lib.Mode; END_VAR m := Lib.Mode#Gone;"), "enumerated value 'Gone' not found in type 'LIB.MODE'")
+	testErrorObjectContains(t, testEval(t, "VAR m : INT; END_VAR m := Nope.Mode#Busy;"), "unknown type: NOPE.MODE")
+}

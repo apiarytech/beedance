@@ -242,7 +242,8 @@ func TestStructsProgram(t *testing.T) {
 		// A program's VAR_IN_OUT too.
 		"(*p.counter) = ((*p.counter) + 1)",
 		// Located variables are linked to the I/O image.
-		"linker.LinkIO(&p.sensor, \"%IX0.0\")",
+		// A located input is read from the process image as a scan starts.
+		"p.sensor = iec.BOOL(img.I.B[0])",
 		"instance.vals = [5]iec.INT{7, 7, 1, 1, 1}",
 	)
 }
@@ -383,8 +384,6 @@ func TestIlCallOfFunctionBlockWithInOut(t *testing.T) {
 func TestUnsupportedDeclarations(t *testing.T) {
 	tests := []struct{ input, want string }{
 		{"FUNCTION_BLOCK ABSTRACT Ab END_FUNCTION_BLOCK PROGRAM P VAR a1 : Ab; END_VAR END_PROGRAM", "cannot instantiate abstract function block 'Ab' for variable 'a1'"},
-		// Go has no counterpart of an IEC namespace yet.
-		{"NAMESPACE Lib FUNCTION F : INT F := 1; END_FUNCTION END_NAMESPACE", "unhandled AST node type: *ast.NamespaceDeclaration"},
 	}
 	for _, tt := range tests {
 		if _, err := transpileSource(t, tt.input); err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -405,7 +404,7 @@ func TestCallEdgeCases(t *testing.T) {
 		"Sum = (c.G.Sum(a, b) + 1)")
 	// IL CAL of a standard function block loads its primary output.
 	checkContains(t, "PROGRAM P VAR t1 : TON; END_VAR CAL t1(IN := TRUE, PT := T#1s) END_PROGRAM",
-		"p.t1.IN = true p.t1.PT = iec.TIME(1000000000) p.t1.Logic(now) cr_BOOL = p.t1.Q")
+		"p.t1.IN = true p.t1.PT = iec.TIME(1000000000) p.t1.Execute(now) cr_BOOL = p.t1.Q")
 
 	tests := []struct{ input, want string }{
 		{"FUNCTION_BLOCK Fb VAR x : INT; END_VAR END_FUNCTION_BLOCK PROGRAM P VAR f : Fb; END_VAR CAL f() END_PROGRAM", "CAL instruction used on function block with no outputs: f"},
@@ -689,7 +688,7 @@ func TestOperatorsAndIlCalls(t *testing.T) {
 	checkContains(t, "PROGRAM P VAR a : INT := 7; b : BOOL := TRUE; c : BOOL; END_VAR a := a MOD 3; c := b & TRUE; END_PROGRAM",
 		"p.a = (p.a % 3)", "p.c = (p.b && true)")
 	// CAL of built-in and unknown functions loads their result.
-	checkContains(t, "PROGRAM P VAR n : INT; END_VAR CAL LEN('ab') ST n END_PROGRAM", `cr_LINT = iec.LINT(LEN("ab"))`)
+	checkContains(t, "PROGRAM P VAR n : INT; END_VAR CAL LEN('ab') ST n END_PROGRAM", `cr_LINT = iec.LINT(iecstrings.LEN(iec.STRING("ab")))`)
 	checkContains(t, "PROGRAM P VAR n : INT; END_VAR CAL Mystery(1) ST n END_PROGRAM", "cr_LINT = iec.LINT(Mystery(1))")
 	// A method inherited from a parent is called on the derived instance.
 	checkContains(t, "FUNCTION_BLOCK Base METHOD M : INT M := 1; END_METHOD END_FUNCTION_BLOCK FUNCTION_BLOCK Dv EXTENDS Base END_FUNCTION_BLOCK PROGRAM P VAR d : Dv; x : INT; END_VAR x := d.M(); END_PROGRAM",
@@ -772,7 +771,7 @@ func TestFunctionBlockInitEdgeCases(t *testing.T) {
 	// A program's own VAR_GLOBAL is a Go package variable.
 	checkContains(t, "PROGRAM P VAR_GLOBAL g : INT := 1; END_VAR g := 2; END_PROGRAM", "var g iec.INT = 1", "g = 2")
 	// An access path is linked at run time.
-	checkContains(t, "PROGRAM P VAR_ACCESS a : Nope.x : INT READ_ONLY; END_VAR END_PROGRAM", `linker.LinkVar(&p.a, "Nope.x")`)
+	checkContains(t, "PROGRAM P VAR_ACCESS a : Nope.x : INT READ_ONLY; END_VAR END_PROGRAM", `if v, ok := resolve("Nope.x").(*iec.INT); ok {`)
 
 	tests := []struct{ input, want string }{
 		{"FUNCTION_BLOCK Base VAR bv : INT; END_VAR END_FUNCTION_BLOCK FUNCTION_BLOCK Dv EXTENDS Base END_FUNCTION_BLOCK PROGRAM P VAR d : Dv := (zz := 1); END_VAR END_PROGRAM", "function block 'Dv' has no variable 'zz'"},
@@ -791,7 +790,7 @@ func TestCallAndConfigHelpers(t *testing.T) {
 	checkContains(t, `PROGRAM Prg VAR name : STRING; wide : WSTRING; END_VAR END_PROGRAM
 		CONFIGURATION C RESOURCE Res ON CPU PROGRAM P1 : Prg; END_RESOURCE
 		VAR_CONFIG Res.P1.name : STRING := 'pump'; Res.P1.wide : WSTRING := "w"; END_VAR END_CONFIGURATION`,
-		`"name": "pump",`, `"wide": "w",`)
+		`{"name": "pump", "wide": "w"}`, `instance.wide = iec.WSTRING(s)`)
 
 	tr := New(&bytes.Buffer{})
 	if err := tr.Transpile(parseForTest(t, "FUNCTION F : INT VAR_IN_OUT io : INT; END_VAR F := io; END_FUNCTION")); err != nil {
@@ -895,4 +894,145 @@ END_PROGRAM
 	// without a known target has the length of its elements.
 	checkContains(t, "PROGRAM P VAR k : INT := 3; a : ARRAY[0..k] OF INT; END_VAR END_PROGRAM", "a []iec.INT")
 	checkContains(t, "FUNCTION_BLOCK Fb VAR_INPUT v : ARRAY[0..1] OF INT; END_VAR END_FUNCTION_BLOCK PROGRAM P VAR f : Fb; END_VAR f(v := [1, 2]); END_PROGRAM", "[...]iec.INT{1, 2}")
+}
+
+// A structure declared in place is a Go anonymous struct with its members'
+// starting values, and a function block called without arguments runs.
+func TestInlineStructuresAndBareCalls(t *testing.T) {
+	checkContains(t, `FUNCTION_BLOCK Fb VAR n : INT; END_VAR n := n + 1; END_FUNCTION_BLOCK
+PROGRAM P VAR rec : STRUCT a : INT := 5; b : BOOL; END_STRUCT; rec2 : STRUCT a : INT; END_STRUCT := (a := 2); f : Fb; END_VAR
+rec.a := rec.a + 1; f(); END_PROGRAM`,
+		"rec struct{ a iec.INT; b iec.BOOL }",
+		"instance.rec = struct{ a iec.INT; b iec.BOOL }{a: 5}",
+		"instance.rec2 = struct{ a iec.INT }{a: 2}",
+		"p.rec.a = (p.rec.a + 1)",
+		"p.f.Logic(now)")
+}
+
+// Standard function blocks and functions are royaljelly's.
+func TestRoyaljellyStandardLibrary(t *testing.T) {
+	checkContains(t, `PROGRAM P VAR t1 : TON; c : CTU; e : R_TRIG; sr1 : SR; x : INT; r : REAL; s : STRING; b : BYTE; END_VAR
+t1(IN := TRUE, PT := T#1s); c(CU := t1.Q, PV := 3); e(CLK := c.Q); sr1(S1 := e.Q);
+x := MAX(x, 5); x := LIMIT(0, x, 10); r := SQRT(2.0); r := SQRT(r); s := LEFT(s, 2); s := MID(s, 1, 2);
+b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
+		"t1 timers.TON", "c counters.CTU", "e triggers.R_TRIG", "sr1 triggers.SR_FB",
+		"instance.c.EN = true", "instance.sr1.EN = true",
+		"p.t1.Execute(now)", "p.c.Execute()", "p.e.R_TRIG()", "p.sr1.SR()",
+		"p.x = iec.INT(stdValue(selection.MAX(p.x, 5)))",
+		"p.x = iec.INT(selection.LIMIT(0, p.x, 10))",
+		"p.r = iec.REAL(numerical.SQRT(iec.REAL(2.000000)))",
+		"p.r = iec.REAL(numerical.SQRT(p.r))",
+		"p.s = stdValue(iecstrings.LEFT(iec.STRING(p.s), iec.LINT(2)))",
+		"p.b = iec.BYTE(bitwise.SHL(p.b, uint(2)))",
+		"p.x = conversion.REAL_TO_INT(iec.REAL(p.r))",
+		"p.x = iec.INT(numerical.ABS(iec.INT((-3))))",
+		"func stdValue[T any](value T, _ error) T { return value }")
+	// Standard function blocks without EN are not given one.
+	out, err := transpileSource(t, "PROGRAM P VAR t1 : TON; END_VAR END_PROGRAM")
+	if err != nil || strings.Contains(out, "t1.EN") {
+		t.Errorf("TON has no EN, got %v:\n%s", err, out)
+	}
+	// Standard functions take their arguments in order.
+	if _, err := transpileSource(t, "PROGRAM P VAR r : REAL; END_VAR r := SQRT(IN := 2.0); END_PROGRAM"); err == nil || !strings.Contains(err.Error(), "takes its arguments in order") {
+		t.Errorf("expected an error for a named argument, got %v", err)
+	}
+}
+
+// Located variables map to the process image; bad addresses are reported.
+func TestProcessImageAddresses(t *testing.T) {
+	for _, tt := range []struct{ address, goType, slot string }{
+		{"%IX0.3", "iec.BOOL", "img.I.B[3]"},
+		{"%IX2.1", "iec.BOOL", "img.I.B[17]"},
+		{"%QX5", "iec.BOOL", "img.Q.B[5]"},
+		{"%IB4", "iec.BYTE", "img.I.C[4]"},
+		{"%MW3", "iec.INT", "img.M.W[3]"},
+		{"%QW3", "iec.WORD", "img.Q.W[3]"},
+		{"%QD1", "iec.DINT", "img.Q.D[1]"},
+		{"%QL2", "iec.LWORD", "img.Q.L[2]"},
+		{"%MD6", "iec.REAL", "img.M.R[6]"},
+		{"%ML6", "iec.LREAL", "img.M.LR[6]"},
+		{"%M7", "iec.STRING", "img.M.S[7]"},
+		{"%M8", "iec.WSTRING", "img.M.WS[8]"},
+	} {
+		if _, slot, _, err := processImageSlot(tt.address, tt.goType); err != nil || slot != tt.slot {
+			t.Errorf("%s (%s): got %s, %v; want %s", tt.address, tt.goType, slot, err, tt.slot)
+		}
+	}
+	for _, tt := range []struct{ address, goType, want string }{
+		{"%ZX0", "iec.BOOL", "must be in the I, Q or M area"},
+		{"%IX*", "iec.BOOL", "must be a fixed address"},
+		{"%IW0", "iec.BOOL", "a BOOL must be located at a bit address"},
+		{"%IX0.9", "iec.BOOL", "is not a bit of a byte"},
+		{"%IX0", "iec.INT", "must be located at a byte, word"},
+		{"%IW1.2", "iec.INT", "must be a single number"},
+		{"%IW300", "iec.INT", "outside royaljelly's process image"},
+		{"%IX0", "iec.TIME", "cannot be located"},
+	} {
+		if _, _, _, err := processImageSlot(tt.address, tt.goType); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s (%s): expected an error containing %q, got %v", tt.address, tt.goType, tt.want, err)
+		}
+	}
+	// A function block reads and writes its located variables too.
+	checkContains(t, "FUNCTION_BLOCK Fb VAR x AT %IX0.0 : BOOL; y AT %QX0.1 : BOOL; END_VAR y := x; END_FUNCTION_BLOCK",
+		"f.x = iec.BOOL(img.I.B[0])", "img.Q.B[1] = iec.BOOL(f.y)", "var processImage vars.ProcessImage")
+	if _, err := transpileSource(t, "PROGRAM P VAR x AT %IW0 : BOOL; END_VAR END_PROGRAM"); err == nil || !strings.Contains(err.Error(), "'x': a BOOL must be located") {
+		t.Errorf("expected a located address error, got %v", err)
+	}
+}
+
+// GoFile writes a complete file importing the packages the code uses.
+func TestGoFileImports(t *testing.T) {
+	out, err := GoFile(parseForTest(t, "PROGRAM P VAR t1 : TON; s : STRING; END_VAR t1(IN := TRUE); s := CONCAT(s, 'x'); END_PROGRAM"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"package main", `"github.com/apiarytech/royaljelly/fb/timers"`, `"github.com/apiarytech/royaljelly/iec"`,
+		`iecstrings "github.com/apiarytech/royaljelly/std/strings"`, `"time"`,
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("expected %s in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(string(out), `"github.com/apiarytech/royaljelly/config"`) {
+		t.Errorf("config is imported but not used:\n%s", out)
+	}
+	if _, err := goFileWithImports([]byte("func (")); err == nil || !strings.Contains(err.Error(), "does not parse") {
+		t.Errorf("expected a parse error, got %v", err)
+	}
+}
+
+// A namespace's declarations take its path as a prefix, and references to
+// them, qualified or from within the namespace, are renamed.
+func TestNamespaces(t *testing.T) {
+	checkContains(t, `NAMESPACE Lib
+  TYPE Mode : (Idle, Busy); END_TYPE
+  FUNCTION Twice : INT VAR_INPUT x : INT; END_VAR Twice := x * 2; END_FUNCTION
+  FUNCTION GetMode : Mode GetMode := Mode#Busy; END_FUNCTION
+  FUNCTION_BLOCK Cnt VAR_OUTPUT n : INT; m : Mode; END_VAR n := Twice(n + 1); m := GetMode(); n := Inner.Half(n); END_FUNCTION_BLOCK
+  NAMESPACE Inner
+    FUNCTION Half : INT VAR_INPUT x : INT; END_VAR Half := x / 2; END_FUNCTION
+  END_NAMESPACE
+END_NAMESPACE
+NAMESPACE A.B FUNCTION F : INT F := 1; END_FUNCTION END_NAMESPACE
+PROGRAM P
+  VAR c : Lib.Cnt; m : Lib.Mode; y : INT; END_VAR
+  y := Lib.Twice(3) + Lib.Inner.Half(8) + A.B.F() + c.n;
+  c();
+  m := Lib.Mode#Busy;
+END_PROGRAM`,
+		"type Lib_Mode int", "Lib_Mode_Busy",
+		"func Lib_Twice(x iec.INT) (Lib_Twice iec.INT)",
+		"func Lib_GetMode() (Lib_GetMode Lib_Mode)",
+		"type Lib_Cnt struct",
+		"l.n = Lib_Twice((l.n + 1))", "l.m = Lib_GetMode()", "l.n = Lib_Inner_Half(l.n)",
+		"func A_B_F() (A_B_F iec.INT)",
+		"c Lib_Cnt", "m Lib_Mode",
+		"p.y = (((Lib_Twice(3) + Lib_Inner_Half(8)) + A_B_F()) + p.c.n)",
+		"p.c.Logic(now)", "p.m = Lib_Mode_Busy")
+	// A program without namespaces is unchanged.
+	program := parseForTest(t, "PROGRAM P VAR x : INT; END_VAR END_PROGRAM")
+	if flattenNamespaces(program) != program {
+		t.Error("a program without namespaces was copied")
+	}
 }

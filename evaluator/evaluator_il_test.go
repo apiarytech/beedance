@@ -225,8 +225,11 @@ func TestIlProgramEvaluation(t *testing.T) {
 			env := object.NewEnvironment()
 			testEvalWithEnv(t, tt.input, env)
 
-			// Call the program and get the result (which should be the accumulator for IL)
+			// Call the program, then read the current result it ends with.
 			result := testEvalWithEnv(t, progName+"();", env)
+			if prog, ok := env.Get(progName); ok && !isError(result) {
+				result, _ = prog.(*object.Program).Env.GetRaw(currentResultVar)
+			}
 
 			switch expected := tt.expected.(type) {
 			case int:

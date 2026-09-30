@@ -95,11 +95,6 @@ func NewMySimpleProgramFactory(params map[string]string) (func(time.Time), error
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MySimpleProgram) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *MySimpleProgram) Logic(now time.Time) {
 	p.myVar = (10 + 5)
 	p.isReady = true
@@ -273,11 +268,6 @@ func NewControlFlowFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *ControlFlow) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *ControlFlow) Logic(now time.Time) {
 	if (p.x < p.y) {
 		p.x = (p.x + 1)
@@ -346,11 +336,6 @@ func NewSubrangeTestFactory(params map[string]string) (func(time.Time), error) {
     instance.mySmallInt = -100
     instance.inputVal = 200
     return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *SubrangeTest) Link(linker config.IOLinker) error {
-    return nil
 }
 
 func (p *SubrangeTest) Logic(now time.Time) {
@@ -426,11 +411,6 @@ func NewTestFBProgramFactory(params map[string]string) (func(time.Time), error) 
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *TestFBProgram) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *TestFBProgram) Logic(now time.Time) {
 	p.MyCounter.INC = p.Trigger
 	p.MyCounter.Logic(now)
@@ -499,11 +479,6 @@ func NewMySFCFactory(params map[string]string) (func(time.Time), error) {
 	instance.sfcActiveSteps = make(map[string]bool)
 	instance.sfcActiveSteps["S1"] = true
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MySFC) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MySFC) Logic(now time.Time) {
@@ -598,11 +573,6 @@ func NewMyILProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance.A = 10
 	instance.B = 5
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MyILProgram) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MyILProgram) Logic(now time.Time) {
@@ -711,11 +681,6 @@ func NewMySFCForkJoinFactory(params map[string]string) (func(time.Time), error) 
 	instance.sfcActiveSteps = make(map[string]bool)
 	instance.sfcActiveSteps["S1"] = true
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MySFCForkJoin) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MySFCForkJoin) Logic(now time.Time) {
@@ -911,11 +876,6 @@ func NewMySFC_TimedFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MySFC_Timed) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *MySFC_Timed) Logic(now time.Time) {
 	// --- SFC Phase 0: Store previous step state ---
 	p.S1_X_prev = p.S1_X
@@ -1057,11 +1017,6 @@ func NewMySFC_PriorityFactory(params map[string]string) (func(time.Time), error)
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MySFC_Priority) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *MySFC_Priority) Logic(now time.Time) {
 	// --- SFC Phase 0: Store previous step state ---
 	p.S1_X_prev = p.S1_X
@@ -1200,11 +1155,6 @@ func NewMyIlCalJmpProgramFactory(params map[string]string) (func(time.Time), err
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MyIlCalJmpProgram) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *MyIlCalJmpProgram) Logic(now time.Time) {
 	// Typed accumulators for IL Current Result (CR)
 	var cr_BOOL iec.BOOL
@@ -1238,18 +1188,23 @@ func TestLocatedVariablesTranspilation(t *testing.T) {
 PROGRAM LocatedVarsProgram
     VAR
         myInput : BOOL AT %IX0.0;
-        myOutput : INT AT %QW1.0;
+        myOutput : INT AT %QW1;
+        memo : REAL AT %MD2;
         internalVar : REAL := 1.23;
     END_VAR
 
     myOutput := myOutput + 1;
+    memo := memo * 2.0;
     myInput := NOT myInput;
 END_PROGRAM
 `
+	// Located variables are copied from royaljelly's process image as the
+	// scan starts, and to it as the scan ends.
 	expected := `
 type LocatedVarsProgram struct {
-	myInput *iec.BOOL // AT %IX0.0
-	myOutput *iec.INT // AT %QW1.0
+	myInput iec.BOOL // AT %IX0.0
+	myOutput iec.INT // AT %QW1
+	memo iec.REAL // AT %MD2
 	internalVar iec.REAL
 }
 
@@ -1260,21 +1215,24 @@ func NewLocatedVarsProgramFactory(params map[string]string) (func(time.Time), er
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *LocatedVarsProgram) Link(linker config.IOLinker) error {
-	if err := linker.LinkIO(&p.myInput, "%IX0.0"); err != nil {
-		return err
-	}
-	if err := linker.LinkIO(&p.myOutput, "%QW1.0"); err != nil {
-		return err
-	}
-	return nil
+func (p *LocatedVarsProgram) Logic(now time.Time) {
+	processImage.Read(func(img *vars.Image) {
+		p.myInput = iec.BOOL(img.I.B[0])
+		p.memo = iec.REAL(img.M.R[2])
+	})
+	defer processImage.Write(func(img *vars.Image) {
+		img.Q.W[1] = iec.WORD(p.myOutput)
+		img.M.R[2] = iec.REAL(p.memo)
+	})
+	p.myOutput = (p.myOutput + 1)
+	p.memo = (p.memo * 2.000000)
+	p.myInput = (!p.myInput)
 }
 
-func (p *LocatedVarsProgram) Logic(now time.Time) {
-	(*p.myOutput) = ((*p.myOutput) + 1)
-	(*p.myInput) = (!(*p.myInput))
-}
+// processImage holds the located variables (AT %I, %Q, %M) of the programs
+// and function blocks in this file. I/O drivers read the outputs from it and
+// write the inputs to it.
+var processImage vars.ProcessImage
 `
 	transpileAndCheck(t, "TestLocatedVariablesTranspilation", input, expected)
 }
@@ -1297,7 +1255,7 @@ END_PROGRAM
 type AccessTest struct {
 	SourceVar   iec.INT
 	DestVar     iec.INT
-	LocalSource *iec.INT
+	LocalSource *iec.INT // VAR_ACCESS SourceVar
 }
 
 // NewAccessTestFactory creates a new instance of the AccessTest program.
@@ -1307,10 +1265,13 @@ func NewAccessTestFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *AccessTest) Link(linker config.IOLinker) error {
-	if err := linker.LinkVar(&p.LocalSource, "SourceVar"); err != nil {
-		return err
+// LinkAccess points the program's VAR_ACCESS variables at the variables
+// their access paths name; resolve returns a pointer to the variable a path names.
+func (p *AccessTest) LinkAccess(resolve func(path string) any) error {
+	if v, ok := resolve("SourceVar").(*iec.INT); ok {
+		p.LocalSource = v
+	} else {
+		return fmt.Errorf("VAR_ACCESS LocalSource: SourceVar does not name a variable of type INT")
 	}
 	return nil
 }
@@ -1354,11 +1315,6 @@ func NewTempAndExternalTestFactory(params map[string]string) (func(time.Time), e
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *TempAndExternalTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *TempAndExternalTest) Logic(now time.Time) {
 	var Temp_Var iec.INT = 5
 	Temp_Var = (Temp_Var + 1)
@@ -1394,11 +1350,6 @@ func NewArrayRepTestFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *ArrayRepTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *ArrayRepTest) Logic(now time.Time) {
 	p.myArray[0] = 0
 }
@@ -1427,11 +1378,6 @@ func TestMacroTranspilation(t *testing.T) {
 func NewMacroTestProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MacroTestProgram{}
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MacroTestProgram) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MacroTestProgram) Logic(now time.Time) {
@@ -1467,58 +1413,46 @@ END_CONFIGURATION
 	expected := `
 type MyProgram struct {
 	ConfigInput iec.INT
-	myVar       iec.INT
+	myVar iec.INT
 }
 
 // NewMyProgramFactory creates a new instance of the MyProgram program.
 func NewMyProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MyProgram{}
+	if _, ok := params["ConfigInput"]; ok {
+		var v iec.LINT
+		if err := config.ParseLINT(params, "ConfigInput", &v); err != nil {
+			return nil, err
+		}
+		instance.ConfigInput = iec.INT(v)
+	}
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MyProgram) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MyProgram) Logic(now time.Time) {
 	p.myVar = p.ConfigInput
 }
 
-// --- Generated Main Function from CONFIGURATION ---
+// main runs configuration MyConfig until the process is interrupted.
 func main() {
-	// Register program factories
 	config.RegisterProgramFactory("MyProgram", NewMyProgramFactory)
+	cfg := &core.Configuration{Name: "MyConfig"}
 
-	// Create the configuration from the IEC 61131-3 source
-	cfg := &config.Configuration{
-		Name: "MyConfig",
-		Resources: []*config.Resource{
-			{
-				Name: "Res1",
-				Tasks: []*config.Task{
-					{
-						Name:     "Task1",
-						Priority: 1,
-						Interval: iec.TIME(100000000),
-						Programs: []string{"P1"},
-					},
-				},
-				Programs: map[string]*config.ProgramInstance{
-					"P1": {
-						Type: "MyProgram",
-						Params: map[string]string{
-							"ConfigInput": "42",
-						},
-					},
-				},
-			},
-		},
+	// RESOURCE Res1
+	res1 := &core.Resource{Name: "Res1"}
+	res1_task1 := core.NewTask("Task1", core.CyclicTask, 0, time.Duration(iec.TIME(100000000)))
+	res1.AddTask(res1_task1)
+	res1_prog1, err := NewMyProgramFactory(map[string]string{"ConfigInput": "42"})
+	if err != nil {
+		log.Fatalf("program P1: %v", err)
 	}
-
-	// This is where you would start the royaljelly scheduler with the generated config.
-	fmt.Println("Configuration loaded and ready to run.")
-	// Example: royaljelly.Start(cfg)
+	res1_task1.AddProgram(&core.Program{Name: "P1", Logic: res1_prog1})
+	cfg.AddResource(res1)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := cfg.Run(ctx); err != nil {
+		log.Fatal(err)
+	}
 }
 `
 	transpileAndCheck(t, "TestConfigurationTranspilation", input, expected)
@@ -1547,11 +1481,6 @@ func NewAssignmentWorkaroundFactory(params map[string]string) (func(time.Time), 
 	instance.myArray = [5]iec.INT{}
 	instance.i = 0
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *AssignmentWorkaround) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *AssignmentWorkaround) Logic(now time.Time) {
@@ -1584,7 +1513,7 @@ END_PROGRAM
 type MyIlBuiltins struct {
 	neg_val  iec.INT
 	abs_val  iec.INT
-	my_timer iec.TON
+	my_timer timers.TON
 	timer_in iec.BOOL
 	timer_q  iec.BOOL
 }
@@ -1593,14 +1522,8 @@ type MyIlBuiltins struct {
 func NewMyIlBuiltinsFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MyIlBuiltins{}
 	instance.neg_val = (-10)
-	instance.my_timer.EN = true
 	instance.timer_in = true
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MyIlBuiltins) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MyIlBuiltins) Logic(now time.Time) {
@@ -1613,12 +1536,12 @@ func (p *MyIlBuiltins) Logic(now time.Time) {
 	_ = cr_BOOL; _ = cr_LINT; _ = cr_LREAL; _ = cr_TIME; _ = cr_STRING // Avoid unused var errors
 
 	cr_LINT = iec.LINT(p.neg_val)
-	cr_LREAL = ABS(cr_LINT)
+	cr_LREAL = iec.LREAL(numerical.ABS(cr_LINT))
 	p.abs_val = iec.INT(cr_LREAL)
 
 	p.my_timer.IN = p.timer_in
 	p.my_timer.PT = iec.TIME(2000000000)
-	p.my_timer.Logic(now)
+	p.my_timer.Execute(now)
 	cr_BOOL = p.my_timer.Q
 	p.timer_q = iec.BOOL(cr_BOOL)
 }
@@ -1688,11 +1611,6 @@ func NewSfcStoredPulseFactory(params map[string]string) (func(time.Time), error)
 	instance.sfcActiveSteps = make(map[string]bool)
 	instance.sfcActiveSteps["S1"] = true
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *SfcStoredPulse) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *SfcStoredPulse) Logic(now time.Time) {
@@ -1823,11 +1741,6 @@ func NewMiscTestFactory(params map[string]string) (func(time.Time), error) {
 	instance.tod = iec.TOD(time.Date(0, 1, 1, 14, 21, 0, 0, time.UTC))
 	instance.dt = iec.DT(time.Date(2026, 1, 2, 14, 21, 0, 0, time.UTC))
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *MiscTest) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *MiscTest) Logic(now time.Time) {

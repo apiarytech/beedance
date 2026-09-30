@@ -12,6 +12,7 @@ package evaluator
 import (
 	"beedance/ast"
 	"beedance/object"
+	"context"
 	"fmt"
 	"math"
 	"regexp"
@@ -214,14 +215,17 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// This object needs its own persistent environment for its static VARs.
 		instanceEnv := object.NewEnclosedEnvironment(env)
 		prog := &object.Program{
-			Name:       node.Name,
-			VarInputs:  node.VarInputs,
-			VarOutputs: node.VarOutputs,
-			VarInOuts:  node.VarInOuts,
-			Vars:       node.Vars,
-			VarTemp:    node.VarTemp,
-			Body:       node.Body,
-			Env:        instanceEnv, // The program's own persistent environment
+			Name:        node.Name,
+			VarInputs:   node.VarInputs,
+			VarOutputs:  node.VarOutputs,
+			VarInOuts:   node.VarInOuts,
+			Vars:        node.Vars,
+			VarTemp:     node.VarTemp,
+			VarExternal: node.VarExternal,
+			VarGlobal:   node.VarGlobal,
+			VarAccess:   node.VarAccess,
+			Body:        node.Body,
+			Env:         instanceEnv, // The program's own persistent environment
 		}
 		// Set the program definition in the outer environment.
 		env.Set(node.Name.Value, prog)
@@ -315,25 +319,17 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			return applyNumericConversion(valueStr, targetTypeName)
 		}
 
-		// 4. Handle enumerated types (e.g., COLOR#RED)
-		if typeQuote, ok := env.Get("_type_" + targetTypeName); ok {
-			if quote, isQuote := typeQuote.(*object.Quote); isQuote {
-				if typeDecl, isTypeDecl := quote.Node.(*ast.TypeDeclaration); isTypeDecl {
-					if enumDef, isEnumDef := typeDecl.DataType.(*ast.EnumDefinition); isEnumDef {
-						// It's an enum type. Check if the value exists.
-						valueFound := false
-						for _, enumVal := range enumDef.Values {
-							if enumVal.Value == valueStr {
-								valueFound = true
-								break
-							}
-						}
-						if valueFound {
-							return &object.EnumeratedValue{TypeName: targetTypeName, Value: valueStr}
-						}
-						return newError(node, "enumerated value '%s' not found in type '%s'", valueStr, targetTypeName)
+		// 4. Handle enumerated types (e.g., COLOR#RED, or Lib.Color#Red for
+		// one declared in a namespace).
+		if typeDecl, ok := lookupTypeDeclaration(targetTypeName, env); ok {
+			if enumDef, isEnumDef := typeDecl.DataType.(*ast.EnumDefinition); isEnumDef {
+				// It's an enum type. Check if the value exists.
+				for _, enumVal := range enumDef.Values {
+					if enumVal.Value == valueStr {
+						return &object.EnumeratedValue{TypeName: strings.ToUpper(typeDecl.Name.Value), Value: valueStr}
 					}
 				}
+				return newError(node, "enumerated value '%s' not found in type '%s'", valueStr, targetTypeName)
 			}
 		}
 
@@ -472,10 +468,14 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return evalDereferenceExpression(node, env)
 
 	case *ast.FunctionLiteral:
-		// A FunctionLiteral is evaluated into a runtime Function object.
-		// The parser now provides VarInputs directly on the FunctionLiteral node.
+		// A FunctionLiteral is evaluated into a runtime Function object. Its
+		// parameters, `fn(x : INT)`, are its inputs.
+		inputs := node.VarInputs
+		for _, param := range node.Parameters {
+			inputs = append(inputs, &ast.VarDeclStatement{Token: param.Name.Token, Name: param.Name, DataType: param.DataType, Scope: "VAR_INPUT"})
+		}
 		return &object.Function{
-			VarInputs: node.VarInputs, Env: env, Body: node.Body,
+			VarInputs: inputs, Env: env, Body: node.Body,
 		}
 
 	case *ast.CallExpression:
@@ -1225,10 +1225,18 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		}
 
 		// If we are here, it's an unconditional CAL or a conditional one that should execute.
-		// The result of the function call becomes the new current result.
+		// The result of a function call becomes the new current result; a
+		// function block or program has no result, so the current result stays.
 		result := evalOperand(node.Operand, env)
 		if isError(result) {
 			return result
+		}
+		if call, isCall := node.Operand.(*ast.CallExpression); isCall {
+			switch Eval(call.Function, env).(type) {
+			case *object.FunctionBlockInstance, *object.Program, *object.ProgramInstance:
+				cr, _ := env.Get(currentResultVar)
+				return cr
+			}
 		}
 		// The loop now sets the CR from the return value.
 		// The instruction's result is the new value of the accumulator, which the loop will handle.
@@ -2389,11 +2397,13 @@ func applyConfigVar(decl *ast.VarDeclStatement, targetEnv *object.Environment, v
 		return NULL // Nothing to configure; redeclaring would reset the variable.
 	}
 
-	// A structure initialization sets members of an existing FB instance.
+	// A structure initialization sets members of an existing FB instance or
+	// structure.
 	if structInit, ok := decl.Value.(*ast.StructLiteral); ok && decl.Location == nil {
 		fbInstance, isFB := existing.(*object.FunctionBlockInstance)
-		if !isFB {
-			return newError(decl, "VAR_CONFIG structure initialization requires a function block instance, but '%s' is %s", varName, existing.Type())
+		structure, isStruct := existing.(*object.Hash)
+		if !isFB && !isStruct {
+			return newError(decl, "VAR_CONFIG structure initialization requires a function block instance or structure, but '%s' is %s", varName, existing.Type())
 		}
 		for _, init := range structInit.Initializers {
 			named, ok := init.(*ast.NamedArgument)
@@ -2404,7 +2414,15 @@ func applyConfigVar(decl *ast.VarDeclStatement, targetEnv *object.Environment, v
 			if isError(val) {
 				return val
 			}
-			fbInstance.Env.Set(named.Name.Value, val)
+			if isFB {
+				fbInstance.Env.Set(named.Name.Value, val)
+				continue
+			}
+			key, found := hashMemberKey(structure, named.Name.Value)
+			if !found {
+				return newError(decl, "structure '%s' has no member '%s'", varName, named.Name.Value)
+			}
+			structure.Pairs[key] = object.HashPair{Key: structure.Pairs[key].Key, Value: object.CopyValue(val)}
 		}
 		return NULL
 	}
@@ -2646,6 +2664,10 @@ func evalIdentifier(
 			if step, stepOk := sfc.Steps[node.Value]; stepOk {
 				return step
 			}
+			// An action, for its flag `MyAction.Q`.
+			if action, actionOk := sfc.Actions[node.Value]; actionOk {
+				return action
+			}
 		}
 	}
 
@@ -2819,7 +2841,9 @@ func isKnownType(typeName string, env *object.Environment) bool {
 	if _, ok := env.Get("_type_" + upper); ok {
 		return true
 	}
-	return false
+	// A type qualified by its namespace, such as Lib.Mode.
+	_, ok := lookupTypeDeclaration(typeName, env)
+	return ok
 }
 
 // evalExpressions evaluates a slice of expressions and returns a slice of the resulting objects.
@@ -3023,12 +3047,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			}
 		}
 
-		if isILProgram {
-			return evaluated
-		}
-		// For ST/SFC, the return value is the value assigned to the program's name.
-		returnValue, _ := fn.Env.Get(fn.Name.Value)
-		return returnValue
+		// A program has no result.
+		return NULL
 
 	case *object.ProgramInstance:
 		// A program instance is being called.
@@ -3093,11 +3113,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			}
 		}
 
-		if isILProgram {
-			return evaluated
-		}
-		returnValue, _ := extendedEnv.Get(fn.Definition.Name.Value)
-		return returnValue
+		// A program has no result.
+		return NULL
 
 	case *object.BuiltinFunctionBlock:
 		// This case is hit when a variable is declared with a standard FB type, e.g., `MyTimer : TON;`
@@ -3832,17 +3849,18 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 	return scheduler, nil
 }
 
-// RunScheduler is a placeholder for a function that would start the main execution
-// loop of a scheduler, triggering tasks based on their configured interval or
-// event conditions.
-func RunScheduler(s *object.Scheduler, env *object.Environment, scanCycle time.Duration) {
+// RunScheduler runs a scheduler's scan cycles, one every scanCycle, until
+// ctx is done: each cycle runs the tasks that are due, in priority order.
+func RunScheduler(ctx context.Context, s *object.Scheduler, env *object.Environment, scanCycle time.Duration) {
 	ticker := time.NewTicker(scanCycle)
 	defer ticker.Stop()
-
-	fmt.Println("Scheduler started. Press Ctrl+C to stop.")
-
-	for range ticker.C {
-		runSchedulerCycle(s, env, time.Now())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			runSchedulerCycle(s, env, now)
+		}
 	}
 }
 
@@ -3894,8 +3912,9 @@ func runSchedulerCycle(s *object.Scheduler, env *object.Environment, now time.Ti
 		if isTaskReady {
 			fmt.Printf("Executing Task: %s (Priority: %d)\n", task.Name, task.Priority)
 			for _, prog := range task.Programs {
-				// Execute the program body in its own instance environment
-				Eval(prog.Definition.Body, prog.Env)
+				// Run the program instance as a call does: its VAR_TEMP starts
+				// afresh, and an IL or SFC body runs as such.
+				applyFunction(prog, nil, env, prog.Definition.Name)
 
 				// Handle output mappings (=>)
 				for _, mapping := range prog.OutputMappings {

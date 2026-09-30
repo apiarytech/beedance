@@ -18,8 +18,24 @@ END_PROGRAM
 P();`
 }
 
+// checkIlEval runs each ilProgram and checks the current result the program
+// P ends with (a program call itself has no result), or the error it gives.
+func checkIlEval(t *testing.T, cases []evalCase) {
+	t.Helper()
+	for _, c := range cases {
+		env := object.NewEnvironment()
+		result := testEvalWithEnv(t, c.input, env)
+		if !isError(result) {
+			if prog, ok := env.Get("P"); ok {
+				result, _ = prog.(*object.Program).Env.GetRaw(currentResultVar)
+			}
+		}
+		checkEvalResult(t, c.input, result, c.want)
+	}
+}
+
 func TestIlArithmeticAndComparison(t *testing.T) {
-	checkEval(t, []evalCase{
+	checkIlEval(t, []evalCase{
 		{ilProgram("LD a\nSUB b"), "3"},
 		{ilProgram("LD a\nMUL b"), "18"},
 		{ilProgram("LD a\nDIV b"), "2"},
@@ -40,7 +56,7 @@ func TestIlArithmeticAndComparison(t *testing.T) {
 }
 
 func TestIlStoreSetAndReset(t *testing.T) {
-	checkEval(t, []evalCase{
+	checkIlEval(t, []evalCase{
 		// STN stores the negated result.
 		{ilProgram("LD y\nSTN x\nLD x"), "false"},
 		// S and R change a BOOL only when the result is TRUE, and keep the result.
@@ -52,13 +68,13 @@ func TestIlStoreSetAndReset(t *testing.T) {
 }
 
 func TestIlFlowControl(t *testing.T) {
-	checkEval(t, []evalCase{
-		// RET stops the program; the result is the current result.
+	checkIlEval(t, []evalCase{
+		// RET stops the program, leaving the current result as it is.
 		{ilProgram("LD 1\nRET\nLD 2"), "1"},
 		{ilProgram("LD TRUE\nRETC\nLD 2"), "true"},
 		{ilProgram("LD FALSE\nRETC\nLD 2"), "2"},
 		{ilProgram("LD FALSE\nRETCN\nLD 2"), "false"},
-		// A program that never loads the current result returns NULL.
+		// A program that never loads the current result leaves it NULL.
 		{ilProgram("RET"), "null"},
 		{ilProgram("LD FALSE\nJMPCN skip\nLD 1\nskip: LD 2"), "2"},
 		{ilProgram("LD TRUE\nJMPCN skip\nLD 1\nRET\nskip: LD 2"), "1"},
@@ -67,7 +83,7 @@ func TestIlFlowControl(t *testing.T) {
 
 func TestIlCalls(t *testing.T) {
 	const fn = "FUNCTION Seven : INT Seven := 7; END_FUNCTION\n"
-	checkEval(t, []evalCase{
+	checkIlEval(t, []evalCase{
 		{fn + ilProgram("CAL Seven()"), "7"},
 		{fn + ilProgram("LD TRUE\nCALC Seven()"), "7"},
 		{fn + ilProgram("LD FALSE\nCALC Seven()"), "false"},

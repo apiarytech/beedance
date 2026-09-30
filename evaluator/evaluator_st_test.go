@@ -1110,13 +1110,13 @@ func TestOtherVarBlocks(t *testing.T) {
 	t.Run("VAR_TEMP in a single pass", func(t *testing.T) {
 		// VAR_TEMP are re-initialized every cycle. In a single eval pass, they act like VAR.
 		input := `
-			PROGRAM TestTemp
+			PROGRAM TestTemp VAR_OUTPUT out : INT; END_VAR
 				VAR_TEMP
 					temp_var : INT := 5;
 				END_VAR
-				TestTemp := temp_var * 2;
+				out := temp_var * 2;
 			END_PROGRAM
-			TestTemp();
+			TestTemp(); TestTemp.out;
 		`
 		evaluated := testEval(t, input)
 		testIntegerObject(t, evaluated, "TestTemp", 10)
@@ -1124,12 +1124,12 @@ func TestOtherVarBlocks(t *testing.T) {
 
 	t.Run("VAR_TEMP re-initialization", func(t *testing.T) {
 		input := `
-			PROGRAM TestTempReinit
+			PROGRAM TestTempReinit VAR_OUTPUT out : INT; END_VAR
 				VAR_TEMP
 					temp_var : INT := 0;
 				END_VAR
 				temp_var := temp_var + 1;
-				TestTempReinit := temp_var;
+				out := temp_var;
 			END_PROGRAM
 		`
 		env := object.NewEnvironment()
@@ -1137,22 +1137,22 @@ func TestOtherVarBlocks(t *testing.T) {
 		testEvalWithEnv(t, input, env)
 
 		// First call
-		evaluated1 := testEvalWithEnv(t, "TestTempReinit();", env)
+		evaluated1 := testEvalWithEnv(t, "TestTempReinit(); TestTempReinit.out;", env)
 		testIntegerObject(t, evaluated1, "first call", 1)
 
 		// Second call - temp_var should be re-initialized to 0, then incremented to 1 again.
-		evaluated2 := testEvalWithEnv(t, "TestTempReinit();", env)
+		evaluated2 := testEvalWithEnv(t, "TestTempReinit(); TestTempReinit.out;", env)
 		testIntegerObject(t, evaluated2, "second call", 1)
 	})
 
 	t.Run("VAR in PROGRAM should be static", func(t *testing.T) {
 		input := `
-			PROGRAM TestStaticVar
+			PROGRAM TestStaticVar VAR_OUTPUT out : INT; END_VAR
 				VAR
 					static_var : INT := 0;
 				END_VAR
 				static_var := static_var + 1;
-				TestStaticVar := static_var;
+				out := static_var;
 			END_PROGRAM
 		`
 		env := object.NewEnvironment()
@@ -1160,11 +1160,11 @@ func TestOtherVarBlocks(t *testing.T) {
 		testEvalWithEnv(t, input, env)
 
 		// First call
-		evaluated1 := testEvalWithEnv(t, "TestStaticVar();", env)
+		evaluated1 := testEvalWithEnv(t, "TestStaticVar(); TestStaticVar.out;", env)
 		testIntegerObject(t, evaluated1, "first call", 1)
 
 		// Second call - static_var should retain its value and be incremented to 2.
-		evaluated2 := testEvalWithEnv(t, "TestStaticVar();", env)
+		evaluated2 := testEvalWithEnv(t, "TestStaticVar(); TestStaticVar.out;", env)
 		testIntegerObject(t, evaluated2, "second call", 2)
 	})
 }

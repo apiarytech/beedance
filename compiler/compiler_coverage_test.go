@@ -445,3 +445,16 @@ func TestEnumAndStructureInitializerEdges(t *testing.T) {
 		{types + "VAR p : Pt := (x := 1, 2); END_VAR", "a structure initializer must list members as name := value"},
 	})
 }
+
+func TestIlCompileErrors(t *testing.T) {
+	checkCompileErrors(t, []struct{ input, want string }{
+		{"PROGRAM P VAR x : INT; END_VAR l1: LD 1 l1: ST x END_PROGRAM", "duplicate label defined: l1"},
+		{"PROGRAM P VAR x : INT; END_VAR LD 1 ST 5 END_PROGRAM", "operand for ST must be a variable identifier"},
+		{"PROGRAM P VAR x : INT; END_VAR LD TRUE S 5 END_PROGRAM", "operand for S must be a variable identifier"},
+		{"PROGRAM P VAR x : INT; END_VAR LD TRUE JMP 5 END_PROGRAM", "operand for JMP must be a label identifier"},
+		{"PROGRAM P VAR x : INT; END_VAR LD 1 JMP nowhere END_PROGRAM", "undefined jump label: nowhere"},
+		{"PROGRAM P VAR x : INT; END_VAR LD missing END_PROGRAM", "undefined variable missing"},
+	})
+	// A jump back to a label already compiled, and an unconditional jump.
+	checkCompiles(t, []string{"PROGRAM P VAR i : INT; END_VAR again: LD i ADD 1 ST i LT 3 JMPC again JMP done done: LD 0 END_PROGRAM"})
+}

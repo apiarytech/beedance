@@ -60,3 +60,22 @@ func TestTypedLiteralWithoutValue(t *testing.T) {
 		}
 	}
 }
+
+// A typed literal may name a type declared in a namespace.
+func TestQualifiedTypedLiteral(t *testing.T) {
+	p := New(lexer.New("x := Lib.Inner.Mode#Busy;"))
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	lit, ok := program.Statements[0].(*ast.AssignmentStatement).Value.(*ast.TypedLiteral)
+	if !ok || lit.TypeName != "Lib.Inner.Mode" {
+		t.Fatalf("expected a typed literal of Lib.Inner.Mode, got %#v", program.Statements[0])
+	}
+	// A left side that is not a name is still an error.
+	p = New(lexer.New("x := a[1]#Busy;"))
+	p.ParseProgram()
+	if len(p.Errors()) == 0 {
+		t.Fatal("expected an error for a[1]#Busy")
+	}
+}

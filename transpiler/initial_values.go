@@ -137,6 +137,15 @@ func (t *Transpiler) initialValueVisiting(dataType, value ast.Expression, visiti
 	if def, ok := dataType.(*ast.ArrayDefinition); ok {
 		return t.arrayValue(def, value, visiting)
 	}
+	if def, ok := dataType.(*ast.StructDefinition); ok {
+		// A structure declared in place: a Go anonymous struct.
+		lit, isLit := value.(*ast.StructLiteral)
+		if value != nil && !isLit {
+			return t.expressionString(value)
+		}
+		td := &ast.TypeDeclaration{Name: &ast.Identifier{Value: t.mapIecTypeToGo(def)}, DataType: def}
+		return t.structValue(td, def, lit, visiting)
+	}
 	if td := t.lookupTypeDeclaration(dataType); td != nil {
 		return t.typeDeclarationValue(td, value, visiting)
 	}
@@ -658,8 +667,11 @@ func (t *Transpiler) transpileProgramVarInit(decl *ast.VarDeclStatement) error {
 		for _, stmt := range init {
 			t.write("\t%s\n", stmt)
 		}
-		// A function block's EN input is TRUE by default.
-		t.write("\t%s.EN = true\n", target)
+		// A function block's EN input is TRUE by default. Some of
+		// royaljelly's standard function blocks have no EN.
+		if std, isStd := t.standardFunctionBlockOf(decl.DataType); !isStd || std.hasEN {
+			t.write("\t%s.EN = true\n", target)
+		}
 		return nil
 	}
 	if decl.Location != nil && decl.Value == nil {

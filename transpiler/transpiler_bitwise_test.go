@@ -52,11 +52,6 @@ func NewBitwiseTestFactory(params map[string]string) (func(time.Time), error) {
 	return instance.Logic, nil
 }
 
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *BitwiseTest) Link(linker config.IOLinker) error {
-	return nil
-}
-
 func (p *BitwiseTest) Logic(now time.Time) {
 	p.w_and = (p.w1 & p.w2)
 	p.w_or = (p.w1 | p.w2)
@@ -97,11 +92,6 @@ func NewNestedBitwiseTestFactory(params map[string]string) (func(time.Time), err
 	instance.w2 = 4080
 	instance.w3 = 15
 	return instance.Logic, nil
-}
-
-// Link connects the program's located variables to the runtime's I/O manager.
-func (p *NestedBitwiseTest) Link(linker config.IOLinker) error {
-	return nil
 }
 
 func (p *NestedBitwiseTest) Logic(now time.Time) {
