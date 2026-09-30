@@ -29,6 +29,7 @@ import (
 	"beedance/lexer"
 	"beedance/object"
 	"beedance/parser"
+	"beedance/plcopen"
 	"beedance/repl"
 	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"beedance/transpiler"
@@ -48,6 +49,8 @@ func main() {
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
 	uvmFlag := flag.Bool("uvm", false, "Use the universal microcontroller virtual machine instead of the evaluator")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
+	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
+	fromXMLFile := flag.String("from-xml", "", "Path to input PLCopen TC6 XML file to convert to IEC 61131-3 text")
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
 	flag.Parse()
 
@@ -81,6 +84,20 @@ func main() {
 			os.Exit(1)
 		}
 		transpileFile(*iecFile, *goFile, os.Stdout)
+		os.Exit(0)
+	}
+
+	if *toXMLFile != "" {
+		if *iecFile == "" {
+			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -to-xml flag to specify the input file.")
+			os.Exit(1)
+		}
+		convertIECToXML(*iecFile, *toXMLFile, os.Stdout)
+		os.Exit(0)
+	}
+
+	if *fromXMLFile != "" {
+		convertXMLToIEC(*fromXMLFile, *iecFile, os.Stdout)
 		os.Exit(0)
 	}
 
@@ -309,5 +326,31 @@ func transpileFile(inputFile, outputFile string, out io.Writer) {
 	cmd.Dir = filepath.Dir(outputFile)
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(out, "Warning: 'go mod tidy' failed: %s\n", err)
+	}
+}
+
+func convertIECToXML(inputFile, outputFile string, out io.Writer) {
+	if err := plcopen.ConvertIECToXMLFile(inputFile, outputFile); err != nil {
+		fmt.Fprintf(out, "Error converting IEC to XML: %s\n", err)
+		return
+	}
+	fmt.Fprintf(out, "Successfully converted %s to PLCopen XML %s\n", inputFile, outputFile)
+}
+
+func convertXMLToIEC(xmlFile, outputFile string, out io.Writer) {
+	iecText, err := plcopen.ConvertXMLToIECText(xmlFile)
+	if err != nil {
+		fmt.Fprintf(out, "Error converting XML to IEC: %s\n", err)
+		return
+	}
+
+	if outputFile != "" {
+		if err := os.WriteFile(outputFile, []byte(iecText), 0644); err != nil {
+			fmt.Fprintf(out, "Error writing IEC output file: %s\n", err)
+			return
+		}
+		fmt.Fprintf(out, "Successfully converted %s to IEC text %s\n", xmlFile, outputFile)
+	} else {
+		out.Write([]byte(iecText))
 	}
 }

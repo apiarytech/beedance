@@ -3021,6 +3021,17 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 	exp.Index = p.parseExpression(LOWEST)
 
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // consume previous expression, curToken is now COMMA
+		p.nextToken() // advance past COMMA to next index expression
+		nextIndex := p.parseExpression(LOWEST)
+		exp = &ast.IndexExpression{
+			Token: exp.Token,
+			Left:  exp,
+			Index: nextIndex,
+		}
+	}
+
 	if !p.expectPeek(token.RBRACKET) {
 		return nil
 	}

@@ -89,7 +89,7 @@ func TestIlErrors(t *testing.T) {
 		{ilProgram("LD missing"), "ERROR: identifier not found: missing"},
 		{ilProgram("LD 1\nADD missing"), "ERROR: identifier not found: missing"},
 		{ilProgram("LDN str"), "ERROR: unknown operator: NOT"},
-		{ilProgram("LD a\nADD str"),"ERROR: unsupported operator '+' for types INT and STRING"},
+		{ilProgram("LD a\nADD str"), "ERROR: unsupported operator '+' for types INT and STRING"},
 		{ilProgram("LD 1\nNOT"), "ERROR: unknown IL operator: NOT"},
 		{ilProgram("LD 1\nADD( )"), "ERROR: parenthesized IL expression did not produce a result"},
 	})

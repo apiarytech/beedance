@@ -342,6 +342,9 @@ func (p *Pointer) Inspect() string {
 // Array objects store a slice of other objects.
 type Array struct {
 	Elements []Object
+	// LowerBound is the index of the first element, as declared, e.g. 1 for
+	// ARRAY[1..3]. Indexing subtracts it.
+	LowerBound int64
 }
 
 // Type returns the object's type.

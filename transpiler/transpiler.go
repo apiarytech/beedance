@@ -129,6 +129,7 @@ type Transpiler struct {
 	currentSetter    *ast.PropertyDeclaration               // The current property setter being transpiled
 	isDereferencing  bool                                   // Flag to prevent double-dereferencing
 	macroDefinitions map[string]*ast.MacroLiteral           // Stores macro definitions for expansion
+	arrayDecls       map[string]*ast.ArrayDefinition        // Declared array types of the variables in scope, for their bounds
 	localVars        map[string]bool                        // Parameters, results and locals of the current function or method
 	initVisiting     map[*ast.FunctionBlockDeclaration]bool // Function blocks whose Init is being generated
 }
@@ -185,13 +186,14 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 	case *ast.ProgramDeclaration:
 		t.write("\n")
 		// First, transpile any global var blocks that might exist at the program level
-		t.transpileGlobalVarBlocks(node.VarGlobal)
+		if err := t.transpileGlobalVarBlocks(node.VarGlobal); err != nil {
+			return err
+		}
 		return t.transpileProgram(node) // This will call transpileNode recursively
 	case *ast.BlockStatement:
 		return t.transpileBlockStatement(node) // This will call transpileNode recursively
 	case *ast.VarDeclStatement:
-		t.transpileVarDecl(node)
-		return nil
+		return t.transpileVarDecl(node)
 	case *ast.AssignmentStatement:
 		return t.transpileAssignmentStatement(node) // This will call transpileNode recursively
 	case *ast.IfStatement:
@@ -248,8 +250,7 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		return nil
 	case *ast.GlobalVarDeclaration:
 		t.write("\n")
-		t.transpileGlobalVarBlocks([]*ast.GlobalVarDeclaration{node})
-		return nil
+		return t.transpileGlobalVarBlocks([]*ast.GlobalVarDeclaration{node})
 	case *ast.FunctionDeclaration:
 		t.write("\n")
 		return t.transpileFunctionDeclaration(node) // This will call transpileNode recursively
@@ -324,7 +325,7 @@ func (t *Transpiler) buildTypeInfo(program *ast.Program) {
 
 // transpileGlobalVarBlocks transpiles VAR_GLOBAL blocks into Go package-level variable declarations.
 // These variables are accessible throughout the generated Go code.
-func (t *Transpiler) transpileGlobalVarBlocks(blocks []*ast.GlobalVarDeclaration) {
+func (t *Transpiler) transpileGlobalVarBlocks(blocks []*ast.GlobalVarDeclaration) error {
 	for _, block := range blocks {
 		t.write("// --- VAR_GLOBAL ---\n")
 		for _, decl := range block.Vars {
@@ -336,14 +337,16 @@ func (t *Transpiler) transpileGlobalVarBlocks(blocks []*ast.GlobalVarDeclaration
 			v, err := t.initialValue(decl.DataType, decl.Value)
 			t.programVarName = originalReceiver
 			if err != nil {
-				log.Printf("Error transpiling initial value of global '%s': %v", decl.Name.Value, err)
-			} else if v != "" {
+				return fmt.Errorf("initial value of global '%s': %w", decl.Name.Value, err)
+			}
+			if v != "" {
 				t.write(" = %s", v)
 			}
 			t.write("\n")
 		}
 		t.write("\n")
 	}
+	return nil
 }
 
 // transpileConfigurationDeclaration transpiles an IEC 61131-3 CONFIGURATION block into a Go `main` function.
@@ -384,7 +387,9 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 	t.write("\t\tResources: []*config.Resource{\n")
 
 	for _, res := range config.Resources {
-		t.transpileResourceDeclaration(res, configEntries)
+		if err := t.transpileResourceDeclaration(res, configEntries); err != nil {
+			return err
+		}
 	}
 
 	t.write("\t\t},\n")
@@ -400,7 +405,7 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 
 // transpileResourceDeclaration transpiles an IEC 61131-3 RESOURCE block within a CONFIGURATION.
 // It generates Go code to define tasks and program instances associated with that resource.
-func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, configEntries []*ast.ConfigVarEntry) {
+func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, configEntries []*ast.ConfigVarEntry) error {
 	// Group program instances by their assigned task.
 	programsByTask := make(map[string][]*ast.ProgramConfiguration)
 	for _, progConfig := range res.Programs {
@@ -417,7 +422,9 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, 
 
 	for _, task := range res.Tasks {
 		// Pass the list of programs for this specific task.
-		t.transpileTaskDeclaration(task, programsByTask[task.Name.Value])
+		if err := t.transpileTaskDeclaration(task, programsByTask[task.Name.Value]); err != nil {
+			return err
+		}
 	}
 
 	t.write("\t\t\t\t},\n")
@@ -437,6 +444,7 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, 
 	}
 	t.write("\t\t\t\t},\n")
 	t.write("\t\t\t},\n")
+	return nil
 }
 
 // transpileVarConfigParams transpiles the variable declarations from a VAR_CONFIG block
@@ -464,7 +472,7 @@ func (t *Transpiler) transpileVarConfigParams(entries []*ast.ConfigVarEntry) {
 
 // transpileTaskDeclaration transpiles an IEC 61131-3 TASK definition within a RESOURCE.
 // It generates Go code to configure a task's name, priority, interval, and associated programs.
-func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, programs []*ast.ProgramConfiguration) {
+func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, programs []*ast.ProgramConfiguration) error {
 	t.write("\t\t\t\t\t{\n")
 	t.write("\t\t\t\t\t\tName: %q,\n", task.Name.Value)
 	// A missing PRIORITY defaults to 0 and a missing INTERVAL to 0 (no periodic
@@ -476,7 +484,9 @@ func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, program
 	}
 	t.write("\t\t\t\t\t\tInterval: ")
 	if task.Interval != nil {
-		t.transpileExpression(task.Interval)
+		if err := t.transpileExpression(task.Interval); err != nil {
+			return err
+		}
 	} else {
 		t.write("0")
 	}
@@ -496,6 +506,7 @@ func (t *Transpiler) transpileTaskDeclaration(task *ast.TaskDeclaration, program
 	t.write("},\n")
 
 	t.write("\t\t\t\t\t},\n")
+	return nil
 }
 
 // transpileProgram transpiles an IEC 61131-3 PROGRAM POU into a Go struct and associated methods.
@@ -511,7 +522,16 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	// are correctly identified (i.e., not already explicitly declared).
 	originalVarInfo := t.varInfo
 	t.varInfo = make(map[string]*ast.TypeDeclaration)
+	originalArrayDecls := t.arrayDecls
+	t.arrayDecls = map[string]*ast.ArrayDefinition{}
+	defer func() { t.arrayDecls = originalArrayDecls }()
 	t.buildVarInfo(prog.VarInputs, prog.VarOutputs, prog.VarInOuts, prog.Vars)
+	originalInOutVars := t.inOutVars
+	t.inOutVars = map[string]bool{}
+	for _, decl := range prog.VarInOuts {
+		t.inOutVars[decl.Name.Value] = true
+	}
+	defer func() { t.inOutVars = originalInOutVars }()
 
 	// Build temp var info first, so we can exclude them from inferred struct fields.
 	originalTempVars := t.tempVars
@@ -557,7 +577,9 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	t.write("type %s struct {\n", prog.Name.Value)
 	for _, varBlock := range allVarBlocks {
 		for _, varDecl := range varBlock {
-			t.transpileVarDecl(varDecl)
+			if err := t.transpileVarDecl(varDecl); err != nil {
+				return err
+			}
 		}
 	}
 	for _, varDecl := range prog.VarInOuts {
@@ -719,7 +741,9 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 			// This is a parenthesized IL sub-program, e.g., LD (LD A ADD B)
 			// We transpile it into an anonymous Go function to isolate its accumulator.
 			t.write("\tcr_LINT = func() iec.LINT {\n") // Assuming result is LINT for now
-			t.transpileIlProgram(block)
+			if err := t.transpileIlProgram(block); err != nil {
+				return err
+			}
 			t.write("\t\treturn cr_LINT\n") // Return the sub-program's final CR
 			t.write("\t}()\n")              // cspell:disable-line
 			t.ilCurrentCRType = "LINT"
@@ -737,7 +761,9 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 			}
 			t.ilCurrentCRType = baseType
 			t.write("\tcr_%s = iec.%s(", baseType, baseType)
-			t.transpileExpression(stmt.Operand)
+			if err := t.transpileExpression(stmt.Operand); err != nil {
+				return err
+			}
 			t.write(")\n")
 		}
 	case "ST":
@@ -749,7 +775,9 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 		crType := t.ilCurrentCRType
 
 		t.write("\t")
-		t.transpileExpression(stmt.Operand)
+		if err := t.transpileExpression(stmt.Operand); err != nil {
+			return err
+		}
 		t.write(" = %s(cr_%s)\n", targetType, crType) // e.g., p.MyInt = iec.INT(cr_LINT)
 
 	case "ADD", "SUB", "MUL", "DIV", "AND", "OR", "XOR":
@@ -759,9 +787,16 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 		if crType == "" {
 			return fmt.Errorf("IL operator '%s' used before accumulator was loaded (LD)", op)
 		}
-		t.write("\tcr_%s = cr_%s %s ", crType, crType, goOp)
-		t.transpileExpression(stmt.Operand)
-		t.write("\n")
+		// The operand takes the accumulator's type, as it may be declared narrower.
+		// Go has no bitwise operators on booleans; BOOL uses the logical ones.
+		if crType == "BOOL" {
+			goOp = map[string]string{"AND": "&&", "OR": "||", "XOR": "!="}[op]
+		}
+		t.write("\tcr_%s = cr_%s %s iec.%s(", crType, crType, goOp, crType)
+		if err := t.transpileExpression(stmt.Operand); err != nil {
+			return err
+		}
+		t.write(")\n")
 
 	case "GT", "LT", "EQ", "NE", "GE", "LE":
 		goOp := t.mapIlOperatorToGo(op)
@@ -770,9 +805,11 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 			return fmt.Errorf("IL operator '%s' used before accumulator was loaded (LD)", op)
 		}
 		// The result of a comparison is always BOOL.
-		t.write("\tcr_BOOL = cr_%s %s ", crType, goOp)
-		t.transpileExpression(stmt.Operand)
-		t.write("\n")
+		t.write("\tcr_BOOL = cr_%s %s iec.%s(", crType, goOp, crType)
+		if err := t.transpileExpression(stmt.Operand); err != nil {
+			return err
+		}
+		t.write(")\n")
 		// The current result is now a boolean.
 		t.ilCurrentCRType = "BOOL"
 
@@ -794,14 +831,29 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 	case "S": // Set
 		// 'S' is conditional on the boolean accumulator.
 		t.write("\tif cr_BOOL { ")
-		t.transpileExpression(stmt.Operand)
+		if err := t.transpileExpression(stmt.Operand); err != nil {
+			return err
+		}
 		t.write(" = true }\n")
 
 	case "R": // Reset
 		// 'R' is conditional on the boolean accumulator.
 		t.write("\tif cr_BOOL { ")
-		t.transpileExpression(stmt.Operand)
+		if err := t.transpileExpression(stmt.Operand); err != nil {
+			return err
+		}
 		t.write(" = false }\n")
+	case "NOT":
+		// NOT negates the current result: logically for BOOL, bitwise otherwise.
+		crType := t.ilCurrentCRType
+		if crType == "" {
+			return fmt.Errorf("IL operator 'NOT' used before accumulator was loaded (LD)")
+		}
+		if crType == "BOOL" {
+			t.write("\tcr_BOOL = !cr_BOOL\n")
+		} else {
+			t.write("\tcr_%s = ^cr_%s\n", crType, crType)
+		}
 	default:
 		// Check if the operator is a standard built-in function (e.g., ABS, SQRT).
 		if returnType, ok := builtInFunctionReturnTypes[op]; ok {
@@ -813,9 +865,8 @@ func (t *Transpiler) transpileIlInstruction(stmt *ast.IlInstructionStatement) er
 			t.write("\tcr_%s = %s(cr_%s)\n", returnType, op, crType)
 			t.ilCurrentCRType = returnType
 		} else {
-			// If it's not a recognized operator or function, log a warning.
-			log.Printf("Warning: Unhandled IL operator: %s", op)
-			t.write("\t// Unhandled IL operator: %s\n", op)
+			// An operator that cannot be transpiled must not be skipped silently.
+			return fmt.Errorf("IL operator '%s' is not supported by the transpiler", op)
 		}
 	}
 
@@ -868,15 +919,23 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 			isInOut := t.isInOutArgument(callExpr.Function, namedArg.Name.Value)
 			if isInOut {
 				t.write("\t")
-				t.transpileExpression(callExpr.Function)
+				if err := t.transpileExpression(callExpr.Function); err != nil {
+					return err
+				}
 				t.write(".%s = &", namedArg.Name.Value)
-				t.transpileExpression(namedArg.Value)
+				if err := t.transpileExpression(namedArg.Value); err != nil {
+					return err
+				}
 				t.write("\n")
 			} else {
 				t.write("\t")
-				t.transpileExpression(callExpr.Function)
+				if err := t.transpileExpression(callExpr.Function); err != nil {
+					return err
+				}
 				t.write(".%s = ", namedArg.Name.Value)
-				t.transpileExpression(namedArg.Value)
+				if err := t.transpileExpression(namedArg.Value); err != nil {
+					return err
+				}
 				t.write("\n")
 			}
 		}
@@ -884,7 +943,9 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 
 	// 2. Transpile the call to the Logic() method.
 	t.write("\t")
-	t.transpileExpression(callExpr.Function)
+	if err := t.transpileExpression(callExpr.Function); err != nil {
+		return err
+	}
 	t.write(".Logic(now)\n")
 
 	// 3. Identify the primary output (first VAR_OUTPUT) to load into the accumulator.
@@ -904,7 +965,9 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 		if primaryOut, ok := standardFBPrimaryOutputs[fbTypeName]; ok {
 			// It's a known standard FB.
 			t.write("\tcr_%s = ", primaryOut.Type)
-			t.transpileExpression(callExpr.Function)
+			if err := t.transpileExpression(callExpr.Function); err != nil {
+				return err
+			}
 			t.write(".%s\n", primaryOut.Name)
 			t.ilCurrentCRType = primaryOut.Type
 			return nil
@@ -913,7 +976,9 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 		// If not found, fallback to the old warning and assumption.
 		log.Printf("Warning: Could not find user definition for FB %s. Assuming primary output 'Q' of type BOOL.", callExpr.Function.String())
 		t.write("\tcr_BOOL = ")
-		t.transpileExpression(callExpr.Function)
+		if err := t.transpileExpression(callExpr.Function); err != nil {
+			return err
+		}
 		t.write(".Q\n")
 		t.ilCurrentCRType = "BOOL"
 		return nil
@@ -929,7 +994,9 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 
 	// 4. Generate the code to load the primary output into the correct typed accumulator.
 	t.write("\tcr_%s = ", baseType)
-	t.transpileExpression(callExpr.Function)
+	if err := t.transpileExpression(callExpr.Function); err != nil {
+		return err
+	}
 	t.write(".%s\n", primaryOutputName)
 
 	// 5. Update the transpiler's state to reflect the new accumulator type.
@@ -969,11 +1036,20 @@ func (t *Transpiler) transpileIlFunctionCall(callExpr *ast.CallExpression) error
 	}
 
 	t.ilCurrentCRType = crType
-	t.write("\tcr_%s = ", crType)
+	// The result takes the accumulator's type, as the function may return a
+	// narrower one.
+	t.write("\tcr_%s = iec.%s(", crType, crType)
 
-	// 2. Transpile the call itself.
-	t.transpileStandardFunctionCall(callExpr)
-	t.write("\n")
+	// 2. Transpile the call itself. A user-defined function takes its
+	// arguments in declaration order, with omitted inputs defaulted.
+	if sig, ok := t.lookupCallSignature(callExpr.Function); ok {
+		if err := t.transpileUserCall(callExpr, sig); err != nil {
+			return err
+		}
+	} else if err := t.transpileStandardFunctionCall(callExpr); err != nil {
+		return err
+	}
+	t.write(")\n")
 
 	return nil
 }
@@ -1057,7 +1133,7 @@ func (t *Transpiler) transpileSFCStateFields(sfc *ast.SFCProgram) {
 		if step, ok := element.(*ast.StepStatement); ok {
 			// For Step S1, generate S1_X bool and S1_T time.Duration
 			t.write("\t%s_X bool\n", step.Name.Value)
-			t.write("\t%s_X_prev iec.BOOL\n", step.Name.Value) // For P qualifier
+			t.write("\t%s_X_prev bool\n", step.Name.Value) // For P qualifier
 			t.write("\t%s_T time.Time\n", step.Name.Value)
 		}
 	}
@@ -1135,7 +1211,9 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 			}
 			t.write(" {\n")
 			t.write("\t\tif ")
-			t.transpileExpression(trans.Condition)
+			if err := t.transpileExpression(trans.Condition); err != nil {
+				return err
+			}
 			t.write(" {\n")
 			t.write("\t\t\tfiredTransitions[%q] = true\n", transKey)
 			t.write("\t\t}\n")
@@ -1202,7 +1280,9 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 				associations := actionsInStep[actionName]
 				effectiveAssoc := findHighestPriorityAction(associations)
 				if effectiveAssoc != nil {
-					t.transpileSFCAction(step, effectiveAssoc, true)
+					if err := t.transpileSFCAction(step, effectiveAssoc, true); err != nil {
+						return err
+					}
 				}
 			}
 			t.write("\t} else {\n")
@@ -1211,7 +1291,9 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 				associations := actionsInStep[actionName]
 				effectiveAssoc := findHighestPriorityAction(associations)
 				if effectiveAssoc != nil {
-					t.transpileSFCAction(step, effectiveAssoc, false)
+					if err := t.transpileSFCAction(step, effectiveAssoc, false); err != nil {
+						return err
+					}
 				}
 			}
 			t.write("\t}\n")
@@ -1267,7 +1349,7 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 // transpileSFCAction transpiles an SFC action block, generating Go code that implements
 // the logic for various action qualifiers (N, S, R, P, D, L, SD, DS, SL) based on whether
 // the associated step is active or not.
-func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *ast.ActionBlockStatement, isStepActive bool) {
+func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *ast.ActionBlockStatement, isStepActive bool) error {
 	actionName := actionBlock.ActionName.Value
 	qualifier := "N"
 	if actionBlock.Qualifier != nil {
@@ -1284,22 +1366,28 @@ func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *as
 			t.write("\t\tp.%s_Q = false\n", actionName)
 		case "P":
 			// Action is active only if the step just became active (was not active in the previous scan).
-			t.write("\t\tp.%s_Q = p.%s_X && !p.%s_X_prev\n", actionName, step.Name.Value, step.Name.Value)
+			t.write("\t\tp.%s_Q = iec.BOOL(p.%s_X && !p.%s_X_prev)\n", actionName, step.Name.Value, step.Name.Value)
 		case "D": // Non-stored delayed
 			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; }\n", actionName, actionName)
-			t.write("\t\tp.%s_Q = now.Sub(p.%s_Timer) >= ", actionName, actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tp.%s_Q = iec.TIME(now.Sub(p.%s_Timer)) >= ", actionName, actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write("\n")
 		case "L": // Non-stored limited
 			t.write("\t\tif p.%s_Timer.IsZero() { p.%s_Timer = now; }\n", actionName, actionName)
-			t.write("\t\tp.%s_Q = now.Sub(p.%s_Timer) < ", actionName, actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tp.%s_Q = iec.TIME(now.Sub(p.%s_Timer)) < ", actionName, actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write("\n")
 		case "SD", "DS": // Stored delayed
 			t.write("\t\tif p.%s_Timer.IsZero() {\n\t\t\tp.%s_Timer = now\n\t\t}\n", actionName, actionName)
 			// Only set Q to true, never to false. It must be reset by 'R'.
-			t.write("\t\tif !p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tif !p.%s_Q && iec.TIME(now.Sub(p.%s_Timer)) >= ", actionName, actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write(" {\n\t\t\tp.%s_Q = true\n\t\t}\n", actionName)
 		case "SL": // Stored limited
 			t.write("\t\tif p.%s_Timer.IsZero() {\n", actionName)
@@ -1307,8 +1395,10 @@ func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *as
 			t.write("\t\t\tp.%s_Q = true\n", actionName)
 			t.write("\t\t}\n")
 			// Only set Q to false, never back to true.
-			t.write("\t\tif now.Sub(p.%s_Timer) >= ", actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tif iec.TIME(now.Sub(p.%s_Timer)) >= ", actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write(" {\n\t\t\tp.%s_Q = false\n\t\t}\n", actionName)
 		}
 	} else { // Step is not active
@@ -1318,17 +1408,22 @@ func (t *Transpiler) transpileSFCAction(step *ast.StepStatement, actionBlock *as
 			t.write("\t\tp.%s_Timer = time.Time{}\n", actionName) // Reset timer
 		case "SD", "DS":
 			// Stored delayed. If timer is running, check if it has elapsed to set Q to true.
-			t.write("\t\tif !p.%s_Timer.IsZero() && !p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName, actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tif !p.%s_Timer.IsZero() && !bool(p.%s_Q) && iec.TIME(now.Sub(p.%s_Timer)) >= ", actionName, actionName, actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write(" {\n\t\t\tp.%s_Q = true\n\t\t}\n", actionName)
 		case "SL": // Stored-Limited
 			// If timer is running, check if it has elapsed to set Q to false.
-			t.write("\t\tif !p.%s_Timer.IsZero() && p.%s_Q && now.Sub(p.%s_Timer) >= ", actionName, actionName, actionName)
-			t.transpileExpression(actionBlock.Duration)
+			t.write("\t\tif !p.%s_Timer.IsZero() && bool(p.%s_Q) && iec.TIME(now.Sub(p.%s_Timer)) >= ", actionName, actionName, actionName)
+			if err := t.transpileExpression(actionBlock.Duration); err != nil {
+				return err
+			}
 			t.write(" {\n\t\t\tp.%s_Q = false\n\t\t}\n", actionName)
 			// For S, the state is maintained, so we do nothing here.
 		}
 	}
+	return nil
 }
 
 // transpileFunctionBlockDeclaration transpiles an IEC 61131-3 FUNCTION_BLOCK POU into a Go struct
@@ -1352,7 +1447,16 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	originalVarInfo := t.varInfo
 	t.varInfo = make(map[string]*ast.TypeDeclaration)
+	originalArrayDecls := t.arrayDecls
+	t.arrayDecls = map[string]*ast.ArrayDefinition{}
+	defer func() { t.arrayDecls = originalArrayDecls }()
 	t.buildVarInfo(fb.VarInputs, fb.VarOutputs, fb.VarInOuts, fb.Vars)
+	originalInOutVars := t.inOutVars
+	t.inOutVars = map[string]bool{}
+	for _, decl := range fb.VarInOuts {
+		t.inOutVars[decl.Name.Value] = true
+	}
+	defer func() { t.inOutVars = originalInOutVars }()
 
 	originalTempVars := t.tempVars
 	t.tempVars = make(map[string]bool)
@@ -1375,16 +1479,22 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	// Transpile VAR_INPUT, VAR_OUTPUT, and VAR into struct fields.
 	for _, varDecl := range fb.VarInputs {
-		t.transpileVarDecl(varDecl)
+		if err := t.transpileVarDecl(varDecl); err != nil {
+			return err
+		}
 	}
 	for _, varDecl := range fb.VarOutputs {
-		t.transpileVarDecl(varDecl)
+		if err := t.transpileVarDecl(varDecl); err != nil {
+			return err
+		}
 	}
 	for _, varDecl := range fb.VarInOuts {
 		t.transpileVarDeclInOut(varDecl)
 	}
 	for _, varDecl := range fb.Vars {
-		t.transpileVarDecl(varDecl)
+		if err := t.transpileVarDecl(varDecl); err != nil {
+			return err
+		}
 	}
 	// VAR_EXTERNAL variables are not part of the struct; they are global.
 	// VAR_TEMP variables are local to the Logic() call, not fields of the struct.
@@ -1655,6 +1765,8 @@ func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration
 	t.currentFunc = &ast.FunctionDeclaration{Name: method.Name, ReturnType: method.ReturnType}
 	defer func() { t.currentFunc = originalFunc }()
 
+	// A method sees its function block's variables as well as its own.
+	defer t.withVarInfo(true, method.VarInputs, method.VarOutputs, method.VarInOuts, method.Vars)()
 	return t.withLocals(declNames(method.VarInputs, method.VarOutputs, method.VarInOuts, method.Vars), func() error {
 		// Starting values of the results and local variables (VAR).
 		if err := t.transpileResultValues(method.Name, returnType, method.VarOutputs); err != nil {
@@ -1675,34 +1787,6 @@ func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration
 		t.write("}\n\n")
 		return nil
 	})
-}
-
-// isTransitionFromStep checks if a given transition statement originates from a specific step.
-// This is a helper for SFC transpilation.
-func (t *Transpiler) isTransitionFromStep(trans *ast.TransitionStatement, stepName string) bool {
-	for _, from := range trans.From {
-		if from.Value == stepName {
-			return true
-		}
-	}
-	return false
-}
-
-// transpileSFCTransition generates Go code for an SFC transition, including
-// deactivating source steps and activating destination steps when the transition condition is met.
-func (t *Transpiler) transpileSFCTransition(trans *ast.TransitionStatement) {
-	t.write("\t\t// Transition from %s to %s\n", trans.From[0].Value, trans.To[0].Value)
-	t.write("\t\tif ")
-	t.transpileExpression(trans.Condition)
-	t.write(" {\n") // This will call transpileNode recursively
-	// Deactivate source steps and activate destination steps
-	for _, from := range trans.From {
-		t.write("\t\t\tdelete(nextActiveSteps, %q)\n", from.Value)
-	}
-	for _, to := range trans.To {
-		t.write("\t\t\tnextActiveSteps[%q] = true\n", to.Value)
-	}
-	t.write("\t\t}\n")
 }
 
 // buildVarInfo populates the transpiler's `varInfo` map with `TypeDeclaration`s for variables
@@ -1736,6 +1820,12 @@ func (t *Transpiler) buildVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 				typeDecl = &ast.TypeDeclaration{Name: &ast.Identifier{Value: typeName}, DataType: varDecl.DataType}
 			}
 			t.varInfo[varDecl.Name.Value] = typeDecl
+			if def := t.arrayDefinitionOf(varDecl.DataType); def != nil {
+				if t.arrayDecls == nil {
+					t.arrayDecls = map[string]*ast.ArrayDefinition{}
+				}
+				t.arrayDecls[varDecl.Name.Value] = def
+			}
 		}
 	}
 }
@@ -1847,6 +1937,8 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 	hasResults := t.transpileResultDeclarations(fd.Name.Value, returnType, fd.VarOutputs)
 	t.write("{\n")
 
+	// The declared types of parameters and locals, for references and subranges.
+	defer t.withVarInfo(false, fd.VarInputs, fd.VarOutputs, fd.VarInOuts, fd.Vars)()
 	return t.withLocals(declNames(fd.VarInputs, fd.VarOutputs, fd.VarInOuts, fd.Vars), func() error {
 		// --- 2. Starting values of the results and local variables (VAR) ---
 		if err := t.transpileResultValues(fd.Name, returnType, fd.VarOutputs); err != nil {
@@ -1873,7 +1965,7 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 
 // transpileVarDecl transpiles a single variable declaration (VAR, VAR_INPUT, VAR_OUTPUT, VAR_TEMP)
 // into a Go struct field. It handles located variables by making them pointers.
-func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
+func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) error {
 	// Check if we are trying to instantiate an abstract function block.
 	var getBaseTypeName func(dt ast.Expression) string
 	getBaseTypeName = func(dt ast.Expression) string {
@@ -1891,9 +1983,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	if typeName != "" {
 		if typeDef, ok := t.typeInfo[typeName]; ok {
 			if fbDef, isFB := typeDef.(*ast.FunctionBlockDeclaration); isFB && fbDef.IsAbstract {
-				log.Printf("ERROR: Cannot instantiate abstract function block '%s' for variable '%s'", typeName, varDecl.Name.Value)
-				t.write("\t// ERROR: Cannot instantiate abstract function block %s\n", typeName)
-				return
+				return fmt.Errorf("cannot instantiate abstract function block '%s' for variable '%s'", typeName, varDecl.Name.Value)
 			}
 		}
 	}
@@ -1901,7 +1991,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	// If the variable is a macro definition, skip it entirely as it has no
 	// runtime equivalent in the transpiled code.
 	if _, ok := varDecl.Value.(*ast.MacroLiteral); ok {
-		return
+		return nil
 	}
 
 	t.transpileLeadingComments(varDecl.LeadingComments)
@@ -1911,7 +2001,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	if varDecl.Location != nil {
 		goType := t.mapIecTypeToGo(varDecl.DataType)
 		t.write("\t%s *%s // AT %s\n", varDecl.Name.Value, goType, varDecl.Location.Location.String())
-		return
+		return nil
 	}
 
 	// Special handling for FUNCTION type to generate a func signature.
@@ -1931,11 +2021,11 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 				t.write(" %s", t.mapIecTypeToGo(fnLit.ReturnType))
 			}
 			t.write("\n")
-			return
+			return nil
 		}
 		// Fallback for a FUNCTION variable without a literal assignment.
 		t.write("\t%s func()\n", varDecl.Name.Value)
-		return
+		return nil
 	}
 
 	name := varDecl.Name.Value
@@ -1946,6 +2036,7 @@ func (t *Transpiler) transpileVarDecl(varDecl *ast.VarDeclStatement) {
 	// Write the struct field. e.g., "MyCounter iec.LINT"
 	t.write("\t%s %s\n", name, goType)
 
+	return nil
 }
 
 // transpileVarAccess transpiles a VAR_ACCESS declaration. It infers the type of the accessed variable
@@ -1969,13 +2060,6 @@ func (t *Transpiler) transpileVarAccess(accessDecl *ast.AccessVarDeclaration) {
 		goType := t.mapIecTypeToGo(targetTypeDecl.DataType)
 		t.write("\t%s *%s\n", localName, goType)
 	}
-}
-
-// LinkMethodBody is a placeholder for the `Link` method's body in generated Go programs.
-// This method is intended for runtime linking of located variables to an I/O manager.
-func (t *Transpiler) LinkMethodBody(prog *ast.ProgramDeclaration) string {
-	// This is a placeholder for the logic that would be generated inside the Link method.
-	return "// Runtime linking logic will be placed here by the royaljelly scheduler.\n"
 }
 
 // transpileVarDeclInOut transpiles a VAR_IN_OUT declaration into a Go struct field that is a pointer to the IEC type.
@@ -2027,12 +2111,16 @@ func (t *Transpiler) transpileCaseStatement(stmt *ast.CaseStatement) error {
 			}
 		}
 		t.write(":\n")
-		t.transpileNode(caseElem.Consequence)
+		if err := t.transpileNode(caseElem.Consequence); err != nil {
+			return err
+		}
 	}
 
 	if stmt.Alternative != nil {
 		t.write("\tdefault:\n")
-		t.transpileNode(stmt.Alternative)
+		if err := t.transpileNode(stmt.Alternative); err != nil {
+			return err
+		}
 	}
 	t.write("\t}\n")
 	return nil
@@ -2063,26 +2151,36 @@ func (t *Transpiler) transpileCaseWithRanges(stmt *ast.CaseStatement) error {
 			if infix, ok := val.(*ast.InfixExpression); ok && infix.Operator == ".." {
 				// Range: (caseSelector >= L && caseSelector <= H)
 				t.write("(caseSelector >= ")
-				t.transpileExpression(infix.Left)
+				if err := t.transpileExpression(infix.Left); err != nil {
+					return err
+				}
 				t.write(" && caseSelector <= ")
-				t.transpileExpression(infix.Right)
+				if err := t.transpileExpression(infix.Right); err != nil {
+					return err
+				}
 				t.write(")")
 			} else {
 				// Simple value: caseSelector == V
 				t.write("(caseSelector == ")
-				t.transpileExpression(val)
+				if err := t.transpileExpression(val); err != nil {
+					return err
+				}
 				t.write(")")
 			}
 		}
 		t.write(" {\n")
-		t.transpileNode(caseElem.Consequence)
+		if err := t.transpileNode(caseElem.Consequence); err != nil {
+			return err
+		}
 		t.write("\t}")
 	}
 
 	// Handle the final ELSE block
 	if stmt.Alternative != nil {
 		t.write(" else {\n")
-		t.transpileNode(stmt.Alternative)
+		if err := t.transpileNode(stmt.Alternative); err != nil {
+			return err
+		}
 		t.write("\t}")
 	}
 	t.write("\n")
@@ -2143,9 +2241,13 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 			fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName)
 			if prop := t.findPropertyOnFBChain(fbDef, memberAccess.Member.Value); prop != nil {
 				// It's a property SET.
-				t.transpileExpression(memberAccess.Struct)
+				if err := t.transpileExpression(memberAccess.Struct); err != nil {
+					return err
+				}
 				t.write(".Set%s(", prop.Name.Value)
-				t.transpileExpression(stmt.Value)
+				if err := t.transpileExpression(stmt.Value); err != nil {
+					return err
+				}
 				t.write(")\n")
 				return nil
 			}
@@ -2169,7 +2271,9 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 					t.write("%s", ident.Value)
 				}
 				t.write(" = &")
-				t.transpileExpression(stmt.Value)
+				if err := t.transpileExpression(stmt.Value); err != nil {
+					return err
+				}
 				t.write("\n")
 				return nil
 			}
@@ -2198,6 +2302,24 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 		}
 		t.write(" = %s\n", v)
 		return nil
+	}
+
+	// An array literal takes its type from the array it is assigned to.
+	if lit, ok := stmt.Value.(*ast.ArrayLiteral); ok {
+		if def, dim := t.indexedArray(stmt.Left); def != nil && dim < len(def.Ranges) {
+			if dim > 0 { // A row of a multi-dimensional array.
+				def = &ast.ArrayDefinition{Token: def.Token, Ranges: def.Ranges[dim:], DataType: def.DataType}
+			}
+			v, err := t.arrayValue(def, lit, map[ast.Node]bool{})
+			if err != nil {
+				return err
+			}
+			if err := t.transpileExpression(stmt.Left); err != nil {
+				return err
+			}
+			t.write(" = %s\n", v)
+			return nil
+		}
 	}
 
 	// Standard assignment
@@ -2316,8 +2438,8 @@ func (t *Transpiler) findMemberType(structDefNode ast.Node, memberName string) *
 }
 
 // transpileSubrangeAssignment handles assignments to variables declared with a subrange type.
-// It generates Go code that uses a `Clamp` function from the `iec` package to ensure the assigned
-// value stays within the defined range.
+// The value is clamped to the subrange with Go's built-in min and max, and
+// converted to the subrange type, e.g. `p.x = SMALL(min(max(v, -100), 100))`.
 func (t *Transpiler) transpileSubrangeAssignment(stmt *ast.AssignmentStatement, typeDecl *ast.TypeDeclaration) error {
 	// Transpile the left side of the assignment (the variable).
 	if err := t.transpileExpression(stmt.Left); err != nil {
@@ -2325,22 +2447,17 @@ func (t *Transpiler) transpileSubrangeAssignment(stmt *ast.AssignmentStatement, 
 	}
 	t.write(" = ")
 
-	// Get the base type to select the correct Clamp function (e.g., "INT" -> "ClampINT").
-	baseType := strings.ToUpper(typeDecl.DataType.String())
-	clampFunc := "iec.Clamp" + baseType
-
 	// Get the subrange bounds.
 	subrange, ok := typeDecl.Subrange.(*ast.InfixExpression)
 	if !ok || subrange.Operator != ".." {
 		return fmt.Errorf("invalid subrange definition for type %s", typeDecl.Name.Value)
 	}
 
-	// Write the call to the clamp function: iec.ClampINT(value, min, max)
-	t.write("%s(", clampFunc)
+	t.write("%s(min(max(", t.mapIecTypeToGo(typeDecl.Name))
 	if err := t.transpileExpression(stmt.Value); err != nil {
 		return err
 	}
-	t.write(", %s, %s)\n", subrange.Left.String(), subrange.Right.String())
+	t.write(", %s), %s))\n", subrange.Left.String(), subrange.Right.String())
 
 	return nil
 }
@@ -2348,20 +2465,42 @@ func (t *Transpiler) transpileSubrangeAssignment(stmt *ast.AssignmentStatement, 
 // transpileForLoopStatement transpiles an IEC 61131-3 `FOR` loop into a Go `for` loop.
 // transpileForLoopStatement transpiles a FOR loop to a Go `for` loop.
 func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error {
-	// The control variable is an assignment statement itself.
-	t.write("\tfor ")
-	t.transpileExpression(stmt.ControlVar.Left)
-	t.write(" := ")
-	t.transpileExpression(stmt.ControlVar.Value)
-	t.write("; ")
-	t.transpileExpression(stmt.ControlVar.Left)
-	t.write(" <= ")
-	t.transpileExpression(stmt.EndValue)
-	t.write("; ")
-	t.transpileExpression(stmt.ControlVar.Left)
+	// The control variable is a declared variable, so it is assigned rather
+	// than declared, and keeps its final value after the loop. The loop runs
+	// up to the end value, or down to it for a negative step.
+	control, err := t.expressionString(stmt.ControlVar.Left)
+	if err != nil {
+		return err
+	}
+	end, err := t.expressionString(stmt.EndValue)
+	if err != nil {
+		return err
+	}
+	condition := fmt.Sprintf("%s <= %s", control, end)
+	if stmt.StepValue != nil {
+		if step, isConst := constantInteger(stmt.StepValue); isConst && step < 0 {
+			condition = fmt.Sprintf("%s >= %s", control, end)
+		} else if !isConst {
+			step, err := t.expressionString(stmt.StepValue)
+			if err != nil {
+				return err
+			}
+			condition = fmt.Sprintf("(%s >= 0 && %s <= %s) || (%s < 0 && %s >= %s)", step, control, end, step, control, end)
+		}
+	}
+	t.write("\tfor %s = ", control)
+	if err := t.transpileExpression(stmt.ControlVar.Value); err != nil {
+		return err
+	}
+	t.write("; %s; ", condition)
+	if err := t.transpileExpression(stmt.ControlVar.Left); err != nil {
+		return err
+	}
 	if stmt.StepValue != nil {
 		t.write(" += ")
-		t.transpileExpression(stmt.StepValue)
+		if err := t.transpileExpression(stmt.StepValue); err != nil {
+			return err
+		}
 	} else {
 		t.write("++")
 	}
@@ -2455,8 +2594,8 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	switch exp := exp.(type) {
 	case *ast.Identifier:
 		// If we are inside a property setter, check if the identifier is the
-		// property name itself, which acts as an implicit input variable.
-		if t.currentSetter != nil && exp.Value == t.currentSetter.Name.Value {
+		// property name itself or `value`, which act as the implicit input variable.
+		if t.currentSetter != nil && (exp.Value == t.currentSetter.Name.Value || strings.EqualFold(exp.Value, "value")) {
 			t.write("value") // The name of the setter's parameter
 			return nil       // This will call transpileNode recursively
 		}
@@ -2475,8 +2614,13 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 		} else if t.accessVars[exp.Value] {
 			t.write("(*%s.%s)", t.programVarName, exp.Value)
 		} else if t.inOutVars[exp.Value] {
-			// VAR_IN_OUT in a FUNCTION is a pointer and must be dereferenced.
-			t.write("(*%s)", exp.Value)
+			// A VAR_IN_OUT is a pointer and must be dereferenced; in a program or
+			// function block it is a field of the receiver.
+			if t.programVarName != "" {
+				t.write("(*%s.%s)", t.programVarName, exp.Value)
+			} else {
+				t.write("(*%s)", exp.Value)
+			}
 		} else if varDecl, ok := t.varInfo[exp.Value]; ok && t.isReferenceType(varDecl.DataType) {
 			// If this is a reference type, it's a pointer. We need to dereference it
 			// to get the value, UNLESS it's already being dereferenced by the '^' operator.
@@ -2509,21 +2653,17 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.UnsignedIntegerLiteral:
 		t.write("%d", exp.Value)
 	case *ast.BitStringLiteral:
-		// Assuming a helper in iec package to create bitstrings
-		t.write("iec.BitString(%d, %d)", exp.Value, exp.Width)
+		t.write("%s(%d)", bitStringGoType(exp.Width), exp.Value)
 	case *ast.LRealLiteral:
 		t.write("%f", exp.Value)
 	case *ast.WStringLiteral:
 		t.write("%q", exp.Value)
 	case *ast.DateLiteral:
-		// Assuming an iec helper `iec.Date("D#...")`
-		t.write("iec.Date(\"D#%s\")", exp.Value)
+		return t.writeTimeDate(exp.Value, "DATE")
 	case *ast.TimeOfDayLiteral:
-		// Assuming an iec helper `iec.TOD("TOD#...")`
-		t.write("iec.TOD(\"TOD#%s\")", exp.Value)
+		return t.writeTimeDate(exp.Value, "TOD")
 	case *ast.DateAndTimeLiteral:
-		// Assuming an iec helper `iec.DT("DT#...")`
-		t.write("iec.DT(\"DT#%s\")", exp.Value)
+		return t.writeTimeDate(exp.Value, "DT")
 	case *ast.Boolean:
 		t.write("%t", exp.Value)
 	case *ast.RealLiteral:
@@ -2531,8 +2671,7 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.StringLiteral:
 		t.write("%q", exp.Value)
 	case *ast.TimeLiteral:
-		// Assuming an iec helper `iec.Time("T#5s")`
-		t.write("iec.Time(\"T#%s\")", exp.Value)
+		return t.writeTimeDate(exp.Value, "TIME")
 	case *ast.InfixExpression:
 		return t.transpileInfixExpression(exp)
 	case *ast.PrefixExpression:
@@ -2592,7 +2731,9 @@ func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration
 			t.write("// %s is the transpiled struct for the user-defined type.\n", decl.Name.Value)
 			t.write("type %s struct {\n", decl.Name.Value)
 			for _, member := range structDef.Members {
-				t.transpileVarDecl(member)
+				if err := t.transpileVarDecl(member); err != nil {
+					return err
+				}
 			}
 			t.write("}\n\n")
 		} else if enumDef, ok := decl.DataType.(*ast.EnumDefinition); ok {
@@ -2631,9 +2772,15 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		// We just need to lowercase the namespace part to follow Go conventions.
 		return t.transpileQualifiedIdentifier(dt)
 	case *ast.ArrayDefinition:
+		// A Go array, which is assigned and passed by value as IEC 61131-3
+		// arrays are. Bounds that are not constant give a slice.
 		dims := ""
-		for range dt.Ranges {
-			dims += "[]"
+		if lengths, ok := arrayLengths(dt); ok {
+			for _, n := range lengths {
+				dims += fmt.Sprintf("[%d]", n)
+			}
+		} else {
+			dims = strings.Repeat("[]", len(dt.Ranges))
 		}
 		elemType := t.mapIecTypeToGo(dt.DataType)
 		return dims + elemType
@@ -2653,6 +2800,10 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		}
 		// Convert to uppercase to match standard IEC types (e.g., 'int' -> 'INT').
 		iecType := strings.ToUpper(typeName)
+		// royaljelly names DATE_AND_TIME only by its short form.
+		if iecType == "DATE_AND_TIME" {
+			iecType = "DT"
+		}
 		// It's a standard built-in type, so prefix with the 'iec' package.
 		return "iec." + iecType
 	}
@@ -2681,18 +2832,22 @@ func (t *Transpiler) transpileQualifiedIdentifier(expr *ast.MemberAccessExpressi
 // into a Go infix expression, mapping IEC operators to their Go equivalents.
 func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
 	t.write("(")
-	t.transpileExpression(exp.Left) // Errors are handled inside
+	if err := t.transpileExpression(exp.Left); err != nil {
+		return err
+	}
 
 	// Map ST operators to Go operators
 	isBitwise := t.isBitwiseType(exp.Left) || t.isBitwiseType(exp.Right)
 	op := exp.Operator
 	switch strings.ToUpper(op) {
-	case "AND":
+	case "AND", "&":
 		if isBitwise {
 			op = "&"
 		} else {
 			op = "&&"
 		}
+	case "MOD":
+		op = "%"
 	case "OR":
 		if isBitwise {
 			op = "|"
@@ -2713,7 +2868,10 @@ func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
 	}
 
 	t.write(" %s ", op)
-	t.transpileExpression(exp.Right) // Errors are handled inside
+	if err := t.transpileExpression(exp.Right); err != nil {
+		return err
+	}
+
 	t.write(")")
 	return nil
 }
@@ -2721,8 +2879,11 @@ func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
 // transpileIfStatement transpiles an IEC 61131-3 `IF...THEN...ELSIF...ELSE...END_IF` statement
 // into a Go `if...else if...else` construct.
 func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
-	t.write("\tif ")                      // Add tab for the if statement itself
-	t.transpileExpression(stmt.Condition) // A function to convert expressions
+	t.write("\tif ") // Add tab for the if statement itself
+	if err := t.transpileExpression(stmt.Condition); err != nil {
+		return err
+	}
+
 	t.write(" {\n")
 	// Manually transpile block to add extra indentation
 	for _, s := range stmt.Consequence.Statements {
@@ -2738,7 +2899,9 @@ func (t *Transpiler) transpileIfStatement(stmt *ast.IfStatement) error {
 	for alt != nil {
 		if elseifStmt, ok := alt.(*ast.IfStatement); ok {
 			t.write(" else if ")
-			t.transpileExpression(elseifStmt.Condition)
+			if err := t.transpileExpression(elseifStmt.Condition); err != nil {
+				return err
+			}
 			t.write(" {\n")
 			for _, s := range elseifStmt.Consequence.Statements {
 				t.write("\t")
@@ -2777,16 +2940,42 @@ func (t *Transpiler) transpileTypedLiteral(lit *ast.TypedLiteral) error {
 
 	// Handle TIME literals specifically
 	if goType == "TIME" || goType == "T" {
-		// The parser gives us the full literal string, e.g., "T#5s"
-		// We need to wrap it in quotes for the Go code.
-		t.write("iec.Time(\"T#%q)", lit.String())
+		return t.writeTimeDate(valueStr, "TIME")
 	} else if goType == "STRING" {
 		// Ensure string literals are properly quoted in Go
 		t.write("%q", valueStr)
+	} else if goType == "BOOL" {
+		switch strings.ToUpper(valueStr) {
+		case "TRUE", "1":
+			t.write("iec.BOOL(true)")
+		case "FALSE", "0":
+			t.write("iec.BOOL(false)")
+		default:
+			return fmt.Errorf("invalid BOOL literal: %s", lit.String())
+		}
 	} else {
-		t.write("iec.%s(%s)", goType, valueStr)
+		t.write("iec.%s(%s)", goType, goNumber(valueStr))
 	}
 	return nil
+}
+
+// goNumber converts an IEC 61131-3 number, which may be based (2#1010,
+// 8#17, 16#FF) and contain underscores (1_000), to Go syntax.
+func goNumber(value string) string {
+	value = strings.ReplaceAll(value, "_", "")
+	base, digits, isBased := strings.Cut(value, "#")
+	if !isBased {
+		return value
+	}
+	switch base {
+	case "2":
+		return "0b" + digits
+	case "8":
+		return "0o" + digits
+	case "16":
+		return "0x" + digits
+	}
+	return digits
 }
 
 // transpilePrefixExpression transpiles an IEC 61131-3 prefix expression (e.g., `NOT X`, `-Y`)
@@ -2800,7 +2989,9 @@ func (t *Transpiler) transpilePrefixExpression(exp *ast.PrefixExpression) error 
 			// Bitwise NOT in Go has lower precedence than arithmetic operators,
 			// so it's safer to wrap the operand.
 			t.write("%s(", op)
-			t.transpileExpression(exp.Right)
+			if err := t.transpileExpression(exp.Right); err != nil {
+				return err
+			}
 			t.write(")")
 			return nil
 		} else {
@@ -2913,13 +3104,17 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 			t.write("\n\t") // Newline and tab for subsequent statements
 		}
 		isInOut := t.isInOutArgument(exp.Function, namedArg.Name.Value)
-		t.transpileExpression(exp.Function)
+		if err := t.transpileExpression(exp.Function); err != nil {
+			return err
+		}
 		if isInOut {
 			t.write(".%s = &", namedArg.Name.Value)
 		} else {
 			t.write(".%s = ", namedArg.Name.Value)
 		}
-		t.transpileExpression(namedArg.Value)
+		if err := t.transpileExpression(namedArg.Value); err != nil {
+			return err
+		}
 		hasWrittenStmt = true
 	}
 
@@ -2927,16 +3122,23 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 	if hasWrittenStmt {
 		t.write("\n\t")
 	}
-	t.transpileExpression(exp.Function) // e.g., p.MyTimer
-	t.write(".Logic(now)")              // Pass the 'now' timestamp
+	if err := t.transpileExpression(exp.Function); err != nil {
+		return err
+	}
+
+	t.write(".Logic(now)") // Pass the 'now' timestamp
 	hasWrittenStmt = true
 
 	// 3. Handle output arguments (e.g., Q => MyVar)
 	for _, outArg := range outputArgs {
 		t.write("\n\t")
-		t.transpileExpression(outArg.Target)
+		if err := t.transpileExpression(outArg.Target); err != nil {
+			return err
+		}
 		t.write(" = ")
-		t.transpileExpression(exp.Function)
+		if err := t.transpileExpression(exp.Function); err != nil {
+			return err
+		}
 		t.write(".%s", outArg.Source.Value)
 	}
 	return nil
@@ -2947,32 +3149,22 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 // isInOutArgument checks the symbol table to determine if an argument for a
 // given function block corresponds to a VAR_IN_OUT parameter.
 func (t *Transpiler) isInOutArgument(fbExpr ast.Expression, argName string) bool {
-	// This is a simplified check. A robust implementation would resolve the type
-	// of fbExpr more accurately. Here, we assume it's an identifier.
-	if fbIdent, ok := fbExpr.(*ast.Identifier); ok {
-		// Look up the FB definition in our type info map.
-		if fbDefNode, ok := t.typeInfo[fbIdent.Value]; ok {
-			// Check if it's a FUNCTION, which can also have VAR_IN_OUT
-			if fDef, ok := fbDefNode.(*ast.FunctionDeclaration); ok {
-				for _, inOut := range fDef.VarInOuts {
-					if inOut.Name.Value == argName {
-						return true
-					}
-				}
-			}
-			if fbDef, ok := fbDefNode.(*ast.FunctionBlockDeclaration); ok {
-				// Check if the argument name exists in the VarInOuts list.
-				for _, inOut := range fbDef.VarInOuts {
-					if inOut.Name.Value == argName {
-						return true
-					}
-				}
+	// The callee is a FUNCTION by name, or a function block instance whose
+	// declared type names the function block.
+	var inOuts []*ast.VarDeclStatement
+	if ident, ok := fbExpr.(*ast.Identifier); ok {
+		if fd, ok := t.lookupType(ident.Value).(*ast.FunctionDeclaration); ok {
+			inOuts = fd.VarInOuts
+		}
+	}
+	if inOuts == nil {
+		if typeDecl := t.resolveAssignmentTargetType(fbExpr); typeDecl != nil && typeDecl.DataType != nil {
+			if fb := t.lookupFunctionBlock(typeDecl.DataType); fb != nil {
+				inOuts = fb.VarInOuts
 			}
 		}
 	}
-	// This could also happen if we are calling a FB instance that is a member of another struct.
-	// e.g. MyStruct.MyTimer(....)
-	return false
+	return indexOfDecl(inOuts, argName) >= 0
 }
 
 // transpileStandardFunctionCall transpiles a standard IEC 61131-3 function call
@@ -2980,28 +3172,10 @@ func (t *Transpiler) isInOutArgument(fbExpr ast.Expression, argName string) bool
 func (t *Transpiler) transpileStandardFunctionCall(exp *ast.CallExpression) error {
 	// If the function is a simple identifier, it's a global/standard function.
 	if ident, ok := exp.Function.(*ast.Identifier); ok {
-		if macroDef, isMacro := t.macroDefinitions[ident.Value]; isMacro {
-			// This is a macro call, perform expansion here.
-			if len(macroDef.Parameters) != len(exp.Arguments) {
-				return fmt.Errorf("macro %s expects %d arguments, got %d", ident.Value, len(macroDef.Parameters), len(exp.Arguments))
-			}
-
-			// For the specific 'twice' macro in the test, we know its structure:
-			// macro(a) { EXPR(EVAL(a) * 2); }
-			// We will manually expand this for now. A more general solution would involve
-			// parsing and substituting within the macro's body expression.
-			if ident.Value == "twice" && len(exp.Arguments) == 1 {
-				// The expected expansion is ((argument) * 2)
-				t.write("(")
-				if err := t.transpileExpression(exp.Arguments[0]); err != nil {
-					return err
-				}
-				t.write(" * 2)")
-				return nil
-			}
-
-			// Fallback for unhandled macro structures.
-			return fmt.Errorf("unsupported macro expansion for macro %s", ident.Value)
+		// Macros are expanded before transpiling (see transpileNode), so a macro
+		// call that is still here could not be expanded.
+		if _, isMacro := t.macroDefinitions[ident.Value]; isMacro {
+			return fmt.Errorf("the call to macro '%s' could not be expanded", ident.Value)
 		}
 	}
 	// Don't transpile it as an expression, which would add a receiver prefix.
@@ -3084,15 +3258,20 @@ func (t *Transpiler) transpileArrayLiteral(al *ast.ArrayLiteral) error {
 		// For other literal types (REAL, BOOL, STRING), Go can often infer the type,
 	}
 
-	t.write("[]%s{", elemType)
+	// Arrays are Go arrays; an array literal whose target is not known here
+	// has the length of its elements.
+	if elemType != "" {
+		t.write("[...]%s{", elemType)
+	} else {
+		t.write("[]%s{", elemType)
+	}
 	for i, el := range al.Elements {
 		if i > 0 {
 			t.write(", ")
 		}
 		// The expression transpiler will handle ArrayRepetition now.
 		if err := t.transpileExpression(el); err != nil {
-			// Cannot return error from here easily, log it.
-			log.Printf("Error transpiling array element: %v", err)
+			return err
 		}
 	}
 	t.write("}")
@@ -3148,7 +3327,9 @@ func (t *Transpiler) transpileArrayRepetition(ar *ast.ArrayRepetition) error {
 
 	for i := 0; i < int(factor.Value); i++ {
 		for j, el := range ar.Elements {
-			t.transpileExpression(el)
+			if err := t.transpileExpression(el); err != nil {
+				return err
+			}
 			if j < len(ar.Elements)-1 || i < int(factor.Value)-1 {
 				t.write(", ")
 			}
@@ -3168,7 +3349,9 @@ func (t *Transpiler) transpileMemberAccessExpression(exp *ast.MemberAccessExpres
 		fbDef := t.getFunctionBlockDefinitionFromTypeInfo(typeName)
 		if prop := t.findPropertyOnFBChain(fbDef, exp.Member.Value); prop != nil {
 			// It's a property GET.
-			t.transpileExpression(exp.Struct)
+			if err := t.transpileExpression(exp.Struct); err != nil {
+				return err
+			}
 			t.write(".Get%s()", prop.Name.Value)
 			return nil
 		}
@@ -3213,9 +3396,25 @@ func (t *Transpiler) transpileIndexExpression(exp *ast.IndexExpression) error {
 	if err := t.transpileExpression(exp.Left); err != nil {
 		return err
 	}
+	// Go slices start at 0, so the declared lower bound is subtracted, e.g.
+	// a[i] on ARRAY[1..3] becomes a[(i - 1)].
+	low := t.indexLowerBound(exp.Left)
+	if index, isConst := constantInteger(exp.Index); isConst && low != 0 {
+		t.write("[%d]", index-low)
+		return nil
+	}
 	t.write("[")
+	if low != 0 {
+		t.write("(")
+	}
 	if err := t.transpileExpression(exp.Index); err != nil {
 		return err
+	}
+	switch {
+	case low > 0:
+		t.write(" - %d)", low)
+	case low < 0:
+		t.write(" + %d)", -low)
 	}
 	t.write("]")
 	return nil
@@ -3278,7 +3477,9 @@ func (t *Transpiler) transpileFunctionLiteral(fl *ast.FunctionLiteral) error {
 	t.programVarName = "" // No receiver inside anonymous function
 	defer func() { t.programVarName = originalProgramVarName }()
 
-	t.transpileNode(fl.Body)
+	if err := t.transpileNode(fl.Body); err != nil {
+		return err
+	}
 
 	t.write("}") // End of anonymous function
 	return nil*/
@@ -3301,9 +3502,13 @@ func (t *Transpiler) transpileHashLiteral(hl *ast.HashLiteral) error {
 
 	for _, key := range keys {
 		t.write("\t\t")
-		t.transpileExpression(key)
+		if err := t.transpileExpression(key); err != nil {
+			return err
+		}
 		t.write(": ")
-		t.transpileExpression(hl.Pairs[key])
+		if err := t.transpileExpression(hl.Pairs[key]); err != nil {
+			return err
+		}
 		t.write(",\n")
 	}
 	t.write("\t")

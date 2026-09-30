@@ -14,6 +14,7 @@ import (
 	"beedance/object"
 	_ "beedance/stdlib"
 	"bytes"
+	"flag"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,57 @@ func TestReplRecoversFromFailedLines(t *testing.T) {
 	}
 	if results[4] != "2" {
 		t.Fatalf("expected the session to continue, got %q", results[4])
+	}
+}
+
+func TestReplReportsErrorsAndContinues(t *testing.T) {
+	for _, engine := range []string{"vm", "eval"} {
+		t.Run(engine, func(t *testing.T) {
+			results := runSession(t, engine, []string{
+				"VAR x : INT := ; END_VAR", // a syntax error
+				"10 / 0;",                  // a runtime error
+				"2 + 3;",
+			})
+			if !strings.Contains(results[0], "Beedance! parser errors:") {
+				t.Errorf("expected parser errors for line 1, got %q", results[0])
+			}
+			if !strings.Contains(results[1], "division by zero") {
+				t.Errorf("expected a division-by-zero error for line 2, got %q", results[1])
+			}
+			if results[2] != "5" {
+				t.Errorf("expected the session to continue, got %q", results[2])
+			}
+		})
+	}
+	if results := runSession(t, "vm", []string{"10 / 0;"}); !strings.HasPrefix(results[0], "Woops! Executing bytecode failed:") {
+		t.Errorf("expected the VM's error prefix, got %q", results[0])
+	}
+}
+
+// A line that panics is reported, and the session goes on.
+func TestRunLineRecoversFromPanics(t *testing.T) {
+	var out bytes.Buffer
+	runLine(&out, func() { panic("boom") })
+	if !strings.Contains(out.String(), "Woops! Internal error while running this line:") || !strings.Contains(out.String(), "boom") {
+		t.Fatalf("expected the panic to be reported, got %q", out.String())
+	}
+}
+
+// The -go flag, defined by main, only works with an input file.
+func TestReplWarnsAboutGoFlag(t *testing.T) {
+	goFlag := flag.Lookup("go")
+	if goFlag == nil {
+		flag.String("go", "", "output Go file")
+		goFlag = flag.Lookup("go")
+	}
+	if err := flag.Set("go", "out.go"); err != nil {
+		t.Fatalf("setting -go: %s", err)
+	}
+	defer flag.Set("go", "")
+
+	var out bytes.Buffer
+	Start(strings.NewReader(""), &out, "vm")
+	if !strings.Contains(out.String(), "Transpilation to Go (-go) is not supported in REPL mode.") {
+		t.Fatalf("expected the -go warning, got %q", out.String())
 	}
 }

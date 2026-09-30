@@ -14,6 +14,7 @@ import (
 	"beedance/code"
 	"beedance/compiler"
 	"beedance/object"
+	"strings"
 	"testing"
 )
 
@@ -220,4 +221,78 @@ func TestNewUsesRegisteredBuiltins(t *testing.T) {
 	if err := testIntegerObject(7, machine.LastPoppedStackElem()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCompileCommaSeparatedIndexExpressions(t *testing.T) {
+	tests := []struct {
+		input                string
+		expectedOpIndexCount int
+		expectedValue        int64
+	}{
+		{
+			input:                "[[1, 2], [3, 4]][0, 1];",
+			expectedOpIndexCount: 2,
+			expectedValue:        2,
+		},
+		{
+			input:                "[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1, 0, 1];",
+			expectedOpIndexCount: 3,
+			expectedValue:        6,
+		},
+		{
+			input:                "[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1 + 0, 2 - 2, 1 * 1];",
+			expectedOpIndexCount: 3,
+			expectedValue:        6,
+		},
+	}
+
+	for _, tt := range tests {
+		comp := compiler.New()
+		program := parse(t, tt.input)
+		if err := comp.Compile(program); err != nil {
+			t.Fatalf("%s: compiler error: %s", tt.input, err)
+		}
+
+		bytecode := comp.Bytecode()
+		disassembly := bytecode.Instructions.String()
+		count := strings.Count(disassembly, "OpIndex")
+		if count != tt.expectedOpIndexCount {
+			t.Errorf("%s: wrong OpIndex count. want=%d, got=%d\nDisassembly:\n%s",
+				tt.input, tt.expectedOpIndexCount, count, disassembly)
+		}
+
+		machine := New(bytecode)
+		if err := machine.Run(); err != nil {
+			t.Fatalf("%s: vm error: %s", tt.input, err)
+		}
+
+		if err := testIntegerObject(tt.expectedValue, machine.LastPoppedStackElem()); err != nil {
+			t.Errorf("%s: %v", tt.input, err)
+		}
+	}
+}
+
+func TestVmCommaSeparatedIndexExpressions(t *testing.T) {
+	tests := []vmTestCase{
+		{"[[1, 2, 3], [4, 5, 6]][0, 0];", 1},
+		{"[[1, 2, 3], [4, 5, 6]][0, 1];", 2},
+		{"[[1, 2, 3], [4, 5, 6]][0, 2];", 3},
+		{"[[1, 2, 3], [4, 5, 6]][1, 0];", 4},
+		{"[[1, 2, 3], [4, 5, 6]][1, 1];", 5},
+		{"[[1, 2, 3], [4, 5, 6]][1, 2];", 6},
+		{"[[10, 20], [30, 40]][1 - 1, 0 + 1];", 20},
+		{"[[10, 20], [30, 40]][2 - 1, 2 - 2];", 30},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][0, 0, 0];", 1},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][0, 1, 1];", 4},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1, 0, 0];", 5},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1, 0, 1];", 6},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1, 1, 0];", 7},
+		{"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]][1, 1, 1];", 8},
+		{"[[1, 2], [3, 4]][0, 0] + [[10, 20], [30, 40]][1, 1];", 41},
+		{"[[1, 2], [3, 4]][1, 1] * [[1, 2], [3, 4]][0, 1];", 8},
+		{"[[1, 2], [3, 4]][0, 1] < [[1, 2], [3, 4]][1, 0];", true},
+		{"[[1, 2], [3, 4]][0, 0] = 1;", true},
+		{"[[1, 2], [3, 4]][0, 0] <> [[1, 2], [3, 4]][1, 1];", true},
+	}
+	runVmTests(t, tests)
 }

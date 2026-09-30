@@ -143,6 +143,15 @@ const (
 	OpReturnValueMulti
 
 	OpSuperIndex
+
+	// OpArrayBounds sets the declared lower bound of each dimension of the
+	// array on top of the stack, from the constant array of bounds its
+	// operand names, so that ARRAY[1..3] is indexed from 1.
+	OpArrayBounds
+
+	// OpCopy replaces the array or structure on top of the stack with a copy,
+	// as they are assigned and passed by value.
+	OpCopy
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -228,6 +237,9 @@ var definitions = map[Opcode]*Definition{
 
 	// OpSuperIndex retrieves a method from a parent function block. It expects the instance and the method name (as a string constant) on the stack.
 	OpSuperIndex: {"OpSuperIndex", []int{}},
+
+	OpArrayBounds: {"OpArrayBounds", []int{2}},
+	OpCopy:        {"OpCopy", []int{}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

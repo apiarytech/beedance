@@ -12,10 +12,11 @@ package vm
 
 import "testing"
 
-// ilProgram wraps IL instructions in a PROGRAM with the given variables and
-// reads result afterwards, so the test sees the value the program stored.
+// ilProgram wraps IL instructions in a PROGRAM with the given variables, runs
+// it, and reads the program's variable result afterwards, so the test sees
+// the value the program stored.
 func ilProgram(vars, body, result string) string {
-	return "PROGRAM P\n VAR " + vars + " END_VAR\n" + body + "\nEND_PROGRAM\n" + result + ";"
+	return "PROGRAM P\n VAR " + vars + " END_VAR\n" + body + "\nEND_PROGRAM\nP();\nP." + result + ";"
 }
 
 func TestIlArithmetic(t *testing.T) {
@@ -70,17 +71,16 @@ func TestIlConditionalJumpKeepsCurrentResult(t *testing.T) {
 	runVmTests(t, tests)
 }
 
-// TestIlCallFunctionBlock is the IL form of an FB call. The VM does not yet
-// support calling an FB instance's body (the same gap as `fb(IN := x)` in ST).
+// TestIlCallFunctionBlock is the IL form of an FB call.
 func TestIlCallFunctionBlock(t *testing.T) {
-	t.Skip("not supported yet: calling a function block instance")
 	tests := []vmTestCase{
 		{`FUNCTION_BLOCK Acc VAR_INPUT n : INT; END_VAR VAR total : INT := 0; END_VAR total := total + n; END_FUNCTION_BLOCK
 		  PROGRAM P VAR f : Acc; END_VAR
 		   CAL f(n := 5)
 		   CAL f(n := 2)
 		  END_PROGRAM
-		  f.total;`, 7},
+		  P();
+		  P.f.total;`, 7},
 	}
 	runVmTests(t, tests)
 }

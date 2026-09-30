@@ -134,11 +134,26 @@ func (p *Parser) extractIlModifiers(op string) (baseOp string, modifier string) 
 		opUpper = opUpper[:len(opUpper)-1]
 	}
 
+	// Only operators that take modifiers lose them; SIN, LN, TAN and ATAN are
+	// mnemonics in their own right.
+	if mod != "" && !ilModifiableOperators[opUpper] {
+		return op, ""
+	}
+
 	// After stripping modifiers, what remains is the base operator. We need to find
 	// the original casing of the base operator from the input string.
 	baseOp = op[:len(opUpper)]
 
 	return baseOp, mod
+}
+
+// ilModifiableOperators are the IL operators that take the N (negate) or C
+// (conditional) modifier, as in LDN, ANDN, JMPC and RETCN.
+var ilModifiableOperators = map[string]bool{
+	"LD": true, "ST": true, "AND": true, "&": true, "OR": true, "XOR": true,
+	"ADD": true, "SUB": true, "MUL": true, "DIV": true, "MOD": true,
+	"GT": true, "GE": true, "EQ": true, "NE": true, "LE": true, "LT": true,
+	"JMP": true, "CAL": true, "RET": true,
 }
 
 // isIlOperator provides a heuristic check to see if a token corresponds to a

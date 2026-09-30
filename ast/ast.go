@@ -136,13 +136,17 @@ func (vds *VarDeclStatement) String() string {
 	if vds.IsFinal {
 		out.WriteString("FINAL ")
 	}
-	out.WriteString(vds.Name.String())
+	if vds.Name != nil { // A VAR_CONFIG entry names its variable by access path instead.
+		out.WriteString(vds.Name.String())
+	}
 	if vds.Location != nil {
 		out.WriteString(" ")
 		out.WriteString(vds.Location.String())
 	}
 	if vds.AccessPath != nil {
-		out.WriteString(" : ")
+		if vds.Name != nil {
+			out.WriteString(" : ")
+		}
 		out.WriteString(vds.AccessPath.String())
 	}
 
@@ -2488,6 +2492,10 @@ func (pg *PropertyGetter) String() string {
 	if pg.AccessSpecifier != "" {
 		out.WriteString(pg.AccessSpecifier + " ")
 	}
+	if pg.Body == nil { // A prototype, as in an INTERFACE.
+		out.WriteString("GET")
+		return out.String()
+	}
 	out.WriteString(fmt.Sprintf("GET\n%s\nEND_GET", pg.Body.String()))
 	return out.String()
 }
@@ -2506,6 +2514,10 @@ func (ps *PropertySetter) String() string {
 	var out bytes.Buffer
 	if ps.AccessSpecifier != "" {
 		out.WriteString(ps.AccessSpecifier + " ")
+	}
+	if ps.Body == nil { // A prototype, as in an INTERFACE.
+		out.WriteString("SET")
+		return out.String()
 	}
 	out.WriteString(fmt.Sprintf("SET\n%s\nEND_SET", ps.Body.String()))
 	return out.String()

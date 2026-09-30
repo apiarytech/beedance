@@ -226,6 +226,13 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// Set the program definition in the outer environment.
 		env.Set(node.Name.Value, prog)
 
+		// A program's VAR_GLOBAL variables are global.
+		for _, block := range node.VarGlobal {
+			if result := Eval(block, env); isError(result) {
+				return result
+			}
+		}
+
 		// When a program is declared, its static variables (VAR, VAR_INPUT, etc.)
 		// must be initialized within its persistent environment.
 		allVarBlocks := [][]*ast.VarDeclStatement{
@@ -1320,6 +1327,8 @@ func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environm
 // is used by assignments and by output arguments (`o => target`). Errors are
 // reported at node.
 func assignValue(node ast.Node, left ast.Expression, val object.Object, env *object.Environment) object.Object {
+	// Arrays and structures are assigned by value.
+	val = object.CopyValue(val)
 	switch target := left.(type) {
 	case *ast.Identifier:
 		if existing, ok := env.Get(target.Value); ok {
@@ -1334,6 +1343,8 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				}
 				return val
 			}
+			// An array keeps the bounds its variable was declared with.
+			keepArrayBounds(existing, val)
 		}
 		env.Assign(target.Value, val)
 
@@ -1341,6 +1352,9 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 		left := Eval(target.Left, env)
 		if isError(left) {
 			return left
+		}
+		if left == nil {
+			return newError(target, "%s has no value", target.Left.String())
 		}
 		index := Eval(target.Index, env)
 		if isError(index) {
@@ -1351,10 +1365,11 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 		case left.Type() == object.ARRAY_OBJ && object.IsNumeric(index):
 			arrayObject := left.(*object.Array)
 			idx, _, _ := object.GetIntegerObjectValue(index)
-			if idx < 0 || idx >= int64(len(arrayObject.Elements)) {
+			position := idx - arrayObject.LowerBound // Indexed from the declared lower bound.
+			if position < 0 || position >= int64(len(arrayObject.Elements)) {
 				return newError(target, "index out of bounds: %d", idx)
 			}
-			arrayObject.Elements[idx] = val
+			arrayObject.Elements[position] = val
 		case left.Type() == object.HASH_OBJ:
 			hashObject := left.(*object.Hash)
 			key, ok := index.(object.Hashable)
@@ -1379,7 +1394,7 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				return newError(target, "structure has no member '%s'", target.Member.Value)
 			}
 			pair := structValue.Pairs[key]
-			pair.Value = val
+			pair.Value = keepArrayBounds(pair.Value, val)
 			structValue.Pairs[key] = pair
 			return val
 		}
@@ -1416,6 +1431,9 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 					return newError(target, "cannot assign to member variable '%s': %s", target.Member.Value, err.Message)
 				}
 			}
+		}
+		if existing, ok := fbInstance.Env.Get(target.Member.Value); ok {
+			keepArrayBounds(existing, val)
 		}
 		fbInstance.Env.Set(target.Member.Value, val)
 
@@ -2860,6 +2878,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if result := declareOmittedInputs(fn.VarInputs, args, extendedEnv); isError(result) {
 			return result
 		}
+		stampArrayParameters(fn.VarInputs, extendedEnv)
 		if result := declareOutputs(fn.VarOutputs, extendedEnv); isError(result) {
 			return result
 		}
@@ -2932,11 +2951,26 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Pre-declare the program name as a variable in the local scope for the return value.
 		fn.Env.Set(fn.Name.Value, NULL)
+		// EN is TRUE unless this call sets it.
+		fn.Env.Set("EN", TRUE)
 
 		// Programs can have VAR_INPUT, so we should handle arguments.
 		_, outputMappings, err := extendFunctionEnv(fn, args, callEnv, fn.Env, callNode)
 		if err != nil {
 			return err
+		}
+
+		// EN = FALSE skips the body; ENO follows EN.
+		enValue, _ := fn.Env.Get("EN")
+		fn.Env.Set("ENO", enValue)
+		if enValue == FALSE {
+			for _, mapping := range outputMappings {
+				val, _ := fn.Env.Get(mapping.SourceParamName)
+				if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
+					return result
+				}
+			}
+			return NULL
 		}
 
 		// Initialize only VAR_TEMP variables for this specific call. Static VARs are already in fn.Env.
@@ -3250,6 +3284,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if result := declareOmittedInputs(fn.Definition.VarInputs, args, methodEnv); isError(result) {
 			return result
 		}
+		stampArrayParameters(fn.Definition.VarInputs, methodEnv)
 		for _, local := range fn.Definition.Vars {
 			if result := evalVarDeclStatement(local, methodEnv); isError(result) {
 				return result
@@ -3327,12 +3362,12 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramName)
 				}
 			} else {
-				// It's a VAR_INPUT, so pass by value.
+				// It's a VAR_INPUT, so pass by value: an array or structure is copied.
 				val := Eval(arg.Value, callEnv)
 				if isError(val) {
 					return nil, nil, val.(*object.Error)
 				}
-				targetEnv.Set(paramName, val)
+				targetEnv.Set(paramName, object.CopyValue(val))
 			}
 
 		case *ast.OutputArgument: // Handle `OutputName => TargetVar`
@@ -3374,12 +3409,8 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramDecl.Name.Value)
 				}
 			} else {
-				// It's a VAR_INPUT, so pass by value.
-				val := Eval(arg, callEnv) // This correctly dereferences pointers for VAR_INPUT.
-				if isError(val) {
-					return nil, nil, val.(*object.Error)
-				}
-				targetEnv.Set(paramDecl.Name.Value, val)
+				// It's a VAR_INPUT, so pass by value: an array or structure is copied.
+				targetEnv.Set(paramDecl.Name.Value, object.CopyValue(val))
 			}
 			positionalParamIndex++
 		}
@@ -3437,6 +3468,7 @@ func evalIndexExpression(node ast.Node, left, index object.Object) object.Object
 func evalArrayIndexExpression(array, index object.Object) object.Object {
 	arrayObject := array.(*object.Array)
 	idx, _, _ := object.GetIntegerObjectValue(index)
+	idx -= arrayObject.LowerBound // Arrays are indexed from their declared lower bound.
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
@@ -3632,6 +3664,13 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		default:
 			return newError(node, "member '%s' not found for type ACTION", member)
 		}
+	case *object.Program:
+		// A program's own variables are read as members, e.g. `Pg.o`.
+		member := node.Member.Value
+		if val, ok := l.Env.GetRaw(member); ok {
+			return val
+		}
+		return newError(node, "program '%s' has no variable '%s'", l.Name.Value, member)
 	default:
 		return newError(node, "member access not supported for type %s", left.Type())
 	}

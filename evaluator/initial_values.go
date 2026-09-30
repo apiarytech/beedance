@@ -58,6 +58,14 @@ func evalStructuredDeclaration(node *ast.VarDeclStatement, env *object.Environme
 			return structValue(node, td, def, structInit, env, map[*ast.TypeDeclaration]bool{}), true
 		case *ast.EnumDefinition:
 			return enumValue(node, td, def, env)
+		case *ast.ArrayDefinition:
+			// A variable of a named array type takes the type's initial value
+			// unless it has its own.
+			decl := *node
+			if decl.Value == nil {
+				decl.Value = td.InitialValue
+			}
+			return arrayValue(&decl, def, env), true
 		}
 	}
 
@@ -297,6 +305,15 @@ func declareOutputs(outputs []*ast.VarDeclStatement, env *object.Environment) ob
 // the default) but not more, and a multi-dimensional array is an array of
 // arrays. Another value, or a multi-dimensional literal, is used as written.
 func arrayValue(node *ast.VarDeclStatement, def *ast.ArrayDefinition, env *object.Environment) object.Object {
+	value := arrayElements(node, def, env)
+	if !isError(value) {
+		object.SetLowerBounds(value, declaredLowerBounds(def, env))
+	}
+	return value
+}
+
+// arrayElements evaluates the elements of an array value; see arrayValue.
+func arrayElements(node *ast.VarDeclStatement, def *ast.ArrayDefinition, env *object.Environment) object.Object {
 	lengths := []int{}
 	for _, rng := range def.Ranges {
 		n, err := arrayLength(rng, env)
@@ -387,4 +404,57 @@ func arrayLength(rng ast.Expression, env *object.Environment) (int, *object.Erro
 		return 0, newError(rng, "upper bound %d is below lower bound %d", high, low)
 	}
 	return int(high-low) + 1, nil
+}
+
+// declaredLowerBounds returns the lower bound of each dimension of an array
+// type, e.g. [1] for ARRAY[1..3]. A bound that is not a constant integer
+// counts as 0; arrayLength reports it.
+func declaredLowerBounds(def *ast.ArrayDefinition, env *object.Environment) []int64 {
+	bounds := []int64{}
+	for _, rng := range def.Ranges {
+		low := int64(0)
+		if infix, ok := rng.(*ast.InfixExpression); ok && infix.Operator == ".." {
+			v := Eval(infix.Left, env)
+			if c, isConst := v.(*object.Constant); isConst {
+				v = c.Value
+			}
+			if n, _, ok := object.GetIntegerObjectValue(v); ok {
+				low = n
+			}
+		}
+		bounds = append(bounds, low)
+	}
+	return bounds
+}
+
+// keepArrayBounds gives an array assigned to a variable the lower bounds the
+// variable's array was declared with, e.g. `a := [1, 2, 3]` for an
+// ARRAY[1..3]. The value is returned unchanged.
+func keepArrayBounds(existing, value object.Object) object.Object {
+	if _, wasArray := existing.(*object.Array); wasArray {
+		if _, isArray := value.(*object.Array); isArray {
+			object.SetLowerBounds(value, object.LowerBounds(existing))
+		}
+	}
+	return value
+}
+
+// stampArrayParameters gives each array parameter the lower bounds of its
+// declared type, so an argument such as an array literal is indexed like the
+// parameter.
+func stampArrayParameters(params []*ast.VarDeclStatement, env *object.Environment) {
+	for _, p := range params {
+		def, ok := p.DataType.(*ast.ArrayDefinition)
+		if !ok {
+			if td, found := lookupTypeDeclaration(dataTypeName(p.DataType), env); found {
+				def, ok = td.DataType.(*ast.ArrayDefinition)
+			}
+		}
+		if !ok {
+			continue
+		}
+		if value, found := env.GetRaw(p.Name.Value); found {
+			object.SetLowerBounds(value, declaredLowerBounds(def, env))
+		}
+	}
 }

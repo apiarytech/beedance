@@ -237,9 +237,11 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 				VAR one_local : INT := 1;END_VAR
 				one := one_local;
 			END_FUNCTION;
-			PROGRAM TestProgram
-				one();
-			END_PROGRAM;`,
+			PROGRAM TestProgram VAR_OUTPUT result : INT; END_VAR
+				result := one();
+			END_PROGRAM;
+			TestProgram();
+			TestProgram.result;`,
 			expected: 1,
 		},
 		{
@@ -248,9 +250,11 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 				VAR one: INT := 1; two: INT := 2; END_VAR
 				oneAndTwo := one + two;
 			END_FUNCTION;
-			PROGRAM TestProgram
-				oneAndTwo();
-			END_PROGRAM;`,
+			PROGRAM TestProgram VAR_OUTPUT result : INT; END_VAR
+				result := oneAndTwo();
+			END_PROGRAM;
+			TestProgram();
+			TestProgram.result;`,
 			expected: 3,
 		},
 		{
@@ -263,9 +267,11 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 				VAR three:INT:=3; four:INT:=4; END_VAR
 				threeAndFour := three + four;
 			END_FUNCTION;
-			PROGRAM TestProgram
-				oneAndTwo() + threeAndFour();
-			END_PROGRAM;`,
+			PROGRAM TestProgram VAR_OUTPUT result : INT; END_VAR
+				result := oneAndTwo() + threeAndFour();
+			END_PROGRAM;
+			TestProgram();
+			TestProgram.result;`,
 			expected: 10,
 		},
 		{
@@ -278,9 +284,11 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 				VAR foobar : INT := 100; END_VAR
 				secondFoobar := foobar;
 			END_FUNCTION;
-			PROGRAM TestProgram
-				firstFoobar() + secondFoobar();
-			END_PROGRAM;`,
+			PROGRAM TestProgram VAR_OUTPUT result : INT; END_VAR
+				result := firstFoobar() + secondFoobar();
+			END_PROGRAM;
+			TestProgram();
+			TestProgram.result;`,
 			expected: 150,
 		},
 		{
@@ -306,12 +314,14 @@ func TestCallingFunctionsWithBindings(t *testing.T) {
 				END_VAR
 				minusTwo := seed - num;
 			END_FUNCTION;
-			PROGRAM TestProgram
+			PROGRAM TestProgram VAR_OUTPUT result : INT; END_VAR
 				VAR_EXTERNAL
 					globalSeed : INT;
 				END_VAR
-				minusOne(globalSeed) + minusTwo(globalSeed);
-			END_PROGRAM;`,
+				result := minusOne(globalSeed) + minusTwo(globalSeed);
+			END_PROGRAM;
+			TestProgram();
+			TestProgram.result;`,
 			expected: 97,
 		},
 	}

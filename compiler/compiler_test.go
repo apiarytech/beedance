@@ -422,7 +422,24 @@ func TestProgramDeclarationWithVars(t *testing.T) {
 				tVar;
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{1, "MyFB", 2.5},
+			expectedConstants: []interface{}{
+				1,      // 0
+				"MyFB", // 1
+				2.5,    // 2
+				// The program's body: VAR_TEMP tVar := 2.5 is a local that
+				// starts afresh on every call; gVar stays global.
+				[]code.Instructions{ // 3
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetGlobal, 0),
+					code.Make(code.OpPop),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+			},
 			expectedInstructions: []code.Instructions{
 				// VAR_GLOBAL gVar := 1;
 				code.Make(code.OpConstant, 0),
@@ -431,15 +448,15 @@ func TestProgramDeclarationWithVars(t *testing.T) {
 				code.Make(code.OpFalse),
 				code.Make(code.OpSetGlobal, 1),
 				// VAR_ACCESS aVar; (no code generated, only symbol table entry)
-				// VAR_TEMP tVar := 2.5;
-				code.Make(code.OpConstant, 2),
+				// The program's class, then its instance.
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 2),
-				// Body: gVar;
-				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpPop),
-				// Body: tVar;
+				code.Make(code.OpConstant, 5),
 				code.Make(code.OpGetGlobal, 2),
-				code.Make(code.OpPop),
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpSetGlobal, 3),
 			},
 		},
 	}
@@ -462,12 +479,25 @@ func TestVarAccess(t *testing.T) {
 				MyPressure;
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{"OtherProg.Pressure"},
+			expectedConstants: []interface{}{
+				"OtherProg.Pressure", // 0
+				[]code.Instructions{ // 1
+					code.Make(code.OpGetExternal, 0),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 2
+				"__class__", // 3
+			},
 			expectedInstructions: []code.Instructions{
-				// The VAR_ACCESS block itself doesn't emit instructions,
-				// it just populates the symbol table.
-				code.Make(code.OpGetExternal, 0),
-				code.Make(code.OpPop),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 	}

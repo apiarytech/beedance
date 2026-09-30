@@ -238,6 +238,20 @@ func (vm *VM) Run() (runErr error) {
 			vm.sp = vm.sp - numElements
 			err = vm.push(array)
 
+		case code.OpArrayBounds:
+			// Sets the declared lower bounds of the array on top of the stack.
+			boundsIndex := code.ReadUint16(ins[ip+1:])
+			vm.currentFrame().ip += 2
+			bounds, ok := vm.constants[boundsIndex].(*object.Array)
+			if !ok {
+				return fmt.Errorf("internal VM error: array bounds constant is %T", vm.constants[boundsIndex])
+			}
+			setArrayBounds(vm.stack[vm.sp-1], bounds.Elements)
+
+		case code.OpCopy:
+			// Arrays and structures are assigned and passed by value.
+			vm.stack[vm.sp-1] = object.CopyValue(vm.stack[vm.sp-1])
+
 		case code.OpHash:
 			// OpHash creates a hash object from key-value pairs on the stack.
 			numElements := int(code.ReadUint16(ins[ip+1:]))
@@ -882,6 +896,7 @@ func (vm *VM) executeArrayIndex(array, index object.Object) error {
 	if !ok {
 		return fmt.Errorf("array index must be an integer, got %s", index.Type())
 	}
+	i -= arrayObject.LowerBound                 // Arrays are indexed from their declared lower bound.
 	max := int64(len(arrayObject.Elements) - 1) // Keep as int64 for comparison with int64 `i`
 
 	if i < 0 || i > max {
@@ -964,10 +979,12 @@ func (vm *VM) executeArraySetIndex(array, index, val object.Object) error {
 	if !ok {
 		return fmt.Errorf("array index must be an integer, got %s", index.Type())
 	}
+	declared := i
+	i -= arrayObject.LowerBound // Arrays are indexed from their declared lower bound.
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if i < 0 || i > max {
-		return fmt.Errorf("array index out of bounds: %d", i)
+		return fmt.Errorf("array index out of bounds: %d", declared)
 	}
 
 	arrayObject.Elements[i] = val
@@ -1273,4 +1290,20 @@ func (vm *VM) findMethodInHierarchy(class *object.Hash, methodName *object.Strin
 	}
 
 	return nil, fmt.Errorf("method '%s' not found in class hierarchy", methodName.Value)
+}
+
+// setArrayBounds sets the lower bound of each dimension of an array: the
+// first bound on the array itself and the rest on the arrays it contains.
+// A value that is not an array is left alone.
+func setArrayBounds(value object.Object, bounds []object.Object) {
+	array, ok := value.(*object.Array)
+	if !ok || len(bounds) == 0 {
+		return
+	}
+	if low, _, ok := object.GetIntegerObjectValue(bounds[0]); ok {
+		array.LowerBound = low
+	}
+	for _, element := range array.Elements {
+		setArrayBounds(element, bounds[1:])
+	}
 }

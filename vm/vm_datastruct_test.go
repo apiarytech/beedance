@@ -36,7 +36,8 @@ func TestArrayReadOutOfRangeIsNull(t *testing.T) {
 
 func TestArrayAssignmentOutOfRange(t *testing.T) {
 	runVmErrorTests(t, []vmErrorTestCase{
-		{"VAR a : ARRAY[0..2] OF INT := [1, 2, 3]; END_VAR a[5] := 9;", "array index out of bounds: 5"},
+		// A constant index is checked at compile time; a variable index at run time.
+		{"VAR a : ARRAY[0..2] OF INT := [1, 2, 3]; i : INT := 5; END_VAR a[i] := 9;", "array index out of bounds: 5"},
 	})
 }
 

@@ -21,9 +21,12 @@ package transpiler
 
 import (
 	"beedance/ast"
+	"beedance/evaluator"
+	"beedance/object"
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // capture runs f and returns what it wrote instead of writing it.
@@ -277,25 +280,35 @@ func lookupExpressionFold(m map[string]ast.Expression, key string) (ast.Expressi
 	return nil, false
 }
 
-// arrayValue returns an array value as a Go slice of the declared length.
+// arrayLengths returns the length of each dimension of an array type, or
+// false when a bound is not constant.
+func arrayLengths(def *ast.ArrayDefinition) ([]int, bool) {
+	lengths := []int{}
+	for _, rng := range def.Ranges {
+		infix, ok := rng.(*ast.InfixExpression)
+		if !ok || infix.Operator != ".." {
+			return nil, false
+		}
+		low, okLow := constantInteger(infix.Left)
+		high, okHigh := constantInteger(infix.Right)
+		if !okLow || !okHigh || high < low {
+			return nil, false
+		}
+		lengths = append(lengths, int(high-low)+1)
+	}
+	return lengths, true
+}
+
+// arrayValue returns an array value as a Go array of the declared length.
 // Without a value, every element takes the element type's default. A literal
 // may list fewer elements than the array holds; the rest take the default. A
 // multi-dimensional literal may be nested ([[1, 2], [3, 4]]) or flat
 // ([1, 2, 3, 4]). An array whose bounds are not constant keeps its value as
 // written.
 func (t *Transpiler) arrayValue(def *ast.ArrayDefinition, value ast.Expression, visiting map[ast.Node]bool) (string, error) {
-	lengths := []int{}
-	for _, rng := range def.Ranges {
-		infix, ok := rng.(*ast.InfixExpression)
-		if !ok || infix.Operator != ".." {
-			return t.valueAsWritten(value)
-		}
-		low, okLow := constantInteger(infix.Left)
-		high, okHigh := constantInteger(infix.Right)
-		if !okLow || !okHigh || high < low {
-			return t.valueAsWritten(value)
-		}
-		lengths = append(lengths, int(high-low)+1)
+	lengths, ok := arrayLengths(def)
+	if !ok {
+		return t.valueAsWritten(value)
 	}
 
 	var elementType ast.Expression
@@ -334,12 +347,12 @@ type arrayBuilder struct {
 	visiting       map[ast.Node]bool
 }
 
-// build returns a value of goType (such as [][]iec.INT) with the given
+// build returns a value of goType (such as [2][3]iec.INT) with the given
 // dimensions. When given is true, elements are the literal's elements for
 // this dimension.
 func (a *arrayBuilder) build(goType string, dims []int, elements []ast.Expression, given bool) (string, error) {
 	n := dims[0]
-	subType := strings.TrimPrefix(goType, "[]")
+	subType := goType[strings.Index(goType, "]")+1:]
 
 	var subDefault string
 	if len(dims) == 1 {
@@ -351,10 +364,10 @@ func (a *arrayBuilder) build(goType string, dims []int, elements []ast.Expressio
 		}
 	}
 	if !given {
-		if subDefault == "" {
-			return fmt.Sprintf("make(%s, %d)", goType, n), nil
+		if subDefault == "" || subDefault == subType+"{}" {
+			return goType + "{}", nil
 		}
-		return fmt.Sprintf("func() %s { __a := make(%s, %d); for __i := range __a { __a[__i] = %s }; return __a }()", goType, goType, n, subDefault), nil
+		return fmt.Sprintf("func() %s { var __a %s; for __i := range __a { __a[__i] = %s }; return __a }()", goType, goType, subDefault), nil
 	}
 
 	elements, err := expandRepetitions(elements)
@@ -400,16 +413,14 @@ func (a *arrayBuilder) build(goType string, dims []int, elements []ast.Expressio
 		return "", fmt.Errorf("array initial value has %d elements, but the array holds %d", len(values), n)
 	}
 
+	// Elements the literal leaves out take the zero value, unless the
+	// element type's default is another value.
 	literal := fmt.Sprintf("%s{%s}", goType, strings.Join(values, ", "))
-	switch {
-	case len(values) == n:
+	if len(values) == n || subDefault == "" || subDefault == subType+"{}" {
 		return literal, nil
-	case subDefault == "":
-		return fmt.Sprintf("append(%s, make(%s, %d)...)", literal, goType, n-len(values)), nil
-	default:
-		return fmt.Sprintf("func() %s { __a := make(%s, %d); copy(__a, %s); for __i := %d; __i < %d; __i++ { __a[__i] = %s }; return __a }()",
-			goType, goType, n, literal, len(values), n, subDefault), nil
 	}
+	return fmt.Sprintf("func() %s { __a := %s; for __i := %d; __i < %d; __i++ { __a[__i] = %s }; return __a }()",
+		goType, literal, len(values), n, subDefault), nil
 }
 
 // expandRepetitions expands repeated elements such as 3(0) of an array
@@ -847,6 +858,12 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 
 	setArg := func(i int, value ast.Expression) error {
 		v, err := t.expressionString(value)
+		// An array literal takes its type from the parameter.
+		if lit, isLiteral := value.(*ast.ArrayLiteral); isLiteral && i < len(sig.inputs) {
+			if def := t.arrayDefinitionOf(params[i].DataType); def != nil {
+				v, err = t.arrayValue(def, lit, map[ast.Node]bool{})
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -983,4 +1000,137 @@ func endsWithReturn(body ast.Node) bool {
 	}
 	_, isReturn := block.Statements[len(block.Statements)-1].(*ast.ReturnStatement)
 	return isReturn
+}
+
+// timeDateLiteral returns the Go expression for a TIME, DATE, TIME_OF_DAY or
+// DATE_AND_TIME literal, parsed at transpile time as the evaluator parses it,
+// e.g. `iec.TIME(5000000000)` for T#5s.
+func timeDateLiteral(value, typeName string) (string, error) {
+	date := func(goType string, tm time.Time) string {
+		return fmt.Sprintf("%s(time.Date(%d, %d, %d, %d, %d, %d, %d, time.UTC))", goType,
+			tm.Year(), tm.Month(), tm.Day(), tm.Hour(), tm.Minute(), tm.Second(), tm.Nanosecond())
+	}
+	switch v := evaluator.TimeDateLiteral(value, typeName).(type) {
+	case *object.Time:
+		return fmt.Sprintf("iec.TIME(%d)", int64(v.Value)), nil
+	case *object.Date:
+		return date("iec.DATE", v.Value), nil
+	case *object.TimeOfDay:
+		return date("iec.TOD", v.Value), nil
+	case *object.DateAndTime:
+		return date("iec.DT", v.Value), nil
+	case *object.Error:
+		return "", fmt.Errorf("%s#%s: %s", typeName, value, strings.TrimPrefix(v.Message, "BUILTIN ERROR: "))
+	}
+	return "", fmt.Errorf("%s#%s is not a time or date literal", typeName, value)
+}
+
+// writeTimeDate writes a time or date literal; see timeDateLiteral.
+func (t *Transpiler) writeTimeDate(value, typeName string) error {
+	v, err := timeDateLiteral(value, typeName)
+	if err != nil {
+		return err
+	}
+	t.write("%s", v)
+	return nil
+}
+
+// bitStringGoType returns the royaljelly type of a bit string of the given
+// width.
+func bitStringGoType(width int) string {
+	switch width {
+	case 8:
+		return "iec.BYTE"
+	case 16:
+		return "iec.WORD"
+	case 32:
+		return "iec.DWORD"
+	}
+	return "iec.LWORD"
+}
+
+// withVarInfo records the declared types of the given variables, on top of
+// the enclosing scope's when inherit is true, and returns a function that
+// restores the previous scope.
+func (t *Transpiler) withVarInfo(inherit bool, blocks ...[]*ast.VarDeclStatement) func() {
+	original, originalArrays := t.varInfo, t.arrayDecls
+	t.varInfo = map[string]*ast.TypeDeclaration{}
+	t.arrayDecls = map[string]*ast.ArrayDefinition{}
+	if inherit {
+		for name, td := range original {
+			t.varInfo[name] = td
+		}
+		for name, def := range originalArrays {
+			t.arrayDecls[name] = def
+		}
+	}
+	t.buildVarInfo(blocks...)
+	return func() { t.varInfo, t.arrayDecls = original, originalArrays }
+}
+
+// arrayDefinitionOf returns the array type of a declared type, looking
+// through a named TYPE, or nil.
+func (t *Transpiler) arrayDefinitionOf(dataType ast.Expression) *ast.ArrayDefinition {
+	for depth := 0; dataType != nil && depth < 16; depth++ {
+		if def, ok := dataType.(*ast.ArrayDefinition); ok {
+			return def
+		}
+		td := t.lookupTypeDeclaration(dataType)
+		if td == nil {
+			return nil
+		}
+		dataType = td.DataType
+	}
+	return nil
+}
+
+// indexedArray returns the array type an expression indexes into and which
+// of its dimensions: 0 for `a`, 1 for `a[i]` of a two-dimensional array.
+func (t *Transpiler) indexedArray(exp ast.Expression) (*ast.ArrayDefinition, int) {
+	switch e := exp.(type) {
+	case *ast.Identifier:
+		return t.arrayDecls[e.Value], 0
+	case *ast.IndexExpression:
+		def, dim := t.indexedArray(e.Left)
+		return def, dim + 1
+	case *ast.MemberAccessExpression:
+		owner := t.resolveAssignmentTargetType(e.Struct)
+		if owner == nil {
+			return nil, 0
+		}
+		var decl *ast.VarDeclStatement
+		if def, ok := owner.DataType.(*ast.StructDefinition); ok {
+			decl = decl0(def.Members, e.Member.Value)
+		} else if fb := t.lookupFunctionBlock(owner.DataType); fb != nil {
+			decl = t.findFunctionBlockVar(fb, e.Member.Value)
+		}
+		if decl == nil {
+			return nil, 0
+		}
+		return t.arrayDefinitionOf(decl.DataType), 0
+	}
+	return nil, 0
+}
+
+// decl0 finds a declaration by name, ignoring case.
+func decl0(decls []*ast.VarDeclStatement, name string) *ast.VarDeclStatement {
+	if i := indexOfDecl(decls, name); i >= 0 {
+		return decls[i]
+	}
+	return nil
+}
+
+// indexLowerBound returns the declared lower bound of the dimension that
+// indexing exp selects, or 0 when it is not known.
+func (t *Transpiler) indexLowerBound(exp ast.Expression) int64 {
+	def, dim := t.indexedArray(exp)
+	if def == nil || dim >= len(def.Ranges) {
+		return 0
+	}
+	infix, ok := def.Ranges[dim].(*ast.InfixExpression)
+	if !ok || infix.Operator != ".." {
+		return 0
+	}
+	low, _ := constantInteger(infix.Left)
+	return low
 }

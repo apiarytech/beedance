@@ -85,40 +85,70 @@ func TestFunctionBlockThreeLevelInheritance(t *testing.T) {
 				END_METHOD
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{0, 10, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, []code.Instructions{
-				code.Make(code.OpReturn),
-			}, "GetValue", "main", 20, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 4),
-				code.Make(code.OpSuperIndex),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpConstant, 6),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, "__parent__", 30, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 4),
-				code.Make(code.OpSuperIndex),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpConstant, 9),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}},
+			expectedConstants: []interface{}{
+				0,  // 0
+				10, // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 3
+					code.Make(code.OpReturn),
+				},
+				"GetValue", // 4
+				"main",     // 5
+				20,         // 6
+				[]code.Instructions{ // 7
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpSuperIndex),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpConstant, 6),
+					code.Make(code.OpAdd),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 8
+					code.Make(code.OpGetGlobal, 0),
+					code.Make(code.OpConstant, 5),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpCall, 1),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"__parent__", // 9
+				30,           // 10
+				[]code.Instructions{ // 11
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpSuperIndex),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpConstant, 10),
+					code.Make(code.OpAdd),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 12
+					code.Make(code.OpGetGlobal, 1),
+					code.Make(code.OpConstant, 5),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpCall, 1),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 4),
 				code.Make(code.OpClosure, 2, 0),
@@ -126,20 +156,20 @@ func TestFunctionBlockThreeLevelInheritance(t *testing.T) {
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpHash, 4),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 8),
+				code.Make(code.OpConstant, 9),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 4),
 				code.Make(code.OpClosure, 7, 0),
 				code.Make(code.OpConstant, 5),
-				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpClosure, 8, 0),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpConstant, 8),
+				code.Make(code.OpConstant, 9),
 				code.Make(code.OpGetGlobal, 1),
 				code.Make(code.OpConstant, 4),
-				code.Make(code.OpClosure, 10, 0),
+				code.Make(code.OpClosure, 11, 0),
 				code.Make(code.OpConstant, 5),
-				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpClosure, 12, 0),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 2),
 			},
@@ -177,45 +207,68 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 				END_PROPERTY
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{0, "_val", []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpIndex),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, []code.Instructions{
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpSetIndex),
-				code.Make(code.OpReturn),
-			}, []code.Instructions{
-				code.Make(code.OpReturn),
-			}, "get_Value", "main", "set_Value", 2, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 5),
-				code.Make(code.OpSuperIndex),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpConstant, 8),
-				code.Make(code.OpMul),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, 1, []code.Instructions{
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 7),
-				code.Make(code.OpSuperIndex),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpConstant, 10),
-				code.Make(code.OpAdd),
-				code.Make(code.OpCall, 1),
-				code.Make(code.OpReturn),
-			}, "__parent__"},
+			expectedConstants: []interface{}{
+				0,      // 0
+				"_val", // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpIndex),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				[]code.Instructions{ // 4
+					code.Make(code.OpReturn),
+				},
+				"get_Value", // 5
+				"main",      // 6
+				"set_Value", // 7
+				2,           // 8
+				[]code.Instructions{ // 9
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 5),
+					code.Make(code.OpSuperIndex),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpConstant, 8),
+					code.Make(code.OpMul),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				1, // 10
+				[]code.Instructions{ // 11
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 7),
+					code.Make(code.OpSuperIndex),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpConstant, 10),
+					code.Make(code.OpAdd),
+					code.Make(code.OpCall, 1),
+					code.Make(code.OpReturn),
+				},
+				[]code.Instructions{ // 12
+					code.Make(code.OpGetGlobal, 0),
+					code.Make(code.OpConstant, 6),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpCall, 1),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"__parent__", // 13
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 5),
 				code.Make(code.OpClosure, 2, 0),
@@ -225,12 +278,12 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 12),
+				code.Make(code.OpConstant, 13),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 5),
 				code.Make(code.OpClosure, 9, 0),
 				code.Make(code.OpConstant, 6),
-				code.Make(code.OpClosure, 4, 0),
+				code.Make(code.OpClosure, 12, 0),
 				code.Make(code.OpConstant, 7),
 				code.Make(code.OpClosure, 11, 0),
 				code.Make(code.OpHash, 8),
@@ -263,8 +316,11 @@ func TestFunctionBlockWithMixedVars(t *testing.T) {
 			`,
 			expectedConstants: []interface{}{
 				"InstanceVar", // const[0]
-				[]code.Instructions{ // const[1] Main Body
-					// THIS=0, InVar=1, OutVar=2
+				"InVar",       // const[1]
+				"OutVar",      // const[2]
+				[]code.Instructions{ // const[3] Main Body
+					// THIS=0. Inputs, outputs and VARs are all fields of the
+					// instance, so they keep their values between calls.
 					// InstanceVar := InstanceVar + InVar;
 					// Assignment:
 					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
@@ -273,23 +329,27 @@ func TestFunctionBlockWithMixedVars(t *testing.T) {
 					code.Make(code.OpGetLocal, 0), // Get THIS (for implicit InstanceVar)
 					code.Make(code.OpConstant, 0), // "InstanceVar"
 					code.Make(code.OpIndex),       // Get value of InstanceVar
-					code.Make(code.OpGetLocal, 1), // Get InVar
+					code.Make(code.OpGetLocal, 0), // Get THIS (for implicit InVar)
+					code.Make(code.OpConstant, 1), // "InVar"
+					code.Make(code.OpIndex),       // Get value of InVar
 					code.Make(code.OpAdd),         // Add
 					code.Make(code.OpSetIndex),    // Set member
 
 					// OutVar := InstanceVar;
+					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
+					code.Make(code.OpConstant, 2), // "OutVar"
 					code.Make(code.OpGetLocal, 0), // Get THIS (for implicit InstanceVar)
 					code.Make(code.OpConstant, 0), // "InstanceVar"
 					code.Make(code.OpIndex),       // Get value of InstanceVar
-					code.Make(code.OpSetLocal, 2), // Set OutVar
+					code.Make(code.OpSetIndex),    // Set OutVar
 
 					code.Make(code.OpReturn),
 				},
-				"main", // const[2]
+				"main", // const[4]
 			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpConstant, 2),   // "main"
-				code.Make(code.OpClosure, 1, 0), // Main body closure
+				code.Make(code.OpConstant, 4),   // "main"
+				code.Make(code.OpClosure, 3, 0), // Main body closure
 				code.Make(code.OpHash, 2),       // Create hash { "main": <closure> }
 				code.Make(code.OpSetGlobal, 0),  // Set the global 'MyFBWithMixedVars'
 			},
@@ -315,28 +375,47 @@ func TestFunctionBlockInheritanceAndSuper(t *testing.T) {
 				END_METHOD
 			END_FUNCTION_BLOCK
 			`,
-			expectedConstants: []interface{}{0, 10, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, []code.Instructions{
-				code.Make(code.OpReturn),
-			}, "DoSomething", "main", 5, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpConstant, 4),
-				code.Make(code.OpSuperIndex),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpConstant, 6),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpReturnValue),
-			}, "__parent__"},
+			expectedConstants: []interface{}{
+				0,  // 0
+				10, // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 3
+					code.Make(code.OpReturn),
+				},
+				"DoSomething", // 4
+				"main",        // 5
+				5,             // 6
+				[]code.Instructions{ // 7
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpSuperIndex),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpConstant, 6),
+					code.Make(code.OpAdd),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpReturnValue),
+				},
+				[]code.Instructions{ // 8
+					code.Make(code.OpGetGlobal, 0),
+					code.Make(code.OpConstant, 5),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpCall, 1),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"__parent__", // 9
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 4),
 				code.Make(code.OpClosure, 2, 0),
@@ -344,12 +423,12 @@ func TestFunctionBlockInheritanceAndSuper(t *testing.T) {
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpHash, 4),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 8),
+				code.Make(code.OpConstant, 9),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 4),
 				code.Make(code.OpClosure, 7, 0),
 				code.Make(code.OpConstant, 5),
-				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpClosure, 8, 0),
 				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
 			},

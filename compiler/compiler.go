@@ -31,8 +31,16 @@ type CompiledProgram struct {
 
 // Compiler holds the state of the compilation process, including the symbol table,
 // constant pool, and compilation scopes for managing instructions and scopes.
+// outputTemp names the hidden variable that holds an output argument on its way
+// to a target other than a variable, such as `o => a[1]`. IEC 61131-3
+// identifiers cannot contain two underscores in a row, so it never clashes.
+const outputTemp = "__output_value"
+
 type Compiler struct {
-	constants []object.Object
+	// stampingArray is set while an assignment to an array with declared
+	// lower bounds is compiled, before the bounds are set on the result.
+	stampingArray bool
+	constants     []object.Object
 
 	symbolTable *SymbolTable
 
@@ -300,8 +308,12 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	for _, b := range node.VarGlobal {
 		varDecls = append(varDecls, b)
 	}
-	for _, d := range node.Vars {
-		varDecls = append(varDecls, d)
+	// A program run on its own has no caller, so its inputs, outputs and
+	// in-outs are ordinary variables that start at their initial values.
+	for _, block := range [][]*ast.VarDeclStatement{node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars} {
+		for _, d := range block {
+			varDecls = append(varDecls, d)
+		}
 	}
 	for _, b := range node.VarExternal {
 		varDecls = append(varDecls, b)
@@ -632,21 +644,28 @@ func (c *Compiler) Compile(node ast.Node) error {
 			methodConstants[method.Name.Value] = c.addConstant(compiledMethod)
 		}
 
-		// Compile main body
+		// Compile the main body, which runs when an instance is called, e.g.
+		// `f(IN := x)`. Like a method, it takes the instance as THIS, and every
+		// variable of the function block (inputs, outputs, in-outs and VARs)
+		// is a field of the instance reached through THIS, so values persist
+		// between calls.
 		c.enterScope()
-		c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
-		for _, p := range node.VarInputs {
-			c.symbolTable.Define(p.Name.Value, false)
+		thisSymbol := c.symbolTable.Define("THIS", false) // 'THIS' is implicitly local 0
+		// A derived function block runs its parent's body first.
+		if parentSymbol != nil {
+			c.loadSymbol(*parentSymbol)
+			c.emitConstant(c.addConstant(&object.String{Value: "main"}))
+			c.emit(code.OpIndex)
+			c.loadSymbol(thisSymbol)
+			c.emit(code.OpCall, 1)
+			c.emit(code.OpPop)
 		}
-		for _, p := range node.VarOutputs {
-			c.symbolTable.Define(p.Name.Value, false)
+		for _, tempBlock := range node.VarTemp {
+			// VAR_TEMP starts afresh on every call.
+			if err := c.Compile(tempBlock); err != nil {
+				return err
+			}
 		}
-		for _, p := range node.VarInOuts {
-			c.symbolTable.Define(p.Name.Value, false)
-		}
-		// Instance variables (VAR blocks) are not compiled into the main body's
-		// instructions. They represent the state of the FB instance and are
-		// handled by the VM during instantiation.
 		if err := c.Compile(mainBody); err != nil {
 			return err
 		}
@@ -657,9 +676,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		numLocals := c.symbolTable.numDefinitions
 		mainLogicInstructions := c.leaveScope()
 		mainFn := &object.CompiledFunction{
-			Instructions:  mainLogicInstructions,
-			NumLocals:     numLocals,
-			NumParameters: len(node.VarInputs),
+			Instructions:   mainLogicInstructions,
+			NumLocals:      numLocals,
+			NumParameters:  1, // THIS
+			ParameterNames: []string{"THIS"},
 		}
 		mainFnIndex := c.addConstant(mainFn)
 
@@ -772,6 +792,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 				c.typeInfo[strings.ToUpper(node.Name.Value)] = node
 				return nil
 			}
+			// Declaring a program defines it; a call runs it.
+			if _, isSFC := node.Body.(*ast.SFCProgram); !isSFC {
+				return c.compileCallableProgram(node)
+			}
 		}
 
 		// This case handles compiling a PROGRAM POU. It processes all variable
@@ -816,6 +840,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// variable, compiling the body, and then packaging it all into a closure.
 	case *ast.FunctionDeclaration:
 		// This is a statement that defines a function in the current scope.
+		// A VAR_IN_OUT is passed by copy-in/copy-out: it is a parameter after
+		// the VAR_INPUTs, and is returned with the outputs so the caller can
+		// copy its final value back into the argument.
 		// First, define the function name in the current scope so it can be captured in a closure.
 		symbol := c.symbolTable.Define(node.Name.Value, false)
 
@@ -825,12 +852,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		c.symbolTable.DefineFunctionName(node.Name.Value) // For recursion
 
-		paramNames := make([]string, len(node.VarInputs))
+		params := append(append([]*ast.VarDeclStatement{}, node.VarInputs...), node.VarInOuts...)
+		paramNames := make([]string, len(params))
+		inOutIndices := make([]int, len(node.VarInOuts))
 		// Define input parameters first, as they are the first locals in the stack frame.
-		for i, p := range node.VarInputs {
+		for i, p := range params {
 			typeName := c.flattenExpressionToString(p.DataType)
-			c.symbolTable.DefineVarInput(p.Name.Value, typeName)
+			param := c.symbolTable.DefineVarInput(p.Name.Value, typeName)
 			paramNames[i] = p.Name.Value
+			if i >= len(node.VarInputs) {
+				// Unlike an input, an in-out may be assigned.
+				param.IsReadOnly = false
+				c.symbolTable.store[strings.ToUpper(p.Name.Value)] = param
+				inOutIndices[i-len(node.VarInputs)] = param.Index
+			}
+		}
+		if err := c.prepareParameters(params); err != nil {
+			return err
 		}
 
 		// Define the function name as a local variable to hold the return value.
@@ -859,7 +897,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			outputIndices[i] = symbol.Index
 			c.emit(code.OpSetLocal, symbol.Index)
 		}
-		c.setFunctionResult(returnSymbol, len(node.VarOutputs) > 0)
+		for i, p := range node.VarInOuts {
+			outputNames = append(outputNames, p.Name.Value)
+			outputIndices = append(outputIndices, inOutIndices[i])
+		}
+		c.setFunctionResult(returnSymbol, len(outputNames) > 0)
 
 		// Compile local variable declarations (VAR ... END_VAR) to define them
 		// in the function's scope.
@@ -896,7 +938,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		compiledFn := &object.CompiledFunction{
 			Instructions:   instructions,
 			NumLocals:      numLocals,
-			NumParameters:  len(node.VarInputs),
+			NumParameters:  len(params),
 			ParameterNames: paramNames,
 			OutputNames:    outputNames,
 			OutputIndices:  outputIndices,
@@ -919,6 +961,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(code.OpPop)
 
 	case *ast.AssignmentStatement:
+		// Arrays and structures are assigned by value.
+		node = c.copyAssignedValue(node)
+		// An array assigned to a variable declared with lower bounds, e.g.
+		// ARRAY[1..3], takes those bounds, whatever array it came from.
+		if !c.stampingArray {
+			if def := c.declaredArrayType(node.Left); def != nil {
+				if _, nonZero := c.arrayLowerBounds(def); nonZero {
+					c.stampingArray = true
+					err := c.Compile(node)
+					c.stampingArray = false
+					if err != nil {
+						return err
+					}
+					if err := c.Compile(node.Left); err != nil {
+						return err
+					}
+					if err := c.emitArrayBounds(def); err != nil {
+						return err
+					}
+					c.emit(code.OpPop)
+					return nil
+				}
+			}
+		}
 		// Use a type switch to safely handle different kinds of assignment targets
 		// and prevent panics if the parser produces an unexpected AST node.
 		switch target := node.Left.(type) {
@@ -944,6 +1010,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 					if varDecl.IsFinal {
 						return fmt.Errorf("cannot assign to FINAL variable '%s' from function block '%s'", varDecl.Name.Value, ownerFB.Name.Value)
 					}
+					if varDecl.IsConstant {
+						return fmt.Errorf("cannot assign to a constant variable '%s'", varDecl.Name.Value)
+					}
 					// Check for read-only (VAR_INPUT)
 					if varDecl.Scope == "VAR_INPUT" {
 						return fmt.Errorf("cannot assign to read-only variable '%s'", target.Value)
@@ -951,7 +1020,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 					// If it's an instance variable (VAR, VAR_TEMP, VAR_GLOBAL in FB), compile as THIS.variable := value
 					// VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT are handled as local symbols.
-					_, isLocal := c.symbolTable.Resolve(target.Value)
+					local, isLocal := c.symbolTable.Resolve(target.Value)
+					isLocal = isLocal && !c.hidesSymbol(local, target.Value)
 					if varDecl.Scope == "" || varDecl.Scope == "VAR" || varDecl.Scope == "VAR_TEMP" || varDecl.Scope == "VAR_GLOBAL" || !isLocal {
 						// Compile as `THIS.variable := value`. Inside a method, the FB's
 						// outputs are also instance fields rather than locals.
@@ -988,6 +1058,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return c.setSymbol(symbol)
 
 		case *ast.IndexExpression:
+			if err := c.checkArrayBounds(target.Left, target.Index); err != nil {
+				return err
+			}
 			// Compile the array/hash (LHS of index expression)
 			if err := c.Compile(target.Left); err != nil {
 				return err
@@ -1613,6 +1686,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// This is important to correctly find parameters like 'value' in a setter
 		// before attempting to interpret it as an implicit property access on THIS.
 		symbol, ok := c.symbolTable.Resolve(node.Value)
+		// A function block's own variable hides a built-in function or global of
+		// the same name, such as a variable called `first` or `counter`.
+		if ok && c.hidesSymbol(symbol, node.Value) {
+			ok = false
+		}
 		if ok {
 			c.loadSymbol(symbol)
 			return nil // Symbol found and loaded, we are done.
@@ -1851,9 +1929,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(code.OpReturnValue)
 
+	// An assigned array or structure is copied; see copyAssignedValue.
+	case *copiedValue:
+		if err := c.Compile(node.Expression); err != nil {
+			return err
+		}
+		c.emit(code.OpCopy)
+
 	// A CallExpression compiles the function/callable and all arguments, then
 	// emits an OpCall instruction.
 	case *ast.CallExpression:
+		// Calling a function block instance runs its body; see compileFunctionBlockCall.
+		if fbDef := c.calleeFunctionBlock(node.Function); fbDef != nil {
+			return c.compileFunctionBlockCall(node, fbDef)
+		}
+
 		// Separate arguments into inputs (positional/named) and outputs (=>).
 		inputArgs := []ast.Expression{}
 		outputArgs := []*ast.OutputArgument{}
@@ -1922,12 +2012,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return fmt.Errorf("function '%s' has no output '%s'", calleeFn.Name.Value, out.Source.Value)
 				}
 			}
+			// A VAR_IN_OUT's argument is passed in by value and its final value
+			// copied back from the result, as if it were an output `io => arg`.
+			copyBacks, err := c.functionInOutCopyBacks(calleeFn, inputArgs, node)
+			if err != nil {
+				return err
+			}
+			outputArgs = append(outputArgs, copyBacks...)
 		}
 
 		// Inputs the call omits take their initial value or type default.
 		numArgs := len(inputArgs)
 		if inputs, known := c.calleeInputs(node.Function); known {
-			added, err := c.emitOmittedInputs(node.Function.String(), inputs, inputArgs)
+			// Named in-outs were checked above; only inputs take defaults.
+			inputOnly := inputArgs
+			if calleeFn != nil && len(calleeFn.VarInOuts) > 0 {
+				inputOnly = []ast.Expression{}
+				for _, arg := range inputArgs {
+					if named, ok := arg.(*ast.NamedArgument); ok && findParameter(calleeFn.VarInOuts, named.Name.Value) != nil {
+						continue
+					}
+					inputOnly = append(inputOnly, arg)
+				}
+			}
+			added, err := c.emitOmittedInputs(node.Function.String(), inputs, inputOnly)
 			if err != nil {
 				return err
 			}
@@ -1955,14 +2063,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emitConstant(c.addConstant(&object.String{Value: outputName}))
 			c.emit(code.OpIndex)
 
-			// Compile assignment to the target variable.
+			// Compile assignment to the target. Any other target, such as an
+			// array element or a structure member, is assigned from a hidden
+			// temporary with an ordinary assignment.
 			targetIdent, ok := out.Target.(*ast.Identifier)
-			if !ok {
-				return fmt.Errorf("output argument target must be an identifier, got %T", out.Target)
+			var symbol Symbol
+			if ok {
+				symbol, ok = c.symbolTable.Resolve(targetIdent.Value)
 			}
-			symbol, ok := c.symbolTable.Resolve(targetIdent.Value)
 			if !ok {
-				return fmt.Errorf("undefined variable %s", targetIdent.Value)
+				temp, defined := c.symbolTable.Resolve(outputTemp)
+				if !defined || (temp.Scope != LocalScope && c.symbolTable.Outer != nil) {
+					temp = c.symbolTable.Define(outputTemp, false)
+				}
+				if err := c.setSymbol(temp); err != nil {
+					return err
+				}
+				assign := &ast.AssignmentStatement{Token: node.Token, Left: out.Target, Value: &ast.Identifier{Token: node.Token, Value: outputTemp}}
+				if err := c.Compile(assign); err != nil {
+					return err
+				}
+				continue
 			}
 			err := c.setSymbol(symbol)
 			if err != nil {
@@ -1971,7 +2092,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Leave the function's own result as the call's value.
-		if calleeFn != nil && len(calleeFn.VarOutputs) > 0 {
+		if calleeFn != nil && len(calleeFn.VarOutputs)+len(calleeFn.VarInOuts) > 0 {
 			c.emitConstant(c.addConstant(&object.String{Value: "__return__"}))
 			c.emit(code.OpIndex)
 		}
@@ -2178,6 +2299,8 @@ func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.
 // getExpressionType recursively determines the data type of an AST expression node.
 func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, error) {
 	switch e := expr.(type) {
+	case *copiedValue:
+		return c.getExpressionType(e.Expression)
 	case *ast.IntegerLiteral:
 		return object.LINT_OBJ, nil // Default to largest integer type for literals
 	case *ast.RealLiteral:
@@ -2212,7 +2335,7 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 			}
 			// Any other variable (e.g. an FB input read inside a method) or a
 			// property of the enclosing FB, read by name.
-			if _, isSymbol := c.symbolTable.Resolve(e.Value); !isSymbol {
+			if symbol, isSymbol := c.symbolTable.Resolve(e.Value); !isSymbol || c.hidesSymbol(symbol, e.Value) {
 				if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, e.Value); varDecl != nil && varDecl.DataType != nil {
 					return object.ObjectType(strings.ToUpper(c.flattenExpressionToString(varDecl.DataType))), nil
 				}
@@ -3367,28 +3490,11 @@ func (c *Compiler) checkArrayBounds(arrayExpr, indexExpr ast.Expression) error {
 		return nil // For other errors (e.g., not a constant), we can't check, so we proceed.
 	}
 
-	// 2. Resolve the array expression to an identifier to find its declaration.
-	arrayIdent, ok := arrayExpr.(*ast.Identifier)
-	if !ok {
-		return nil // Array expression is complex (e.g., func()[i]), cannot check.
-	}
-
-	// 3. Find the variable's declaration by searching scopes.
-	var varDecl *ast.VarDeclStatement
-	for i := c.scopeIndex; i >= 0; i-- {
-		if decl, found := c.scopes[i].varDecls[arrayIdent.Value]; found {
-			varDecl = decl
-			break
-		}
-	}
-	if varDecl == nil {
-		return nil // Declaration not found in any scope.
-	}
-
-	// 4. Get the ArrayDefinition from the variable's declaration.
-	arrayDef, ok := varDecl.DataType.(*ast.ArrayDefinition)
-	if !ok {
-		return nil // The variable is not an array.
+	// 2. Find the declared type of the array: a variable in scope, a field of
+	// the function block (or program) being compiled, or a member.
+	arrayDef := c.declaredArrayType(arrayExpr)
+	if arrayDef == nil {
+		return nil // Not a declared array (e.g., func()[i]), cannot check.
 	}
 
 	// 5. For now, assume a 1D array. Get the bounds expression.
@@ -3442,6 +3548,9 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 	for _, p := range method.VarInputs {
 		typeName := c.flattenExpressionToString(p.DataType)
 		c.symbolTable.DefineVarInput(p.Name.Value, typeName)
+	}
+	if err := c.prepareParameters(method.VarInputs); err != nil {
+		return nil, err
 	}
 
 	// Define and initialize the implicit return variable.
@@ -3598,10 +3707,17 @@ func (c *Compiler) getExpressionTypeName(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.Identifier:
 		symbol, resolved := c.symbolTable.Resolve(e.Value)
-		if !resolved {
-			return "", false
+		if resolved && symbol.TypeName != "" {
+			return symbol.TypeName, true
 		}
-		return symbol.TypeName, symbol.TypeName != ""
+		// Inside a method, a variable of the enclosing function block is used
+		// by name without being a symbol.
+		if c.currentFB != nil {
+			if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, e.Value); varDecl != nil && varDecl.DataType != nil {
+				return c.flattenExpressionToString(varDecl.DataType), true
+			}
+		}
+		return "", false
 	case *ast.ThisExpression:
 		if c.currentFB != nil {
 			return strings.ToUpper(c.currentFB.Name.Value), true
@@ -4053,9 +4169,16 @@ func (c *Compiler) orderByInheritance(stmts []ast.Statement) []ast.Statement {
 		fbs = append(fbs, fb)
 	}
 
+	// Functions come first, so that function block bodies and methods can
+	// call them; function blocks only need each other's (predefined) classes.
+	functions := []ast.Statement{}
 	for _, s := range stmts {
 		if fb, ok := s.(*ast.FunctionBlockDeclaration); ok {
 			visit(fb)
+			continue
+		}
+		if _, isFunction := s.(*ast.FunctionDeclaration); isFunction {
+			functions = append(functions, s)
 			continue
 		}
 		others = append(others, s)
@@ -4064,7 +4187,7 @@ func (c *Compiler) orderByInheritance(stmts []ast.Statement) []ast.Statement {
 		// Keep source order so the cycle is reported from the first FB written.
 		return stmts
 	}
-	return append(fbs, others...)
+	return append(append(functions, fbs...), others...)
 }
 
 // predefineFunctionBlocks defines a global symbol for every function block in

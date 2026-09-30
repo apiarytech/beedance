@@ -298,7 +298,7 @@ func (p *ControlFlow) Logic(now time.Time) {
 		p.z = (-1)
 	}
 
-	for p.z := 1; p.z <= 5; p.z += 1 {
+	for p.z = 1; p.z <= 5; p.z += 1 {
 		p.x = (p.x + p.z)
 		break
 	}
@@ -354,7 +354,7 @@ func (p *SubrangeTest) Link(linker config.IOLinker) error {
 }
 
 func (p *SubrangeTest) Logic(now time.Time) {
-    p.mySmallInt = iec.ClampINT(p.inputVal, (-100), 100)
+    p.mySmallInt = SMALL_INT(min(max(p.inputVal, (-100)), 100))
 }
 `
 	transpileAndCheck(t, "TestSubrangeAssignmentTranspilation", input, expected)
@@ -476,10 +476,10 @@ type MySFC struct {
 	y iec.INT
 	sfcActiveSteps map[string]bool
 	S1_X bool
-	S1_X_prev iec.BOOL
+	S1_X_prev bool
 	S1_T time.Time
 	S2_X bool
-	S2_X_prev iec.BOOL
+	S2_X_prev bool
 	S2_T time.Time
 	Action1_Q iec.BOOL
 	Action1_Timer time.Time
@@ -615,10 +615,10 @@ func (p *MyILProgram) Logic(now time.Time) {
 	_ = cr_BOOL; _ = cr_LINT; _ = cr_LREAL; _ = cr_TIME; _ = cr_STRING // Avoid unused var errors
 
 	cr_LINT = iec.LINT(p.A)
-	cr_LINT = cr_LINT + p.B
+	cr_LINT = cr_LINT + iec.LINT(p.B)
 	p.C = iec.INT(cr_LINT)
 	cr_LINT = iec.LINT(p.C)
-	cr_BOOL = cr_LINT > 12
+	cr_BOOL = cr_LINT > iec.LINT(12)
 	p.D = iec.BOOL(cr_BOOL)
 }
 `
@@ -671,22 +671,22 @@ type MySFCForkJoin struct {
 	Merged_Active iec.BOOL
 	sfcActiveSteps map[string]bool
 	S1_X          bool
-	S1_X_prev     iec.BOOL
+	S1_X_prev     bool
 	S1_T          time.Time
 	S2_X          bool
-	S2_X_prev     iec.BOOL
+	S2_X_prev     bool
 	S2_T          time.Time
 	S3_X          bool
-	S3_X_prev     iec.BOOL
+	S3_X_prev     bool
 	S3_T          time.Time
 	S4_X          bool
-	S4_X_prev     iec.BOOL
+	S4_X_prev     bool
 	S4_T          time.Time
 	S5_X          bool
-	S5_X_prev     iec.BOOL
+	S5_X_prev     bool
 	S5_T          time.Time
 	S6_X          bool
-	S6_X_prev     iec.BOOL
+	S6_X_prev     bool
 	S6_T          time.Time
 	ActionA_Q       iec.BOOL
 	ActionA_Timer   time.Time
@@ -883,13 +883,13 @@ type MySFC_Timed struct {
 	LimitedActionActive iec.BOOL
 	sfcActiveSteps      map[string]bool
 	S1_X                bool
-	S1_X_prev           iec.BOOL
+	S1_X_prev           bool
 	S1_T                time.Time
 	S2_X                bool
-	S2_X_prev           iec.BOOL
+	S2_X_prev           bool
 	S2_T                time.Time
 	S3_X                bool
-	S3_X_prev           iec.BOOL
+	S3_X_prev           bool
 	S3_T                time.Time
 	DelayedAction_Q       iec.BOOL
 	DelayedAction_Timer   time.Time
@@ -969,9 +969,9 @@ func (p *MySFC_Timed) Logic(now time.Time) {
 	// Actions for step S2
 	if p.sfcActiveSteps["S2"] {
 		if p.DelayedAction_Timer.IsZero() { p.DelayedAction_Timer = now; }
-		p.DelayedAction_Q = now.Sub(p.DelayedAction_Timer) >= iec.Time("T#2s")
+		p.DelayedAction_Q = iec.TIME(now.Sub(p.DelayedAction_Timer)) >= iec.TIME(2000000000)
 		if p.LimitedAction_Timer.IsZero() { p.LimitedAction_Timer = now; }
-		p.LimitedAction_Q = now.Sub(p.LimitedAction_Timer) < iec.Time("T#3s")
+		p.LimitedAction_Q = iec.TIME(now.Sub(p.LimitedAction_Timer)) < iec.TIME(3000000000)
 	} else {
 		p.DelayedAction_Q = false
 		p.DelayedAction_Timer = time.Time{}
@@ -1032,10 +1032,10 @@ type MySFC_Priority struct {
 	SetIsActive   iec.BOOL
 	sfcActiveSteps map[string]bool
 	S1_X          bool
-	S1_X_prev     iec.BOOL
+	S1_X_prev     bool
 	S1_T          time.Time
 	S2_X          bool
-	S2_X_prev     iec.BOOL
+	S2_X_prev     bool
 	S2_T          time.Time
 	ResetAction_Q       iec.BOOL
 	ResetAction_Timer   time.Time
@@ -1216,7 +1216,7 @@ func (p *MyIlCalJmpProgram) Logic(now time.Time) {
 
 Loop:
 	cr_LINT = iec.LINT(p.Counter)
-	cr_LINT = cr_LINT + 1
+	cr_LINT = cr_LINT + iec.LINT(1)
 	p.Counter = iec.INT(cr_LINT)
 	p.MyTrigger.CLK = p.DoTrigger
 	p.MyTrigger.Logic(now)
@@ -1226,7 +1226,7 @@ Loop:
 	p.RisingEdgeDetected = iec.BOOL(cr_BOOL)
 EndLoop:
 	cr_LINT = iec.LINT(p.Counter)
-	cr_BOOL = cr_LINT > 10
+	cr_BOOL = cr_LINT > iec.LINT(10)
 	if !cr_BOOL { goto Loop; }
 }
 `
@@ -1376,21 +1376,21 @@ func TestArrayRepetitionTranspilation(t *testing.T) {
 			anotherArray : ARRAY[1..7] OF INT := [1, 2, 3(0), 4, 5];
 		END_VAR
 
-		myArray[0] := 0;
+		myArray[1] := 0; // The first element of ARRAY[1..5].
 
 	END_PROGRAM
 	`
 	expected := `
 type ArrayRepTest struct {
-	myArray      []iec.INT
-	anotherArray []iec.INT
+	myArray      [5]iec.INT
+	anotherArray [7]iec.INT
 }
 
 // NewArrayRepTestFactory creates a new instance of the ArrayRepTest program.
 func NewArrayRepTestFactory(params map[string]string) (func(time.Time), error) {
 	instance := &ArrayRepTest{}
-	instance.myArray = []iec.INT{10, 10, 20, 20, 20}
-	instance.anotherArray = []iec.INT{1, 2, 0, 0, 0, 4, 5}
+	instance.myArray = [5]iec.INT{10, 10, 20, 20, 20}
+	instance.anotherArray = [7]iec.INT{1, 2, 0, 0, 0, 4, 5}
 	return instance.Logic, nil
 }
 
@@ -1500,7 +1500,7 @@ func main() {
 					{
 						Name:     "Task1",
 						Priority: 1,
-						Interval: iec.Time("T#100ms"),
+						Interval: iec.TIME(100000000),
 						Programs: []string{"P1"},
 					},
 				},
@@ -1537,14 +1537,14 @@ END_PROGRAM
 `
 	expected := `
 type AssignmentWorkaround struct {
-	myArray []iec.INT
+	myArray [5]iec.INT
 	i       iec.INT
 }
 
 // NewAssignmentWorkaroundFactory creates a new instance of the AssignmentWorkaround program.
 func NewAssignmentWorkaroundFactory(params map[string]string) (func(time.Time), error) {
 	instance := &AssignmentWorkaround{}
-	instance.myArray = make([]iec.INT, 5)
+	instance.myArray = [5]iec.INT{}
 	instance.i = 0
 	return instance.Logic, nil
 }
@@ -1617,7 +1617,7 @@ func (p *MyIlBuiltins) Logic(now time.Time) {
 	p.abs_val = iec.INT(cr_LREAL)
 
 	p.my_timer.IN = p.timer_in
-	p.my_timer.PT = iec.Time("T#2s")
+	p.my_timer.PT = iec.TIME(2000000000)
 	p.my_timer.Logic(now)
 	cr_BOOL = p.my_timer.Q
 	p.timer_q = iec.BOOL(cr_BOOL)
@@ -1660,10 +1660,10 @@ type SfcStoredPulse struct {
 	StoredLimitedActive iec.BOOL
 	sfcActiveSteps      map[string]bool
 	S1_X                bool
-	S1_X_prev           iec.BOOL
+	S1_X_prev           bool
 	S1_T                time.Time
 	S2_X                bool
-	S2_X_prev           iec.BOOL
+	S2_X_prev           bool
 	S2_T                time.Time
 	PulseAction_Q       iec.BOOL
 	PulseAction_Timer   time.Time
@@ -1731,22 +1731,22 @@ func (p *SfcStoredPulse) Logic(now time.Time) {
 	// Process actions for active steps
 	// Actions for step S1
 	if p.sfcActiveSteps["S1"] {
-		p.PulseAction_Q = p.S1_X && !p.S1_X_prev
+		p.PulseAction_Q = iec.BOOL(p.S1_X && !p.S1_X_prev)
 		if p.StoredDelayedAction_Timer.IsZero() { p.StoredDelayedAction_Timer = now }
-		if !p.StoredDelayedAction_Q && now.Sub(p.StoredDelayedAction_Timer) >= iec.Time("T#1s") {
+		if !p.StoredDelayedAction_Q && iec.TIME(now.Sub(p.StoredDelayedAction_Timer)) >= iec.TIME(1000000000) {
 			p.StoredDelayedAction_Q = true
 		}
 		if p.StoredLimitedAction_Timer.IsZero() { p.StoredLimitedAction_Timer = now p.StoredLimitedAction_Q = true }
-		if now.Sub(p.StoredLimitedAction_Timer) >= iec.Time("T#2s") {
+		if iec.TIME(now.Sub(p.StoredLimitedAction_Timer)) >= iec.TIME(2000000000) {
 			p.StoredLimitedAction_Q = false
 		}
 	} else {
 		p.PulseAction_Q = false
 		p.PulseAction_Timer = time.Time{}
-		if !p.StoredDelayedAction_Timer.IsZero() && !p.StoredDelayedAction_Q && now.Sub(p.StoredDelayedAction_Timer) >= iec.Time("T#1s") {
+		if !p.StoredDelayedAction_Timer.IsZero() && !bool(p.StoredDelayedAction_Q) && iec.TIME(now.Sub(p.StoredDelayedAction_Timer)) >= iec.TIME(1000000000) {
 			p.StoredDelayedAction_Q = true
 		}
-		if !p.StoredLimitedAction_Timer.IsZero() && p.StoredLimitedAction_Q && now.Sub(p.StoredLimitedAction_Timer) >= iec.Time("T#2s") {
+		if !p.StoredLimitedAction_Timer.IsZero() && bool(p.StoredLimitedAction_Q) && iec.TIME(now.Sub(p.StoredLimitedAction_Timer)) >= iec.TIME(2000000000) {
 			p.StoredLimitedAction_Q = false
 		}
 	}
@@ -1808,7 +1808,7 @@ type MiscTest struct {
 	t   iec.TIME
 	d   iec.DATE
 	tod iec.TIME_OF_DAY
-	dt  iec.DATE_AND_TIME
+	dt  iec.DT
 	f any // Inferred
 	h any // Inferred
 }
@@ -1818,10 +1818,10 @@ func NewMiscTestFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MiscTest{}
 	instance.c = MyColor_RED
 	instance.ws = "wide"
-	instance.t = iec.Time("T#5s")
-	instance.d = iec.Date("D#2026-01-02")
-	instance.tod = iec.TOD("TOD#14:21:00")
-	instance.dt = iec.DT("DT#2026-01-02-14:21:00")
+	instance.t = iec.TIME(5000000000)
+	instance.d = iec.DATE(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+	instance.tod = iec.TOD(time.Date(0, 1, 1, 14, 21, 0, 0, time.UTC))
+	instance.dt = iec.DT(time.Date(2026, 1, 2, 14, 21, 0, 0, time.UTC))
 	return instance.Logic, nil
 }
 

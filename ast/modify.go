@@ -10,6 +10,8 @@
 
 package ast
 
+import "reflect"
+
 // ModifierFunc defines the signature for a function that can be used to modify an AST node.
 type ModifierFunc func(Node) Node
 
@@ -17,6 +19,10 @@ type ModifierFunc func(Node) Node
 // It returns the potentially modified node. This function is the core of the AST rewriting capabilities,
 // allowing for transformations of the tree.
 func Modify(node Node, modifier ModifierFunc) Node {
+	// A nil child, such as the missing body of a property prototype, is left as is.
+	if isNilNode(node) {
+		return node
+	}
 	switch node := node.(type) {
 
 	case *Program:
@@ -335,6 +341,158 @@ func Modify(node Node, modifier ModifierFunc) Node {
 			node.Statements[i], _ = Modify(node.Statements[i], modifier).(Statement)
 		}
 
+	case *ProgramDeclaration:
+		modifyVars(node.VarInputs, modifier)
+		modifyVars(node.VarOutputs, modifier)
+		modifyVars(node.VarInOuts, modifier)
+		modifyVars(node.Vars, modifier)
+		for i := range node.VarExternal {
+			node.VarExternal[i], _ = Modify(node.VarExternal[i], modifier).(*ExternalVarDeclaration)
+		}
+		for i := range node.VarGlobal {
+			node.VarGlobal[i], _ = Modify(node.VarGlobal[i], modifier).(*GlobalVarDeclaration)
+		}
+		for i := range node.VarAccess {
+			node.VarAccess[i], _ = Modify(node.VarAccess[i], modifier).(*AccessVarDeclaration)
+		}
+		for i := range node.VarTemp {
+			node.VarTemp[i], _ = Modify(node.VarTemp[i], modifier).(*TempVarDeclaration)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(Statement)
+		}
+
+	case *GlobalVarDeclaration:
+		modifyVars(node.Vars, modifier)
+	case *AccessVarDeclaration:
+		modifyVars(node.Vars, modifier)
+	case *VarBlockDeclaration:
+		modifyVars(node.Declarations, modifier)
+	case *ConfigVarDeclaration:
+		modifyVars(node.Declarations, modifier)
+
+	case *TypeBlockDeclaration:
+		for i := range node.Declarations {
+			node.Declarations[i], _ = Modify(node.Declarations[i], modifier).(*TypeDeclaration)
+		}
+
+	case *TypeDeclaration:
+		if node.DataType != nil {
+			node.DataType, _ = Modify(node.DataType, modifier).(Expression)
+		}
+		if node.Subrange != nil {
+			node.Subrange, _ = Modify(node.Subrange, modifier).(Expression)
+		}
+		if node.StringLength != nil {
+			node.StringLength, _ = Modify(node.StringLength, modifier).(Expression)
+		}
+		if node.InitialValue != nil {
+			node.InitialValue, _ = Modify(node.InitialValue, modifier).(Expression)
+		}
+
+	case *StructDefinition:
+		modifyVars(node.Members, modifier)
+
+	case *ArrayDefinition:
+		for i := range node.Ranges {
+			node.Ranges[i], _ = Modify(node.Ranges[i], modifier).(Expression)
+		}
+
+	case *ArrayRepetition:
+		node.Factor, _ = Modify(node.Factor, modifier).(Expression)
+		for i := range node.Elements {
+			node.Elements[i], _ = Modify(node.Elements[i], modifier).(Expression)
+		}
+
+	case *IlInstructionStatement:
+		if node.Operand != nil {
+			node.Operand, _ = Modify(node.Operand, modifier).(Expression)
+		}
+
+	case *ConfigurationDeclaration:
+		for i := range node.GlobalVars {
+			node.GlobalVars[i], _ = Modify(node.GlobalVars[i], modifier).(*GlobalVarDeclaration)
+		}
+		for i := range node.Resources {
+			node.Resources[i], _ = Modify(node.Resources[i], modifier).(*ResourceDeclaration)
+		}
+		for i := range node.AccessVars {
+			node.AccessVars[i], _ = Modify(node.AccessVars[i], modifier).(*AccessVarDeclaration)
+		}
+		for i := range node.VarConfigs {
+			node.VarConfigs[i], _ = Modify(node.VarConfigs[i], modifier).(*ConfigVarDeclaration)
+		}
+
+	case *ResourceDeclaration:
+		for i := range node.GlobalVars {
+			node.GlobalVars[i], _ = Modify(node.GlobalVars[i], modifier).(*GlobalVarDeclaration)
+		}
+		for i := range node.Tasks {
+			node.Tasks[i], _ = Modify(node.Tasks[i], modifier).(*TaskDeclaration)
+		}
+		for i := range node.Programs {
+			node.Programs[i], _ = Modify(node.Programs[i], modifier).(*ProgramConfiguration)
+		}
+
+	case *TaskDeclaration:
+		if node.Single != nil {
+			node.Single, _ = Modify(node.Single, modifier).(Expression)
+		}
+		if node.Interval != nil {
+			node.Interval, _ = Modify(node.Interval, modifier).(Expression)
+		}
+		if node.Priority != nil {
+			node.Priority, _ = Modify(node.Priority, modifier).(Expression)
+		}
+
+	case *SFCProgram:
+		for i := range node.Elements {
+			node.Elements[i], _ = Modify(node.Elements[i], modifier).(Statement)
+		}
+
+	case *StepStatement:
+		for i := range node.Actions {
+			node.Actions[i], _ = Modify(node.Actions[i], modifier).(*ActionBlockStatement)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+		}
+
+	case *ActionBlockStatement:
+		if node.Duration != nil {
+			node.Duration, _ = Modify(node.Duration, modifier).(Expression)
+		}
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(*BlockStatement)
+		}
+
+	case *TransitionStatement:
+		if node.Condition != nil {
+			node.Condition, _ = Modify(node.Condition, modifier).(Expression)
+		}
+
+	case *ActionStatement:
+		if node.Body != nil {
+			node.Body, _ = Modify(node.Body, modifier).(Statement)
+		}
+
 	}
 	return modifier(node)
+}
+
+// modifyVars applies Modify to each declaration of a variable block.
+func modifyVars(decls []*VarDeclStatement, modifier ModifierFunc) {
+	for i := range decls {
+		decls[i], _ = Modify(decls[i], modifier).(*VarDeclStatement)
+	}
+}
+
+// isNilNode reports whether node is nil or a nil pointer held in the Node
+// interface.
+func isNilNode(node Node) bool {
+	if node == nil {
+		return true
+	}
+	v := reflect.ValueOf(node)
+	return v.Kind() == reflect.Pointer && v.IsNil()
 }

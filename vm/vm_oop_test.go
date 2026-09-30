@@ -40,11 +40,14 @@ func TestFunctionBlockThreeLevelInheritanceVM(t *testing.T) {
 			END_FUNCTION_BLOCK
 
 			PROGRAM TestInheritance
+				VAR_OUTPUT result : INT; END_VAR
 				VAR
 					instance : A;
 				END_VAR
-				instance.GetValue();
+				result := instance.GetValue();
 			END_PROGRAM
+			TestInheritance();
+			TestInheritance.result;
 			`,
 			expected: 60,
 		},
@@ -61,12 +64,13 @@ func TestFunctionBlockInstanceStateVM(t *testing.T) {
 			// read and update the instance's own variable across calls.
 			input: `
 			PROGRAM TestCounter
+				VAR_OUTPUT result : INT; END_VAR
 				VAR
 					counter : Counter;
 				END_VAR
 				counter.Increment();
 				counter.Increment();
-				counter.Current();
+				result := counter.Current();
 			END_PROGRAM
 
 			FUNCTION_BLOCK Counter
@@ -81,6 +85,8 @@ func TestFunctionBlockInstanceStateVM(t *testing.T) {
 					Current := THIS.count;
 				END_METHOD
 			END_FUNCTION_BLOCK
+			TestCounter();
+			TestCounter.result;
 			`,
 			expected: 7,
 		},
@@ -101,14 +107,17 @@ func TestFunctionBlockInstanceStateVM(t *testing.T) {
 			END_FUNCTION_BLOCK
 
 			PROGRAM TestTwoCounters
+				VAR_OUTPUT result : INT; END_VAR
 				VAR
 					a : Counter;
 					b : Counter;
 				END_VAR
 				a.Add(10);
 				b.Add(1);
-				a.Add(5) * 100 + b.Add(2);
+				result := a.Add(5) * 100 + b.Add(2);
 			END_PROGRAM
+			TestTwoCounters();
+			TestTwoCounters.result;
 			`,
 			expected: 1503,
 		},

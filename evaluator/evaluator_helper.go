@@ -97,3 +97,10 @@ func isSubclassOf(d *object.FunctionBlock, target *ast.FunctionBlockDeclaration,
 	return false
 }
 
+// TimeDateLiteral parses the value of a TIME, DATE, TIME_OF_DAY or
+// DATE_AND_TIME literal (such as "5s" for T#5s), returning an *object.Time,
+// *object.Date, *object.TimeOfDay, *object.DateAndTime or *object.Error. The
+// transpiler uses it so that every engine reads literals the same way.
+func TimeDateLiteral(value, typeName string) object.Object {
+	return applyTimeDateConversion(value, typeName)
+}

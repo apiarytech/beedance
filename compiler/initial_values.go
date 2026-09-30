@@ -419,6 +419,15 @@ func (c *Compiler) arrayLength(rng ast.Expression) (int, bool) {
 // is an array of arrays. A one-dimensional array literal may list fewer
 // elements than the array holds (the rest take the default) but not more.
 func (c *Compiler) compileArrayValue(name string, def *ast.ArrayDefinition, value ast.Expression, visiting map[ast.Node]bool) error {
+	if err := c.compileArrayElements(name, def, value, visiting); err != nil {
+		return err
+	}
+	return c.emitArrayBounds(def)
+}
+
+// compileArrayElements compiles the elements of an array value; see
+// compileArrayValue.
+func (c *Compiler) compileArrayElements(name string, def *ast.ArrayDefinition, value ast.Expression, visiting map[ast.Node]bool) error {
 	var elementType ast.Expression
 	if def.DataType != nil {
 		elementType = def.DataType

@@ -962,3 +962,60 @@ func isBitStringOfWidth(obj Object, typeName string) bool {
 	width, known := GetBitStringWidth(typeName)
 	return ok && known && bs.Width <= width
 }
+
+// SetLowerBounds sets the lower bound of each dimension of an array: the
+// first on the array itself and the rest on the arrays it contains. A value
+// that is not an array is left alone.
+func SetLowerBounds(value Object, bounds []int64) {
+	array, ok := value.(*Array)
+	if !ok || len(bounds) == 0 {
+		return
+	}
+	array.LowerBound = bounds[0]
+	for _, element := range array.Elements {
+		SetLowerBounds(element, bounds[1:])
+	}
+}
+
+// LowerBounds returns the lower bound of each dimension of an array, reading
+// nested dimensions from the first element; it is nil for a non-array.
+func LowerBounds(value Object) []int64 {
+	bounds := []int64{}
+	for {
+		array, ok := value.(*Array)
+		if !ok {
+			return bounds
+		}
+		bounds = append(bounds, array.LowerBound)
+		if len(array.Elements) == 0 {
+			return bounds
+		}
+		value = array.Elements[0]
+	}
+}
+
+// CopyValue returns a copy of an array or structure, as IEC 61131-3 assigns
+// and passes them by value: changing the copy leaves the original alone.
+// Nested arrays and structures are copied too, and arrays keep their lower
+// bounds. A function block instance (a hash with a "__class__" entry) and
+// any other value are returned as they are.
+func CopyValue(value Object) Object {
+	switch v := value.(type) {
+	case *Array:
+		elements := make([]Object, len(v.Elements))
+		for i, element := range v.Elements {
+			elements[i] = CopyValue(element)
+		}
+		return &Array{Elements: elements, LowerBound: v.LowerBound}
+	case *Hash:
+		if _, isInstance := v.Pairs[(&String{Value: "__class__"}).HashKey()]; isInstance {
+			return v
+		}
+		pairs := make(map[HashKey]HashPair, len(v.Pairs))
+		for key, pair := range v.Pairs {
+			pairs[key] = HashPair{Key: pair.Key, Value: CopyValue(pair.Value)}
+		}
+		return &Hash{Pairs: pairs}
+	}
+	return value
+}

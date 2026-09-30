@@ -18,18 +18,46 @@ func TestIlCompilerOperators(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{10, 20, 0},
+			expectedConstants: []interface{}{
+				"a", // 0
+				"b", // 1
+				"c", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpIndex),
+					code.Make(code.OpAdd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+				10,          // 6
+				20,          // 7
+				0,           // 8
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpConstant, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpConstant, 2),
-				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 5),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpConstant, 8),
+				code.Make(code.OpHash, 8),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -44,16 +72,40 @@ func TestIlCompilerOperators(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{0, 10},
+			expectedConstants: []interface{}{
+				"b", // 0
+				10,  // 1
+				"a", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpJumpNotTruthy, 12),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+				0,           // 6
+			},
 			expectedInstructions: []code.Instructions{
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpConstant, 6),
 				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpJumpNotTruthy, 19),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 0),
 			},
 		},
 	}
@@ -73,17 +125,41 @@ func TestIlCompiler_JMPC(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{0, 10},
+		expectedConstants: []interface{}{
+			"b", // 0
+			10,  // 1
+			"a", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpBang),
+				code.Make(code.OpJumpNotTruthy, 13),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			0,           // 6
+		},
 		expectedInstructions: []code.Instructions{
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
+			code.Make(code.OpSetGlobal, 0),
+			code.Make(code.OpConstant, 5),
+			code.Make(code.OpGetGlobal, 0),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpConstant, 6),
 			code.Make(code.OpConstant, 0),
-			code.Make(code.OpSetGlobal, 0),
 			code.Make(code.OpTrue),
+			code.Make(code.OpHash, 6),
 			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpBang),
-			code.Make(code.OpJumpNotTruthy, 20),
-			code.Make(code.OpConstant, 1),
-			code.Make(code.OpSetGlobal, 0),
 		},
 	}})
 }
@@ -99,20 +175,46 @@ func TestIlCompiler_SetAndReset(t *testing.T) {
 				R target
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{},
+		expectedConstants: []interface{}{
+			"cond",   // 0
+			"target", // 1
+			[]code.Instructions{ // 2
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpDup),
+				code.Make(code.OpJumpNotTruthy, 19),
+				code.Make(code.OpTrue),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpDup),
+				code.Make(code.OpJumpNotTruthy, 32),
+				code.Make(code.OpFalse),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 3
+			"__class__", // 4
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
+			code.Make(code.OpConstant, 3),
+			code.Make(code.OpClosure, 2, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 1),
+			code.Make(code.OpConstant, 4),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpDup),
-			code.Make(code.OpJumpNotTruthy, 19),
-			code.Make(code.OpTrue),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpDup),
-			code.Make(code.OpJumpNotTruthy, 27),
+			code.Make(code.OpConstant, 0),
 			code.Make(code.OpFalse),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 6),
 			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
@@ -129,18 +231,45 @@ func TestIlCompiler_GtOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{20, 10},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGreaterThan),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			20,          // 6
+			10,          // 7
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 1),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpGreaterThan),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 7),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -156,18 +285,45 @@ func TestIlCompiler_LtOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{5, 10},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpLessThan),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			5,           // 6
+			10,          // 7
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 1),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpLessThan),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 7),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -183,18 +339,44 @@ func TestIlCompiler_EqOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{7},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpEqual),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			7,           // 6
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 0),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpEqual),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -210,18 +392,44 @@ func TestIlCompiler_GeOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{10},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGreaterThanOrEqual),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			10,          // 6
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 0),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpGreaterThanOrEqual),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -237,18 +445,45 @@ func TestIlCompiler_LeOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{9, 10},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpLessThanOrEqual),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			9,           // 6
+			10,          // 7
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 1),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpLessThanOrEqual),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 7),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -264,18 +499,45 @@ func TestIlCompiler_NeOperator(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{9, 10},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			"c", // 2
+			[]code.Instructions{ // 3
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpIndex),
+				code.Make(code.OpNotEqual),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 4
+			"__class__", // 5
+			9,           // 6
+			10,          // 7
+		},
 		expectedInstructions: []code.Instructions{
-			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpClosure, 3, 0),
+			code.Make(code.OpHash, 2),
 			code.Make(code.OpSetGlobal, 0),
-			code.Make(code.OpConstant, 1),
-			code.Make(code.OpSetGlobal, 1),
-			code.Make(code.OpFalse), // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 5),
 			code.Make(code.OpGetGlobal, 0),
-			code.Make(code.OpGetGlobal, 1),
-			code.Make(code.OpNotEqual),
-			code.Make(code.OpSetGlobal, 2),
+			code.Make(code.OpConstant, 0),
+			code.Make(code.OpConstant, 6),
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpConstant, 7),
+			code.Make(code.OpConstant, 2),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 8),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -291,15 +553,37 @@ func TestIlCompiler_NotOperator(t *testing.T) {
 				ST b
 			END_PROGRAM
 			`,
-		expectedConstants: []interface{}{},
+		expectedConstants: []interface{}{
+			"a", // 0
+			"b", // 1
+			[]code.Instructions{ // 2
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpIndex),
+				code.Make(code.OpBang),
+				code.Make(code.OpGetLocal, 0),
+				code.Make(code.OpSwap),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpSwap),
+				code.Make(code.OpSetIndex),
+				code.Make(code.OpReturn),
+			},
+			"main",      // 3
+			"__class__", // 4
+		},
 		expectedInstructions: []code.Instructions{
+			code.Make(code.OpConstant, 3),
+			code.Make(code.OpClosure, 2, 0),
+			code.Make(code.OpHash, 2),
+			code.Make(code.OpSetGlobal, 0),
+			code.Make(code.OpConstant, 4),
+			code.Make(code.OpGetGlobal, 0),
+			code.Make(code.OpConstant, 0),
 			code.Make(code.OpTrue),
-			code.Make(code.OpSetGlobal, 0), // a := TRUE
-			code.Make(code.OpFalse),        // BOOL defaults to FALSE
-			code.Make(code.OpSetGlobal, 1), // b
-			code.Make(code.OpGetGlobal, 0), // LD a
-			code.Make(code.OpBang),         // NOT
-			code.Make(code.OpSetGlobal, 1), // ST b
+			code.Make(code.OpConstant, 1),
+			code.Make(code.OpFalse),
+			code.Make(code.OpHash, 6),
+			code.Make(code.OpSetGlobal, 1),
 		},
 	}})
 }
@@ -321,28 +605,49 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// The function should be called, setting result to 10.
-			expectedConstants: []interface{}{0, 10, 1, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 2),
-				code.Make(code.OpSetLocal, 0),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpReturnValue),
-			}},
+			expectedConstants: []interface{}{
+				0,  // 0
+				10, // 1
+				1,  // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSetGlobal, 0),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpReturnValue),
+				},
+				"cond", // 4
+				[]code.Instructions{ // 5
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpIndex),
+					code.Make(code.OpJumpNotTruthy, 15),
+					code.Make(code.OpGetGlobal, 1),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 6
+				"__class__", // 7
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 5, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 7),
 				code.Make(code.OpGetGlobal, 2),
-				code.Make(code.OpJumpNotTruthy, 29),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpPop),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpTrue),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 3),
 			},
 		},
 		{
@@ -360,29 +665,49 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// The function should be called because condition is FALSE.
-			expectedConstants: []interface{}{0, 10, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 0),
-				code.Make(code.OpGetLocal, 0),
-				code.Make(code.OpReturnValue),
-			}},
+			expectedConstants: []interface{}{
+				0,  // 0
+				10, // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSetGlobal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpReturnValue),
+				},
+				"cond", // 3
+				[]code.Instructions{ // 4
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 3),
+					code.Make(code.OpIndex),
+					code.Make(code.OpBang),
+					code.Make(code.OpJumpNotTruthy, 16),
+					code.Make(code.OpGetGlobal, 1),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpPop),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 5
+				"__class__", // 6
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpConstant, 0),
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpClosure, 2, 0),
 				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpFalse),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpClosure, 4, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 6),
 				code.Make(code.OpGetGlobal, 2),
-				code.Make(code.OpBang),
-				code.Make(code.OpJumpNotTruthy, 30),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpPop),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 3),
 			},
 		},
 		{
@@ -401,26 +726,47 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 			END_PROGRAM
 			`,
 			// MyFunc should return 5 because RETC is executed.
-			expectedConstants: []interface{}{0, 5, 10, []code.Instructions{
-				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetLocal, 0),
-				code.Make(code.OpTrue),
-				code.Make(code.OpSetLocal, 1),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpGetLocal, 1),
-				code.Make(code.OpJumpNotTruthy, 17),
-				code.Make(code.OpReturnValue),
-				code.Make(code.OpConstant, 2),
-				code.Make(code.OpReturnValue),
-			}},
+			expectedConstants: []interface{}{
+				0,  // 0
+				5,  // 1
+				10, // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSetLocal, 0),
+					code.Make(code.OpTrue),
+					code.Make(code.OpSetLocal, 1),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpJumpNotTruthy, 17),
+					code.Make(code.OpReturnValue),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpReturnValue),
+				},
+				"result", // 4
+				[]code.Instructions{ // 5
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpGetGlobal, 0),
+					code.Make(code.OpCall, 0),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 6
+				"__class__", // 7
+			},
 			expectedInstructions: []code.Instructions{
 				code.Make(code.OpClosure, 3, 0),
 				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 5, 0),
+				code.Make(code.OpHash, 2),
+				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpConstant, 4),
 				code.Make(code.OpConstant, 0),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpCall, 0),
-				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 2),
 			},
 		},
 	}
@@ -443,14 +789,36 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{0, 5, 10},
+			expectedConstants: []interface{}{
+				5,   // 0
+				10,  // 1
+				"a", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpAdd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+				0,           // 6
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpConstant, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 1),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 2),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -469,18 +837,37 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{},
+			expectedConstants: []interface{}{
+				"a", // 0
+				[]code.Instructions{ // 1
+					code.Make(code.OpTrue),
+					code.Make(code.OpFalse),
+					code.Make(code.OpTrue),
+					code.Make(code.OpTrue),
+					code.Make(code.OpAnd),
+					code.Make(code.OpOr),
+					code.Make(code.OpAnd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 2
+				"__class__", // 3
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpFalse),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpClosure, 1, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpGetGlobal, 0),
+				code.Make(code.OpConstant, 0),
 				code.Make(code.OpFalse),
-				code.Make(code.OpTrue),
-				code.Make(code.OpTrue),
-				code.Make(code.OpAnd),
-				code.Make(code.OpOr),
-				code.Make(code.OpAnd),
-				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpHash, 4),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -504,26 +891,57 @@ func TestIlCompiler_NestedDeferredModifiers(t *testing.T) {
 				ST      Result
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{}, // All values are TRUE/FALSE/NULL, no constants needed
+			expectedConstants: []interface{}{
+				"A",      // 0
+				"B",      // 1
+				"C",      // 2
+				"D",      // 3
+				"Result", // 4
+				[]code.Instructions{ // 5
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpIndex),
+					code.Make(code.OpAnd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 3),
+					code.Make(code.OpIndex),
+					code.Make(code.OpAnd),
+					code.Make(code.OpOr),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 4),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 6
+				"__class__", // 7
+			}, // All values are TRUE/FALSE/NULL, no constants needed
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpClosure, 5, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 2),
-				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 3),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 4),
+				code.Make(code.OpConstant, 7),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpAnd),
-				code.Make(code.OpGetGlobal, 2),
-				code.Make(code.OpGetGlobal, 3),
-				code.Make(code.OpAnd),
-				code.Make(code.OpOr),
-				code.Make(code.OpSetGlobal, 4),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 12),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 	}
@@ -544,16 +962,41 @@ func TestIlCompiler_DeferredModifiers(t *testing.T) {
 				ST a
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{0, 10, 5},
+			expectedConstants: []interface{}{
+				"b", // 0
+				5,   // 1
+				"a", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpAdd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+				0,           // 6
+				10,          // 7
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpConstant, 0),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpConstant, 1),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpGetGlobal, 1),
+				code.Make(code.OpConstant, 5),
+				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 2),
-				code.Make(code.OpAdd),
-				code.Make(code.OpSetGlobal, 0),
+				code.Make(code.OpConstant, 6),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpConstant, 7),
+				code.Make(code.OpHash, 6),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 		{
@@ -569,18 +1012,43 @@ func TestIlCompiler_DeferredModifiers(t *testing.T) {
 				ST b
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{},
+			expectedConstants: []interface{}{
+				"a", // 0
+				"c", // 1
+				"b", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpIndex),
+					code.Make(code.OpBang),
+					code.Make(code.OpAnd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 5),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpGetGlobal, 2),
-				code.Make(code.OpBang),
-				code.Make(code.OpAnd),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpFalse),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 8),
 				code.Make(code.OpSetGlobal, 1),
 			},
 		},
@@ -599,14 +1067,36 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 				ST b
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{},
+			expectedConstants: []interface{}{
+				"a", // 0
+				"b", // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpBang),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 3
+				"__class__", // 4
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpConstant, 4),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpBang),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
 			},
 		},
@@ -619,14 +1109,36 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 				STN b
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{},
+			expectedConstants: []interface{}{
+				"a", // 0
+				"b", // 1
+				[]code.Instructions{ // 2
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpBang),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 3
+				"__class__", // 4
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 3),
+				code.Make(code.OpClosure, 2, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 1),
+				code.Make(code.OpConstant, 4),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpBang),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 6),
 				code.Make(code.OpSetGlobal, 1),
 			},
 		},
@@ -640,19 +1152,44 @@ func TestIlCompiler_Modifiers(t *testing.T) {
 				ST c
 			END_PROGRAM
 			`,
-			expectedConstants: []interface{}{},
+			expectedConstants: []interface{}{
+				"a", // 0
+				"b", // 1
+				"c", // 2
+				[]code.Instructions{ // 3
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 0),
+					code.Make(code.OpIndex),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpConstant, 1),
+					code.Make(code.OpIndex),
+					code.Make(code.OpBang),
+					code.Make(code.OpAnd),
+					code.Make(code.OpGetLocal, 0),
+					code.Make(code.OpSwap),
+					code.Make(code.OpConstant, 2),
+					code.Make(code.OpSwap),
+					code.Make(code.OpSetIndex),
+					code.Make(code.OpReturn),
+				},
+				"main",      // 4
+				"__class__", // 5
+			},
 			expectedInstructions: []code.Instructions{
-				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 4),
+				code.Make(code.OpClosure, 3, 0),
+				code.Make(code.OpHash, 2),
 				code.Make(code.OpSetGlobal, 0),
-				code.Make(code.OpTrue),
-				code.Make(code.OpSetGlobal, 1),
-				code.Make(code.OpFalse),
-				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 5),
 				code.Make(code.OpGetGlobal, 0),
-				code.Make(code.OpGetGlobal, 1),
-				code.Make(code.OpBang),
-				code.Make(code.OpAnd),
-				code.Make(code.OpSetGlobal, 2),
+				code.Make(code.OpConstant, 0),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 1),
+				code.Make(code.OpTrue),
+				code.Make(code.OpConstant, 2),
+				code.Make(code.OpFalse),
+				code.Make(code.OpHash, 8),
+				code.Make(code.OpSetGlobal, 1),
 			},
 		},
 	}

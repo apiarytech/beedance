@@ -139,11 +139,7 @@ func (c *Compiler) compileIlInstruction(node *ast.IlInstructionStatement, jumpsT
 			c.emit(code.OpBang)
 		}
 		if ident, ok := node.Operand.(*ast.Identifier); ok {
-			symbol, ok := c.symbolTable.Resolve(ident.Value)
-			if !ok {
-				return fmt.Errorf("undefined variable %s", ident.Value)
-			}
-			if err := c.setSymbol(symbol); err != nil {
+			if err := c.storeTopInto(ident.Value); err != nil {
 				return err
 			}
 		} else {
@@ -155,16 +151,14 @@ func (c *Compiler) compileIlInstruction(node *ast.IlInstructionStatement, jumpsT
 		c.emit(code.OpDup)
 		jumpPos := c.emit(code.OpJumpNotTruthy, 9999)
 		if ident, ok := node.Operand.(*ast.Identifier); ok {
-			symbol, ok := c.symbolTable.Resolve(ident.Value)
-			if !ok {
-				return fmt.Errorf("undefined variable %s", ident.Value)
-			}
 			if op == "S" {
 				c.emit(code.OpTrue)
 			} else {
 				c.emit(code.OpFalse)
 			}
-			c.setSymbol(symbol)
+			if err := c.storeTopInto(ident.Value); err != nil {
+				return err
+			}
 		}
 		c.changeOperand(jumpPos, len(c.currentInstructions()))
 	case "ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR":

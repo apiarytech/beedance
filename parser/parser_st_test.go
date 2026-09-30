@@ -2460,6 +2460,128 @@ func TestParsingIndexExpressions(t *testing.T) {
 	}
 }
 
+func TestParsingCommaSeparatedIndexExpressions(t *testing.T) {
+	t.Run("2D comma indexing expression", func(t *testing.T) {
+		input := "myArray[1, 2];"
+		l := lexer.New(input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestParsingCommaSeparatedIndexExpressions_2D", input)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("stmt is not *ast.ExpressionStatement. got=%T", program.Statements[0])
+		}
+
+		outerExp, ok := stmt.Expression.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("exp not *ast.IndexExpression. got=%T", stmt.Expression)
+		}
+		if !testIntegerLiteral(t, outerExp.Index, 2) {
+			return
+		}
+
+		innerExp, ok := outerExp.Left.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("outerExp.Left not *ast.IndexExpression. got=%T", outerExp.Left)
+		}
+		if !testIdentifier(t, innerExp.Left, "myArray") {
+			return
+		}
+		if !testIntegerLiteral(t, innerExp.Index, 1) {
+			return
+		}
+	})
+
+	t.Run("3D comma indexing with nested expressions", func(t *testing.T) {
+		input := "tensor[1 + 1, 2 * 3, 4];"
+		l := lexer.New(input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestParsingCommaSeparatedIndexExpressions_3D", input)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("stmt is not *ast.ExpressionStatement. got=%T", program.Statements[0])
+		}
+
+		dim3Exp, ok := stmt.Expression.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("dim3Exp not *ast.IndexExpression. got=%T", stmt.Expression)
+		}
+		if !testIntegerLiteral(t, dim3Exp.Index, 4) {
+			return
+		}
+
+		dim2Exp, ok := dim3Exp.Left.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("dim2Exp not *ast.IndexExpression. got=%T", dim3Exp.Left)
+		}
+		if !testInfixExpression(t, 0, dim2Exp.Index, 2, "*", 3) {
+			return
+		}
+
+		dim1Exp, ok := dim2Exp.Left.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("dim1Exp not *ast.IndexExpression. got=%T", dim2Exp.Left)
+		}
+		if !testIdentifier(t, dim1Exp.Left, "tensor") {
+			return
+		}
+		if !testInfixExpression(t, 0, dim1Exp.Index, 1, "+", 1) {
+			return
+		}
+	})
+
+	t.Run("comma indexing in assignment statement", func(t *testing.T) {
+		input := "matrix[row, col] := 10;"
+		l := lexer.New(input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestParsingCommaSeparatedIndexExpressions_Assignment", input)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+		}
+
+		assignStmt, ok := program.Statements[0].(*ast.AssignmentStatement)
+		if !ok {
+			t.Fatalf("stmt is not *ast.AssignmentStatement. got=%T", program.Statements[0])
+		}
+
+		outerIndex, ok := assignStmt.Left.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("assignStmt.Left not *ast.IndexExpression. got=%T", assignStmt.Left)
+		}
+		if !testIdentifier(t, outerIndex.Index, "col") {
+			return
+		}
+
+		innerIndex, ok := outerIndex.Left.(*ast.IndexExpression)
+		if !ok {
+			t.Fatalf("outerIndex.Left not *ast.IndexExpression. got=%T", outerIndex.Left)
+		}
+		if !testIdentifier(t, innerIndex.Left, "matrix") {
+			return
+		}
+		if !testIdentifier(t, innerIndex.Index, "row") {
+			return
+		}
+
+		if !testIntegerLiteral(t, assignStmt.Value, 10) {
+			return
+		}
+	})
+}
+
 func TestParsingEmptyHashLiteral(t *testing.T) {
 	input := "{};"
 

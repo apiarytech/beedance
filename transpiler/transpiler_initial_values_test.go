@@ -67,13 +67,13 @@ func TestProgramInitialValues(t *testing.T) {
 		{"rv : Rng; m : MyInt;", []string{"instance.rv = 1", "instance.m = 42"}},
 		{"m : MyInt := 5;", []string{"instance.m = 5"}},
 		// Arrays have their declared length; missing elements take the default.
-		{"arr : ARRAY[1..3] OF INT;", []string{"instance.arr = make([]iec.INT, 3)"}},
-		{"arr : ARRAY[1..3] OF INT := [1, 2];", []string{"instance.arr = append([]iec.INT{1, 2}, make([]iec.INT, 1)...)"}},
-		{"arr : ARRAY[0..3] OF INT := [2(5), 1, 0];", []string{"instance.arr = []iec.INT{5, 5, 1, 0}"}},
-		{"grid : ARRAY[0..1, 0..2] OF BOOL;", []string{"instance.grid = func() [][]iec.BOOL { __a := make([][]iec.BOOL, 2); for __i := range __a { __a[__i] = make([]iec.BOOL, 3) }; return __a }()"}},
+		{"arr : ARRAY[1..3] OF INT;", []string{"instance.arr = [3]iec.INT{}"}},
+		{"arr : ARRAY[1..3] OF INT := [1, 2];", []string{"instance.arr = [3]iec.INT{1, 2}"}},
+		{"arr : ARRAY[0..3] OF INT := [2(5), 1, 0];", []string{"instance.arr = [4]iec.INT{5, 5, 1, 0}"}},
+		{"grid : ARRAY[0..1, 0..2] OF BOOL;", []string{"instance.grid = [2][3]iec.BOOL{}"}},
 		{"pts : ARRAY[0..1] OF Pt;", []string{"__a[__i] = Pt{px: 4}"}},
-		{"g : ARRAY[0..1, 0..1] OF INT := [[1, 2], [3]];", []string{"instance.g = [][]iec.INT{[]iec.INT{1, 2}, append([]iec.INT{3}, make([]iec.INT, 1)...)}"}},
-		{"g : ARRAY[0..1, 0..1] OF INT := [1, 2, 3, 4];", []string{"instance.g = [][]iec.INT{[]iec.INT{1, 2}, []iec.INT{3, 4}}"}},
+		{"g : ARRAY[0..1, 0..1] OF INT := [[1, 2], [3]];", []string{"instance.g = [2][2]iec.INT{[2]iec.INT{1, 2}, [2]iec.INT{3}}"}},
+		{"g : ARRAY[0..1, 0..1] OF INT := [1, 2, 3, 4];", []string{"instance.g = [2][2]iec.INT{[2]iec.INT{1, 2}, [2]iec.INT{3, 4}}"}},
 	}
 	for _, tt := range tests {
 		checkContains(t, program(tt.vars), tt.want...)
@@ -180,7 +180,7 @@ func TestStructureAssignment(t *testing.T) {
 func TestGlobalAndTempInitialValues(t *testing.T) {
 	checkContains(t, initTypes+"VAR_GLOBAL gp : Pt; ga : ARRAY[0..1] OF INT := [9]; END_VAR",
 		"var gp Pt = Pt{px: 4}",
-		"var ga []iec.INT = append([]iec.INT{9}, make([]iec.INT, 1)...)")
+		"var ga [2]iec.INT = [2]iec.INT{9}")
 	checkContains(t, "PROGRAM P VAR a : INT := 2; END_VAR VAR_TEMP tmp : INT := 4; END_VAR a := tmp; END_PROGRAM",
 		"var tmp iec.INT = 4")
 }

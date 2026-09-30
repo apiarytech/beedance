@@ -32,7 +32,7 @@ type MY_STRUCT struct {
 }
 
 type DataStructTest struct {
-	matrix [][]iec.INT
+	matrix [2][3]iec.INT
 	s1     MY_STRUCT
 	s2     MY_STRUCT
 }
@@ -40,7 +40,7 @@ type DataStructTest struct {
 // NewDataStructTestFactory creates a new instance of the DataStructTest program.
 func NewDataStructTestFactory(params map[string]string) (func(time.Time), error) {
 	instance := &DataStructTest{}
-	instance.matrix = func() [][]iec.INT { __a := make([][]iec.INT, 2); for __i := range __a { __a[__i] = make([]iec.INT, 3) }; return __a }()
+	instance.matrix = [2][3]iec.INT{}
 	instance.s2 = MY_STRUCT{A: 10, B: true}
 	return instance.Logic, nil
 }
@@ -51,7 +51,7 @@ func (p *DataStructTest) Link(linker config.IOLinker) error {
 }
 
 func (p *DataStructTest) Logic(now time.Time) {
-	p.matrix[1][2] = 5
+	p.matrix[0][1] = 5
 	p.s1 = p.s2
 }
 `
