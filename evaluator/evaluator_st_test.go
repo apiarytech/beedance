@@ -1264,9 +1264,12 @@ func TestBitwiseOperators(t *testing.T) {
 		{"(BYTE#16#A5 OR BYTE#16#0F) AND BYTE#16#F0;", uint64(0xA0)},
 		{"NOT (BYTE#16#A5 AND BYTE#16#F0);", uint64(0x5F)},
 
+		// The narrower bit string is widened, and an integer literal is a bit string.
+		{"BYTE#16#A5 AND WORD#16#F0;", uint64(0xA0)},
+		{"BYTE#16#A5 OR 10;", uint64(0xAF)},
+
 		// Error cases
-		{"BYTE#16#A5 AND WORD#16#F0;", "type mismatch: bitstring operands must have same width, got 8 and 16"},
-		{"BYTE#16#A5 OR 10;", "type mismatch: BITSTRING OR LINT"},
+		{"BYTE#16#A5 OR -1;", "type mismatch: BITSTRING OR LINT"},
 	}
 
 	for _, tt := range tests {

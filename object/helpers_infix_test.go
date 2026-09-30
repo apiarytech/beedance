@@ -250,7 +250,12 @@ func TestBitStringInfix(t *testing.T) {
 		{"le", b(1), "<=", b(2), "BOOLEAN true"},
 		{"ge", b(1), ">=", b(2), "BOOLEAN false"},
 		{"unknown", b(1), "+", b(1), "ERROR: unknown operator for bitstrings: +"},
-		{"widths", b(1), "AND", &BitString{Value: 1, Width: 16}, "ERROR: bitstring operands must have same width, got 8 and 16"},
+		{"lt", b(1), "<", b(2), "BOOLEAN true"},
+		{"gt", b(1), ">", b(2), "BOOLEAN false"},
+		{"widths", b(1), "AND", &BitString{Value: 1, Width: 16}, "BITSTRING WORD#16#1"},
+		{"integer", b(0x0F), "OR", &LInt{Value: 0x30}, "BITSTRING BYTE#16#3F"},
+		{"integer first", &LInt{Value: 300}, ">", b(0xFF), "BOOLEAN true"},
+		{"negative integer", b(1), "=", &LInt{Value: -1}, "ERROR: type mismatch for comparison: BITSTRING = LINT"},
 	})
 }
 

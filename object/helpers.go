@@ -521,6 +521,15 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		return evalTimeInfix(left, operator, right)
 	case left.Type() == BITSTRING_OBJ && right.Type() == BITSTRING_OBJ:
 		return evalBitStringInfix(left, operator, right)
+	case left.Type() == BITSTRING_OBJ && (IsBitwiseOperator(operator) || IsComparisonOperator(operator)):
+		// An integer, such as the literal in myByte = 10, acts as a bit string.
+		if bits, ok := integerAsBitString(right, left.(*BitString).Width); ok {
+			return evalBitStringInfix(left, operator, bits)
+		}
+	case right.Type() == BITSTRING_OBJ && (IsBitwiseOperator(operator) || IsComparisonOperator(operator)):
+		if bits, ok := integerAsBitString(left, right.(*BitString).Width); ok {
+			return evalBitStringInfix(bits, operator, right)
+		}
 	case left.Type() == ENUMERATED_VALUE_OBJ && right.Type() == ENUMERATED_VALUE_OBJ:
 		// Enumerated values support equality only. They are equal when they
 		// name the same value of the same type; names are case-insensitive.
@@ -589,17 +598,36 @@ func evalWStringInfix(left *WString, operator string, right *WString) Object {
 	}
 }
 
+// integerAsBitString returns a non-negative integer as a bit string of the
+// given width, or of 64 bits if it needs more, as an untyped integer literal
+// takes the type of the bit string it is combined with. It returns false for
+// anything else.
+func integerAsBitString(obj Object, width int) (*BitString, bool) {
+	switch obj.Type() {
+	case SINT_OBJ, INT_OBJ, DINT_OBJ, LINT_OBJ, USINT_OBJ, UINT_OBJ, UDINT_OBJ, ULINT_OBJ:
+	default:
+		return nil, false
+	}
+	n, unsigned, ok := GetIntegerObjectValue(obj)
+	if !ok || (!unsigned && n < 0) {
+		return nil, false
+	}
+	value := uint64(n)
+	if width < 64 && value>>uint(width) != 0 {
+		width = 64
+	}
+	return &BitString{Value: value, Width: width}, true
+}
+
+// evalBitStringInfix combines two bit strings. The narrower is widened to
+// the wider, as IEC 61131-3 converts BYTE to WORD implicitly.
 func evalBitStringInfix(left Object, operator string, right Object) Object {
 	leftBitString := left.(*BitString)
 	rightBitString := right.(*BitString)
 
-	if leftBitString.Width != rightBitString.Width {
-		return NewBuiltinError("type mismatch: bitstring operands must have same width, got %d and %d", leftBitString.Width, rightBitString.Width)
-	}
-
 	leftVal := leftBitString.Value
 	rightVal := rightBitString.Value
-	width := leftBitString.Width
+	width := max(leftBitString.Width, rightBitString.Width)
 
 	switch operator {
 	case "AND", "&":
@@ -624,6 +652,10 @@ func evalBitStringInfix(left Object, operator string, right Object) Object {
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=", "<>", "NE":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<", "LT":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
 	case "<=", "LE":
 		return nativeBoolToBooleanObject(leftVal <= rightVal)
 	case ">=", "GE":

@@ -631,7 +631,9 @@ func (vm *VM) executeComparison(op code.Opcode) error {
 		return vm.executeStringComparison(op, stringValue(left), stringValue(right))
 	}
 
-	if usesSharedOperations(left) && usesSharedOperations(right) {
+	// A time, date or bit string compared with another type, such as a bit
+	// string with an integer literal, is left to object.EvalInfix.
+	if usesSharedOperations(left) || usesSharedOperations(right) {
 		return vm.executeSharedOperation(op, left, right)
 	}
 
