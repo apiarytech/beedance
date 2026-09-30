@@ -386,9 +386,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err != nil {
 				return err
 			}
-			if _, ok := s.(*ast.IfStatement); ok {
-				c.emit(code.OpPop)
-			}
 		}
 
 	// A Configuration block is compiled into a data structure representing the system setup.
@@ -1391,47 +1388,29 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// An IfStatement compiles the condition, then uses jump instructions to control
 	// execution flow between the consequence and alternative blocks.
 	case *ast.IfStatement:
+		// IF is a statement: its branches leave nothing on the stack, so an IF
+		// in a loop or at the top level keeps the stack balanced whichever
+		// branch runs.
 		err := c.Compile(node.Condition)
 		if err != nil {
 			return err
 		}
-
-		// Emit an `OpJumpNotTruthy` with a bogus value
 		jumpNotTruthyPos := c.emit(code.OpJumpNotTruthy, 9999)
 
-		err = c.Compile(node.Consequence)
-		if err != nil {
+		if err := c.Compile(node.Consequence); err != nil {
 			return err
 		}
 
-		if c.lastInstructionIs(code.OpPop) {
-			// The consequence of an IF is an expression. We want its value to
-			// be left on the stack, so we remove the final OpPop that an
-			// ExpressionStatement would normally have.
-			c.removeLastPop()
-		}
-
-		// Emit an `OpJump` with a bogus value
 		jumpPos := c.emit(code.OpJump, 9999)
-
-		afterConsequencePos := len(c.currentInstructions())
-		c.changeOperand(jumpNotTruthyPos, afterConsequencePos)
-
+		c.changeOperand(jumpNotTruthyPos, len(c.currentInstructions()))
 		if node.Alternative == nil {
+			// No branch ran: the IF's value, as the REPL shows it, is NULL.
 			c.emit(code.OpNull)
-		} else {
-			err := c.Compile(node.Alternative)
-			if err != nil {
-				return err
-			}
-
-			if c.lastInstructionIs(code.OpPop) {
-				c.removeLastPop()
-			}
+			c.emit(code.OpPop)
+		} else if err := c.Compile(node.Alternative); err != nil {
+			return err
 		}
-
-		afterAlternativePos := len(c.currentInstructions())
-		c.changeOperand(jumpPos, afterAlternativePos)
+		c.changeOperand(jumpPos, len(c.currentInstructions()))
 
 	case *ast.UnsignedIntegerLiteral:
 		c.emitConstant(c.addConstant(&object.ULInt{Value: node.Value}))
