@@ -89,5 +89,6 @@ func TestOscatLibraryParses(t *testing.T) {
 	}
 }
 
-// oscatParseBaseline is the number of OSCAT units known to parse.
-const oscatParseBaseline = 487
+// oscatParseBaseline is the number of OSCAT units known to parse. The
+// others use POINTER TO and ADR, CODESYS extensions beedance does not support.
+const oscatParseBaseline = 488
