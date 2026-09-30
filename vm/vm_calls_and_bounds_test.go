@@ -181,3 +181,31 @@ func TestBitAccess(t *testing.T) {
 		{"VAR x : REAL; END_VAR x.1;", "bit access needs an integer or bit string, got LREAL"},
 	})
 }
+
+// TestDeclarationOrder checks that a function can call a function, and use a
+// global, declared after it, as IEC 61131-3 declarations are order-independent.
+func TestDeclarationOrder(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"FUNCTION Twice : INT VAR_INPUT x : INT; END_VAR Twice := Add1(x) + Add1(x) - 2; END_FUNCTION FUNCTION Add1 : INT VAR_INPUT x : INT; END_VAR Add1 := x + 1; END_FUNCTION Twice(5);", 10},
+		{"FUNCTION Scaled : INT VAR_INPUT x : INT; END_VAR Scaled := x * factor; END_FUNCTION VAR_GLOBAL factor : INT := 3; END_VAR Scaled(4);", 12},
+	})
+}
+
+// TestOperandTypes checks the types the checker accepts: BOOL is BOOLEAN, an
+// integer literal compares with a bit string, bit strings of different
+// widths combine, 0 and 1 are BOOL literals, and a function's result
+// variable has the function's type.
+func TestOperandTypes(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR a : BOOL := TRUE; b : BOOL; END_VAR a OR b;", true},
+		{"VAR a : BOOL := TRUE; b : BOOL; END_VAR a = b;", false},
+		{"VAR x : BYTE := 16#0A; END_VAR x = 10;", true},
+		{"VAR x : WORD := 16#0100; END_VAR 16#FF < x;", true},
+		{"VAR x : BYTE := 16#0F; y : WORD := 16#0F00; END_VAR (x OR y) = 16#0F0F;", true},
+		{"VAR x : BYTE := 16#0F; y : WORD := 16#000F; END_VAR x = y;", true},
+		{"VAR CONSTANT on : BOOL := 1; off : BOOL := 0; END_VAR on AND NOT off;", true},
+		{"FUNCTION Odd : BOOL VAR_INPUT x : BYTE; END_VAR Odd := x.0; Odd := Odd XOR x.1; END_FUNCTION Odd(BYTE#3);", false},
+		{"FUNCTION Later : TIME Later := T#2h; Later := Later - T#1h; END_FUNCTION Later() = T#1h;", true},
+		{"VAR t : TOD := TOD#10:00:00; END_VAR t < TOD#11:00:00;", true},
+	})
+}

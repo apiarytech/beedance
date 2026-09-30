@@ -622,4 +622,5 @@ const (
 	BuiltinWstringToUsint          // WSTRING_TO_USINT
 	BuiltinWstringToWord           // WSTRING_TO_WORD
 	BuiltinXor                     // XOR
+	BuiltinClock                   // __CLOCK
 )
