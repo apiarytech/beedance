@@ -3826,24 +3826,41 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 		}
 	}
 
-	// Associate programs with tasks
-	for _, progInstance := range programs {
-		if progInstance.TaskName != "" {
-			if task, ok := tasks[progInstance.TaskName]; ok {
-				task.Programs = append(task.Programs, progInstance)
-			}
-		} else {
-			// Handle programs with no task association (run once or continuously at low priority)
+	// Associate programs with tasks, in the order of their names. A program
+	// instance with no task runs in a background task of the lowest priority,
+	// on every scan, as in the generated Go.
+	names := make([]string, 0, len(programs))
+	for name := range programs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	background := &object.Task{Name: "BACKGROUND"}
+	for _, name := range names {
+		progInstance := programs[name]
+		if progInstance.TaskName == "" {
+			background.Programs = append(background.Programs, progInstance)
+		} else if task, ok := tasks[progInstance.TaskName]; ok {
+			task.Programs = append(task.Programs, progInstance)
 		}
 	}
 
+	var lowest int64
 	for _, task := range tasks {
 		scheduler.Tasks = append(scheduler.Tasks, task)
+		lowest = max(lowest, task.Priority+1)
+	}
+	if len(background.Programs) > 0 {
+		background.Priority = lowest
+		scheduler.Tasks = append(scheduler.Tasks, background)
 	}
 
-	// Sort tasks by priority (lower number = higher priority)
+	// Sort tasks by priority (lower number = higher priority), then name.
 	sort.Slice(scheduler.Tasks, func(i, j int) bool {
-		return scheduler.Tasks[i].Priority < scheduler.Tasks[j].Priority
+		a, b := scheduler.Tasks[i], scheduler.Tasks[j]
+		if a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
+		return a.Name < b.Name
 	})
 
 	return scheduler, nil
@@ -3889,6 +3906,10 @@ func runSchedulerCycle(s *object.Scheduler, env *object.Environment, now time.Ti
 				isReady = true
 			}
 			task.LastTriggerValue = currentTriggerVal
+		} else {
+			// A task with neither INTERVAL nor SINGLE, such as the background
+			// task, runs on every scan.
+			isReady = true
 		}
 
 		if isReady {
