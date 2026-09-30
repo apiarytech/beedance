@@ -1267,7 +1267,7 @@ func (tl *TimeLiteral) TokenLiteral() string { return tl.Token.Literal }
 
 // String returns the string representation of the TIME literal.
 func (tl *TimeLiteral) String() string {
-	return tl.Value
+	return withLiteralPrefix(tl.Token, "T", tl.Value)
 }
 
 // DateLiteral represents a DATE literal (e.g., D#2026-05-21).
@@ -1287,7 +1287,7 @@ func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
 
 // String returns the string representation of the DATE literal.
 func (dl *DateLiteral) String() string {
-	return dl.Value
+	return withLiteralPrefix(dl.Token, "D", dl.Value)
 }
 
 // TimeOfDayLiteral represents a TIME_OF_DAY literal (e.g., TOD#14:30:00).
@@ -1305,7 +1305,7 @@ func (todl *TimeOfDayLiteral) Pos() (int, int) { return todl.Token.Row, todl.Tok
 // TokenLiteral returns the literal value of the token.
 func (todl *TimeOfDayLiteral) TokenLiteral() string { return todl.Token.Literal }
 func (todl *TimeOfDayLiteral) String() string {
-	return todl.Value
+	return withLiteralPrefix(todl.Token, "TOD", todl.Value)
 }
 
 type DateAndTimeLiteral struct {
@@ -1324,7 +1324,7 @@ func (dtl *DateAndTimeLiteral) TokenLiteral() string { return dtl.Token.Literal 
 
 // String returns the string representation of the DATE_AND_TIME literal.
 func (dtl *DateAndTimeLiteral) String() string {
-	return dtl.Value
+	return withLiteralPrefix(dtl.Token, "DT", dtl.Value)
 }
 
 // ArrayLiteral represents an array literal expression (e.g., [1, 2, 3]).
@@ -2593,4 +2593,19 @@ func (sl *StructLiteral) String() string {
 	out.WriteString(strings.Join(inits, ", "))
 	out.WriteString(")")
 	return out.String()
+}
+
+// withLiteralPrefix returns a time or date literal as written: its value
+// after its type prefix, such as T# or TIME#, from its type token, or
+// short#, e.g. T#, for a literal built without one. A value that already
+// holds its prefix is returned as it is.
+func withLiteralPrefix(tok token.Token, short, value string) string {
+	if strings.Contains(value, "#") {
+		return value
+	}
+	prefix, _, _ := strings.Cut(tok.Literal, "#")
+	if prefix == "" {
+		prefix = short
+	}
+	return prefix + "#" + value
 }

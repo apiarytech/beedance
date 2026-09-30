@@ -105,7 +105,7 @@ func TestTypeErrors(t *testing.T) {
 		{"BOOL arithmetic", "TRUE + 1;", "type error in expression '(TRUE + 1)': operator '+' not defined for types BOOLEAN and LINT"},
 		{"string and number", "'a' < 1;", "type error in expression '(a < 1)': comparison operator '<' not defined for types STRING and LINT"},
 		{"logic on reals", "1.5 AND 2.5;", "type error in expression '(1.5 AND 2.5)': logical operator 'AND' not defined for types LREAL and LREAL"},
-		{"TIME times TIME", "T#1s * T#1s;", "type error in expression '(1s * 1s)': operator '*' not defined for types TIME and TIME"},
+		{"TIME times TIME", "T#1s * T#1s;", "type error in expression '(T#1s * T#1s)': operator '*' not defined for types TIME and TIME"},
 	})
 }
 
