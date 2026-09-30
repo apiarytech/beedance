@@ -55,6 +55,8 @@ type Compiler struct {
 	pouNamespaces   map[string]*ast.NamespaceDeclaration // Maps POU name to its namespace
 	currentNS       *ast.NamespaceDeclaration            // The namespace currently being compiled
 	rootProgram     *ast.Program                         // Reference to the root program node
+	// predefined holds the symbols predefineGlobals made, by declaration.
+	predefined map[ast.Node]Symbol
 }
 
 // NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
@@ -376,12 +378,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// First pass: recursively build POU info, including namespaces.
 		c.buildPouInfo(node)
 		c.rootProgram = node // Set the root program node
-		c.predefineFunctionBlocks(node.Statements)
+		// The standard function blocks the program uses are compiled with it.
+		stmts := c.withStandardFBs(node)
+		c.predefineGlobals(stmts)
+		c.predefineFunctionBlocks(stmts)
 
 		// Second pass: compile all statements. Function blocks are ordered so that a
 		// parent is always compiled before any FB that EXTENDS it, because the derived
 		// FB's hash references the parent's hash at runtime.
-		for _, s := range c.orderByInheritance(node.Statements) {
+		for _, s := range c.orderByInheritance(stmts) {
 			err := c.Compile(s)
 			if err != nil {
 				return err
@@ -841,7 +846,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// the VAR_INPUTs, and is returned with the outputs so the caller can
 		// copy its final value back into the argument.
 		// First, define the function name in the current scope so it can be captured in a closure.
-		symbol := c.symbolTable.Define(node.Name.Value, false)
+		symbol := c.definePredefined(node, node.Name.Value, false)
 
 		// Then, compile the function body itself.
 		c.enterScope()
@@ -869,7 +874,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Define the function name as a local variable to hold the return value.
-		returnSymbol := c.symbolTable.Define(node.Name.Value, false)
+		returnType := ""
+		if node.ReturnType != nil {
+			returnType = c.flattenExpressionToString(node.ReturnType)
+		}
+		returnSymbol := c.symbolTable.Define(node.Name.Value, false, returnType)
 
 		outputNames := make([]string, len(node.VarOutputs))
 		outputIndices := make([]int, len(node.VarOutputs))
@@ -1269,7 +1278,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.compileVarValue(node); err != nil {
 			return err
 		}
-		symbol := c.symbolTable.Define(node.Name.Value, node.IsConstant, typeName)
+		symbol := c.definePredefined(node, node.Name.Value, node.IsConstant, typeName)
 		c.scopes[c.scopeIndex].varDecls[node.Name.Value] = node
 
 		// A declaration's initial value is not an assignment, so it also
@@ -1288,10 +1297,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err != nil {
 			return err
 		}
-		// Untyped integer literals act as bit strings in logical operations.
-		if isLogicalOperator(node.Operator) {
-			leftType, rightType = literalAsBitString(node.Left, leftType, rightType), literalAsBitString(node.Right, rightType, leftType)
-		}
+		leftType, rightType = literalOperandTypes(node, leftType, rightType)
 		// Then, check if the operator is valid for these types.
 		if _, err := c.getResultingType(node.Operator, leftType, rightType); err != nil {
 			return fmt.Errorf("type error in expression '%s': %w", node.String(), err)
@@ -2365,12 +2371,7 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 		if err != nil {
 			return "", err
 		}
-		// An untyped integer literal takes its type from context, so in a
-		// bitwise/logical operation it is treated as a bit string (e.g. `10 AND 12`
-		// or `myWord AND 16#FF`). Typed integer variables are still rejected.
-		if isLogicalOperator(e.Operator) {
-			leftType, rightType = literalAsBitString(e.Left, leftType, rightType), literalAsBitString(e.Right, rightType, leftType)
-		}
+		leftType, rightType = literalOperandTypes(e, leftType, rightType)
 		return c.getResultingType(e.Operator, leftType, rightType)
 	case *ast.PrefixExpression:
 		// For prefix expressions, the type is usually the same as the operand's type.
@@ -2549,6 +2550,51 @@ func literalAsBitString(operand ast.Expression, operandType, otherType object.Ob
 	return object.LWORD_OBJ
 }
 
+// literalOperandTypes returns the types an infix expression's operands have
+// once an untyped integer literal takes its type from context. In a logical
+// operation it is a bit string (e.g. `10 AND 12` or `myWord AND 16#FF`), and
+// compared with a bit string it has the bit string's type (`myByte = 0`).
+// Typed integer variables are still rejected.
+func literalOperandTypes(e *ast.InfixExpression, left, right object.ObjectType) (object.ObjectType, object.ObjectType) {
+	left, right = elementaryTypeName(left), elementaryTypeName(right)
+	switch {
+	case isLogicalOperator(e.Operator):
+		return literalAsBitString(e.Left, left, right), literalAsBitString(e.Right, right, left)
+	case object.IsComparisonOperator(e.Operator):
+		if _, ok := e.Left.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(right)) {
+			left = right
+		}
+		if _, ok := e.Right.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(left)) {
+			right = left
+		}
+	}
+	return left, right
+}
+
+// elementaryTypeName returns the name the type checker uses for an
+// elementary type written with another of its names, such as BOOL or TOD.
+func elementaryTypeName(t object.ObjectType) object.ObjectType {
+	switch strings.ToUpper(string(t)) {
+	case "BOOL":
+		return object.BOOLEAN_OBJ
+	case "TOD", "LTOD", "LTIME_OF_DAY":
+		return object.TIME_OF_DAY_OBJ
+	case "DT", "LDT", "LDATE_AND_TIME":
+		return object.DATE_AND_TIME_OBJ
+	case "LTIME":
+		return object.TIME_OBJ
+	case "LDATE":
+		return object.DATE_OBJ
+	}
+	return t
+}
+
+// bitStringWidth returns a bit-string type's width, or 0.
+func bitStringWidth(t object.ObjectType) int {
+	w, _ := object.GetBitStringWidth(string(t))
+	return w
+}
+
 // getResultingType checks if an operator is valid for the given operand types
 // and returns the resulting type according to IEC 61131-3 type promotion rules.
 func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (object.ObjectType, error) {
@@ -2557,6 +2603,7 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		return object.IsIntegerType(string(t)) || object.IsRealType(string(t))
 	}
 
+	left, right = elementaryTypeName(left), elementaryTypeName(right)
 	// An operand whose type is only known at runtime is not rejected here.
 	if left == anyType || right == anyType {
 		switch op {
@@ -2609,8 +2656,12 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		if left == object.BOOLEAN_OBJ && right == object.BOOLEAN_OBJ {
 			return object.BOOLEAN_OBJ, nil
 		}
-		// Times, dates and bit strings compare with values of the same type.
-		if left == right && (isTemporalType(left) || object.IsBitStringType(string(left))) {
+		// Times and dates compare with values of the same type, and bit
+		// strings with bit strings, the narrower widened to the wider.
+		if left == right && isTemporalType(left) {
+			return object.BOOLEAN_OBJ, nil
+		}
+		if object.IsBitStringType(string(left)) && object.IsBitStringType(string(right)) {
 			return object.BOOLEAN_OBJ, nil
 		}
 		// Any two values of the same type (e.g. an enumeration) can be tested for equality.
@@ -2620,8 +2671,15 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 		return "", fmt.Errorf("comparison operator '%s' not defined for types %s and %s", op, left, right)
 
 	case "AND", "OR", "XOR", "NAND", "NOR":
-		if (left == object.BOOLEAN_OBJ && right == object.BOOLEAN_OBJ) || (object.IsBitStringType(string(left)) && object.IsBitStringType(string(right))) {
-			return left, nil // Result type is the same as operand type
+		if left == object.BOOLEAN_OBJ && right == object.BOOLEAN_OBJ {
+			return left, nil
+		}
+		if object.IsBitStringType(string(left)) && object.IsBitStringType(string(right)) {
+			// The narrower bit string is widened to the wider.
+			if bitStringWidth(right) > bitStringWidth(left) {
+				return right, nil
+			}
+			return left, nil
 		}
 		return "", fmt.Errorf("logical operator '%s' not defined for types %s and %s", op, left, right)
 	}
@@ -4200,6 +4258,52 @@ func (c *Compiler) predefineFunctionBlocks(stmts []ast.Statement) {
 			c.predefineFunctionBlocks(node.Statements)
 		}
 	}
+}
+
+// predefineGlobals defines a global symbol for every function and VAR_GLOBAL
+// variable declared at the top level of stmts, before any code is compiled,
+// so a function can call a function or use a global declared after it. The
+// declaration's own compile step later takes the symbol (see definePredefined).
+func (c *Compiler) predefineGlobals(stmts []ast.Statement) {
+	if c.scopeIndex != 0 {
+		return
+	}
+	if c.predefined == nil {
+		c.predefined = make(map[ast.Node]Symbol)
+	}
+	for _, s := range stmts {
+		switch node := s.(type) {
+		case *ast.FunctionDeclaration:
+			c.predefined[node] = c.symbolTable.Define(node.Name.Value, false)
+		case *ast.GlobalVarDeclaration:
+			for _, decl := range node.Vars {
+				if decl.Location != nil {
+					continue
+				}
+				if _, isMacro := decl.Value.(*ast.MacroLiteral); isMacro {
+					continue
+				}
+				typeName := ""
+				if decl.DataType != nil {
+					typeName = c.flattenExpressionToString(decl.DataType)
+				}
+				c.predefined[decl] = c.symbolTable.Define(decl.Name.Value, decl.IsConstant, typeName)
+				c.scopes[0].varDecls[decl.Name.Value] = decl
+			}
+		}
+	}
+}
+
+// definePredefined returns the symbol predefineGlobals made for a
+// declaration, or defines a new one.
+func (c *Compiler) definePredefined(node ast.Node, name string, isConstant bool, typeName ...string) Symbol {
+	if symbol, ok := c.predefined[node]; ok && c.scopeIndex == 0 {
+		delete(c.predefined, node)
+		if current, found := c.symbolTable.Resolve(name); found && current == symbol {
+			return symbol
+		}
+	}
+	return c.symbolTable.Define(name, isConstant, typeName...)
 }
 
 // emitFBInstanceWith emits code that builds a new instance of fbDef and leaves it on

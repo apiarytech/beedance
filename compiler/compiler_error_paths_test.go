@@ -121,3 +121,13 @@ func TestInvalidTypedLiterals(t *testing.T) {
 		{"DATE_AND_TIME", "DT#bad;", `invalid DATE_AND_TIME literal 'bad': parsing time "bad" as "2006-01-02-15:04:05": cannot parse "bad" as "2006"`},
 	})
 }
+
+// TestOperandTypeErrors checks the operand types the checker still rejects.
+func TestOperandTypeErrors(t *testing.T) {
+	runCompileErrorTests(t, []compileErrorCase{
+		{"BOOL from 2", "VAR x : BOOL := 2; END_VAR", "cannot initialize 'x' of type BOOL with a value of type LINT"},
+		{"BOOL from a typed integer", "VAR x : BOOL := INT#1; END_VAR", "cannot initialize 'x' of type BOOL with a value of type INT"},
+		{"integer with bit string", "VAR x : INT := 1; y : BYTE := 1; END_VAR x = y;",
+			"type error in expression '(x = y)': comparison operator '=' not defined for types INT and BYTE"},
+	})
+}

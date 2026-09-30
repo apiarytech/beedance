@@ -195,6 +195,16 @@ func (c *Compiler) compileElementaryValue(name, typeName string, value ast.Expre
 			}
 			c.emitConstant(c.addConstant(&object.BitString{Value: uint64(n), Width: width}))
 			return nil
+		case object.IsBooleanType(typeName):
+			// IEC 61131-3 writes the BOOL literals as 0 and 1 too.
+			if _, literal := value.(*ast.IntegerLiteral); literal && (n == 0 || n == 1) {
+				if n == 1 {
+					c.emit(code.OpTrue)
+				} else {
+					c.emit(code.OpFalse)
+				}
+				return nil
+			}
 		}
 		return mismatch(object.LINT_OBJ)
 	}
@@ -212,7 +222,7 @@ func (c *Compiler) compileElementaryValue(name, typeName string, value ast.Expre
 	case object.IsRealType(typeName):
 		compatible = object.IsRealType(string(valueType))
 	case object.IsBooleanType(typeName):
-		compatible = valueType == object.BOOLEAN_OBJ
+		compatible = elementaryTypeName(valueType) == object.BOOLEAN_OBJ
 	case typeName == "WSTRING":
 		compatible = valueType == object.WSTRING_OBJ
 	case object.IsStringType(typeName):
