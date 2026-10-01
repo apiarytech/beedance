@@ -1,0 +1,182 @@
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  # Fail instead of silently downloading a newer toolchain, so each matrix
+  # entry really tests the Go version it names.
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        go:
+          - '1.27' # Minimum version. Keep in sync with the go directive in go.mod.
+          - 'stable'
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Test
+      run: go test -v ./...
+
+  lint-race:
+    name: Format and race detector
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Check formatting
+      run: |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "These files need gofmt:"
+          echo "$unformatted"
+          exit 1
+        fi
+
+    - name: Test with race detector
+      run: go test -race -count=1 ./...
+
+  raspberry-pi:
+    name: Raspberry Pi (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Pi Zero and Pi 1, 32-bit ARMv6
+            goarch: arm
+            goarm: '6'
+            artifact: beedance-linux-armv6
+          - name: Pi 2 and Pi 3, 32-bit ARMv7
+            goarch: arm
+            goarm: '7'
+            artifact: beedance-linux-armv7
+          - name: Pi 3, 4 and 5, 64-bit
+            goarch: arm64
+            goarm: ''
+            artifact: beedance-linux-arm64
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.goarch }}
+      GOARM: ${{ matrix.goarm }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    # QEMU runs the ARM test binaries on the x86 runner.
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm,arm64
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Test
+      run: go test -count=1 ./...
+
+    - name: Build the beedance command
+      run: go build -o ${{ matrix.artifact }} .
+
+    - name: Upload the beedance command
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact }}
+        path: ${{ matrix.artifact }}
+
+  tinygo-test:
+    name: TinyGo Build Test
+    runs-on: ubuntu-latest
+    env:
+      # TinyGo selects its own Go toolchain.
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable' # TinyGo needs a Go installation
+
+      - name: Set up TinyGo
+        uses: acifani/setup-tinygo@v3
+        with:
+          tinygo-version: '0.42.0' # Specify the TinyGo version you want to use
+
+      # compiler, vm and evaluator do not pass under TinyGo yet: a nil pointer
+      # dereference in compiler and vm, and FIRST, LAST and REST of an empty
+      # array in evaluator. Add them here once they do.
+      - name: Test with TinyGo
+        run: tinygo test -v ./token ./lexer ./ast ./code ./object ./parser ./stdlib
+
+  raspberry-pi-pico:
+    name: Raspberry Pi Pico (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - pico    # RP2040
+          - pico-w  # RP2040 with Wi-Fi
+          - pico2   # RP2350
+          - pico2-w # RP2350 with Wi-Fi
+    env:
+      # TinyGo selects its own Go toolchain.
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable' # TinyGo needs a Go installation
+
+      - name: Set up TinyGo
+        uses: acifani/setup-tinygo@v3
+        with:
+          tinygo-version: '0.42.0'
+
+      - name: Build the embedded VM example
+        run: tinygo build -target=${{ matrix.target }} -size short -o beedance-${{ matrix.target }}.uf2 ./embedded/example/raspberrypi/
+
+      - name: Upload the firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: beedance-${{ matrix.target }}
+          path: beedance-${{ matrix.target }}.uf2
