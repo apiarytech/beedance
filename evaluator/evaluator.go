@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1850,82 +1849,8 @@ func applyBitStringConversion(value, typeName string) object.Object {
 	return &object.BitString{Value: val, Width: width}
 }
 
-// parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms"),
-// which can include underscores and multiple units, into a standard Go `time.Duration`.
-// into a time.Duration. This is a simplified implementation.
-func parseDuration(s string) (time.Duration, error) {
-	originalString := s
-	isNegative := false
-	if strings.HasPrefix(s, "-") {
-		isNegative = true
-		s = s[1:]
-	}
-
-	// Per the standard, underscores are for readability and can be ignored.
-	s = strings.ReplaceAll(s, "_", "")
-	// Work with lowercase for unit matching.
-	s = strings.ToLower(s)
-
-	if s == "" {
-		// An empty string after the prefix (e.g., T#) is not a valid duration.
-		return 0, fmt.Errorf("invalid duration string: empty")
-	}
-
-	totalDuration := time.Duration(0)
-	remaining := s
-
-	// This regex will find all number-unit pairs.
-	// It finds a number (int or float) followed by letters.
-	re := regexp.MustCompile(`(\d*\.?\d+)([a-z]+)`)
-	matches := re.FindAllStringSubmatch(remaining, -1)
-
-	if len(matches) == 0 && remaining != "" {
-		return 0, fmt.Errorf("invalid duration format in %q", originalString)
-	}
-
-	parsedStr := ""
-	for _, match := range matches {
-		numPart := match[1]
-		unitPart := match[2]
-		parsedStr += numPart + unitPart
-
-		val, err := strconv.ParseFloat(numPart, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid number %q in duration string %q", numPart, originalString)
-		}
-
-		var unitDuration time.Duration
-		switch unitPart {
-		case "d":
-			unitDuration = 24 * time.Hour
-		case "h":
-			unitDuration = time.Hour
-		case "m":
-			unitDuration = time.Minute
-		case "s":
-			unitDuration = time.Second
-		case "ms":
-			unitDuration = time.Millisecond
-		case "us":
-			unitDuration = time.Microsecond
-		case "ns":
-			unitDuration = time.Nanosecond
-		default:
-			return 0, fmt.Errorf("unknown duration unit %q in string %q", unitPart, originalString)
-		}
-		totalDuration += time.Duration(val * float64(unitDuration))
-	}
-
-	// Check if the entire string was parsed by the regex.
-	if parsedStr != s {
-		return 0, fmt.Errorf("unparsed characters in duration string %q", originalString)
-	}
-
-	if isNegative {
-		totalDuration = -totalDuration
-	}
-	return totalDuration, nil
-}
+// parseDuration parses an IEC 61131-3 duration, such as 1d_12h_30m.
+func parseDuration(s string) (time.Duration, error) { return object.ParseDuration(s) }
 
 // nativeBoolToBooleanObject returns one of the singleton TRUE or FALSE objects.
 func nativeBoolToBooleanObject(input bool) *object.Boolean {

@@ -623,4 +623,5 @@ const (
 	BuiltinWstringToWord           // WSTRING_TO_WORD
 	BuiltinXor                     // XOR
 	BuiltinClock                   // __CLOCK
+	BuiltinTime                    // TIME
 )

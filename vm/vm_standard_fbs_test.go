@@ -54,3 +54,23 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		{"FUNCTION_BLOCK Edge VAR_INPUT x : BOOL; END_VAR VAR_OUTPUT q : BOOL; END_VAR VAR r : R_TRIG; END_VAR r(CLK := x); q := r.Q; END_FUNCTION_BLOCK VAR e : Edge; END_VAR e(x := TRUE); e.q;", true},
 	})
 }
+
+// TestTimeFunction checks TIME(), the CODESYS clock OSCAT's T_PLC_MS reads.
+func TestTimeFunction(t *testing.T) {
+	saved := stdlib.Clock
+	defer func() { stdlib.Clock = saved }()
+	stdlib.Clock = func() time.Duration { return 1500 * time.Millisecond }
+
+	runVmTests(t, []vmTestCase{
+		{"TIME() = T#1.5s;", true},
+		{"FUNCTION T_PLC_MS : DWORD VAR tx : TIME; END_VAR tx := TIME(); T_PLC_MS := TIME_TO_DWORD(tx); END_FUNCTION T_PLC_MS() = 1500;", true},
+	})
+}
+
+// TestDayDurations checks that a TIME literal may have days, as IEC 61131-3 allows.
+func TestDayDurations(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"T#1d = T#24h;", true},
+		{"T#1d_2h - T#2h = TIME#1d;", true},
+	})
+}
