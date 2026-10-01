@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -35,13 +36,14 @@ func TestSchedulerCycles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewScheduler failed: %s", err.Inspect())
 	}
-	// Tasks are ordered by priority; a program without a task is not scheduled.
+	// Tasks are ordered by priority; a program without a task runs in a
+	// background task of the lowest priority.
 	names := []string{}
 	for _, task := range s.Tasks {
 		names = append(names, task.Name)
 	}
-	if got := strings.Join(names, ","); got != "Fast,Ev,Slow" {
-		t.Fatalf("task order = %s, want Fast,Ev,Slow", got)
+	if got := strings.Join(names, ","); got != "Fast,Ev,Slow,BACKGROUND" {
+		t.Fatalf("task order = %s, want Fast,Ev,Slow,BACKGROUND", got)
 	}
 
 	count := func(instance string) string {
@@ -71,7 +73,7 @@ func TestSchedulerCycles(t *testing.T) {
 	env.Set("trig", TRUE)
 	runSchedulerCycle(s, env, start.Add(20*time.Millisecond))
 	runSchedulerCycle(s, env, start.Add(40*time.Millisecond))
-	if count("P1") != "3" || count("P2") != "1" || count("P3") != "0" {
+	if count("P1") != "3" || count("P2") != "1" || count("P3") != "4" {
 		t.Fatalf("after cycles 3-4: P1=%s P2=%s P3=%s", count("P1"), count("P2"), count("P3"))
 	}
 }
@@ -99,5 +101,47 @@ func TestRunScheduler(t *testing.T) {
 	count, _ := programInstanceEnv(t, env, "R1", "P1").Get("COUNT")
 	if count.Inspect() == "0" {
 		t.Error("the scheduler ran no cycles")
+	}
+}
+
+// A task with neither INTERVAL nor SINGLE runs on every scan, and tasks of
+// the same priority run in the order of their names.
+func TestSchedulerEveryScanTasks(t *testing.T) {
+	env := object.NewEnvironment()
+	config := `
+PROGRAM Prog
+	VAR_OUTPUT COUNT : INT; END_VAR
+	COUNT := COUNT + 1;
+END_PROGRAM
+CONFIGURATION Cell
+	RESOURCE R1 ON CPU
+		TASK Beta(PRIORITY := 2);
+		TASK Alpha(PRIORITY := 2);
+		PROGRAM B1 WITH Beta : Prog;
+		PROGRAM Free : Prog;
+	END_RESOURCE
+END_CONFIGURATION
+`
+	if result := testEvalWithEnv(t, config, env); isError(result) {
+		t.Fatalf("configuration evaluation failed: %s", result.Inspect())
+	}
+	s, err := NewScheduler(env)
+	if err != nil {
+		t.Fatalf("NewScheduler failed: %s", err.Inspect())
+	}
+	names := []string{}
+	for _, task := range s.Tasks {
+		names = append(names, fmt.Sprintf("%s:%d", task.Name, task.Priority))
+	}
+	if got := strings.Join(names, ","); got != "Alpha:2,Beta:2,BACKGROUND:3" {
+		t.Fatalf("tasks = %s", got)
+	}
+	start := time.Now()
+	runSchedulerCycle(s, env, start)
+	runSchedulerCycle(s, env, start)
+	for _, instance := range []string{"B1", "Free"} {
+		if v, _ := programInstanceEnv(t, env, "R1", instance).Get("COUNT"); v.Inspect() != "2" {
+			t.Errorf("%s ran %s times in 2 scans, want 2", instance, v.Inspect())
+		}
 	}
 }

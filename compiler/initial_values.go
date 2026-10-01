@@ -195,6 +195,16 @@ func (c *Compiler) compileElementaryValue(name, typeName string, value ast.Expre
 			}
 			c.emitConstant(c.addConstant(&object.BitString{Value: uint64(n), Width: width}))
 			return nil
+		case object.IsBooleanType(typeName):
+			// IEC 61131-3 writes the BOOL literals as 0 and 1 too.
+			if _, literal := value.(*ast.IntegerLiteral); literal && (n == 0 || n == 1) {
+				if n == 1 {
+					c.emit(code.OpTrue)
+				} else {
+					c.emit(code.OpFalse)
+				}
+				return nil
+			}
 		}
 		return mismatch(object.LINT_OBJ)
 	}
@@ -212,7 +222,7 @@ func (c *Compiler) compileElementaryValue(name, typeName string, value ast.Expre
 	case object.IsRealType(typeName):
 		compatible = object.IsRealType(string(valueType))
 	case object.IsBooleanType(typeName):
-		compatible = valueType == object.BOOLEAN_OBJ
+		compatible = elementaryTypeName(valueType) == object.BOOLEAN_OBJ
 	case typeName == "WSTRING":
 		compatible = valueType == object.WSTRING_OBJ
 	case object.IsStringType(typeName):
@@ -442,6 +452,9 @@ func (c *Compiler) compileArrayElements(name string, def *ast.ArrayDefinition, v
 	}
 
 	literal, isLiteral := value.(*ast.ArrayLiteral)
+	if isLiteral && len(lengths) > 1 && !nestedArrayLiteral(literal) {
+		return c.compileFlatArrayLiteral(name, elementType, lengths, literal, visiting)
+	}
 	if value != nil && (!isLiteral || len(lengths) != 1) {
 		// Another array value, or a multi-dimensional literal: compiled as written.
 		return c.Compile(value)
@@ -617,4 +630,68 @@ func (c *Compiler) emitOmittedInputs(callee string, inputs []*ast.VarDeclStateme
 		added++
 	}
 	return added, nil
+}
+
+// nestedArrayLiteral reports whether an array literal is written as rows,
+// [[1, 2], [3, 4]], rather than as one list.
+func nestedArrayLiteral(literal *ast.ArrayLiteral) bool {
+	for _, el := range literal.Elements {
+		if _, ok := el.(*ast.ArrayLiteral); !ok {
+			return false
+		}
+	}
+	return len(literal.Elements) > 0
+}
+
+// compileFlatArrayLiteral compiles the initial value of a multi-dimensional
+// array written as one list, as IEC 61131-3 writes it: the elements in row
+// order, the last index changing fastest, so that ARRAY[1..2, 1..2] OF INT
+// := [1, 2, 3, 4] has the rows [1, 2] and [3, 4]. Elements the list leaves
+// out take their type's default.
+func (c *Compiler) compileFlatArrayLiteral(name string, elementType ast.Expression, lengths []int, literal *ast.ArrayLiteral, visiting map[ast.Node]bool) error {
+	var elements []ast.Expression
+	for _, el := range literal.Elements {
+		rep, ok := el.(*ast.ArrayRepetition)
+		if !ok {
+			elements = append(elements, el)
+			continue
+		}
+		n, err := c.evaluateConstantInteger(rep.Factor)
+		if err != nil {
+			return fmt.Errorf("array '%s': the repetition factor %s is not a constant", name, rep.Factor.String())
+		}
+		for i := int64(0); i < n; i++ {
+			elements = append(elements, rep.Elements...)
+		}
+	}
+	total := 1
+	for _, n := range lengths {
+		total *= n
+	}
+	if len(elements) > total {
+		return fmt.Errorf("array '%s' has %d elements but its initial value lists %d", name, total, len(elements))
+	}
+	next := 0
+	var emitRows func(dims []int) error
+	emitRows = func(dims []int) error {
+		for i := 0; i < dims[0]; i++ {
+			if len(dims) > 1 {
+				if err := emitRows(dims[1:]); err != nil {
+					return err
+				}
+				continue
+			}
+			var el ast.Expression
+			if next < len(elements) {
+				el = elements[next]
+			}
+			next++
+			if err := c.compileStartingValue(name, elementType, el, visiting); err != nil {
+				return err
+			}
+		}
+		c.emit(code.OpArray, dims[0])
+		return nil
+	}
+	return emitRows(lengths)
 }

@@ -249,20 +249,28 @@ func TestComments(t *testing.T) {
 	}
 }
 
-func TestNestedCommentsAreIllegal(t *testing.T) {
+// Comments nest, as IEC 61131-3 allows and CODESYS does, so code with its
+// own comments can be commented out.
+func TestNestedComments(t *testing.T) {
 	input := `
-		(* outer (* middle *) outer *)
+		(* outer (* middle (* inner *) *) outer *)
+		x := 1; (* old code
+		IF x > 1 THEN (* a note *) x := 2; END_IF;
+		*)
+		y := 2;
 	`
-	l := lexer.New(input)
-	p := New(l)
-	p.ParseProgram()
-
-	if len(p.Errors()) == 0 {
-		t.Fatalf("Expected an error for nested comments, but got none")
+	p := New(lexer.New(input))
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
 	}
-
-	expectedError := "illegal character \"nested comment\""
-	assertErrorContains(t, p.Errors(), expectedError)
+	if len(program.Statements) != 2 {
+		t.Fatalf("expected 2 statements outside the comments, got %d: %s", len(program.Statements), program.String())
+	}
+	// A comment whose nested comments close but which does not is unterminated.
+	p = New(lexer.New("(* outer (* inner *) never closed\nx := 1;"))
+	p.ParseProgram()
+	assertErrorContains(t, p.Errors(), "unterminated comment")
 }
 
 func TestUnterminatedCommentErrorRecovery(t *testing.T) {

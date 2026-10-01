@@ -312,7 +312,7 @@ END_PROGRAM
 func TestTypesProgram(t *testing.T) {
 	checkContains(t, typesProgram,
 		// IL accumulators follow the operand's type family.
-		"cr_LREAL = cr_LREAL + iec.LREAL(2.000000)",
+		"cr_LREAL = cr_LREAL + iec.LREAL(2.0)",
 		"p.rr = iec.REAL(cr_LREAL)",
 		"cr_STRING = iec.STRING(p.s)",
 		// Boolean IL logic uses Go's logical operators.
@@ -326,7 +326,7 @@ func TestTypesProgram(t *testing.T) {
 		"MakePt = Pt{px: x, py: 2}",
 		// References.
 		"p.ref = &p.target",
-		"p.copy = ((*p.ref) + 1)",
+		"p.copy_ = ((*p.ref) + 1)",
 	)
 }
 
@@ -597,7 +597,7 @@ func TestLiteralNodes(t *testing.T) {
 		want string
 	}{
 		{&ast.UnsignedIntegerLiteral{Value: 7}, "7"},
-		{&ast.LRealLiteral{Value: 1.5}, "1.500000"},
+		{&ast.LRealLiteral{Value: 1.5}, "1.5"},
 		{&ast.BitStringLiteral{Value: 255, Width: 8}, "iec.BYTE(255)"},
 		{&ast.BitStringLiteral{Value: 1, Width: 64}, "iec.LWORD(1)"},
 		{&ast.EnumeratedValueLiteral{TypeName: &ast.Identifier{Value: "Color"}, Value: &ast.Identifier{Value: "Red"}}, "Color_Red"},
@@ -920,7 +920,7 @@ b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
 		"p.t1.Execute(now)", "p.c.Execute()", "p.e.R_TRIG()", "p.sr1.SR()",
 		"p.x = iec.INT(stdValue(selection.MAX(p.x, 5)))",
 		"p.x = iec.INT(selection.LIMIT(0, p.x, 10))",
-		"p.r = iec.REAL(numerical.SQRT(iec.REAL(2.000000)))",
+		"p.r = iec.REAL(numerical.SQRT(iec.REAL(2.0)))",
 		"p.r = iec.REAL(numerical.SQRT(p.r))",
 		"p.s = stdValue(iecstrings.LEFT(iec.STRING(p.s), iec.LINT(2)))",
 		"p.b = iec.BYTE(bitwise.SHL(p.b, uint(2)))",
@@ -1034,5 +1034,79 @@ END_PROGRAM`,
 	program := parseForTest(t, "PROGRAM P VAR x : INT; END_VAR END_PROGRAM")
 	if flattenNamespaces(program) != program {
 		t.Error("a program without namespaces was copied")
+	}
+}
+
+// IEC names that Go cannot use as written, such as a Go keyword, a built-in
+// the generated code calls, or a package it imports, gain a trailing
+// underscore everywhere they are declared and used. Within a POU, a local
+// named like the receiver or the scan time is renamed the same way.
+func TestGoReservedNames(t *testing.T) {
+	checkContains(t, `TYPE map : STRUCT len : INT; fallthrough : BOOL; END_STRUCT; END_TYPE
+FUNCTION select : INT VAR_INPUT go : INT; min : INT; END_VAR select := go + min + MAX(go, 2); END_FUNCTION
+FUNCTION_BLOCK Fb
+  VAR_INPUT chan : INT; END_VAR
+  VAR_OUTPUT defer : INT; END_VAR
+  VAR_TEMP f : INT; now : INT; END_VAR
+  METHOD goto : INT VAR_INPUT f : INT; END_VAR goto := f + chan; END_METHOD
+  f := chan * 2; now := f; defer := goto(f := now);
+END_FUNCTION_BLOCK
+PROGRAM iec
+  VAR m : map; fb : Fb; switch : INT; func : BOOL; append : INT; END_VAR
+  VAR_TEMP p : INT; END_VAR
+  m.len := select(go := 1, min := 2);
+  m.fallthrough := TRUE;
+  fb(chan := m.len);
+  switch := fb.defer;
+  p := switch;
+  func := p > 0;
+  append := LEN('abc');
+END_PROGRAM
+CONFIGURATION C RESOURCE R1 ON PLC TASK T1 (INTERVAL := T#10ms, PRIORITY := 1); PROGRAM go WITH T1 : iec; END_RESOURCE END_CONFIGURATION`,
+		"type map_ struct { len_ iec.INT fallthrough_ iec.BOOL }",
+		"func select_(go_ iec.INT, min_ iec.INT) (select_ iec.INT)",
+		// A standard function keeps its name.
+		"stdValue(selection.MAX(go_, 2))",
+		"chan_ iec.INT", "defer_ iec.INT",
+		// Locals named like the receiver f or the scan time.
+		"var f_ iec.INT", "var now_ iec.INT", "f.defer_ = f.goto_(now_)",
+		"func (f *Fb) goto_(f_ iec.INT) (goto_ iec.INT)",
+		"type iec_ struct", "func (p *iec_) Logic(now time.Time)", "var p_ iec.INT",
+		"p.m.len_ = select_(1, 2)", "p.fb.chan_ = p.m.len_", "p.switch_ = p.fb.defer_", "p.func_ = (p_ > 0)",
+		`config.RegisterProgramFactory("iec_", Newiec_Factory)`, `&core.Program{Name: "go_"`)
+	// Names Go can use are unchanged.
+	checkContains(t, "PROGRAM Go VAR Len : INT; END_VAR Len := 1; END_PROGRAM", "type Go struct", "p.Len = 1")
+}
+
+// A function block calls its own methods by name or through THIS.
+func TestOwnMethodCalls(t *testing.T) {
+	checkContains(t, `FUNCTION_BLOCK Fb
+  VAR_OUTPUT o : INT; END_VAR
+  METHOD Inc : INT VAR_INPUT k : INT; END_VAR Inc := k + 1; END_METHOD
+  METHOD Twice : INT VAR_INPUT k : INT; END_VAR Twice := Inc(k) * 2; END_METHOD
+  o := Inc(k := 2) + Inc(3) + THIS.Inc(k := 4) + Twice(1);
+END_FUNCTION_BLOCK
+FUNCTION Inc2 : INT VAR_INPUT k : INT; END_VAR Inc2 := k; END_FUNCTION`,
+		"f.o = (((f.Inc(2) + f.Inc(3)) + f.Inc(4)) + f.Twice(1))",
+		"Twice = (f.Inc(k) * 2)")
+}
+
+// A bit is read as a BOOL and written by setting or clearing it.
+func TestBitAccess(t *testing.T) {
+	checkContains(t, `FUNCTION_BLOCK Fb VAR_OUTPUT f : INT; END_VAR f.1 := TRUE; END_FUNCTION_BLOCK
+PROGRAM P VAR x : BYTE := 16#0A; a : ARRAY[0..1] OF WORD; b : BOOL; fb : Fb; END_VAR
+  b := x.3 AND NOT x.0; a[1].15 := b; b := fb.f.1;
+END_PROGRAM`,
+		"f.f = iec.INT(uint64(f.f) | 1<<1)",
+		"p.b = (iec.BOOL(uint64(p.x)>>3&1 == 1) && (!iec.BOOL(uint64(p.x)>>0&1 == 1)))",
+		"p.a[1] = iec.WORD(uint64(p.a[1]) | 1<<15)", "p.a[1] = iec.WORD(uint64(p.a[1]) &^ (1 << 15))",
+		"p.b = iec.BOOL(uint64(p.fb.f)>>1&1 == 1)")
+	for _, tt := range []struct{ src, want string }{
+		{"PROGRAM P VAR r : REAL; b : BOOL; END_VAR b := r.1; END_PROGRAM", "needs an integer or bit string"},
+		{"PROGRAM P VAR x : BYTE; END_VAR x.8 := TRUE; END_PROGRAM", "bit 8 is outside the 8 bits of x"},
+	} {
+		if _, err := transpileSource(t, tt.src); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: expected an error containing %q, got %v", tt.src, tt.want, err)
+		}
 	}
 }

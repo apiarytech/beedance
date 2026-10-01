@@ -47,8 +47,8 @@ func TestInvalidInitialValues(t *testing.T) {
 		{"unknown FB variable", fb + "VAR f : Fb := (nope := 1); END_VAR", "function block 'Fb' has no variable 'nope'"},
 		{"initializer on an elementary type", "VAR x : INT := (a := 1); END_VAR",
 			"the initial value of 'x' is a structure initializer, which requires a structure or function block type, but 'INT' is neither"},
-		{"initializer on an unsupported type", "VAR t : TON := (PT := T#1s); END_VAR",
-			"the initial value of 't' is a structure initializer, but type 'TON' is not supported by the compiler"},
+		{"initializer on an unsupported type", "VAR t : Missing := (PT := T#1s); END_VAR",
+			"the initial value of 't' is a structure initializer, but type 'MISSING' is not supported by the compiler"},
 		{"initializer outside a declaration", "x := (a := 1);",
 			"a structure initializer (a := 1) is only allowed as the initial value of a structure or function block variable"},
 		// Enumerations and subranges

@@ -151,3 +151,74 @@ func TestNamespacedEnumLiterals(t *testing.T) {
 		{"NAMESPACE Lib TYPE Mode : (Idle, Busy); END_TYPE END_NAMESPACE VAR m : Lib.Mode; END_VAR m := Lib.Mode#Busy; m = Lib.Mode#Busy;", true},
 	})
 }
+
+// An IF leaves the stack as it found it, whichever branch runs, at the top
+// level and in a loop.
+func TestIfKeepsTheStackBalanced(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR b : BOOL := TRUE; c : INT; END_VAR IF b THEN c := 5; END_IF c;", 5},
+		{"VAR b : BOOL; c : INT := 1; END_VAR IF b THEN c := 5; ELSIF NOT b THEN c := 7; END_IF; c;", 7},
+		// Many IFs that do not run, and many that do, in a loop.
+		{"FUNCTION F : INT VAR i : INT; n : INT; END_VAR FOR i := 1 TO 5000 DO IF i > 9000 THEN n := n + 1; END_IF; IF i > 0 THEN n := n + 1; END_IF; END_FOR F := n; END_FUNCTION F();", 5000},
+	})
+}
+
+// A bit of an integer or bit string is read and written as a BOOL; the
+// variable keeps its type.
+func TestBitAccess(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR x : BYTE := 16#0A; END_VAR x.3;", true},
+		{"VAR x : BYTE := 16#0A; END_VAR x.0;", false},
+		{"VAR x : INT := -1; END_VAR x.15 := FALSE; x;", 32767},
+		{"VAR x : INT := 5; END_VAR x.15 := TRUE; x;", -32763},
+		{"VAR a : ARRAY[0..1] OF INT; END_VAR a[1].2 := TRUE; a[1];", 4},
+		{"FUNCTION_BLOCK Fb VAR_OUTPUT f : INT; END_VAR f.1 := TRUE; END_FUNCTION_BLOCK VAR fb : Fb; END_VAR fb(); fb.f;", 2},
+		{"VAR x : BYTE := 16#0A; b : BOOL; END_VAR IF x.1 AND NOT x.0 THEN b := TRUE; END_IF b;", true},
+	})
+	runVmErrorTests(t, []vmErrorTestCase{
+		{"VAR x : INT; END_VAR x.16;", "bit 16 is outside the 16 bits of INT"},
+		{"VAR x : INT; END_VAR x.20 := TRUE;", "bit 20 is outside the 16 bits of INT"},
+		{"VAR x : REAL; END_VAR x.1;", "bit access needs an integer or bit string, got LREAL"},
+	})
+}
+
+// TestDeclarationOrder checks that a function can call a function, and use a
+// global, declared after it, as IEC 61131-3 declarations are order-independent.
+func TestDeclarationOrder(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"FUNCTION Twice : INT VAR_INPUT x : INT; END_VAR Twice := Add1(x) + Add1(x) - 2; END_FUNCTION FUNCTION Add1 : INT VAR_INPUT x : INT; END_VAR Add1 := x + 1; END_FUNCTION Twice(5);", 10},
+		{"FUNCTION Scaled : INT VAR_INPUT x : INT; END_VAR Scaled := x * factor; END_FUNCTION VAR_GLOBAL factor : INT := 3; END_VAR Scaled(4);", 12},
+	})
+}
+
+// TestOperandTypes checks the types the checker accepts: BOOL is BOOLEAN, an
+// integer literal compares with a bit string, bit strings of different
+// widths combine, 0 and 1 are BOOL literals, and a function's result
+// variable has the function's type.
+func TestOperandTypes(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR a : BOOL := TRUE; b : BOOL; END_VAR a OR b;", true},
+		{"VAR a : BOOL := TRUE; b : BOOL; END_VAR a = b;", false},
+		{"VAR x : BYTE := 16#0A; END_VAR x = 10;", true},
+		{"VAR x : WORD := 16#0100; END_VAR 16#FF < x;", true},
+		{"VAR x : BYTE := 16#0F; y : WORD := 16#0F00; END_VAR (x OR y) = 16#0F0F;", true},
+		{"VAR x : BYTE := 16#0F; y : WORD := 16#000F; END_VAR x = y;", true},
+		{"VAR CONSTANT on : BOOL := 1; off : BOOL := 0; END_VAR on AND NOT off;", true},
+		{"FUNCTION Odd : BOOL VAR_INPUT x : BYTE; END_VAR Odd := x.0; Odd := Odd XOR x.1; END_FUNCTION Odd(BYTE#3);", false},
+		{"FUNCTION Later : TIME Later := T#2h; Later := Later - T#1h; END_FUNCTION Later() = T#1h;", true},
+		{"VAR t : TOD := TOD#10:00:00; END_VAR t < TOD#11:00:00;", true},
+	})
+}
+
+// TestMultiDimensionalInitialValues checks that a multi-dimensional array's
+// initial value, written as one list, fills the array in row order.
+func TestMultiDimensionalInitialValues(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1,2,3,4]; END_VAR a[2,1];", 4},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1,2,3,4]; END_VAR a[1,1];", 2},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [2(7), 9]; END_VAR a[2,0] + a[2,1];", 9},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1]; END_VAR a[2,1];", 0},
+		{"TYPE Pt : STRUCT m : ARRAY[1..2,0..1] OF STRING(3) := 'a', 'b', 'c', 'd'; END_STRUCT; END_TYPE VAR p : Pt; END_VAR p.m[2,0];", "c"},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [[1,2],[3,4]]; END_VAR a[2,0];", 3},
+	})
+}

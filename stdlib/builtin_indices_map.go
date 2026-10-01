@@ -624,4 +624,6 @@ var BuiltinNameToIndex = map[string]int{
 	"WSTRING_TO_USINT":    BuiltinWstringToUsint,
 	"WSTRING_TO_WORD":     BuiltinWstringToWord,
 	"XOR":                 BuiltinXor,
+	"__CLOCK":             BuiltinClock,
+	"TIME":                BuiltinTime,
 }

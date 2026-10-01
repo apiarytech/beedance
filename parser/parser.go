@@ -133,6 +133,10 @@ func New(l *lexer.Lexer) *Parser {
 
 	// Variables (B.1.4)
 	p.registerPrefix(token.IDENT, p.parseIdentifier)
+	// Contextual keywords name variables in expressions, e.g. IF SET THEN.
+	for tok := range contextualKeywords {
+		p.registerPrefix(tok, p.parseIdentifier)
+	}
 	p.registerPrefix(token.DIRECT_VAR, p.parseDirectVariable)
 
 	// Numeric literals (which can also be part of a typed literal)
@@ -324,6 +328,11 @@ func (p *Parser) isIlInstruction() bool {
 	if p.peekTokenIs(token.ASSIGN) {
 		return false
 	}
+	// No IL operand starts with '.' or '[', so a mnemonic followed by one
+	// names a variable, as in `s.Q1` or `r[1] := x`.
+	if p.peekTokenIs(token.DOT) || p.peekTokenIs(token.LBRACKET) {
+		return false
+	}
 
 	// Special case for NOT: if it's followed by an expression operand,
 	// it's an ST prefix operator. If it's followed by a semicolon or
@@ -341,6 +350,12 @@ func (p *Parser) isIlInstruction() bool {
 	// The token is a known IL mnemonic. Now, we must resolve the ambiguity between
 	// an ST function call like `ADD(5)` and a deferred IL operation like `ADD(LD A)`.
 	if p.peekTokenIs(token.LPAREN) {
+		// S and R take no deferred operand, so S( or R( calls something
+		// named S or R, such as an SR instance: s(S1 := TRUE).
+		switch strings.ToUpper(p.curToken.Literal) {
+		case "S", "R":
+			return false
+		}
 		// Heuristic: Look at the token *inside* the parenthesis (peek2Token).
 		// If it's an unambiguous IL keyword, it's a deferred IL operation.
 		// Otherwise, we assume it's a standard ST function call.
@@ -495,6 +510,14 @@ func (p *Parser) parseStatement() ast.Statement {
 	// Consume any comments before the statement starts. They will be stored in p.leadingComments
 	// and attached to the AST node by the specific parsing function.
 	p.consumeLeadingComments()
+
+	// Comments at the end of the source precede no statement.
+	if p.curTokenIs(token.EOF) {
+		return nil
+	}
+	// A contextual keyword naming a variable at the start of a statement, e.g.
+	// STEP := STEP + 1.
+	p.nameInContext(token.ASSIGN, token.DOT, token.LBRACKET, token.LPAREN)
 
 	// Handle empty statements (just a semicolon).
 	if p.curTokenIs(token.SEMICOLON) {
@@ -677,11 +700,12 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 		p.synchronize(token.SEMICOLON, token.END_STRUCT)
 		return nil
 	}
+	stmt.StringLength = p.parseStringLength(stmt.DataType)
 
 	if p.peekTokenIs(token.ASSIGN) {
 		p.nextToken() // consume data type, curToken is now ':='
 		p.nextToken() // consume ':=', move to expression start
-		stmt.Value = p.parseExpression(LOWEST)
+		stmt.Value = p.parseInitialValue()
 	}
 
 	if !p.expectPeek(token.SEMICOLON) { // Consume semicolon for a valid declaration
@@ -740,6 +764,8 @@ func (p *Parser) parseAccessDeclarations() []*ast.VarDeclStatement {
 	for !p.curTokenIs(token.END_VAR) && !p.curTokenIs(token.EOF) {
 		// Consume any comments before the next declaration line.
 		p.consumeLeadingComments()
+		// A contextual keyword naming a variable, e.g. STEP : INT.
+		p.nameInContext(token.COLON, token.COMMA, token.AT)
 
 		if isStatementStartKeyword(p.curToken.Type) {
 			p.peekError(token.END_VAR)
@@ -978,6 +1004,10 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 	} else {
 		decl.DataType = p.parseTypeSpecifier() // Can be ARRAY or simple type
 	}
+	// A string type with its length in brackets, e.g. STRING[10].
+	if p.peekTokenIs(token.LBRACKET) {
+		decl.StringLength = p.parseStringLength(decl.DataType)
+	}
 
 	// After the base type, check for optional subrange or initialization.
 	if p.peekTokenIs(token.LPAREN) {
@@ -1004,7 +1034,11 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		decl.InitialValue = p.parseExpression(LOWEST)
 	}
 
-	// A type declaration must end with a semicolon.
+	// A type declaration ends with a semicolon, which CODESYS leaves out after
+	// END_STRUCT.
+	if _, isStruct := decl.DataType.(*ast.StructDefinition); isStruct && !p.peekTokenIs(token.SEMICOLON) {
+		return decl
+	}
 	p.expectPeek(token.SEMICOLON)
 	return decl
 }
@@ -1018,6 +1052,11 @@ func (p *Parser) parseStructDefinition() ast.Expression {
 	p.nextToken() // consume STRUCT
 
 	for !p.curTokenIs(token.END_STRUCT) && !p.curTokenIs(token.EOF) {
+		// A comment between members, e.g. after a member on its line.
+		if p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+			continue
+		}
 		member := p.parseStructMember()
 		if member != nil {
 			structDef.Members = append(structDef.Members, member)
@@ -1093,12 +1132,12 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 			p.nextToken()
 			continue
 		}
-		if p.curTokenIs(token.R_EDGE) {
+		if p.curTokenIs(token.R_EDGE) && !p.peekTokenIs(token.COLON) && !p.peekTokenIs(token.COMMA) {
 			isRisingEdge = true
 			p.nextToken()
 			continue
 		}
-		if p.curTokenIs(token.F_EDGE) {
+		if p.curTokenIs(token.F_EDGE) && !p.peekTokenIs(token.COLON) && !p.peekTokenIs(token.COMMA) {
 			isFallingEdge = true
 			p.nextToken()
 			continue
@@ -1126,6 +1165,8 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 
 		// Consume any comments before the next declaration line.
 		p.consumeLeadingComments()
+		// A contextual keyword naming a variable, e.g. STEP : INT.
+		p.nameInContext(token.COLON, token.COMMA, token.AT)
 
 		// Error Recovery: If we encounter a token that looks like the start of a new statement block,
 		// assume END_VAR was missing and stop parsing this var block.
@@ -1207,7 +1248,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		} else if p.peekTokenIs(token.ASSIGN) {
 			p.nextToken() // to ASSIGN
 			p.nextToken() // to expression start
-			initialValue = p.parseExpression(LOWEST)
+			initialValue = p.parseInitialValue()
 		}
 
 		for _, name := range names {
@@ -1679,6 +1720,7 @@ func (p *Parser) parseArrayDefinition() ast.Expression {
 	}
 
 	def.DataType = &ast.TypeSpecifier{Token: p.curToken}
+	def.ElementLength = p.parseStringLength(def.DataType)
 	return def
 }
 
@@ -1900,6 +1942,16 @@ func (p *Parser) parseMemberAccessExpression(left ast.Expression) ast.Expression
 	// The member can be an identifier or a keyword used as an identifier (e.g., 'T', 'IN', 'Q').
 	// We advance to the member token and then create an identifier from its literal.
 	p.nextToken() // consume the '.'
+
+	// A bit of an integer or bit string, e.g. flags.3.
+	if p.curTokenIs(token.INT) {
+		bit, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
+		if err != nil {
+			p.currentError("invalid bit number %s", p.curToken.Literal)
+			return nil
+		}
+		return &ast.BitAccessExpression{Token: exp.Token, Target: left, Bit: bit}
+	}
 
 	// Basic validation: a member name can't be a delimiter like a parenthesis or semicolon.
 	if p.curTokenIs(token.SEMICOLON) || p.curTokenIs(token.LPAREN) || p.curTokenIs(token.RPAREN) {
@@ -3241,4 +3293,78 @@ func qualifiedName(e ast.Expression) (*ast.Identifier, bool) {
 		return &ast.Identifier{Token: owner.Token, Value: owner.Value + "." + v.Member.Value}, true
 	}
 	return nil, false
+}
+
+// parseStringLength parses the length that may follow a STRING or WSTRING
+// type, written STRING(80), as CODESYS does, or STRING[80], as IEC 61131-3
+// does. The current token is the type; on return it is the closing
+// parenthesis or bracket. It returns nil when no length follows.
+func (p *Parser) parseStringLength(dataType ast.Expression) ast.Expression {
+	spec, ok := dataType.(*ast.TypeSpecifier)
+	if !ok || (spec.Token.Type != token.STRING && spec.Token.Type != token.WSTRING) {
+		return nil
+	}
+	closing := token.TokenType(token.RPAREN)
+	switch {
+	case p.peekTokenIs(token.LPAREN):
+	case p.peekTokenIs(token.LBRACKET):
+		closing = token.RBRACKET
+	default:
+		return nil
+	}
+	p.nextToken() // the opening parenthesis or bracket
+	p.nextToken()
+	length := p.parseExpression(LOWEST)
+	if !p.expectPeek(closing) {
+		return nil
+	}
+	return length
+}
+
+// contextualKeywords are keywords only in some places: SET and GET in a
+// PROPERTY, STEP in an SFC, ON in a RESOURCE, and R_EDGE and F_EDGE as
+// qualifiers of an input, S and R as action qualifiers and IL operators,
+// and SR and RS as standard function block types. Elsewhere, as in CODESYS
+// code such as OSCAT, they name variables.
+var contextualKeywords = map[token.TokenType]bool{
+	token.SET: true, token.GET: true, token.STEP: true, token.ON: true,
+	token.R_EDGE: true, token.F_EDGE: true,
+	// The standard function blocks SR and RS, and their inputs S and R.
+	token.SR: true, token.RS: true, token.S: true, token.R: true,
+}
+
+// nameInContext makes the current token an identifier when it is a
+// contextual keyword used as a name: followed by one of the given tokens.
+func (p *Parser) nameInContext(followers ...token.TokenType) {
+	if !contextualKeywords[p.curToken.Type] {
+		return
+	}
+	for _, f := range followers {
+		if p.peekTokenIs(f) {
+			p.curToken.Type = token.IDENT
+			return
+		}
+	}
+}
+
+// parseInitialValue parses a declaration's initial value. CODESYS also
+// writes an array's initial value without brackets, `:= 1, 3, 7, 15`, which
+// is read as the array literal [1, 3, 7, 15].
+func (p *Parser) parseInitialValue() ast.Expression {
+	first := p.curToken
+	value := p.parseExpression(LOWEST)
+	if value == nil || !p.peekTokenIs(token.COMMA) {
+		return value
+	}
+	lit := &ast.ArrayLiteral{Token: first, Elements: []ast.Expression{value}}
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // the element
+		p.nextToken() // the comma
+		element := p.parseExpression(LOWEST)
+		if element == nil {
+			return nil
+		}
+		lit.Elements = append(lit.Elements, element)
+	}
+	return lit
 }

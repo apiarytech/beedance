@@ -223,7 +223,7 @@ func (a *AbstractMotor) Logic(now time.Time) {
 // Stop is a method on the AbstractMotor FUNCTION_BLOCK.
 func (a *AbstractMotor) Stop() (Stop iec.BOOL) {
 	a.IsRunning = false
-	a.internalSpeed = 0.000000
+	a.internalSpeed = 0.0
 	Stop = true
 	return
 }
@@ -243,13 +243,13 @@ func (d *DCMotor) Logic(now time.Time) {
 	d.ENO = true
 	d.AbstractMotor.Logic(now)
 	if d.IsRunning {
-		d.internalSpeed = (d.Voltage * 100.000000)
+		d.internalSpeed = (d.Voltage * 100.0)
 	}
 }
 
 // Start is a method on the DCMotor FUNCTION_BLOCK.
 func (d *DCMotor) Start() (Start iec.BOOL) {
-	if (d.Voltage > 0.000000) {
+	if (d.Voltage > 0.0) {
 		d.IsRunning = true
 		Start = true
 	} else {
@@ -287,11 +287,11 @@ func NewOopTestProgramFactory(params map[string]string) (func(time.Time), error)
 }
 
 func (p *OopTestProgram) Logic(now time.Time) {
-	p.Motor1.Voltage = 12.000000
+	p.Motor1.Voltage = 12.0
 	p.Motor1.Logic(now)
 	p.Motor1.Start()
 	p.TestSpeed = p.Motor1.GetSpeed()
-	p.Motor1.SetSpeed(1500.000000)
+	p.Motor1.SetSpeed(1500.0)
 }
 `
 	transpileAndCheck(t, "TestAdvancedOOPFeaturesTranspilation", input, expected)

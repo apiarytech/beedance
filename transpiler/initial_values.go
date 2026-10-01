@@ -158,6 +158,9 @@ func (t *Transpiler) initialValueVisiting(dataType, value ast.Expression, visiti
 	if value == nil {
 		return "", nil
 	}
+	if b, ok := boolLiteral(value); ok && t.mapIecTypeToGo(dataType) == "iec.BOOL" {
+		return b, nil
+	}
 	return t.expressionString(value)
 }
 
@@ -507,6 +510,10 @@ func (t *Transpiler) functionBlockInit(target string, dataType, value ast.Expres
 	if fb != nil && t.functionBlockNeedsInit(fb) {
 		stmts = append(stmts, target+".Init()")
 	}
+	// A function block of OSCAT BASIC sets its initial values with INIT.
+	if b, ok := t.beebreadTypeOf(dataType); ok && b.isFB {
+		stmts = append(stmts, target+".INIT()")
+	}
 	if !isLit {
 		return stmts, nil
 	}
@@ -517,6 +524,13 @@ func (t *Transpiler) functionBlockInit(target string, dataType, value ast.Expres
 	for _, e := range lit.Initializers {
 		name := e.(*ast.NamedArgument).Name.Value
 		fieldName := name
+		if b, ok := t.beebreadTypeOf(dataType); ok {
+			f, _, found := b.field(name)
+			if !found {
+				return nil, fmt.Errorf("function block '%s' has no input '%s'", dataType.String(), name)
+			}
+			fieldName = f
+		}
 		if fb != nil {
 			decl := t.findFunctionBlockVar(fb, name)
 			if decl == nil {
@@ -808,6 +822,15 @@ type callSignature struct {
 // lookupCallSignature returns the signature of a call's callee when it is a
 // user-defined function, or a method of a function block instance.
 func (t *Transpiler) lookupCallSignature(callee ast.Expression) (*callSignature, bool) {
+	// A method of the function block being transpiled, called by name or
+	// through THIS.
+	if method := t.ownMethod(callee); method != nil {
+		sig := &callSignature{name: method.Name.Value, inputs: method.VarInputs, inOuts: method.VarInOuts, outputs: method.VarOutputs}
+		if method.ReturnType != nil {
+			sig.returnType = method.ReturnType
+		}
+		return sig, true
+	}
 	switch fn := callee.(type) {
 	case *ast.Identifier:
 		fd, ok := t.lookupType(fn.Value).(*ast.FunctionDeclaration)
@@ -869,7 +892,13 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 	outputTargets := make([]ast.Expression, len(sig.outputs))
 
 	setArg := func(i int, value ast.Expression) error {
+		// An input of another numeric type is converted to the parameter's.
 		v, err := t.expressionString(value)
+		if i < len(sig.inputs) {
+			v, err = t.capture(func() error {
+				return t.transpileConverted(value, iecOnly(t.mapIecTypeToGo(params[i].DataType)))
+			})
+		}
 		// An array literal takes its type from the parameter.
 		if lit, isLiteral := value.(*ast.ArrayLiteral); isLiteral && i < len(sig.inputs) {
 			if def := t.arrayDefinitionOf(params[i].DataType); def != nil {
@@ -983,6 +1012,9 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 // calleeString transpiles the function part of a call: a function name as
 // written, or a method with its instance.
 func (t *Transpiler) calleeString(fn ast.Expression) (string, error) {
+	if method := t.ownMethod(fn); method != nil {
+		return t.programVarName + "." + method.Name.Value, nil
+	}
 	if ident, ok := fn.(*ast.Identifier); ok {
 		if node, ok := t.lookupType(ident.Value).(*ast.FunctionDeclaration); ok {
 			return node.Name.Value, nil
@@ -1106,16 +1138,7 @@ func (t *Transpiler) indexedArray(exp ast.Expression) (*ast.ArrayDefinition, int
 		def, dim := t.indexedArray(e.Left)
 		return def, dim + 1
 	case *ast.MemberAccessExpression:
-		owner := t.resolveAssignmentTargetType(e.Struct)
-		if owner == nil {
-			return nil, 0
-		}
-		var decl *ast.VarDeclStatement
-		if def, ok := owner.DataType.(*ast.StructDefinition); ok {
-			decl = decl0(def.Members, e.Member.Value)
-		} else if fb := t.lookupFunctionBlock(owner.DataType); fb != nil {
-			decl = t.findFunctionBlockVar(fb, e.Member.Value)
-		}
+		decl := t.memberDecl(e.Struct, e.Member.Value)
 		if decl == nil {
 			return nil, 0
 		}
@@ -1137,6 +1160,9 @@ func decl0(decls []*ast.VarDeclStatement, name string) *ast.VarDeclStatement {
 func (t *Transpiler) indexLowerBound(exp ast.Expression) int64 {
 	def, dim := t.indexedArray(exp)
 	if def == nil || dim >= len(def.Ranges) {
+		if low, ok := t.beebreadLowerBound(exp); ok {
+			return low
+		}
 		return 0
 	}
 	infix, ok := def.Ranges[dim].(*ast.InfixExpression)
@@ -1145,4 +1171,26 @@ func (t *Transpiler) indexLowerBound(exp ast.Expression) int64 {
 	}
 	low, _ := constantInteger(infix.Left)
 	return low
+}
+
+// ownMethod returns the method a call names when it calls a method of the
+// function block being transpiled, by its name (Inc) or through THIS
+// (THIS.Inc), or nil. A function of the same name takes precedence over a
+// bare name.
+func (t *Transpiler) ownMethod(callee ast.Expression) *ast.MethodImplementation {
+	if t.currentFuncBlock == nil {
+		return nil
+	}
+	switch fn := callee.(type) {
+	case *ast.Identifier:
+		if _, isFunction := t.lookupType(fn.Value).(*ast.FunctionDeclaration); isFunction {
+			return nil
+		}
+		return t.findMethodOnFBChain(t.currentFuncBlock, fn.Value)
+	case *ast.MemberAccessExpression:
+		if _, isThis := fn.Struct.(*ast.ThisExpression); isThis {
+			return t.findMethodOnFBChain(t.currentFuncBlock, fn.Member.Value)
+		}
+	}
+	return nil
 }

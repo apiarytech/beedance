@@ -227,11 +227,23 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		(fromType == "ANY_INT" && IsIntegerType(actualType)) ||
 		(fromType == "ANY_REAL" && IsNumeric(input)) ||
 		(fromType == "BCD" && actualType == string(BITSTRING_OBJ)) ||
-		(actualType == fromType) {
+		(actualType == fromType) ||
+		(temporalTypeName(fromType) != "" && temporalTypeName(fromType) == actualType) {
 		isValidFromType = true
 	}
 	if !isValidFromType {
 		return NewBuiltinError("type mismatch for %s_TO_%s: input is %s, expected a %s type", fromType, toType, actualType, fromType)
+	}
+	if result, ok := convertTemporal(input, toType); ok {
+		return result
+	}
+	// A BOOL converts to a number or bit string as 1 for TRUE and 0 for FALSE.
+	if b, ok := input.(*Boolean); ok && !IsBooleanType(toType) && !IsStringType(toType) {
+		n := int64(0)
+		if b.Value {
+			n = 1
+		}
+		return ApplyConversion(&LInt{Value: n}, "LINT", toType)
 	}
 	if fromType == "BCD" {
 		if IsIntegerType(toType) {
@@ -521,6 +533,15 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		return evalTimeInfix(left, operator, right)
 	case left.Type() == BITSTRING_OBJ && right.Type() == BITSTRING_OBJ:
 		return evalBitStringInfix(left, operator, right)
+	case left.Type() == BITSTRING_OBJ && (IsBitwiseOperator(operator) || IsComparisonOperator(operator)):
+		// An integer, such as the literal in myByte = 10, acts as a bit string.
+		if bits, ok := integerAsBitString(right, left.(*BitString).Width); ok {
+			return evalBitStringInfix(left, operator, bits)
+		}
+	case right.Type() == BITSTRING_OBJ && (IsBitwiseOperator(operator) || IsComparisonOperator(operator)):
+		if bits, ok := integerAsBitString(left, right.(*BitString).Width); ok {
+			return evalBitStringInfix(bits, operator, right)
+		}
 	case left.Type() == ENUMERATED_VALUE_OBJ && right.Type() == ENUMERATED_VALUE_OBJ:
 		// Enumerated values support equality only. They are equal when they
 		// name the same value of the same type; names are case-insensitive.
@@ -589,17 +610,36 @@ func evalWStringInfix(left *WString, operator string, right *WString) Object {
 	}
 }
 
+// integerAsBitString returns a non-negative integer as a bit string of the
+// given width, or of 64 bits if it needs more, as an untyped integer literal
+// takes the type of the bit string it is combined with. It returns false for
+// anything else.
+func integerAsBitString(obj Object, width int) (*BitString, bool) {
+	switch obj.Type() {
+	case SINT_OBJ, INT_OBJ, DINT_OBJ, LINT_OBJ, USINT_OBJ, UINT_OBJ, UDINT_OBJ, ULINT_OBJ:
+	default:
+		return nil, false
+	}
+	n, unsigned, ok := GetIntegerObjectValue(obj)
+	if !ok || (!unsigned && n < 0) {
+		return nil, false
+	}
+	value := uint64(n)
+	if width < 64 && value>>uint(width) != 0 {
+		width = 64
+	}
+	return &BitString{Value: value, Width: width}, true
+}
+
+// evalBitStringInfix combines two bit strings. The narrower is widened to
+// the wider, as IEC 61131-3 converts BYTE to WORD implicitly.
 func evalBitStringInfix(left Object, operator string, right Object) Object {
 	leftBitString := left.(*BitString)
 	rightBitString := right.(*BitString)
 
-	if leftBitString.Width != rightBitString.Width {
-		return NewBuiltinError("type mismatch: bitstring operands must have same width, got %d and %d", leftBitString.Width, rightBitString.Width)
-	}
-
 	leftVal := leftBitString.Value
 	rightVal := rightBitString.Value
-	width := leftBitString.Width
+	width := max(leftBitString.Width, rightBitString.Width)
 
 	switch operator {
 	case "AND", "&":
@@ -624,6 +664,10 @@ func evalBitStringInfix(left Object, operator string, right Object) Object {
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=", "<>", "NE":
 		return nativeBoolToBooleanObject(leftVal != rightVal)
+	case "<", "LT":
+		return nativeBoolToBooleanObject(leftVal < rightVal)
+	case ">", "GT":
+		return nativeBoolToBooleanObject(leftVal > rightVal)
 	case "<=", "LE":
 		return nativeBoolToBooleanObject(leftVal <= rightVal)
 	case ">=", "GE":
@@ -1018,4 +1062,179 @@ func CopyValue(value Object) Object {
 		return &Hash{Pairs: pairs}
 	}
 	return value
+}
+
+// bitWidth returns the number of bits of an integer or bit string value, and
+// its bits as an unsigned number.
+func bitWidth(value Object) (uint64, int, bool) {
+	switch v := value.(type) {
+	case *SInt:
+		return uint64(uint8(v.Value)), 8, true
+	case *Int:
+		return uint64(uint16(v.Value)), 16, true
+	case *DInt:
+		return uint64(uint32(v.Value)), 32, true
+	case *LInt:
+		return uint64(v.Value), 64, true
+	case *USInt:
+		return uint64(v.Value), 8, true
+	case *UInt:
+		return uint64(v.Value), 16, true
+	case *UDInt:
+		return uint64(v.Value), 32, true
+	case *ULInt:
+		return v.Value, 64, true
+	case *Byte:
+		return uint64(v.Value), 8, true
+	case *Word:
+		return uint64(v.Value), 16, true
+	case *DWord:
+		return uint64(v.Value), 32, true
+	case *LWord:
+		return v.Value, 64, true
+	case *BitString:
+		return v.Value, v.Width, true
+	}
+	return 0, 0, false
+}
+
+// GetBit returns bit n of an integer or bit string value, as the partial
+// access `value.n` (IEC 61131-3 `value.%Xn`) reads it; bit 0 is the least
+// significant.
+func GetBit(value Object, n int64) (bool, error) {
+	bits, width, ok := bitWidth(value)
+	if !ok {
+		return false, fmt.Errorf("bit access needs an integer or bit string, got %s", value.Type())
+	}
+	if n < 0 || n >= int64(width) {
+		return false, fmt.Errorf("bit %d is outside the %d bits of %s", n, width, bitTypeName(value))
+	}
+	return bits>>uint(n)&1 == 1, nil
+}
+
+// SetBit returns value with bit n set to bit, of the same type, as the
+// assignment `value.n := bit` writes it.
+func SetBit(value Object, n int64, bit bool) (Object, error) {
+	bits, width, ok := bitWidth(value)
+	if !ok {
+		return nil, fmt.Errorf("bit access needs an integer or bit string, got %s", value.Type())
+	}
+	if n < 0 || n >= int64(width) {
+		return nil, fmt.Errorf("bit %d is outside the %d bits of %s", n, width, bitTypeName(value))
+	}
+	mask := uint64(1) << uint(n)
+	if bit {
+		bits |= mask
+	} else {
+		bits &^= mask
+	}
+	switch v := value.(type) {
+	case *SInt:
+		return &SInt{Value: int8(bits)}, nil
+	case *Int:
+		return &Int{Value: int16(bits)}, nil
+	case *DInt:
+		return &DInt{Value: int32(bits)}, nil
+	case *LInt:
+		return &LInt{Value: int64(bits)}, nil
+	case *USInt:
+		return &USInt{Value: uint8(bits)}, nil
+	case *UInt:
+		return &UInt{Value: uint16(bits)}, nil
+	case *UDInt:
+		return &UDInt{Value: uint32(bits)}, nil
+	case *ULInt:
+		return &ULInt{Value: bits}, nil
+	case *Byte:
+		return &Byte{Value: byte(bits)}, nil
+	case *Word:
+		return &Word{Value: uint16(bits)}, nil
+	case *DWord:
+		return &DWord{Value: uint32(bits)}, nil
+	case *LWord:
+		return &LWord{Value: bits}, nil
+	default:
+		return &BitString{Value: bits, Width: v.(*BitString).Width}, nil
+	}
+}
+
+// bitTypeName names the IEC type of an integer or bit string value.
+func bitTypeName(value Object) string {
+	if bs, ok := value.(*BitString); ok {
+		switch bs.Width {
+		case 8:
+			return "BYTE"
+		case 16:
+			return "WORD"
+		case 32:
+			return "DWORD"
+		case 64:
+			return "LWORD"
+		}
+	}
+	return string(value.Type())
+}
+
+// integerTypeBits returns the width of an integer or bit string type, and
+// whether it is signed; the width is 0 for another type.
+func integerTypeBits(typeName string) (int, bool) {
+	switch strings.ToUpper(typeName) {
+	case "SINT":
+		return 8, true
+	case "INT":
+		return 16, true
+	case "DINT":
+		return 32, true
+	case "LINT":
+		return 64, true
+	case "USINT", "BYTE":
+		return 8, false
+	case "UINT", "WORD":
+		return 16, false
+	case "UDINT", "DWORD":
+		return 32, false
+	case "ULINT", "LWORD":
+		return 64, false
+	}
+	return 0, false
+}
+
+// GetBitAs is GetBit for a variable declared as typeName, whose value may be
+// held in a wider integer: the bit must be one of typeName's.
+func GetBitAs(value Object, n int64, typeName string) (bool, error) {
+	if width, _ := integerTypeBits(typeName); width > 0 && (n < 0 || n >= int64(width)) {
+		return false, fmt.Errorf("bit %d is outside the %d bits of %s", n, width, strings.ToUpper(typeName))
+	}
+	return GetBit(value, n)
+}
+
+// SetBitAs is SetBit for a variable declared as typeName, whose value may be
+// held in a wider integer: the result keeps typeName's width and sign, so
+// clearing bit 15 of an INT -1 gives 32767.
+func SetBitAs(value Object, n int64, bit bool, typeName string) (Object, error) {
+	width, signed := integerTypeBits(typeName)
+	if width > 0 && (n < 0 || n >= int64(width)) {
+		return nil, fmt.Errorf("bit %d is outside the %d bits of %s", n, width, strings.ToUpper(typeName))
+	}
+	updated, err := SetBit(value, n, bit)
+	if err != nil || width == 0 || width == 64 {
+		return updated, err
+	}
+	bits, held, _ := bitWidth(updated)
+	if held <= width {
+		return updated, nil
+	}
+	bits &= uint64(1)<<uint(width) - 1
+	switch v := updated.(type) {
+	case *LInt:
+		if signed && bits&(uint64(1)<<uint(width-1)) != 0 {
+			return &LInt{Value: int64(bits) - int64(1)<<uint(width)}, nil
+		}
+		return &LInt{Value: int64(bits)}, nil
+	case *ULInt:
+		return &ULInt{Value: bits}, nil
+	default:
+		_ = v
+		return updated, nil
+	}
 }

@@ -105,7 +105,7 @@ func TestTypeErrors(t *testing.T) {
 		{"BOOL arithmetic", "TRUE + 1;", "type error in expression '(TRUE + 1)': operator '+' not defined for types BOOLEAN and LINT"},
 		{"string and number", "'a' < 1;", "type error in expression '(a < 1)': comparison operator '<' not defined for types STRING and LINT"},
 		{"logic on reals", "1.5 AND 2.5;", "type error in expression '(1.5 AND 2.5)': logical operator 'AND' not defined for types LREAL and LREAL"},
-		{"TIME times TIME", "T#1s * T#1s;", "type error in expression '(1s * 1s)': operator '*' not defined for types TIME and TIME"},
+		{"TIME times TIME", "T#1s * T#1s;", "type error in expression '(T#1s * T#1s)': operator '*' not defined for types TIME and TIME"},
 	})
 }
 
@@ -115,9 +115,20 @@ func TestInvalidTypedLiterals(t *testing.T) {
 		{"UINT", "UINT#-1;", `invalid UINT literal '-1': strconv.ParseUint: parsing "-1": invalid syntax`},
 		{"REAL", "REAL#abc;", `invalid REAL/LREAL literal 'abc': strconv.ParseFloat: parsing "abc": invalid syntax`},
 		{"BYTE too wide", "BYTE#16#FFF;", "BYTE literal '16#FFF' does not fit in 8 bits"},
-		{"TIME", "T#bad;", `invalid TIME literal 'bad': time: invalid duration "bad"`},
+		{"TIME", "T#bad;", `invalid TIME literal 'bad': invalid duration format in "bad"`},
+		{"TIME with an unknown unit", "T#1w;", `invalid TIME literal '1w': unknown duration unit "w" in string "1w"`},
 		{"DATE", "D#bad;", `invalid DATE literal 'bad': parsing time "bad" as "2006-01-02": cannot parse "bad" as "2006"`},
 		{"TIME_OF_DAY", "TOD#bad;", `invalid TIME_OF_DAY literal 'bad': parsing time "bad" as "15:04:05": cannot parse "bad" as "15"`},
 		{"DATE_AND_TIME", "DT#bad;", `invalid DATE_AND_TIME literal 'bad': parsing time "bad" as "2006-01-02-15:04:05": cannot parse "bad" as "2006"`},
+	})
+}
+
+// TestOperandTypeErrors checks the operand types the checker still rejects.
+func TestOperandTypeErrors(t *testing.T) {
+	runCompileErrorTests(t, []compileErrorCase{
+		{"BOOL from 2", "VAR x : BOOL := 2; END_VAR", "cannot initialize 'x' of type BOOL with a value of type LINT"},
+		{"BOOL from a typed integer", "VAR x : BOOL := INT#1; END_VAR", "cannot initialize 'x' of type BOOL with a value of type INT"},
+		{"integer with bit string", "VAR x : INT := 1; y : BYTE := 1; END_VAR x = y;",
+			"type error in expression '(x = y)': comparison operator '=' not defined for types INT and BYTE"},
 	})
 }

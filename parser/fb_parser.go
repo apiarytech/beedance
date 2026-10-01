@@ -53,6 +53,10 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 
 	stmt := &ast.FunctionBlockDeclaration{Token: fbToken, IsAbstract: isAbstract, IsFinal: isFinal, AccessSpecifier: accessSpecifier, LeadingComments: p.leadingComments}
 
+	// A contextual keyword, such as SR, can name a function block.
+	if contextualKeywords[p.curToken.Type] {
+		p.curToken.Type = token.IDENT
+	}
 	if !p.curTokenIs(token.IDENT) {
 		p.currentError("expected function block name, got %s", p.curToken.Type)
 		return nil // Expected function block name

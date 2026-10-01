@@ -152,6 +152,16 @@ const (
 	// OpCopy replaces the array or structure on top of the stack with a copy,
 	// as they are assigned and passed by value.
 	OpCopy
+
+	// OpGetBit replaces the integer or bit string on top of the stack with its
+	// bit named by the first operand, a BOOL: the bit access `flags.3`. The
+	// second operand is 1 + the constant index of the declared type's name, or
+	// 0 when it is not known.
+	OpGetBit
+	// OpSetBit pops a BOOL and an integer or bit string, and pushes the
+	// integer with its bit named by the first operand set to the BOOL; the
+	// second operand names the declared type, as for OpGetBit.
+	OpSetBit
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -240,6 +250,8 @@ var definitions = map[Opcode]*Definition{
 
 	OpArrayBounds: {"OpArrayBounds", []int{2}},
 	OpCopy:        {"OpCopy", []int{}},
+	OpGetBit:      {"OpGetBit", []int{1, 2}},
+	OpSetBit:      {"OpSetBit", []int{1, 2}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

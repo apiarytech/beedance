@@ -202,3 +202,29 @@ func TestEnvironmentNames(t *testing.T) {
 		}
 	}
 }
+
+// TestEnvironmentIgnoresCase checks that names ignore case, as identifiers
+// do in IEC 61131-3, and keep the spelling they were first stored with.
+func TestEnvironmentIgnoresCase(t *testing.T) {
+	outer := NewEnvironment()
+	outer.Set("Count", &LInt{Value: 1})
+	inner := NewEnclosedEnvironment(outer)
+	if v, ok := inner.Get("COUNT"); !ok || v.(*LInt).Value != 1 {
+		t.Fatalf("COUNT = %v, %v", v, ok)
+	}
+	inner.Assign("count", &LInt{Value: 2})
+	if v, _ := outer.GetRaw("cOuNt"); v.(*LInt).Value != 2 {
+		t.Errorf("count was not assigned in the outer scope: %v", v)
+	}
+	if _, ok := inner.GetRaw("count"); ok {
+		t.Error("assigning count defined it in the inner scope")
+	}
+	outer.Set("COUNT", &LInt{Value: 3})
+	if names := outer.Names(); len(names) != 1 || names[0] != "Count" {
+		t.Errorf("names = %v, want [Count]", names)
+	}
+	inner.SetLocal("x", &LInt{Value: 4})
+	if v, ok := inner.Get("X"); !ok || v.(*LInt).Value != 4 {
+		t.Errorf("X = %v, %v", v, ok)
+	}
+}

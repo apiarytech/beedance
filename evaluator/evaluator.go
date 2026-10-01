@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -406,6 +405,18 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.MemberAccessExpression:
 		// A MemberAccessExpression (e.g., MyTimer.Q) accesses a field of a struct or function block instance.
 		return evalMemberAccessExpression(node, env)
+
+	case *ast.BitAccessExpression:
+		// One bit of an integer or bit string, e.g. flags.3.
+		target := Eval(node.Target, env)
+		if isError(target) {
+			return target
+		}
+		bit, err := object.GetBit(target, node.Bit)
+		if err != nil {
+			return newError(node, "%s", err)
+		}
+		return nativeBoolToBooleanObject(bit)
 
 	case *ast.IfStatement:
 		return evalIfStatement(node, env)
@@ -1338,6 +1349,17 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 	// Arrays and structures are assigned by value.
 	val = object.CopyValue(val)
 	switch target := left.(type) {
+	case *ast.BitAccessExpression:
+		// Writing one bit sets it in the variable, which keeps its type.
+		current := Eval(target.Target, env)
+		if isError(current) {
+			return current
+		}
+		updated, err := object.SetBit(current, target.Bit, isTruthy(val))
+		if err != nil {
+			return newError(node, "%s", err)
+		}
+		return assignValue(node, target.Target, updated, env)
 	case *ast.Identifier:
 		if existing, ok := env.Get(target.Value); ok {
 			switch v := existing.(type) {
@@ -1827,82 +1849,8 @@ func applyBitStringConversion(value, typeName string) object.Object {
 	return &object.BitString{Value: val, Width: width}
 }
 
-// parseDuration parses an IEC 61131-3 duration string (e.g., "1d_12h_30m_5s_10ms"),
-// which can include underscores and multiple units, into a standard Go `time.Duration`.
-// into a time.Duration. This is a simplified implementation.
-func parseDuration(s string) (time.Duration, error) {
-	originalString := s
-	isNegative := false
-	if strings.HasPrefix(s, "-") {
-		isNegative = true
-		s = s[1:]
-	}
-
-	// Per the standard, underscores are for readability and can be ignored.
-	s = strings.ReplaceAll(s, "_", "")
-	// Work with lowercase for unit matching.
-	s = strings.ToLower(s)
-
-	if s == "" {
-		// An empty string after the prefix (e.g., T#) is not a valid duration.
-		return 0, fmt.Errorf("invalid duration string: empty")
-	}
-
-	totalDuration := time.Duration(0)
-	remaining := s
-
-	// This regex will find all number-unit pairs.
-	// It finds a number (int or float) followed by letters.
-	re := regexp.MustCompile(`(\d*\.?\d+)([a-z]+)`)
-	matches := re.FindAllStringSubmatch(remaining, -1)
-
-	if len(matches) == 0 && remaining != "" {
-		return 0, fmt.Errorf("invalid duration format in %q", originalString)
-	}
-
-	parsedStr := ""
-	for _, match := range matches {
-		numPart := match[1]
-		unitPart := match[2]
-		parsedStr += numPart + unitPart
-
-		val, err := strconv.ParseFloat(numPart, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid number %q in duration string %q", numPart, originalString)
-		}
-
-		var unitDuration time.Duration
-		switch unitPart {
-		case "d":
-			unitDuration = 24 * time.Hour
-		case "h":
-			unitDuration = time.Hour
-		case "m":
-			unitDuration = time.Minute
-		case "s":
-			unitDuration = time.Second
-		case "ms":
-			unitDuration = time.Millisecond
-		case "us":
-			unitDuration = time.Microsecond
-		case "ns":
-			unitDuration = time.Nanosecond
-		default:
-			return 0, fmt.Errorf("unknown duration unit %q in string %q", unitPart, originalString)
-		}
-		totalDuration += time.Duration(val * float64(unitDuration))
-	}
-
-	// Check if the entire string was parsed by the regex.
-	if parsedStr != s {
-		return 0, fmt.Errorf("unparsed characters in duration string %q", originalString)
-	}
-
-	if isNegative {
-		totalDuration = -totalDuration
-	}
-	return totalDuration, nil
-}
+// parseDuration parses an IEC 61131-3 duration, such as 1d_12h_30m.
+func parseDuration(s string) (time.Duration, error) { return object.ParseDuration(s) }
 
 // nativeBoolToBooleanObject returns one of the singleton TRUE or FALSE objects.
 func nativeBoolToBooleanObject(input bool) *object.Boolean {
@@ -3826,24 +3774,41 @@ func NewScheduler(configEnv *object.Environment) (*object.Scheduler, *object.Err
 		}
 	}
 
-	// Associate programs with tasks
-	for _, progInstance := range programs {
-		if progInstance.TaskName != "" {
-			if task, ok := tasks[progInstance.TaskName]; ok {
-				task.Programs = append(task.Programs, progInstance)
-			}
-		} else {
-			// Handle programs with no task association (run once or continuously at low priority)
+	// Associate programs with tasks, in the order of their names. A program
+	// instance with no task runs in a background task of the lowest priority,
+	// on every scan, as in the generated Go.
+	names := make([]string, 0, len(programs))
+	for name := range programs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	background := &object.Task{Name: "BACKGROUND"}
+	for _, name := range names {
+		progInstance := programs[name]
+		if progInstance.TaskName == "" {
+			background.Programs = append(background.Programs, progInstance)
+		} else if task, ok := tasks[progInstance.TaskName]; ok {
+			task.Programs = append(task.Programs, progInstance)
 		}
 	}
 
+	var lowest int64
 	for _, task := range tasks {
 		scheduler.Tasks = append(scheduler.Tasks, task)
+		lowest = max(lowest, task.Priority+1)
+	}
+	if len(background.Programs) > 0 {
+		background.Priority = lowest
+		scheduler.Tasks = append(scheduler.Tasks, background)
 	}
 
-	// Sort tasks by priority (lower number = higher priority)
+	// Sort tasks by priority (lower number = higher priority), then name.
 	sort.Slice(scheduler.Tasks, func(i, j int) bool {
-		return scheduler.Tasks[i].Priority < scheduler.Tasks[j].Priority
+		a, b := scheduler.Tasks[i], scheduler.Tasks[j]
+		if a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
+		return a.Name < b.Name
 	})
 
 	return scheduler, nil
@@ -3889,6 +3854,10 @@ func runSchedulerCycle(s *object.Scheduler, env *object.Environment, now time.Ti
 				isReady = true
 			}
 			task.LastTriggerValue = currentTriggerVal
+		} else {
+			// A task with neither INTERVAL nor SINGLE, such as the background
+			// task, runs on every scan.
+			isReady = true
 		}
 
 		if isReady {
