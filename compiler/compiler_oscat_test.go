@@ -26,15 +26,10 @@ import (
 	"beedance/token"
 )
 
-// oscatPath is the OSCAT BASIC library, a CODESYS export kept out of the
-// test sources; the test that reads it is skipped without it.
-const oscatPath = "../reference/oscat_basic_335.st"
-
-// oscatCompileBaseline is the number of OSCAT declarations known to compile
-// together. Most of the others call the CODESYS function TIME(), through
-// T_PLC_MS and T_PLC_US, assign to a function's VAR_INPUT, or do arithmetic
-// on bit strings, none of which IEC 61131-3 allows.
-const oscatCompileBaseline = 355
+// oscatPath is the OSCAT BASIC 3.35 library converted to the IEC 61131-3
+// beedance accepts, kept out of the test sources; the test that reads it is
+// skipped without it.
+const oscatPath = "../reference/beedance_oscat_basic.st"
 
 // oscatDeclarations returns the declarations of the OSCAT library units that
 // parse: its POUs, TYPE blocks and global variable blocks.
@@ -117,6 +112,7 @@ func TestOscatLibraryCompiles(t *testing.T) {
 			break
 		}
 		failed[declarationName(bad)] = err.Error()
+		t.Logf("left out %s: %v", declarationName(bad), err)
 		kept := stmts[:0:0]
 		for _, s := range stmts {
 			if s != bad {
@@ -144,7 +140,7 @@ func TestOscatLibraryCompiles(t *testing.T) {
 	for _, k := range keys {
 		t.Logf("%4d  %s\n        e.g. %s", len(causes[k]), k, causes[k][0])
 	}
-	if len(stmts) < oscatCompileBaseline {
-		t.Errorf("only %d declarations compile; at least %d did before", len(stmts), oscatCompileBaseline)
+	if len(failed) > 0 {
+		t.Errorf("%d declarations do not compile", len(failed))
 	}
 }
