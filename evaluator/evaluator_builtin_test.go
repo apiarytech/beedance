@@ -642,7 +642,7 @@ func TestTypeConversionErrors(t *testing.T) {
 		input           string
 		expectedMessage string
 	}{
-		{"REAL_TO_TIME(1.0);", "BUILTIN ERROR: conversion to type TIME is not supported"},
+		{"TIME_TO_DATE(T#1s);", "BUILTIN ERROR: conversion from TIME to DATE is not supported"},
 		{"INT_TO_REAL();", "BUILTIN ERROR: wrong number of arguments for INT_TO_REAL. got=0, want=1"},
 	}
 

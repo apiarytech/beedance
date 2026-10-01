@@ -3284,9 +3284,8 @@ func (c *Compiler) parseTypedLiteralValue(node *ast.TypedLiteral) (object.Object
 
 	switch typeName {
 	case "TIME", "T":
-		// IEC duration can have underscores, Go's time.ParseDuration does not support them.
-		durationStr := strings.ReplaceAll(valueStr, "_", "")
-		d, err := time.ParseDuration(durationStr)
+		// An IEC duration may have days and underscores, as in 1d_12h.
+		d, err := object.ParseDuration(valueStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid TIME literal '%s': %w", valueStr, err)
 		}

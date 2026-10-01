@@ -227,11 +227,23 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		(fromType == "ANY_INT" && IsIntegerType(actualType)) ||
 		(fromType == "ANY_REAL" && IsNumeric(input)) ||
 		(fromType == "BCD" && actualType == string(BITSTRING_OBJ)) ||
-		(actualType == fromType) {
+		(actualType == fromType) ||
+		(temporalTypeName(fromType) != "" && temporalTypeName(fromType) == actualType) {
 		isValidFromType = true
 	}
 	if !isValidFromType {
 		return NewBuiltinError("type mismatch for %s_TO_%s: input is %s, expected a %s type", fromType, toType, actualType, fromType)
+	}
+	if result, ok := convertTemporal(input, toType); ok {
+		return result
+	}
+	// A BOOL converts to a number or bit string as 1 for TRUE and 0 for FALSE.
+	if b, ok := input.(*Boolean); ok && !IsBooleanType(toType) && !IsStringType(toType) {
+		n := int64(0)
+		if b.Value {
+			n = 1
+		}
+		return ApplyConversion(&LInt{Value: n}, "LINT", toType)
 	}
 	if fromType == "BCD" {
 		if IsIntegerType(toType) {
