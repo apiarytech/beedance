@@ -43,7 +43,7 @@ func NewStdLibTestFactory(params map[string]string) (func(time.Time), error) {
 }
 
 func (p *StdLibTest) Logic(now time.Time) {
-	p.r = iec.REAL(numerical.SQRT(iec.REAL(25.000000)))
+	p.r = iec.REAL(numerical.SQRT(iec.REAL(25.0)))
 	p.i = iec.INT(numerical.ABS(p.i))
 	p.s3 = iecstrings.CONCAT(iec.STRING(p.s1), iec.STRING(" "))
 	p.s3 = iecstrings.CONCAT(iec.STRING(p.s3), iec.STRING(p.s2))

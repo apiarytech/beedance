@@ -312,7 +312,7 @@ END_PROGRAM
 func TestTypesProgram(t *testing.T) {
 	checkContains(t, typesProgram,
 		// IL accumulators follow the operand's type family.
-		"cr_LREAL = cr_LREAL + iec.LREAL(2.000000)",
+		"cr_LREAL = cr_LREAL + iec.LREAL(2.0)",
 		"p.rr = iec.REAL(cr_LREAL)",
 		"cr_STRING = iec.STRING(p.s)",
 		// Boolean IL logic uses Go's logical operators.
@@ -597,7 +597,7 @@ func TestLiteralNodes(t *testing.T) {
 		want string
 	}{
 		{&ast.UnsignedIntegerLiteral{Value: 7}, "7"},
-		{&ast.LRealLiteral{Value: 1.5}, "1.500000"},
+		{&ast.LRealLiteral{Value: 1.5}, "1.5"},
 		{&ast.BitStringLiteral{Value: 255, Width: 8}, "iec.BYTE(255)"},
 		{&ast.BitStringLiteral{Value: 1, Width: 64}, "iec.LWORD(1)"},
 		{&ast.EnumeratedValueLiteral{TypeName: &ast.Identifier{Value: "Color"}, Value: &ast.Identifier{Value: "Red"}}, "Color_Red"},
@@ -920,7 +920,7 @@ b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
 		"p.t1.Execute(now)", "p.c.Execute()", "p.e.R_TRIG()", "p.sr1.SR()",
 		"p.x = iec.INT(stdValue(selection.MAX(p.x, 5)))",
 		"p.x = iec.INT(selection.LIMIT(0, p.x, 10))",
-		"p.r = iec.REAL(numerical.SQRT(iec.REAL(2.000000)))",
+		"p.r = iec.REAL(numerical.SQRT(iec.REAL(2.0)))",
 		"p.r = iec.REAL(numerical.SQRT(p.r))",
 		"p.s = stdValue(iecstrings.LEFT(iec.STRING(p.s), iec.LINT(2)))",
 		"p.b = iec.BYTE(bitwise.SHL(p.b, uint(2)))",

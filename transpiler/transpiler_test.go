@@ -91,7 +91,7 @@ type MySimpleProgram struct {
 // NewMySimpleProgramFactory creates a new instance of the MySimpleProgram program.
 func NewMySimpleProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &MySimpleProgram{}
-	instance.anotherVar = 3.140000
+	instance.anotherVar = 3.14
 	return instance.Logic, nil
 }
 
@@ -171,7 +171,7 @@ func MyFunc(A iec.INT, C *iec.REAL) (MyFunc iec.INT) {
 	var Local iec.INT
 
 	Local = (A * 2)
-	(*C) = ((*C) + 1.000000)
+	(*C) = ((*C) + 1.0)
 	MyFunc = Local
 	return
 }
@@ -1211,7 +1211,7 @@ type LocatedVarsProgram struct {
 // NewLocatedVarsProgramFactory creates a new instance of the LocatedVarsProgram program.
 func NewLocatedVarsProgramFactory(params map[string]string) (func(time.Time), error) {
 	instance := &LocatedVarsProgram{}
-	instance.internalVar = 1.230000
+	instance.internalVar = 1.23
 	return instance.Logic, nil
 }
 
@@ -1225,7 +1225,7 @@ func (p *LocatedVarsProgram) Logic(now time.Time) {
 		img.M.R[2] = iec.REAL(p.memo)
 	})
 	p.myOutput = (p.myOutput + 1)
-	p.memo = (p.memo * 2.000000)
+	p.memo = (p.memo * 2.0)
 	p.myInput = (!p.myInput)
 }
 

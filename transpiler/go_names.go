@@ -20,7 +20,7 @@ package transpiler
 // same way.
 
 import (
-	"strings"
+	"unicode"
 
 	"beedance/ast"
 )
@@ -41,7 +41,7 @@ var reservedGoNames = map[string]bool{
 	"triggers": true, "numerical": true, "iecstrings": true, "selection": true, "bitwise": true,
 	"arithmetic": true, "comparison": true, "conversion": true, "iectime": true, "iecmath": true,
 	"fmt": true, "time": true, "strings": true, "context": true, "os": true, "signal": true, "log": true,
-	"stdValue": true, "processImage": true, "main": true, "init": true,
+	"stdValue": true, "stringCut": true, "plcTime": true, "plcStarted": true, "processImage": true, "main": true, "init": true,
 }
 
 // goSafeName returns the name an identifier takes in Go.
@@ -143,7 +143,7 @@ func pouLocals(stmt ast.Statement) ([]string, string) {
 			}
 			return n
 		})
-		return names, strings.ToLower(s.Name.Value[:1])
+		return names, receiverOf(s.Name.Value)
 	}
 	return nil, ""
 }
@@ -209,4 +209,16 @@ func declarationName(n ast.Node) *ast.Identifier {
 		return v.Name
 	}
 	return nil
+}
+
+// receiverOf returns the receiver name of a function block's methods: the
+// first letter of its name in lower case, as Go code usually has, so _RMP_B
+// gets r. A name without letters gets f.
+func receiverOf(name string) string {
+	for _, r := range name {
+		if unicode.IsLetter(r) {
+			return string(unicode.ToLower(r))
+		}
+	}
+	return "f"
 }
