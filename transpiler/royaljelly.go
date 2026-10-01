@@ -108,11 +108,17 @@ func (t *Transpiler) standardFunctionBlockOf(dataType ast.Expression) (standardF
 		return standardFunctionBlock{}, false
 	}
 	name := dataType.String()
-	if _, declared := t.typeInfo[name]; declared {
+	if t.lookupType(name) != nil {
 		return standardFunctionBlock{}, false
 	}
-	fb, ok := standardFunctionBlocks[strings.ToUpper(name)]
-	return fb, ok
+	if fb, ok := standardFunctionBlocks[strings.ToUpper(name)]; ok {
+		return fb, true
+	}
+	// A function block of OSCAT BASIC runs like royaljelly's.
+	if b, ok := t.beebreadTypeOf(dataType); ok && b.isFB {
+		return standardFunctionBlock{goType: b.goType, run: "Execute(now)"}, true
+	}
+	return standardFunctionBlock{}, false
 }
 
 // functionBlockRun returns the call that runs the function block instance
@@ -166,6 +172,27 @@ func (t *Transpiler) transpileRoyaljellyCall(name string, fn stdFunction, exp *a
 		literalType = expected
 	}
 
+	// The real type of a real function whose arguments mix integers in.
+	realMix := ""
+	if realOnlyFunctions[name] {
+		hasInt := false
+		for _, arg := range exp.Arguments {
+			switch at := t.exprGoType(arg); {
+			case isIntegerGoType(at):
+				hasInt = true
+			case isRealGoType(at) && realMix == "":
+				realMix = at
+			}
+		}
+		switch {
+		case !hasInt:
+			realMix = ""
+		case realMix == "" && isRealGoType(expected):
+			realMix = expected
+		case realMix == "":
+			realMix = "iec.LREAL"
+		}
+	}
 	convert := expected != "" && fn.result != expected
 	if convert {
 		t.write("%s(", expected)
@@ -182,6 +209,11 @@ func (t *Transpiler) transpileRoyaljellyCall(name string, fn stdFunction, exp *a
 		wrap := paramType(fn, i)
 		if wrap == "" && allLiterals && untypedLiteral(arg) != "" {
 			wrap = literalType
+		}
+		// An integer argument of a real function is widened to a real, as
+		// IEC 61131-3 does, and so are the literals with it.
+		if wrap == "" && realOnlyFunctions[name] && realMix != "" && (isIntegerGoType(t.exprGoType(arg)) || untypedLiteral(arg) != "") {
+			wrap = realMix
 		}
 		if wrap != "" && !strings.HasPrefix(wrap, "[") && !strings.HasPrefix(wrap, "*") && wrap != "any" && wrap != "func" {
 			t.write("%s(", wrap)

@@ -113,7 +113,10 @@ var standardFBPrimaryOutputs = map[string]struct {
 
 // Transpiler holds the state of the code generation process.
 type Transpiler struct {
-	w                io.Writer
+	w io.Writer
+	// PreferOSCAT makes a name that both OSCAT BASIC (beebread) and royaljelly
+	// define, such as ROUND or CEIL, OSCAT's. It is royaljelly's otherwise.
+	PreferOSCAT      bool
 	programVarName   string // The name of the receiver for program methods, e.g., "p"
 	currentFunc      *ast.FunctionDeclaration
 	currentFuncBlock *ast.FunctionBlockDeclaration   // The current FB being transpiled
@@ -125,6 +128,7 @@ type Transpiler struct {
 	locatedVars      map[string]bool                 // Set of VARs with an AT % location
 	mainGenerated    bool                            // Flag to ensure main is only generated once
 	globalVars       map[string]bool                 // Set of global variable names
+	globalDecls      []*ast.VarDeclStatement         // The global variables' declarations
 	typeInfo         map[string]ast.Node
 	currentSetter    *ast.PropertyDeclaration               // The current property setter being transpiled
 	isDereferencing  bool                                   // Flag to prevent double-dereferencing
@@ -134,6 +138,8 @@ type Transpiler struct {
 	initVisiting     map[*ast.FunctionBlockDeclaration]bool // Function blocks whose Init is being generated
 	expectedGoType   string                                 // The elementary Go type the expression being transpiled is assigned to, or ""
 	usesStdValue     bool                                   // The output calls stdValue, so it is written at the end
+	usesStringCut    bool                                   // The output calls stringCut, so it is written at the end
+	usesPlcTime      bool                                   // The output calls plcTime, so it is written at the end
 	usesProcessImage bool                                   // The output uses processImage, so it is declared at the end
 	configuredVars   map[string][]string                    // The variables VAR_CONFIG sets, by program type
 }
@@ -179,6 +185,8 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		expandedAST := evaluator.ExpandMacros(node, macroEnv).(*ast.Program)
 		// Go has no namespaces within a package; see namespaces.go.
 		expandedAST = flattenNamespaces(expandedAST)
+		// Uses of a name spelled as it is declared; see name_case.go.
+		expandedAST = matchNameCase(expandedAST)
 		// Names Go cannot use, such as `go` or `len`; see go_names.go.
 		expandedAST = renameForGo(expandedAST)
 
@@ -193,6 +201,12 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		}
 		if t.usesStdValue {
 			t.write("%s", stdValueHelper)
+		}
+		if t.usesStringCut {
+			t.write("%s", stringCutHelper)
+		}
+		if t.usesPlcTime {
+			t.write("%s", plcTimeHelper)
 		}
 		if t.usesProcessImage {
 			t.write("%s", processImageDecl)
@@ -291,7 +305,10 @@ func (t *Transpiler) write(format string, a ...interface{}) {
 // transpileLeadingComments writes comments to the output buffer, formatting them as Go comments.
 func (t *Transpiler) transpileLeadingComments(comments []string) {
 	for _, comment := range comments {
-		t.write("// %s\n", strings.TrimSpace(comment))
+		// Each line of a comment that spans several lines is a Go comment.
+		for _, line := range strings.Split(strings.TrimSpace(comment), "\n") {
+			t.write("// %s\n", strings.TrimRight(line, " \t\r"))
+		}
 	}
 }
 
@@ -302,6 +319,7 @@ func (t *Transpiler) buildGlobalVarInfo(program *ast.Program) {
 		case *ast.GlobalVarDeclaration:
 			for _, decl := range node.Vars {
 				t.globalVars[decl.Name.Value] = true
+				t.globalDecls = append(t.globalDecls, decl)
 			}
 		case *ast.ProgramDeclaration:
 			for _, globalBlock := range node.VarGlobal {
@@ -784,7 +802,7 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 				if err := t.transpileExpression(callExpr.Function); err != nil {
 					return err
 				}
-				t.write(".%s = &", namedArg.Name.Value)
+				t.write(".%s = &", t.memberName(callExpr.Function, namedArg.Name.Value))
 				if err := t.transpileExpression(namedArg.Value); err != nil {
 					return err
 				}
@@ -794,8 +812,8 @@ func (t *Transpiler) transpileIlFunctionBlockCall(callExpr *ast.CallExpression) 
 				if err := t.transpileExpression(callExpr.Function); err != nil {
 					return err
 				}
-				t.write(".%s = ", namedArg.Name.Value)
-				if err := t.transpileExpression(namedArg.Value); err != nil {
+				t.write(".%s = ", t.memberName(callExpr.Function, namedArg.Name.Value))
+				if err := t.transpileValue(namedArg.Value, t.inputGoType(callExpr.Function, namedArg.Name)); err != nil {
 					return err
 				}
 				t.write("\n")
@@ -1363,7 +1381,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	t.write("}\n\n")
 
 	// The receiver name is specific to this FB.
-	receiverName := strings.ToLower(fb.Name.Value[:1])
+	receiverName := receiverOf(fb.Name.Value)
 
 	// Generate the Init method, which sets the starting values of an instance.
 	if err := t.transpileFunctionBlockInit(fb, receiverName); err != nil {
@@ -1479,7 +1497,7 @@ func (t *Transpiler) transpilePropertyDeclaration(fb *ast.FunctionBlockDeclarati
 		return nil
 	}
 
-	receiverName := strings.ToLower(fb.Name.Value[:1])
+	receiverName := receiverOf(fb.Name.Value)
 	propName := prop.Name.Value
 	goType := t.mapIecTypeToGo(prop.DataType)
 
@@ -1684,6 +1702,12 @@ func (t *Transpiler) buildVarInfo(varBlocks ...[]*ast.VarDeclStatement) {
 			if typeDecl == nil {
 				typeDecl = &ast.TypeDeclaration{Name: &ast.Identifier{Value: typeName}, DataType: varDecl.DataType}
 			}
+			// A STRING(n) variable keeps its length, which an assignment cuts to.
+			if varDecl.StringLength != nil && typeDecl.StringLength == nil {
+				sized := *typeDecl
+				sized.StringLength = varDecl.StringLength
+				typeDecl = &sized
+			}
 			t.varInfo[varDecl.Name.Value] = typeDecl
 			if def := t.arrayDefinitionOf(varDecl.DataType); def != nil {
 				if t.arrayDecls == nil {
@@ -1743,6 +1767,9 @@ func (t *Transpiler) isFunctionBlockType(dataType ast.Expression) bool {
 			}
 		}
 		if _, ok := standardFBPrimaryOutputs[strings.ToUpper(typeName)]; ok {
+			return true
+		}
+		if b, ok := t.beebreadTypeOf(dataType); ok && b.isFB {
 			return true
 		}
 	}
@@ -1812,6 +1839,13 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 		for _, v := range fd.Vars {
 			if err := t.transpileLocalVar(v); err != nil {
 				return err
+			}
+		}
+		// Go does not allow a local that is never used.
+		used := usedNames(fd.Body)
+		for _, v := range fd.Vars {
+			if !used[v.Name.Value] {
+				t.write("\t_ = %s\n", v.Name.Value)
 			}
 		}
 		t.write("\n")
@@ -2045,6 +2079,10 @@ func (t *Transpiler) transpileCaseWithRanges(stmt *ast.CaseStatement) error {
 // isBitwiseType is a helper to infer if an expression is likely to be a bitwise type (WORD, BYTE, etc.).
 // This is a heuristic for the transpiler to differentiate between logical (&&) and bitwise (&) operators.
 func (t *Transpiler) isBitwiseType(expr ast.Expression) bool {
+	// An integer or bit string of a type the transpiler knows.
+	if typ := t.exprGoType(expr); typ != "" {
+		return isIntegerGoType(typ)
+	}
 	switch e := expr.(type) {
 	case *ast.Identifier:
 		if typeDecl, ok := t.varInfo[e.Value]; ok {
@@ -2083,7 +2121,12 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 			t.write("%s\n", v)
 			return nil
 		}
-		if err := t.transpileExpression(stmt.Value); err != nil {
+		// A value of another numeric type is converted to the result's.
+		target := ""
+		if t.currentFunc.ReturnType != nil {
+			target = iecOnly(t.mapIecTypeToGo(t.currentFunc.ReturnType))
+		}
+		if err := t.transpileValue(stmt.Value, target); err != nil {
 			return err
 		}
 		t.write("\n")
@@ -2185,10 +2228,18 @@ func (t *Transpiler) transpileAssignmentStatement(stmt *ast.AssignmentStatement)
 		return err
 	}
 	t.write(" = ")
-	// A standard function's value is converted to the target's type.
-	t.expectedGoType = t.elementaryGoType(stmt.Left)
-	err := t.transpileExpression(stmt.Value)
-	t.expectedGoType = ""
+	// A value of another numeric type is converted to the target's type,
+	// as IEC 61131-3 widens it implicitly.
+	var err error
+	if n := t.stringLength(stmt.Left); n > 0 {
+		// A STRING(n) keeps the first n characters of a longer value.
+		t.usesStringCut = true
+		t.write("stringCut(iec.STRING(")
+		err = t.transpileExpression(stmt.Value)
+		t.write("), %d)", n)
+	} else {
+		err = t.transpileValue(stmt.Value, t.exprGoType(stmt.Left))
+	}
 	if err != nil {
 		return err
 	}
@@ -2237,7 +2288,14 @@ func (t *Transpiler) resolveAssignmentTargetType(expr ast.Expression) *ast.TypeD
 	switch e := expr.(type) {
 	case *ast.Identifier:
 		// Base case: a simple variable. Look it up in the current scope's varInfo.
-		return t.varInfo[e.Value]
+		if td := t.varInfo[e.Value]; td != nil {
+			return td
+		}
+		// A global variable the scope does not declare.
+		if decl := t.globalDecl(e.Value); decl != nil {
+			return &ast.TypeDeclaration{Name: decl.Name, DataType: decl.DataType, StringLength: decl.StringLength}
+		}
+		return nil
 
 	case *ast.IndexExpression:
 		// It's an array element. The type of the element is the type of the array's base variable.
@@ -2245,6 +2303,10 @@ func (t *Transpiler) resolveAssignmentTargetType(expr ast.Expression) *ast.TypeD
 		return t.resolveAssignmentTargetType(e.Left)
 
 	case *ast.MemberAccessExpression:
+		// Any member of a structure or function block, however it is reached.
+		if decl := t.memberDecl(e.Struct, e.Member.Value); decl != nil {
+			return &ast.TypeDeclaration{Name: decl.Name, DataType: decl.DataType, StringLength: decl.StringLength}
+		}
 		// It's a struct field. We need to find the type of the struct, then the type of the field.
 		structVarType := t.resolveAssignmentTargetType(e.Struct)
 		if structVarType == nil {
@@ -2341,7 +2403,9 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 	if err != nil {
 		return err
 	}
-	end, err := t.expressionString(stmt.EndValue)
+	// The start, end and step take the control variable's type.
+	ctype := t.exprGoType(stmt.ControlVar.Left)
+	end, err := t.capture(func() error { return t.transpileConverted(stmt.EndValue, ctype) })
 	if err != nil {
 		return err
 	}
@@ -2350,7 +2414,7 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 		if step, isConst := constantInteger(stmt.StepValue); isConst && step < 0 {
 			condition = fmt.Sprintf("%s >= %s", control, end)
 		} else if !isConst {
-			step, err := t.expressionString(stmt.StepValue)
+			step, err := t.capture(func() error { return t.transpileConverted(stmt.StepValue, ctype) })
 			if err != nil {
 				return err
 			}
@@ -2358,7 +2422,7 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 		}
 	}
 	t.write("\tfor %s = ", control)
-	if err := t.transpileExpression(stmt.ControlVar.Value); err != nil {
+	if err := t.transpileValue(stmt.ControlVar.Value, ctype); err != nil {
 		return err
 	}
 	t.write("; %s; ", condition)
@@ -2367,7 +2431,7 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 	}
 	if stmt.StepValue != nil {
 		t.write(" += ")
-		if err := t.transpileExpression(stmt.StepValue); err != nil {
+		if err := t.transpileConverted(stmt.StepValue, ctype); err != nil {
 			return err
 		}
 	} else {
@@ -2464,6 +2528,11 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.BitAccessExpression:
 		return t.transpileBitRead(exp)
 	case *ast.Identifier:
+		// A global variable of OSCAT BASIC, such as MATH.
+		if g, ok := t.beebreadGlobal(exp); ok {
+			t.write("%s", g)
+			return nil
+		}
 		// If we are inside a property setter, check if the identifier is the
 		// property name itself or `value`, which act as the implicit input variable.
 		if t.currentSetter != nil && (exp.Value == t.currentSetter.Name.Value || strings.EqualFold(exp.Value, "value")) {
@@ -2525,7 +2594,7 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.BitStringLiteral:
 		t.write("%s(%d)", bitStringGoType(exp.Width), exp.Value)
 	case *ast.LRealLiteral:
-		t.write("%f", exp.Value)
+		t.write("%s", realLiteral(float64(exp.Value)))
 	case *ast.WStringLiteral:
 		t.write("%q", exp.Value)
 	case *ast.DateLiteral:
@@ -2537,7 +2606,7 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.Boolean:
 		t.write("%t", exp.Value)
 	case *ast.RealLiteral:
-		t.write("%f", exp.Value)
+		t.write("%s", realLiteral(float64(exp.Value)))
 	case *ast.StringLiteral:
 		t.write("%q", exp.Value)
 	case *ast.TimeLiteral:
@@ -2675,9 +2744,19 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 			// It's a type we've defined in this package, so just use its name.
 			return typeName
 		}
+		// The same type written in another case, as IEC 61131-3 allows.
+		for declared := range t.typeInfo {
+			if strings.EqualFold(declared, typeName) {
+				return declared
+			}
+		}
 		// A standard function block is royaljelly's.
 		if fb, ok := standardFunctionBlocks[strings.ToUpper(typeName)]; ok {
 			return fb.goType
+		}
+		// A function block or structured type of OSCAT BASIC is beebread's.
+		if b, ok := t.beebreadTypeOf(dataType); ok {
+			return b.goType
 		}
 		// Convert to uppercase to match standard IEC types (e.g., 'int' -> 'INT').
 		iecType := strings.ToUpper(typeName)
@@ -2712,8 +2791,41 @@ func (t *Transpiler) transpileQualifiedIdentifier(expr *ast.MemberAccessExpressi
 // transpileInfixExpression transpiles an IEC 61131-3 infix expression (e.g., `A + B`, `X AND Y`)
 // into a Go infix expression, mapping IEC operators to their Go equivalents.
 func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
+	// DATE, DT and TOD values compare as points in time.
+	if done, err := t.transpileTimeComparison(exp); done || err != nil {
+		return err
+	}
+	if done, err := t.transpileTimeArithmetic(exp); done || err != nil {
+		return err
+	}
 	t.write("(")
-	if err := t.transpileExpression(exp.Left); err != nil {
+	// Operands of different numeric types meet at the wider type.
+	common := ""
+	lt, rt := t.exprGoType(exp.Left), t.exprGoType(exp.Right)
+	if lt != "" && rt != "" && lt != rt {
+		common = wider(lt, rt)
+	}
+	// An integer literal too big for the other operand's type, such as
+	// 60000 with an INT, makes the operation as wide as the literal needs.
+	// Bit strings keep their width.
+	if !isBitStringGoType(lt) && !isBitStringGoType(rt) {
+		for _, side := range [][2]string{{literalFit(exp.Right), lt}, {literalFit(exp.Left), rt}} {
+			if need, known := side[0], side[1]; need != "" && known != "" && typeRank[need] > typeRank[wider(known, common)] {
+				common = need
+			}
+		}
+	}
+	// A function whose result type comes only from literal arguments, such
+	// as SEL(g, 0, 255), takes the other operand's type.
+	operand := func(e ast.Expression, other string) error {
+		if t.isLibraryCall(e) && common == "" && other != "" {
+			expected := t.expectedGoType
+			t.expectedGoType = other
+			defer func() { t.expectedGoType = expected }()
+		}
+		return t.transpileConverted(e, common)
+	}
+	if err := operand(exp.Left, rt); err != nil {
 		return err
 	}
 
@@ -2749,7 +2861,7 @@ func (t *Transpiler) transpileInfixExpression(exp *ast.InfixExpression) error {
 	}
 
 	t.write(" %s ", op)
-	if err := t.transpileExpression(exp.Right); err != nil {
+	if err := operand(exp.Right, lt); err != nil {
 		return err
 	}
 
@@ -2948,6 +3060,12 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 	if sig, ok := t.lookupCallSignature(exp.Function); ok {
 		return t.transpileUserCall(exp, sig)
 	}
+	// TIME(), the CODESYS clock, is the time since the program started.
+	if isClockCall(exp) {
+		t.usesPlcTime = true
+		t.write("plcTime()")
+		return nil
+	}
 	// A call expression can be a standard function (e.g., SIN(X)) or a Function Block invocation (e.g., MyTimer(IN:=...)).
 	// We'll treat calls with named arguments as potential FB calls.
 	isLikelyFB := false
@@ -2962,6 +3080,8 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 		isLikelyFB = t.isFunctionBlockType(td.DataType)
 	} else if ident, ok := exp.Function.(*ast.Identifier); ok {
 		if _, isStd := royaljellyFunctions[strings.ToUpper(ident.Value)]; isStd {
+			isLikelyFB = false
+		} else if _, _, isOSCAT := t.beebreadFunctionOf(ident); isOSCAT {
 			isLikelyFB = false
 		}
 	}
@@ -2998,12 +3118,15 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 			return err
 		}
 		if isInOut {
-			t.write(".%s = &", namedArg.Name.Value)
+			t.write(".%s = &", t.memberName(exp.Function, namedArg.Name.Value))
+			if err := t.transpileExpression(namedArg.Value); err != nil {
+				return err
+			}
 		} else {
-			t.write(".%s = ", namedArg.Name.Value)
-		}
-		if err := t.transpileExpression(namedArg.Value); err != nil {
-			return err
+			t.write(".%s = ", t.memberName(exp.Function, namedArg.Name.Value))
+			if err := t.transpileValue(namedArg.Value, t.inputGoType(exp.Function, namedArg.Name)); err != nil {
+				return err
+			}
 		}
 		hasWrittenStmt = true
 	}
@@ -3029,7 +3152,7 @@ func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
 		if err := t.transpileExpression(exp.Function); err != nil {
 			return err
 		}
-		t.write(".%s", outArg.Source.Value)
+		t.write(".%s", t.memberName(exp.Function, outArg.Source.Value))
 	}
 	return nil
 }
@@ -3054,7 +3177,7 @@ func (t *Transpiler) isInOutArgument(fbExpr ast.Expression, argName string) bool
 			}
 		}
 	}
-	return indexOfDecl(inOuts, argName) >= 0
+	return indexOfDecl(inOuts, argName) >= 0 || t.isBeebreadInOut(fbExpr, argName)
 }
 
 // transpileStandardFunctionCall transpiles a standard IEC 61131-3 function call
@@ -3067,6 +3190,10 @@ func (t *Transpiler) transpileStandardFunctionCall(exp *ast.CallExpression) erro
 		if _, isMacro := t.macroDefinitions[ident.Value]; isMacro {
 			return fmt.Errorf("the call to macro '%s' could not be expanded", ident.Value)
 		}
+	}
+	// A function of OSCAT BASIC, such as DEAD_BAND.
+	if name, fn, ok := t.beebreadFunctionOf(exp.Function); ok {
+		return t.transpileBeebreadCall(name, fn, exp)
 	}
 	// A royaljelly standard function, such as SQRT or CONCAT.
 	if ident, ok := exp.Function.(*ast.Identifier); ok {
@@ -3258,7 +3385,7 @@ func (t *Transpiler) transpileMemberAccessExpression(exp *ast.MemberAccessExpres
 	if err := t.transpileExpression(exp.Struct); err != nil {
 		return err
 	}
-	t.write(".%s", exp.Member.Value)
+	t.write(".%s", t.memberName(exp.Struct, exp.Member.Value))
 	return nil
 }
 

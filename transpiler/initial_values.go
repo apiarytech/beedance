@@ -158,6 +158,9 @@ func (t *Transpiler) initialValueVisiting(dataType, value ast.Expression, visiti
 	if value == nil {
 		return "", nil
 	}
+	if b, ok := boolLiteral(value); ok && t.mapIecTypeToGo(dataType) == "iec.BOOL" {
+		return b, nil
+	}
 	return t.expressionString(value)
 }
 
@@ -507,6 +510,10 @@ func (t *Transpiler) functionBlockInit(target string, dataType, value ast.Expres
 	if fb != nil && t.functionBlockNeedsInit(fb) {
 		stmts = append(stmts, target+".Init()")
 	}
+	// A function block of OSCAT BASIC sets its initial values with INIT.
+	if b, ok := t.beebreadTypeOf(dataType); ok && b.isFB {
+		stmts = append(stmts, target+".INIT()")
+	}
 	if !isLit {
 		return stmts, nil
 	}
@@ -517,6 +524,13 @@ func (t *Transpiler) functionBlockInit(target string, dataType, value ast.Expres
 	for _, e := range lit.Initializers {
 		name := e.(*ast.NamedArgument).Name.Value
 		fieldName := name
+		if b, ok := t.beebreadTypeOf(dataType); ok {
+			f, _, found := b.field(name)
+			if !found {
+				return nil, fmt.Errorf("function block '%s' has no input '%s'", dataType.String(), name)
+			}
+			fieldName = f
+		}
 		if fb != nil {
 			decl := t.findFunctionBlockVar(fb, name)
 			if decl == nil {
@@ -878,7 +892,13 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 	outputTargets := make([]ast.Expression, len(sig.outputs))
 
 	setArg := func(i int, value ast.Expression) error {
+		// An input of another numeric type is converted to the parameter's.
 		v, err := t.expressionString(value)
+		if i < len(sig.inputs) {
+			v, err = t.capture(func() error {
+				return t.transpileConverted(value, iecOnly(t.mapIecTypeToGo(params[i].DataType)))
+			})
+		}
 		// An array literal takes its type from the parameter.
 		if lit, isLiteral := value.(*ast.ArrayLiteral); isLiteral && i < len(sig.inputs) {
 			if def := t.arrayDefinitionOf(params[i].DataType); def != nil {
@@ -1118,16 +1138,7 @@ func (t *Transpiler) indexedArray(exp ast.Expression) (*ast.ArrayDefinition, int
 		def, dim := t.indexedArray(e.Left)
 		return def, dim + 1
 	case *ast.MemberAccessExpression:
-		owner := t.resolveAssignmentTargetType(e.Struct)
-		if owner == nil {
-			return nil, 0
-		}
-		var decl *ast.VarDeclStatement
-		if def, ok := owner.DataType.(*ast.StructDefinition); ok {
-			decl = decl0(def.Members, e.Member.Value)
-		} else if fb := t.lookupFunctionBlock(owner.DataType); fb != nil {
-			decl = t.findFunctionBlockVar(fb, e.Member.Value)
-		}
+		decl := t.memberDecl(e.Struct, e.Member.Value)
 		if decl == nil {
 			return nil, 0
 		}
@@ -1149,6 +1160,9 @@ func decl0(decls []*ast.VarDeclStatement, name string) *ast.VarDeclStatement {
 func (t *Transpiler) indexLowerBound(exp ast.Expression) int64 {
 	def, dim := t.indexedArray(exp)
 	if def == nil || dim >= len(def.Ranges) {
+		if low, ok := t.beebreadLowerBound(exp); ok {
+			return low
+		}
 		return 0
 	}
 	infix, ok := def.Ranges[dim].(*ast.InfixExpression)
