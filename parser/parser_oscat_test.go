@@ -21,9 +21,11 @@ import (
 	"beedance/token"
 )
 
-// oscatPath is the OSCAT BASIC library, a CODESYS export kept out of the
-// test sources; the tests that read it are skipped without it.
-const oscatPath = "../reference/oscat_basic_335.st"
+// oscatPath is the OSCAT BASIC 3.35 library converted to the IEC 61131-3
+// beedance accepts, kept out of the test sources; the tests that read it are
+// skipped without it. The units that use POINTER TO or ADR, and those that
+// call them, are commented out in it.
+const oscatPath = "../reference/beedance_oscat_basic.st"
 
 // oscatUnits splits the OSCAT library into its POUs, TYPE blocks and global
 // variable blocks, each a separate source.
@@ -84,11 +86,7 @@ func TestOscatLibraryParses(t *testing.T) {
 	for _, k := range keys {
 		t.Logf("%4d  %s\n        e.g. %s", len(causes[k]), k, causes[k][0])
 	}
-	if parsed < oscatParseBaseline {
-		t.Errorf("only %d units parse; at least %d did before", parsed, oscatParseBaseline)
+	if parsed != len(units) {
+		t.Errorf("only %d of %d units parse", parsed, len(units))
 	}
 }
-
-// oscatParseBaseline is the number of OSCAT units known to parse. The
-// others use POINTER TO and ADR, CODESYS extensions beedance does not support.
-const oscatParseBaseline = 488
