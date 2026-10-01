@@ -362,6 +362,9 @@ func arrayElements(node *ast.VarDeclStatement, def *ast.ArrayDefinition, env *ob
 		return value
 	}
 	array, isArray := value.(*object.Array)
+	if _, isLiteral := node.Value.(*ast.ArrayLiteral); isLiteral && isArray && len(lengths) > 1 && !holdsRows(array) {
+		return arrayRows(node, array.Elements, lengths, elementDefault)
+	}
 	if _, isLiteral := node.Value.(*ast.ArrayLiteral); !isLiteral || !isArray || len(lengths) != 1 {
 		return value
 	}
@@ -482,4 +485,50 @@ func lookupNamespace(name string, env *object.Environment) (*object.Namespace, b
 		}
 	}
 	return nil, false
+}
+
+// holdsRows reports whether an array value is written as rows, [[1, 2],
+// [3, 4]], rather than as one list.
+func holdsRows(array *object.Array) bool {
+	for _, el := range array.Elements {
+		if _, ok := el.(*object.Array); !ok {
+			return false
+		}
+	}
+	return len(array.Elements) > 0
+}
+
+// arrayRows arranges the initial value of a multi-dimensional array, written
+// as one list, into rows, as IEC 61131-3 reads it: the last index changes
+// fastest, so ARRAY[1..2, 1..2] OF INT := [1, 2, 3, 4] has the rows [1, 2]
+// and [3, 4]. Elements the list leaves out take their type's default.
+func arrayRows(node *ast.VarDeclStatement, flat []object.Object, lengths []int, elementDefault func() object.Object) object.Object {
+	total := 1
+	for _, n := range lengths {
+		total *= n
+	}
+	if len(flat) > total {
+		return newError(node, "array '%s' holds %d elements, but its initial value has %d", node.Name.Value, total, len(flat))
+	}
+	next := 0
+	var rows func(dims []int) object.Object
+	rows = func(dims []int) object.Object {
+		elements := make([]object.Object, dims[0])
+		for i := range elements {
+			switch {
+			case len(dims) > 1:
+				elements[i] = rows(dims[1:])
+			case next < len(flat):
+				elements[i] = flat[next]
+				next++
+			default:
+				elements[i] = elementDefault()
+			}
+			if isError(elements[i]) {
+				return elements[i]
+			}
+		}
+		return &object.Array{Elements: elements}
+	}
+	return rows(lengths)
 }

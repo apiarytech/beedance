@@ -11,6 +11,7 @@
 package compiler
 
 import (
+	"strings"
 	"testing"
 
 	"beedance/ast"
@@ -139,5 +140,59 @@ func TestBoolLiteralInitialValues(t *testing.T) {
 		if _, err := compileWithClock(t, input); err != nil {
 			t.Errorf("%s: %v", input, err)
 		}
+	}
+}
+
+// TestBuiltinResultTypes checks the types the checker knows of built-in
+// functions' results: a conversion X_TO_Y returns a Y, and a shift or
+// rotation of a bit string returns its type.
+func TestBuiltinResultTypes(t *testing.T) {
+	c := New()
+	c.symbolTable.Define("w", false, "WORD")
+	c.symbolTable.Define("i", false, "INT")
+	word := &ast.Identifier{Value: "w"}
+	integer := &ast.Identifier{Value: "i"}
+	for _, tt := range []struct {
+		name string
+		args []ast.Expression
+		want object.ObjectType
+		ok   bool
+	}{
+		{"INT_TO_DWORD", nil, object.DWORD_OBJ, true},
+		{"dt_to_tod", nil, object.TIME_OF_DAY_OBJ, true},
+		{"REAL_TO_BOOL", nil, object.BOOLEAN_OBJ, true},
+		{"ANY_INT_TO_BCD", nil, "", false},
+		{"SHL", []ast.Expression{word}, object.WORD_OBJ, true},
+		{"ror", []ast.Expression{word}, object.WORD_OBJ, true},
+		{"SHR", []ast.Expression{integer}, "", false},
+		{"SHR", nil, "", false},
+		{"LEN", nil, "", false},
+	} {
+		got, ok := c.builtinResultType(tt.name, tt.args)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("%s: %s %v, want %s %v", tt.name, got, ok, tt.want, tt.ok)
+		}
+	}
+	// DWORD arithmetic on a conversion's result is caught when compiling.
+	_, err := compileWithClock(t, "VAR d : DATE; w : DWORD; END_VAR w := DATE_TO_DWORD(d) / 86400;")
+	if err == nil || !strings.Contains(err.Error(), "not defined for types DWORD and LINT") {
+		t.Errorf("DWORD arithmetic: %v", err)
+	}
+}
+
+// TestFlatArrayInitialValues checks the errors of a multi-dimensional
+// array's initial value written as one list.
+func TestFlatArrayInitialValues(t *testing.T) {
+	for input, want := range map[string]string{
+		"VAR a : ARRAY[1..2,1..2] OF INT := [1,2,3,4,5]; END_VAR": "array 'a' has 4 elements but its initial value lists 5",
+		"VAR a : ARRAY[1..2,1..2] OF INT := ['x']; END_VAR":       "cannot initialize 'a' of type INT with a value of type STRING",
+	} {
+		_, err := compileWithClock(t, input)
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %s", input, err, want)
+		}
+	}
+	if _, err := compileWithClock(t, "VAR a : ARRAY[1..2,1..2] OF INT := [2(1), 3]; END_VAR"); err != nil {
+		t.Errorf("repetition: %v", err)
 	}
 }
