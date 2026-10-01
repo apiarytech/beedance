@@ -209,3 +209,16 @@ func TestOperandTypes(t *testing.T) {
 		{"VAR t : TOD := TOD#10:00:00; END_VAR t < TOD#11:00:00;", true},
 	})
 }
+
+// TestMultiDimensionalInitialValues checks that a multi-dimensional array's
+// initial value, written as one list, fills the array in row order.
+func TestMultiDimensionalInitialValues(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1,2,3,4]; END_VAR a[2,1];", 4},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1,2,3,4]; END_VAR a[1,1];", 2},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [2(7), 9]; END_VAR a[2,0] + a[2,1];", 9},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [1]; END_VAR a[2,1];", 0},
+		{"TYPE Pt : STRUCT m : ARRAY[1..2,0..1] OF STRING(3) := 'a', 'b', 'c', 'd'; END_STRUCT; END_TYPE VAR p : Pt; END_VAR p.m[2,0];", "c"},
+		{"VAR a : ARRAY[1..2,0..1] OF INT := [[1,2],[3,4]]; END_VAR a[2,0];", 3},
+	})
+}

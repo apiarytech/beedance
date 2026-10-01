@@ -2357,6 +2357,9 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 		if err != nil {
 			return "", err
 		}
+		if structType == anyType {
+			return anyType, nil // Its members are checked when it runs.
+		}
 		typeNode, ok := c.resolveTypeNode(&ast.Identifier{Value: string(structType)})
 		if !ok {
 			return "", fmt.Errorf("type definition not found for '%s'", structType)
@@ -2408,8 +2411,13 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 				return "", fmt.Errorf("method '%s' not found on type '%s'", methodName, baseType)
 			}
 		}
-		// Built-in functions have no declared return type here; their result
-		// is checked by the VM when the program runs.
+		if ident, ok := e.Function.(*ast.Identifier); ok {
+			if t, ok := c.builtinResultType(ident.Value, e.Arguments); ok {
+				return t, nil
+			}
+		}
+		// Other built-in functions have no declared return type here; their
+		// result is checked by the VM when the program runs.
 		return anyType, nil
 	case *ast.UnsignedIntegerLiteral:
 		return object.ULINT_OBJ, nil
@@ -2475,23 +2483,14 @@ func bitStringTypeForWidth(width int) object.ObjectType {
 // indexElementType returns the element type of an indexed array variable, as
 // declared, or anyType when it cannot be determined statically.
 func (c *Compiler) indexElementType(e *ast.IndexExpression) object.ObjectType {
-	ident, ok := e.Left.(*ast.Identifier)
-	if !ok {
+	// The array may be a local, a function block's variable, a member, or
+	// of a named array type.
+	def := c.arrayTypeOf(c.declaredVarType(e.Left))
+	if def == nil || def.DataType == nil {
 		return anyType
 	}
-	// Look for the declaration from the innermost scope outwards.
-	for i := c.scopeIndex; i >= 0; i-- {
-		for name, decl := range c.scopes[i].varDecls {
-			if !strings.EqualFold(name, ident.Value) {
-				continue
-			}
-			if arrayDef, ok := decl.DataType.(*ast.ArrayDefinition); ok && arrayDef.DataType != nil {
-				if elementType := c.flattenExpressionToString(arrayDef.DataType); elementType != "" {
-					return object.ObjectType(elementType)
-				}
-			}
-			return anyType
-		}
+	if elementType := c.flattenExpressionToString(def.DataType); elementType != "" {
+		return object.ObjectType(elementType)
 	}
 	return anyType
 }
