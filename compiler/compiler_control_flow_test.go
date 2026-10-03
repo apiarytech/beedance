@@ -11,7 +11,7 @@
 package compiler
 
 import (
-	"beedance/code"
+	"github.com/apiarytech/beedance/code"
 	"testing"
 )
 

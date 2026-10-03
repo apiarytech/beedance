@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"beedance/ast"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 func TestEXPR(t *testing.T) {

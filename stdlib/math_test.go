@@ -1,7 +1,7 @@
 package stdlib
 
 import (
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 	"testing"
 	"time"
 )

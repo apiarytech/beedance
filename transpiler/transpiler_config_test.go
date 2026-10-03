@@ -11,9 +11,9 @@
 package transpiler
 
 import (
-	"beedance/lexer"
-	"beedance/parser"
 	"bytes"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 	"strings"
 	"testing"
 )

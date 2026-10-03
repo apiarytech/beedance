@@ -2,11 +2,11 @@
 package transpiler
 
 import (
-	"beedance/ast"
-	"beedance/evaluator"
-	"beedance/object"
-	"beedance/token"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 	"io"
 	"log" // Added for time.Time and time.Duration
 	"sort"
@@ -116,7 +116,10 @@ type Transpiler struct {
 	w io.Writer
 	// PreferOSCAT makes a name that both OSCAT BASIC (beebread) and royaljelly
 	// define, such as ROUND or CEIL, OSCAT's. It is royaljelly's otherwise.
-	PreferOSCAT      bool
+	PreferOSCAT bool
+	// HostBinding generates New<Program>() and Variables() for each PROGRAM
+	// (see Options.HostBinding).
+	HostBinding      bool
 	programVarName   string // The name of the receiver for program methods, e.g., "p"
 	currentFunc      *ast.FunctionDeclaration
 	currentFuncBlock *ast.FunctionBlockDeclaration   // The current FB being transpiled
@@ -549,6 +552,11 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		}
 	}
 	t.write("}\n")
+	if t.HostBinding {
+		if err := t.transpileHostBinding(prog, allVarBlocks); err != nil {
+			return err
+		}
+	}
 	t.programVarName = "" // Unset after use
 	return nil
 }

@@ -11,11 +11,11 @@
 package embedded
 
 import (
-	"beedance/code"
-	"beedance/compiler"
-	"beedance/object"
 	"bytes"
 	"fmt"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/object"
 	"io"
 	"strings"
 )
@@ -30,9 +30,9 @@ const goFileTemplate = `/*
 package main
 
 import (
-	"beedance/compiler"
-	"beedance/object"
-	"beedance/vm"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/vm"
 	"fmt"
 	"time"
 )

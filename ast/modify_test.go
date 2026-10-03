@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"beedance/token"
+	"github.com/apiarytech/beedance/token"
 	"reflect"
 	"testing"
 )

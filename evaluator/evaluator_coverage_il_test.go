@@ -3,9 +3,9 @@ package evaluator
 import (
 	"testing"
 
-	"beedance/ast"
-	"beedance/object"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 )
 
 // ilProgram wraps IL instructions in a program with some variables, and

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"beedance/stdlib"
+	"github.com/apiarytech/beedance/stdlib"
 )
 
 func TestStandardFunctionBlocks(t *testing.T) {

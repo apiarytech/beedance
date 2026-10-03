@@ -18,12 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
-	_ "beedance/stdlib" // The standard functions OSCAT calls.
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
+	_ "github.com/apiarytech/beedance/stdlib" // The standard functions OSCAT calls.
+	"github.com/apiarytech/beedance/token"
 )
 
 // oscatPath is the OSCAT BASIC 3.35 library converted to the IEC 61131-3

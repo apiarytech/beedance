@@ -1,4 +1,4 @@
-module beedance
+module github.com/apiarytech/beedance
 
 go 1.27.1
 

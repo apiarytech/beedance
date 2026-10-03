@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"beedance/ast"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 // Program instances of a configuration run IL, SFC and ST bodies with

@@ -20,7 +20,7 @@ package transpiler
 import (
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // spellings maps the upper case of names to their declared spelling.

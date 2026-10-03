@@ -18,7 +18,7 @@ package transpiler
 import (
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // valueDataType returns the data type an expression's value was declared

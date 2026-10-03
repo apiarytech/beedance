@@ -11,7 +11,7 @@
 package compiler
 
 import (
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 	"strings"
 )
 

@@ -13,11 +13,11 @@ package vm
 import (
 	"testing"
 
-	"beedance/ast"
-	"beedance/compiler"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // Function outputs can be written to any assignable target.

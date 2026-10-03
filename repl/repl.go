@@ -15,14 +15,14 @@ import (
 	"fmt"
 	"io"
 
-	"beedance/ast"
-	"beedance/compiler"
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 
-	"beedance/evaluator"
-	"beedance/object"
-	"beedance/vm"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/vm"
 )
 
 // PROMPT defines the string that is displayed to the user for input.

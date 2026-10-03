@@ -22,7 +22,7 @@ package transpiler
 import (
 	"unicode"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // reservedGoNames are the names an IEC declaration cannot keep in Go.

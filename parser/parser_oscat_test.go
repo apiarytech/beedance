@@ -17,8 +17,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/lexer"
-	"beedance/token"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/token"
 )
 
 // oscatPath is the OSCAT BASIC 3.35 library converted to the IEC 61131-3

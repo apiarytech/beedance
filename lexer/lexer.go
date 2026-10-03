@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"beedance/token"
+	"github.com/apiarytech/beedance/token"
 )
 
 // Lexer holds the state of the lexical analysis process, including the input string,

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/token"
 )
 
 func testTypedRealLiteral(t *testing.T, exp ast.Expression, typeName string, value float64) bool {
