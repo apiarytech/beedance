@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 )
 
 // evalCase is an input and its expected result: the printed form of the

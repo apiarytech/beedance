@@ -1,9 +1,9 @@
 package parser
 
 import (
-	"beedance/ast"
-	"beedance/lexer"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
 	"testing"
 )
 

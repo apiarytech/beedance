@@ -25,9 +25,9 @@ import (
 	"fmt"
 	"strings"
 
-	"beedance/ast"
-	"beedance/code"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/object"
 )
 
 // programClassName is the name of the function block class of a program.

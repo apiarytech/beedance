@@ -16,7 +16,7 @@ package transpiler
 import (
 	"fmt"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // transpileBitRead writes a bit read as a BOOL.

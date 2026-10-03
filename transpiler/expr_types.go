@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // typeRank orders the elementary types by width: a value converts

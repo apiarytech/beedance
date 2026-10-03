@@ -20,11 +20,11 @@ package transpiler
 // 61131-3 identifiers cannot contain, so they never hide a user's variable.
 
 import (
-	"beedance/ast"
-	"beedance/evaluator"
-	"beedance/object"
 	"bytes"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/object"
 	"strings"
 	"time"
 )

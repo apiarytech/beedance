@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // stdFunction describes a royaljelly standard function; see
@@ -317,18 +317,45 @@ func stdValue[T any](value T, _ error) T { return value }
 // GoFile transpiles program into a complete, formatted Go source file of
 // package main, importing each package the generated code uses.
 func GoFile(program *ast.Program) ([]byte, error) {
+	return GoFileWith(program, Options{})
+}
+
+// Options configures GoFileWith.
+type Options struct {
+	// Package is the generated file's package; "main" if empty. A host that
+	// links programs into its own binary generates them into a package of
+	// their own.
+	Package string
+	// HostBinding generates, for each PROGRAM, New<Program>() and a
+	// Variables() method listing its variables as royaljelly core.Variable,
+	// so a host can bind them to its data (tags, retain storage).
+	HostBinding bool
+	// PreferOSCAT: see Transpiler.PreferOSCAT.
+	PreferOSCAT bool
+}
+
+// GoFileWith is GoFile with options.
+func GoFileWith(program *ast.Program, o Options) ([]byte, error) {
 	var body bytes.Buffer
 	t := New(&body)
+	t.HostBinding, t.PreferOSCAT = o.HostBinding, o.PreferOSCAT
 	if err := t.Transpile(program); err != nil {
 		return nil, err
 	}
-	return goFileWithImports(body.Bytes())
+	pkg := o.Package
+	if pkg == "" {
+		pkg = "main"
+	}
+	return goFileWithImportsIn(body.Bytes(), pkg)
 }
 
 // goFileWithImports adds the package clause and the imports that body
 // refers to, and formats the file.
-func goFileWithImports(body []byte) ([]byte, error) {
-	src := append([]byte("package main\n\n"), body...)
+func goFileWithImports(body []byte) ([]byte, error) { return goFileWithImportsIn(body, "main") }
+
+// goFileWithImportsIn is goFileWithImports for package pkg.
+func goFileWithImportsIn(body []byte, pkg string) ([]byte, error) {
+	src := append([]byte("package "+pkg+"\n\n"), body...)
 	fset := token.NewFileSet()
 	file, err := goparser.ParseFile(fset, "main.go", src, goparser.SkipObjectResolution)
 	if err != nil {
@@ -374,7 +401,7 @@ func goFileWithImports(body []byte) ([]byte, error) {
 	sort.Strings(names)
 
 	var out bytes.Buffer
-	out.WriteString("package main\n\n")
+	out.WriteString("package " + pkg + "\n\n")
 	if len(names) > 0 {
 		out.WriteString("import (\n")
 		for _, name := range names {

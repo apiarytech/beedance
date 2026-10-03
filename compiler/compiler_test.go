@@ -1,13 +1,13 @@
 package compiler
 
 import (
-	"beedance/ast"
-	"beedance/code"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
-	_ "beedance/stdlib"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
+	_ "github.com/apiarytech/beedance/stdlib"
 	"strings"
 	"testing"
 	"time"

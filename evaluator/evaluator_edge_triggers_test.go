@@ -1,7 +1,7 @@
 package evaluator
 
 import (
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 	"testing"
 )
 

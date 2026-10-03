@@ -11,8 +11,8 @@
 package stdlib
 
 import (
-	"beedance/object"
 	"fmt"
+	"github.com/apiarytech/beedance/object"
 )
 
 func init() {

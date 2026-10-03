@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // Project is the root element defined by http://www.plcopen.org/xml/tc6_0201.

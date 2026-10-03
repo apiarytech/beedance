@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
 )
 
 func TestSingleVarDeclStatement(t *testing.T) {

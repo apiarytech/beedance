@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 func TestExportAndImportProgram(t *testing.T) {

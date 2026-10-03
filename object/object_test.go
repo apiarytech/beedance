@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"beedance/ast"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 )
 
 func TestStringHashKey(t *testing.T) {

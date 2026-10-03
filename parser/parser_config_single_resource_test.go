@@ -11,8 +11,8 @@
 package parser
 
 import (
-	"beedance/ast"
-	"beedance/lexer"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
 	"strings"
 	"testing"
 )

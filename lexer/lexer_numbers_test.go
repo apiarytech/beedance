@@ -3,7 +3,7 @@ package lexer
 import (
 	"testing"
 
-	"beedance/token"
+	"github.com/apiarytech/beedance/token"
 )
 
 func TestNumericLiterals(t *testing.T) {

@@ -10,8 +10,8 @@
 package evaluator
 
 import (
-	"beedance/ast"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 // DefineMacros finds all macro definitions within a program's AST, adds them

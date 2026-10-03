@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"beedance/ast"
-	"beedance/code"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
 )
 
 // ObjectType is a string that represents the type of an object.

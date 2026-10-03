@@ -12,10 +12,11 @@
 package vm
 
 import (
-	"beedance/code"
-	"beedance/compiler"
-	"beedance/object"
+	"errors"
 	"fmt"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/object"
 	"math"
 	"strings"
 )
@@ -57,7 +58,21 @@ type VM struct {
 	// and external access paths, keyed by address. A host reads outputs from
 	// it and writes inputs to it between runs; see IO.
 	io map[string]object.Object
+
+	// budget bounds the instructions of one run (SetBudget); used counts
+	// them since the last Reset.
+	budget, used int64
 }
+
+// ErrBudget is returned by Run when a run executes more instructions than
+// its budget: a program caught in a loop is stopped instead of running for
+// ever.
+var ErrBudget = errors.New("vm: execution budget exceeded")
+
+// SetBudget bounds the instructions of each run (from one Reset to the
+// next) to n; 0 or less means no bound. A host running a program every scan
+// sets one, so a scan that loops for ever fails instead of stalling it.
+func (vm *VM) SetBudget(n int64) { vm.budget = n }
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode) *VM {
@@ -74,17 +89,38 @@ func New(bytecode *compiler.Bytecode) *VM {
 		}
 	}
 
+	return newVM(bytecode, defaultBuiltins(), make([]object.Object, GlobalsSize))
+}
+
+// defaultBuiltins returns a VM's own copy of the registered built-ins, indexed
+// by built-in index, so that SetBuiltin changes only that VM.
+func defaultBuiltins() []*object.Builtin {
+	maxIndex := -1
+	for _, entry := range object.Builtins {
+		if entry.Index > maxIndex {
+			maxIndex = entry.Index
+		}
+	}
 	builtins := make([]*object.Builtin, maxIndex+1)
 	for _, entry := range object.Builtins {
 		builtins[entry.Index] = entry.Builtin
 	}
-
-	return NewWithBuiltins(bytecode, builtins)
+	return builtins
 }
 
 // NewWithBuiltins creates a new VM with a specific set of built-in functions.
 // This is useful for testing to avoid dependency on global state.
 func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *VM {
+	return newVM(bytecode, builtins, make([]object.Object, GlobalsSize))
+}
+
+// NewWithGlobalsStore creates a new VM with a pre-populated global variable
+// store, which the VM uses (and changes) in place.
+func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object) *VM {
+	return newVM(bytecode, defaultBuiltins(), s)
+}
+
+func newVM(bytecode *compiler.Bytecode, builtins []*object.Builtin, globals []object.Object) *VM {
 	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
 	mainClosure := &object.Closure{Fn: mainFn}
 	mainFrame := NewFrame(mainClosure, 0)
@@ -96,7 +132,7 @@ func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *V
 		constants:   bytecode.Constants,
 		stack:       make([]object.Object, StackSize),
 		sp:          0,
-		globals:     make([]object.Object, GlobalsSize),
+		globals:     globals,
 		frames:      frames,
 		framesIndex: 1,
 		builtins:    builtins,
@@ -104,11 +140,28 @@ func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *V
 	}
 }
 
-// NewWithGlobalsStore creates a new VM with a pre-populated global variable store.
-func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object) *VM {
-	vm := New(bytecode)
-	vm.globals = s
-	return vm
+// Reset prepares the VM to run its bytecode again, as the next scan of a
+// program: the stack and the call frames start over, while the globals and
+// the I/O image keep their values. A host that runs a program every scan
+// calls Run, Reset, Run, ... on one VM instead of building a VM per scan.
+func (vm *VM) Reset() {
+	vm.used = 0
+	clear(vm.stack[:vm.sp])
+	vm.sp = 0
+	clear(vm.frames[1:vm.framesIndex])
+	vm.frames[0].ip = -1
+	vm.framesIndex = 1
+}
+
+// SetBuiltin replaces the built-in function at index for this VM only, e.g.
+// to give a program a clock of its host's choosing (see stdlib.ClockBuiltins).
+func (vm *VM) SetBuiltin(index int, b *object.Builtin) {
+	if index >= len(vm.builtins) {
+		grown := make([]*object.Builtin, index+1)
+		copy(grown, vm.builtins)
+		vm.builtins = grown
+	}
+	vm.builtins[index] = b
 }
 
 // IO returns the VM's I/O image: the values of located variables and external
@@ -154,6 +207,11 @@ func (vm *VM) Run() (runErr error) {
 	var err error
 
 	for vm.currentFrame().ip < len(vm.currentFrame().Instructions())-1 {
+		if vm.budget > 0 {
+			if vm.used++; vm.used > vm.budget {
+				return ErrBudget
+			}
+		}
 		vm.currentFrame().ip++ // Advance instruction pointer to the next opcode
 		ip := vm.currentFrame().ip
 		ins = vm.currentFrame().Instructions()

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 )
 
 // These tests call each built-in directly with the argument objects,
