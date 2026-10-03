@@ -1,273 +1,265 @@
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _BUFFER_CLEAR : BOOL
-VAR_INPUT
-	PT : POINTER TO BYTE;
-	SIZE : UINT;
-END_VAR
-VAR
-	ptw : POINTER TO DWORD;
-	temp: DWORD;
-	end, end32 : DWORD;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _BUFFER_CLEAR : BOOL
+// VAR_INPUT
+// 	PT : POINTER TO BYTE;
+// 	SIZE : UINT;
+// END_VAR
+// VAR
+// 	ptw : POINTER TO DWORD;
+// 	temp: DWORD;
+// 	end, end32 : DWORD;
+// END_VAR
+//
+// (* this routine uses 32 bit access to gain speed *)
+// (* first access bytes till pointer is aligned for 32 bit access *)
+// temp := pt;
+// end := temp + UINT_TO_DWORD(size);
+// end32 := end - 3;
+// WHILE (pt < end) AND ((temp AND 16#00000003) > 0) DO
+// 	pt^ := 0;
+// 	pt := pt + 1;
+// 	temp := temp + 1;
+// END_WHILE;
+// (* pointer is aligned, now copy 32 bits at a time *)
+// ptw := pt;
+// WHILE ptw < end32 DO (* *)
+// 	ptw^ := 0;
+// 	ptw := ptw + 4;
+// END_WHILE;
+// (* copy the remaining bytes in byte mode *)
+// pt := ptw;
+// WHILE pt < end DO
+// 	pt^ := 0;
+// 	pt := pt + 1;
+// END_WHILE;
+//
+// _BUFFER_CLEAR := TRUE;
+// END_FUNCTION
 
-(* this routine uses 32 bit access to gain speed *)
-(* first access bytes till pointer is aligned for 32 bit access *)
-temp := pt;
-end := temp + UINT_TO_DWORD(size);
-end32 := end - 3;
-WHILE (pt < end) AND ((temp AND 16#00000003) > 0) DO
-	pt^ := 0;
-	pt := pt + 1;
-	temp := temp + 1;
-END_WHILE;
-(* pointer is aligned, now copy 32 bits at a time *)
-ptw := pt;
-WHILE ptw < end32 DO (* *)
-	ptw^ := 0;
-	ptw := ptw + 4;
-END_WHILE;
-(* copy the remaining bytes in byte mode *)
-pt := ptw;
-WHILE pt < end DO
-	pt^ := 0;
-	pt := pt + 1;
-END_WHILE;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _BUFFER_INIT : BOOL
+// VAR_INPUT
+// 	PT : POINTER TO BYTE;
+// 	SIZE : UINT;
+// 	INIT : BYTE;
+// END_VAR
+// VAR
+// 	ptw : POINTER TO DWORD;
+// 	temp : DWORD;
+// 	end, end32 : DWORD;
+// END_VAR
+//
+// (* this routine uses 32 bit access to gain speed *)
+// (* first access bytes till pointer is aligned for 32 bit access *)
+// temp := pt;
+// end := temp + UINT_TO_DWORD(size);
+// end32 := end - 3;
+// WHILE (pt < end) AND ((temp AND 16#00000003) > 0) DO
+// 	pt^ := init;
+// 	pt := pt + 1;
+// 	temp := temp + 1;
+// END_WHILE;
+// (* pointer is aligned, now copy 32 bits at a time *)
+// ptw := pt;
+// temp := SHL(BYTE_TO_DWORD(init),24) OR SHL(BYTE_TO_DWORD(init),16) OR SHL(BYTE_TO_DWORD(init),8) OR BYTE_TO_DWORD(init);
+// WHILE ptw < end32 DO
+// 	ptw^ := temp;
+// 	ptw := ptw + 4;
+// END_WHILE;
+// (* copy the remaining bytes in byte mode *)
+// pt := ptw;
+// WHILE pt < end DO
+// 	pt^ := init;
+// 	pt := pt + 1;
+// END_WHILE;
+//
+// _BUFFER_INIT := TRUE;
+// END_FUNCTION
 
-_BUFFER_CLEAR := TRUE;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _BUFFER_INSERT : INT
+// VAR_INPUT
+// 	STR : STRING(STRING_LENGTH);
+// 	POS : INT;
+// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE : UINT;
+// END_VAR
+// VAR
+// 	end : INT;
+// 	lx: INT;
+// 	i: INT;
+// END_VAR
+//
+// lx := LEN(str);
+// end := pos + lx;
+// (* first move the upper part of the buffer to make space for the string *)
+// FOR i := UINT_TO_INT(size) - 1 TO end BY -1 DO
+// 	pt^[i] := pt^[i-lx];
+// END_FOR;
+// (* copy the string *)
+// _BUFFER_INSERT := _STRING_TO_BUFFER(str, pos, PT, size);
+// END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _BUFFER_INIT : BOOL
-VAR_INPUT
-	PT : POINTER TO BYTE;
-	SIZE : UINT;
-	INIT : BYTE;
-END_VAR
-VAR
-	ptw : POINTER TO DWORD;
-	temp : DWORD;
-	end, end32 : DWORD;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _BUFFER_UPPERCASE : BOOL
+// VAR_INPUT
+// 	PT : POINTER TO ARRAY[0..32000] OF BYTE;
+// 	SIZE : INT;
+// END_VAR
+// VAR
+// 	pos: INT;
+// END_VAR
+//
+// pos := 0;
+// WHILE pos < size DO
+// 	PT^[pos] := TO_UPPER(pt^[pos]);
+// 	pos := pos + 1;
+// END_WHILE;
+//
+// _BUFFER_UPPERCASE := TRUE;
+// END_FUNCTION
 
-(* this routine uses 32 bit access to gain speed *)
-(* first access bytes till pointer is aligned for 32 bit access *)
-temp := pt;
-end := temp + UINT_TO_DWORD(size);
-end32 := end - 3;
-WHILE (pt < end) AND ((temp AND 16#00000003) > 0) DO
-	pt^ := init;
-	pt := pt + 1;
-	temp := temp + 1;
-END_WHILE;
-(* pointer is aligned, now copy 32 bits at a time *)
-ptw := pt;
-temp := SHL(BYTE_TO_DWORD(init),24) OR SHL(BYTE_TO_DWORD(init),16) OR SHL(BYTE_TO_DWORD(init),8) OR BYTE_TO_DWORD(init);
-WHILE ptw < end32 DO
-	ptw^ := temp;
-	ptw := ptw + 4;
-END_WHILE;
-(* copy the remaining bytes in byte mode *)
-pt := ptw;
-WHILE pt < end DO
-	pt^ := init;
-	pt := pt + 1;
-END_WHILE;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _STRING_TO_BUFFER : INT
+// VAR_INPUT
+// 	STR : STRING(STRING_LENGTH);
+// 	POS : INT;
+// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE : UINT;
+// END_VAR
+// VAR
+// 	ps : POINTER TO BYTE;
+// 	i: INT;
+// 	end: INT;
+// END_VAR
+//
+// ps := ADR(str);
+// end := MIN(pos + LEN(str), UINT_TO_INT(size));
+// IF end > 0 THEN end := end -1; END_IF;
+// FOR i := pos TO end DO
+// 	pt^[i] := ps^;
+// 	ps := ps + 1;
+// END_FOR;
+//
+// _STRING_TO_BUFFER := i;
+// END_FUNCTION
 
-_BUFFER_INIT := TRUE;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BUFFER_COMP : INT
+// VAR_INPUT
+// 	PT1 : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE1 : INT;
+// 	PT2 : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE2 : INT;
+// 	START : INT;
+// END_VAR
+// VAR
+// 	i, j, end : INT;
+// 	firstbyte: BYTE;
+// END_VAR
+//
+// (* search for first character match *)
+// IF size2 <= size1 THEN
+// 	end := size1 - size2;
+// 	firstbyte := PT2^[0];
+// 	FOR i := START TO end DO
+// 		IF PT1^[i] = firstbyte THEN
+// 			(* first character matches, now compare rest of array *)
+// 			j := 1;
+// 			WHILE j < size2 DO
+// 				IF pt2^[j] <> pt1^[j+i] THEN EXIT; END_IF;
+// 				j := j + 1;
+// 			END_WHILE;
+// 			(* when J > size2 a match was found return the position i in buffer1 *)
+// 			IF j = size2 THEN
+// 				BUFFER_COMP := i;
+// 				RETURN;
+// 			END_IF;
+// 		END_IF;
+// 	END_FOR;
+// END_IF;
+// BUFFER_COMP := -1;
+//
+//
+// (*
+// hm 14. nov. 2008	rev 1.0
+// 	original version
+//
+// hm	12. nov. 2009	rev 1.1
+// 	performance increase
+//
+// *)
+// END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _BUFFER_INSERT : INT
-VAR_INPUT
-	STR : STRING(STRING_LENGTH);
-	POS : INT;
-	PT : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE : UINT;
-END_VAR
-VAR
-	end : INT;
-	lx: INT;
-	i: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BUFFER_SEARCH : INT
+// VAR_INPUT
+// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE : INT;
+// 	STR : STRING(STRING_LENGTH);
+// 	POS : INT;
+// 	IGN : BOOL;
+// END_VAR
+// VAR
+// 	ps : POINTER TO ARRAY[0..STRING_LENGTH] OF BYTE;
+// 	chx : BYTE;
+// 	i: INT;
+// 	end: INT;
+// 	k: INT;
+// 	lx: INT;
+// END_VAR
+//
+// ps := ADR(STR);
+// lx := LEN(STR);
+// end := MIN(SIZE - lx, SIZE - 1);
+// lx := lx - 1;
+// FOR i := pos TO end DO
+// 	FOR k := 0 TO lx DO
+// 		IF IGN THEN chx := TO_UPPER(pt^[i+k]); ELSE chx := pt^[i+k]; END_IF;
+// 		IF ps^[k] <> chx THEN EXIT; END_IF;
+// 	END_FOR;
+// 	IF k > lx THEN
+// 		BUFFER_SEARCH := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// BUFFER_SEARCH := -1;
+// END_FUNCTION
 
-lx := LEN(str);
-end := pos + lx;
-(* first move the upper part of the buffer to make space for the string *)
-FOR i := UINT_TO_INT(size) - 1 TO end BY -1 DO
-	pt^[i] := pt^[i-lx];
-END_FOR;
-(* copy the string *)
-_BUFFER_INSERT := _STRING_TO_BUFFER(str, pos, PT, size);
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _BUFFER_UPPERCASE : BOOL
-VAR_INPUT
-	PT : POINTER TO ARRAY[0..32000] OF BYTE;
-	SIZE : INT;
-END_VAR
-VAR
-	pos: INT;
-END_VAR
-
-pos := 0;
-WHILE pos < size DO
-	PT^[pos] := TO_UPPER(pt^[pos]);
-	pos := pos + 1;
-END_WHILE;
-
-_BUFFER_UPPERCASE := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _STRING_TO_BUFFER : INT
-VAR_INPUT
-	STR : STRING(STRING_LENGTH);
-	POS : INT;
-	PT : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE : UINT;
-END_VAR
-VAR
-	ps : POINTER TO BYTE;
-	i: INT;
-	end: INT;
-END_VAR
-
-ps := ADR(str);
-end := MIN(pos + LEN(str), UINT_TO_INT(size));
-IF end > 0 THEN end := end -1; END_IF;
-FOR i := pos TO end DO
-	pt^[i] := ps^;
-	ps := ps + 1;
-END_FOR;
-
-_STRING_TO_BUFFER := i;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BUFFER_COMP : INT
-VAR_INPUT
-	PT1 : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE1 : INT;
-	PT2 : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE2 : INT;
-	START : INT;
-END_VAR
-VAR
-	i, j, end : INT;
-	firstbyte: BYTE;
-END_VAR
-
-(* search for first character match *)
-IF size2 <= size1 THEN
-	end := size1 - size2;
-	firstbyte := PT2^[0];
-	FOR i := START TO end DO
-		IF PT1^[i] = firstbyte THEN
-			(* first character matches, now compare rest of array *)
-			j := 1;
-			WHILE j < size2 DO
-				IF pt2^[j] <> pt1^[j+i] THEN EXIT; END_IF;
-				j := j + 1;
-			END_WHILE;
-			(* when J > size2 a match was found return the position i in buffer1 *)
-			IF j = size2 THEN
-				BUFFER_COMP := i;
-				RETURN;
-			END_IF;
-		END_IF;
-	END_FOR;
-END_IF;
-BUFFER_COMP := -1;
-
-
-(*
-hm 14. nov. 2008	rev 1.0
-	original version
-
-hm	12. nov. 2009	rev 1.1
-	performance increase
-
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BUFFER_SEARCH : INT
-VAR_INPUT
-	PT : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE : INT;
-	STR : STRING(STRING_LENGTH);
-	POS : INT;
-	IGN : BOOL;
-END_VAR
-VAR
-	ps : POINTER TO ARRAY[0..STRING_LENGTH] OF BYTE;
-	chx : BYTE;
-	i: INT;
-	end: INT;
-	k: INT;
-	lx: INT;
-END_VAR
-
-ps := ADR(STR);
-lx := LEN(STR);
-end := MIN(SIZE - lx, SIZE - 1);
-lx := lx - 1;
-FOR i := pos TO end DO
-	FOR k := 0 TO lx DO
-		IF IGN THEN chx := TO_UPPER(pt^[i+k]); ELSE chx := pt^[i+k]; END_IF;
-		IF ps^[k] <> chx THEN EXIT; END_IF;
-	END_FOR;
-	IF k > lx THEN
-		BUFFER_SEARCH := i;
-		RETURN;
-	END_IF;
-END_FOR;
-BUFFER_SEARCH := -1;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BUFFER_TO_STRING : STRING(STRING_LENGTH)
-VAR_INPUT
-	PT : POINTER TO ARRAY[0..32767] OF BYTE;
-	SIZE : UINT;
-	START : UINT;
-	STOP : UINT;
-END_VAR
-VAR
-	ps : POINTER TO BYTE;
-	i : UINT;
-	stp: UINT;
-	sta: UINT;
-END_VAR
-
-ps := ADR(BUFFER_TO_STRING);
-IF size = 0 THEN RETURN; END_IF;
-sta := MIN(start, size -1);
-stp := MIN(stop, size -1);
-
-(* check for maximum string_length *)
-IF UINT_TO_INT(stp - sta + 1) >= STRING_LENGTH THEN
-	stp := sta + INT_TO_UINT(STRING_LENGTH) - 1;
-END_IF;
-
-FOR i := sta TO stp DO
-	ps^ := pt^[i];
-	ps := ps + 1;
-END_FOR;
-
-(* terminate the string *)
-
-ps^ := 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BUFFER_TO_STRING : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	SIZE : UINT;
+// 	START : UINT;
+// 	STOP : UINT;
+// END_VAR
+// VAR
+// 	ps : POINTER TO BYTE;
+// 	i : UINT;
+// 	stp: UINT;
+// 	sta: UINT;
+// END_VAR
+//
+// ps := ADR(BUFFER_TO_STRING);
+// IF size = 0 THEN RETURN; END_IF;
+// sta := MIN(start, size -1);
+// stp := MIN(stop, size -1);
+//
+// (* check for maximum string_length *)
+// IF UINT_TO_INT(stp - sta + 1) >= STRING_LENGTH THEN
+// 	stp := sta + INT_TO_UINT(STRING_LENGTH) - 1;
+// END_IF;
+//
+// FOR i := sta TO stp DO
+// 	ps^ := pt^[i];
+// 	ps := ps + 1;
+// END_FOR;
+//
+// (* terminate the string *)
+//
+// ps^ := 0;
+// END_FUNCTION
 
 FUNCTION_BLOCK DRIVER_1
 VAR_INPUT CONSTANT
@@ -3882,48 +3874,47 @@ IF res > 0.0 THEN
 END_IF;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION TEMP_PT : REAL
-VAR_INPUT
-	Res : REAL;
-	R0 : REAL;
-END_VAR
-VAR CONSTANT
-	A : REAL := 3.9083E-3 ;
-	B : REAL := -5.775E-7;
-	accuracy : REAL := 0.01;
-END_VAR
-VAR
-	step: REAL := 50.0;
-	X: REAL;
-	Y: REAL;
-	t1: REAL;
-	pt : POINTER TO DWORD;
-END_VAR
-
-X := A * R0;
-Y := B * R0;
-IF Res >= R0 THEN
-	t1 := X * X - 4.0 * Y * (R0 - Res);
-	IF t1 < 0.0 THEN
-		TEMP_PT := 10000.0;
-	ELSE
-		TEMP_PT := (-X + SQRT(t1)) / (2.0 * Y);
-	END_IF;
-ELSE
-	pt := ADR(step);
-	(* since the formula cannot be solved this is a successive approximation *)
-	TEMP_PT := -100.0;
-	WHILE step > accuracy DO
-		(* test if result greater or less *)
-		IF RES_PT(TEMP_PT, R0) < res THEN TEMP_PT := TEMP_PT + step; ELSE TEMP_PT := TEMP_PT - step; END_IF;
-		pt^ := pt^ - 8388608;  (* this is a super fast divide by 2 method for non floating point CPUs *)
-		(* the alternative code: step := step * 0.5; *)
-	END_WHILE;
-END_IF;
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION TEMP_PT : REAL
+// VAR_INPUT
+// 	Res : REAL;
+// 	R0 : REAL;
+// END_VAR
+// VAR CONSTANT
+// 	A : REAL := 3.9083E-3 ;
+// 	B : REAL := -5.775E-7;
+// 	accuracy : REAL := 0.01;
+// END_VAR
+// VAR
+// 	step: REAL := 50.0;
+// 	X: REAL;
+// 	Y: REAL;
+// 	t1: REAL;
+// 	pt : POINTER TO DWORD;
+// END_VAR
+//
+// X := A * R0;
+// Y := B * R0;
+// IF Res >= R0 THEN
+// 	t1 := X * X - 4.0 * Y * (R0 - Res);
+// 	IF t1 < 0.0 THEN
+// 		TEMP_PT := 10000.0;
+// 	ELSE
+// 		TEMP_PT := (-X + SQRT(t1)) / (2.0 * Y);
+// 	END_IF;
+// ELSE
+// 	pt := ADR(step);
+// 	(* since the formula cannot be solved this is a successive approximation *)
+// 	TEMP_PT := -100.0;
+// 	WHILE step > accuracy DO
+// 		(* test if result greater or less *)
+// 		IF RES_PT(TEMP_PT, R0) < res THEN TEMP_PT := TEMP_PT + step; ELSE TEMP_PT := TEMP_PT - step; END_IF;
+// 		pt^ := pt^ - 8388608;  (* this is a super fast divide by 2 method for non floating point CPUs *)
+// 		(* the alternative code: step := step * 0.5; *)
+// 	END_WHILE;
+// END_IF;
+//
+// END_FUNCTION
 
 FUNCTION TEMP_SI : REAL
 VAR_INPUT
@@ -5818,415 +5809,407 @@ WORD_TO_RANGE := (high - low) * WORD_TO_REAL(X) * 0.00001525902189669640 + low;
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
-FUNCTION LIST_ADD : BOOL
-VAR_INPUT
-	SEP : BYTE;
-	INS : STRING(LIST_LENGTH);
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	sx : STRING(1);
-END_VAR
-VAR
-	INS_work : STRING;
-END_VAR
-(* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
-INS_work := INS;
-
-sx := CHR_TO_STRING(SEP);			(* convert separation character to string *)
-INS_work := CONCAT(sx, INS_work);					(* start element with separation character *)
-
-IF LEN(LIST) + LEN(INS_work) > LIST_LENGTH THEN
-	LIST_ADD := FALSE;					(* return false if element does not fit *)
-ELSE
-	LIST := CONCAT(LIST, INS_work);
-	LIST_ADD := TRUE;
-END_IF;
-
-
-(* revision histroy
-
-hm	21. mar. 2011	rev 2.0
-	original release
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_CLEAN : BOOL
-VAR_INPUT
-	SEP : BYTE;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	read : INT := 1;
-	write : INT := 1;
-	last: BYTE;
-	c: BYTE;
-END_VAR
-
-pt := ADR(LIST);
-
-FOR read := 1 TO LIST_LENGTH DO
-	c := pt^[read];								(* read character from list *)
-	IF c = 0 THEN EXIT;						(* exit the loop if character definbes end of string *)
-	ELSIF c <> SEP OR sep <> last THEN	(* copy element from read to write position unless a double sep character is present *)
-		pt^[write] := c;
-		write := write + 1;
-	END_IF;
-	last := c;									(* remember last character *)
-END_FOR;
-
-IF last = SEP THEN write := write - 1; END_IF;		(* if last character is sep then delete empty element at end *)
-IF write <= STRING_LENGTH THEN pt^[write] := 0;	 END_IF;		(* terminate string with 0 *)
-
-LIST_CLEAN := TRUE;						(* retrun TRUE *)
-
-
-(* revision histroy
-hm	28. jun. 2008	rev 1.0
-	original release
-
-hm	19. jan. 2011	rev 1.1
-	changed string(255) to string(LIST_LENGTH)
-
-hm	21. mar. 2011	rev 2.0
-	all elements start with SEP
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_GET : STRING(LIST_LENGTH)
-VAR_INPUT
-	SEP : BYTE;
-	POS : INT;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	i : INT := 1;
-	o : INT := 1;
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	cnt: INT := 0;
-	c: BYTE;
-END_VAR
-
-pt := ADR(LIST);							(* load pointers *)
-po := ADR(LIST_GET);
-
-REPEAT
-	c := pt^[i];
-	IF cnt = pos THEN						(* copy element to output string *)
-		IF c = SEP  THEN EXIT; END_IF;		(* next element stop copy and finish *)
-		po^[o] := c;
-		o := o + 1;
-	ELSIF c = SEP THEN
-		cnt := cnt + 1;
-	END_IF;
-	i := i + 1;
-UNTIL
-	(i = LIST_LENGTH) OR (c = 0)
-END_REPEAT;
-po^[o] := 0;						(* close the output string *)
-
-
-
-(* revision histroy
-hm	20. jun. 2008	rev 1.0
-	original release
-
-hm	19. jan. 2011	rev 1.1
-	changed string(255) to strring(LIST_LENGTH)
-
-hm	21. mar. 2011	rev 2.0
-	all list elements start with SEP
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_INSERT : BOOL
-VAR_INPUT
-	SEP : BYTE;
-	POS : INT;
-	INS : STRING(LIST_LENGTH);
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	read : INT := 1;
-	cnt : INT := 1;
-	sx : STRING(1);
-END_VAR
-
-(* load pointers *)
-pt := ADR(LIST);
-
-IF LEN(ins) + 1 + LEN(LIST) > LIST_LENGTH THEN
-	LIST_INSERT := FALSE;
-ELSE
-	LIST_INSERT := TRUE;
-	(* search for position *)
-	WHILE read < LIST_LENGTH DO
-		IF cnt >= POS THEN
-			sx := CHR_TO_STRING(SEP);
-			INS := CONCAT(sx, INS);
-			LIST := INSERT(LIST, INS, read - 1);
-			LIST_INSERT := TRUE;
-			RETURN;
-		END_IF;
-		IF pt^[read]  = 0 THEN				(* list is too short add empty element *)
-			pt^[read] := SEP;
-			pt^[read + 1] := 0;
-		END_IF;
-		read := read + 1;
-		IF pt^[read] = SEP OR pt^[read] = 0 THEN cnt := cnt + 1; END_IF;
-	END_WHILE;
-END_IF;
-
-
-
-(* revision histroy
-hm	28. jun. 2008	rev 1.0
-	original release
-
-hm	17. dec. 2008	rev 1.1
-	changes name of function chr to chr_to_string
-
-hm	19. jan. 2011	rev 1.2
-	changed string(255) to string(LIST_LENGTH)
-
-hm	21. mar. 2011	rev 2.0
-	all list elements start with SEP
-	
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_LEN : INT
-VAR_INPUT
-	SEP : BYTE;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	pos: INT := 1;
-	c: BYTE;
-END_VAR
-
-pt := ADR(LIST);
-LIST_LEN := 0;
-REPEAT
-	c := pt^[pos];
-	IF c = SEP THEN LIST_LEN := LIST_LEN + 1; END_IF;
-	pos := pos + 1;
-UNTIL
-	c = 0 OR pos > LIST_LENGTH
-END_REPEAT;
-
-
-
-(* revision histroy
-hm	25. jun. 2008	rev 1.0
-	original release
-
-hm	16. oct. 2008	rev 1.1
-	fixed a problem where list_len would only work up to LIST_LENGTH
-
-hm	19. jan. 2001	rev 1.2
-	changed string(255) to string(LIST_LENGTH)
-
-hm	21. mar. 2011	rev 2.0
-	all list elements start with SEP
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION_BLOCK LIST_NEXT
-VAR_INPUT
-	SEP : BYTE;
-	RST : BOOL;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR_OUTPUT
-	LEL : STRING(LIST_LENGTH);
-	NUL : BOOL;
-END_VAR
-VAR
-	pos : INT := 1;
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	c: BYTE;
-	write: INT;
-END_VAR
-
-pt := ADR(LIST);
-po := ADR(LEL);
-
-IF rst THEN
-	pos := 1;
-END_IF;
-
-IF pt^[pos] = 0 OR pos = LIST_LENGTH THEN
-	LEL := '';
-	NUL := TRUE;
-ELSE
-	NUL := FALSE;
-	write := 1;
-	FOR pos := pos + 1 TO LIST_LENGTH DO
-		c := pt^[pos];
-		IF c = 0 OR c = SEP THEN
-			po^[write] := 0;
-			RETURN;
-		ELSE
-			po^[write] := pt^[pos];
-			write := write + 1;
-		END_IF;
-	END_FOR;
-END_IF;
-
-
-
-
-(* revision histroy
-hm	25. jun. 2008	rev 1.0
-	original release
-
-hm	19. jan. 2011	rev 1.1
-	changed string(255) to string(LIST_LENGTH)	
-
-hm	21. mar. 2011	rev 2.0
-	all elements start with SEP
-
-*)	
-
-END_FUNCTION_BLOCK
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_RETRIEVE : STRING(LIST_LENGTH)
-VAR_INPUT
-	SEP : BYTE;
-	POS : INT;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	i :	INT;
-	o : INT := 1;
-	w : INT := 1;
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	cnt: INT := 0;
-	c: BYTE;
-END_VAR
-
-(* load pointers *)
-pt := ADR(LIST);
-po := ADR(LIST_RETRIEVE);
-
-IF pos > 0 THEN
-	FOR i := 1 TO LIST_LENGTH DO
-		c := pt^[i];
-		IF c = 0 THEN
-			po^[o] := 0;
-			IF cnt < pos THEN pt^[w + 1] := 0; ELSE pt^[w] := 0; END_IF;
-			RETURN;
-		ELSIF cnt = pos AND c <> SEP THEN				(* we have found the element *)
-			po^[o] := pt^[i];
-			o := o + 1;
-		ELSIF cnt >= pos THEN
-			pt^[w] := c;
-			w := w + 1;
-		ELSE
-			w := i;
-		END_IF;
-		IF c = sep THEN cnt := cnt + 1; END_IF;
-	END_FOR;
-ELSE
-	LIST_RETRIEVE := '';
-END_IF;
-
-
-(* revision histroy
-hm	28. jun. 2008	rev 1.0
-	original release
-
-hm	19. jan. 2011	rev 1.1
-	changed string(255) to string(LIST_LENGTH)
-
-hm	21. mar. 2011	rev 2.0
-	all elements start with SEP
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LIST_RETRIEVE_LAST : STRING(LIST_LENGTH)
-VAR_INPUT
-	SEP : BYTE;
-END_VAR
-VAR_IN_OUT
-	LIST : STRING(LIST_LENGTH);
-END_VAR
-VAR
-	i :	INT;
-	last : INT := 1;
-	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-	c: BYTE;
-END_VAR
-
-(* load pointers *)
-pt := ADR(LIST);
-
-(* search position of last element *)
-FOR i := 1 TO LIST_LENGTH DO
-	c := pt^[i];
-	IF c = 0 THEN
-		EXIT;
-	ELSIF C = SEP THEN
-		last := i;
-	END_IF;
-END_FOR;
-(* return last element of list *)
-LIST_RETRIEVE_LAST := MID(LIST, LIST_LENGTH, last + 1);
-(* terminate list at i *)
-pt^[last] := 0;
-
-
-
-(* revision histroy
-hm	21. mar. 2011	rev 2.0
-	new module
-*)	
-END_FUNCTION
-*)
+// Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
+// FUNCTION LIST_ADD : BOOL
+// VAR_INPUT
+// 	SEP : BYTE;
+// 	INS : STRING(LIST_LENGTH);
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	sx : STRING(1);
+// END_VAR
+// VAR
+// 	INS_work : STRING;
+// END_VAR
+// (* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
+// INS_work := INS;
+//
+// sx := CHR_TO_STRING(SEP);			(* convert separation character to string *)
+// INS_work := CONCAT(sx, INS_work);					(* start element with separation character *)
+//
+// IF LEN(LIST) + LEN(INS_work) > LIST_LENGTH THEN
+// 	LIST_ADD := FALSE;					(* return false if element does not fit *)
+// ELSE
+// 	LIST := CONCAT(LIST, INS_work);
+// 	LIST_ADD := TRUE;
+// END_IF;
+//
+//
+// (* revision histroy
+//
+// hm	21. mar. 2011	rev 2.0
+// 	original release
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_CLEAN : BOOL
+// VAR_INPUT
+// 	SEP : BYTE;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	read : INT := 1;
+// 	write : INT := 1;
+// 	last: BYTE;
+// 	c: BYTE;
+// END_VAR
+//
+// pt := ADR(LIST);
+//
+// FOR read := 1 TO LIST_LENGTH DO
+// 	c := pt^[read];								(* read character from list *)
+// 	IF c = 0 THEN EXIT;						(* exit the loop if character definbes end of string *)
+// 	ELSIF c <> SEP OR sep <> last THEN	(* copy element from read to write position unless a double sep character is present *)
+// 		pt^[write] := c;
+// 		write := write + 1;
+// 	END_IF;
+// 	last := c;									(* remember last character *)
+// END_FOR;
+//
+// IF last = SEP THEN write := write - 1; END_IF;		(* if last character is sep then delete empty element at end *)
+// IF write <= STRING_LENGTH THEN pt^[write] := 0;	 END_IF;		(* terminate string with 0 *)
+//
+// LIST_CLEAN := TRUE;						(* retrun TRUE *)
+//
+//
+// (* revision histroy
+// hm	28. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	19. jan. 2011	rev 1.1
+// 	changed string(255) to string(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all elements start with SEP
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_GET : STRING(LIST_LENGTH)
+// VAR_INPUT
+// 	SEP : BYTE;
+// 	POS : INT;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	i : INT := 1;
+// 	o : INT := 1;
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	cnt: INT := 0;
+// 	c: BYTE;
+// END_VAR
+//
+// pt := ADR(LIST);							(* load pointers *)
+// po := ADR(LIST_GET);
+//
+// REPEAT
+// 	c := pt^[i];
+// 	IF cnt = pos THEN						(* copy element to output string *)
+// 		IF c = SEP  THEN EXIT; END_IF;		(* next element stop copy and finish *)
+// 		po^[o] := c;
+// 		o := o + 1;
+// 	ELSIF c = SEP THEN
+// 		cnt := cnt + 1;
+// 	END_IF;
+// 	i := i + 1;
+// UNTIL
+// 	(i = LIST_LENGTH) OR (c = 0)
+// END_REPEAT;
+// po^[o] := 0;						(* close the output string *)
+//
+//
+//
+// (* revision histroy
+// hm	20. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	19. jan. 2011	rev 1.1
+// 	changed string(255) to strring(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all list elements start with SEP
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_INSERT : BOOL
+// VAR_INPUT
+// 	SEP : BYTE;
+// 	POS : INT;
+// 	INS : STRING(LIST_LENGTH);
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	read : INT := 1;
+// 	cnt : INT := 1;
+// 	sx : STRING(1);
+// END_VAR
+//
+// (* load pointers *)
+// pt := ADR(LIST);
+//
+// IF LEN(ins) + 1 + LEN(LIST) > LIST_LENGTH THEN
+// 	LIST_INSERT := FALSE;
+// ELSE
+// 	LIST_INSERT := TRUE;
+// 	(* search for position *)
+// 	WHILE read < LIST_LENGTH DO
+// 		IF cnt >= POS THEN
+// 			sx := CHR_TO_STRING(SEP);
+// 			INS := CONCAT(sx, INS);
+// 			LIST := INSERT(LIST, INS, read - 1);
+// 			LIST_INSERT := TRUE;
+// 			RETURN;
+// 		END_IF;
+// 		IF pt^[read]  = 0 THEN				(* list is too short add empty element *)
+// 			pt^[read] := SEP;
+// 			pt^[read + 1] := 0;
+// 		END_IF;
+// 		read := read + 1;
+// 		IF pt^[read] = SEP OR pt^[read] = 0 THEN cnt := cnt + 1; END_IF;
+// 	END_WHILE;
+// END_IF;
+//
+//
+//
+// (* revision histroy
+// hm	28. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	17. dec. 2008	rev 1.1
+// 	changes name of function chr to chr_to_string
+//
+// hm	19. jan. 2011	rev 1.2
+// 	changed string(255) to string(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all list elements start with SEP
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_LEN : INT
+// VAR_INPUT
+// 	SEP : BYTE;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pos: INT := 1;
+// 	c: BYTE;
+// END_VAR
+//
+// pt := ADR(LIST);
+// LIST_LEN := 0;
+// REPEAT
+// 	c := pt^[pos];
+// 	IF c = SEP THEN LIST_LEN := LIST_LEN + 1; END_IF;
+// 	pos := pos + 1;
+// UNTIL
+// 	c = 0 OR pos > LIST_LENGTH
+// END_REPEAT;
+//
+//
+//
+// (* revision histroy
+// hm	25. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	16. oct. 2008	rev 1.1
+// 	fixed a problem where list_len would only work up to LIST_LENGTH
+//
+// hm	19. jan. 2001	rev 1.2
+// 	changed string(255) to string(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all list elements start with SEP
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION_BLOCK LIST_NEXT
+// VAR_INPUT
+// 	SEP : BYTE;
+// 	RST : BOOL;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR_OUTPUT
+// 	LEL : STRING(LIST_LENGTH);
+// 	NUL : BOOL;
+// END_VAR
+// VAR
+// 	pos : INT := 1;
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	c: BYTE;
+// 	write: INT;
+// END_VAR
+//
+// pt := ADR(LIST);
+// po := ADR(LEL);
+//
+// IF rst THEN
+// 	pos := 1;
+// END_IF;
+//
+// IF pt^[pos] = 0 OR pos = LIST_LENGTH THEN
+// 	LEL := '';
+// 	NUL := TRUE;
+// ELSE
+// 	NUL := FALSE;
+// 	write := 1;
+// 	FOR pos := pos + 1 TO LIST_LENGTH DO
+// 		c := pt^[pos];
+// 		IF c = 0 OR c = SEP THEN
+// 			po^[write] := 0;
+// 			RETURN;
+// 		ELSE
+// 			po^[write] := pt^[pos];
+// 			write := write + 1;
+// 		END_IF;
+// 	END_FOR;
+// END_IF;
+//
+//
+//
+//
+// (* revision histroy
+// hm	25. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	19. jan. 2011	rev 1.1
+// 	changed string(255) to string(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all elements start with SEP
+//
+// *)
+//
+// END_FUNCTION_BLOCK
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_RETRIEVE : STRING(LIST_LENGTH)
+// VAR_INPUT
+// 	SEP : BYTE;
+// 	POS : INT;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	i :	INT;
+// 	o : INT := 1;
+// 	w : INT := 1;
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	cnt: INT := 0;
+// 	c: BYTE;
+// END_VAR
+//
+// (* load pointers *)
+// pt := ADR(LIST);
+// po := ADR(LIST_RETRIEVE);
+//
+// IF pos > 0 THEN
+// 	FOR i := 1 TO LIST_LENGTH DO
+// 		c := pt^[i];
+// 		IF c = 0 THEN
+// 			po^[o] := 0;
+// 			IF cnt < pos THEN pt^[w + 1] := 0; ELSE pt^[w] := 0; END_IF;
+// 			RETURN;
+// 		ELSIF cnt = pos AND c <> SEP THEN				(* we have found the element *)
+// 			po^[o] := pt^[i];
+// 			o := o + 1;
+// 		ELSIF cnt >= pos THEN
+// 			pt^[w] := c;
+// 			w := w + 1;
+// 		ELSE
+// 			w := i;
+// 		END_IF;
+// 		IF c = sep THEN cnt := cnt + 1; END_IF;
+// 	END_FOR;
+// ELSE
+// 	LIST_RETRIEVE := '';
+// END_IF;
+//
+//
+// (* revision histroy
+// hm	28. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	19. jan. 2011	rev 1.1
+// 	changed string(255) to string(LIST_LENGTH)
+//
+// hm	21. mar. 2011	rev 2.0
+// 	all elements start with SEP
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LIST_RETRIEVE_LAST : STRING(LIST_LENGTH)
+// VAR_INPUT
+// 	SEP : BYTE;
+// END_VAR
+// VAR_IN_OUT
+// 	LIST : STRING(LIST_LENGTH);
+// END_VAR
+// VAR
+// 	i :	INT;
+// 	last : INT := 1;
+// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	c: BYTE;
+// END_VAR
+//
+// (* load pointers *)
+// pt := ADR(LIST);
+//
+// (* search position of last element *)
+// FOR i := 1 TO LIST_LENGTH DO
+// 	c := pt^[i];
+// 	IF c = 0 THEN
+// 		EXIT;
+// 	ELSIF C = SEP THEN
+// 		last := i;
+// 	END_IF;
+// END_FOR;
+// (* return last element of list *)
+// LIST_RETRIEVE_LAST := MID(LIST, LIST_LENGTH, last + 1);
+// (* terminate list at i *)
+// pt^[last] := 0;
+//
+//
+//
+// (* revision histroy
+// hm	21. mar. 2011	rev 2.0
+// 	new module
+// *)
+// END_FUNCTION
 
 FUNCTION_BLOCK COUNT_BR
 VAR_INPUT
@@ -7061,30 +7044,29 @@ check_parity := even(cnt) XOR P;
 *)
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION CHK_REAL : BYTE
-VAR_INPUT
-	X : REAL;
-END_VAR
-VAR
-	pt : POINTER TO DWORD;
-	tmp : DWORD;
-END_VAR
-
-
-pt := ADR(X);				(* move real to dword, real_to_dword does not work becasze it treats dword as a number on many systems *)
-tmp := ROL(pt^,1);			(* rotate left foir easy checking, sign will be at lease significant digit *)
-IF tmp < 16#FF000000 THEN
-	CHK_REAL := 16#00;		(* normalized and denormalized numbers *)
-ELSIF tmp = 16#FF000000 THEN
-	CHK_REAL := 16#20;		(* X is +infinity see IEEE754 *)
-ELSIF tmp = 16#FF000001 THEN
-	CHK_REAL := 16#40;		(* X is -infinity see IEEE754 *)
-ELSE
-	CHK_REAL := 16#80;		(* X is NAN see IEEE754 *)
-END_IF;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION CHK_REAL : BYTE
+// VAR_INPUT
+// 	X : REAL;
+// END_VAR
+// VAR
+// 	pt : POINTER TO DWORD;
+// 	tmp : DWORD;
+// END_VAR
+//
+//
+// pt := ADR(X);				(* move real to dword, real_to_dword does not work becasze it treats dword as a number on many systems *)
+// tmp := ROL(pt^,1);			(* rotate left foir easy checking, sign will be at lease significant digit *)
+// IF tmp < 16#FF000000 THEN
+// 	CHK_REAL := 16#00;		(* normalized and denormalized numbers *)
+// ELSIF tmp = 16#FF000000 THEN
+// 	CHK_REAL := 16#20;		(* X is +infinity see IEEE754 *)
+// ELSIF tmp = 16#FF000001 THEN
+// 	CHK_REAL := 16#40;		(* X is -infinity see IEEE754 *)
+// ELSE
+// 	CHK_REAL := 16#80;		(* X is NAN see IEEE754 *)
+// END_IF;
+// END_FUNCTION
 
 FUNCTION_BLOCK DEC_2
 VAR_INPUT
@@ -7163,20 +7145,19 @@ CASE X OF
 END_CASE;
 END_FUNCTION_BLOCK
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DW_TO_REAL : REAL
-VAR_INPUT
-	X : DWORD;
-END_VAR
-VAR
-	pt : POINTER TO REAL;
-END_VAR
-
-
-pt := ADR(X);
-DW_TO_REAL := pt^;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DW_TO_REAL : REAL
+// VAR_INPUT
+// 	X : DWORD;
+// END_VAR
+// VAR
+// 	pt : POINTER TO REAL;
+// END_VAR
+//
+//
+// pt := ADR(X);
+// DW_TO_REAL := pt^;
+// END_FUNCTION
 
 FUNCTION DWORD_OF_BYTE : DWORD
 VAR_INPUT
@@ -7270,20 +7251,19 @@ IF (cnt MOD 2) = 1 THEN parity := TRUE; ELSE parity := FALSE; END_IF;
 *)
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION REAL_TO_DW : DWORD
-VAR_INPUT
-	X : REAL;
-END_VAR
-VAR
-	pt : POINTER TO DWORD;
-END_VAR
-
-
-pt := ADR(X);
-REAL_TO_DW := pt^;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION REAL_TO_DW : DWORD
+// VAR_INPUT
+// 	X : REAL;
+// END_VAR
+// VAR
+// 	pt : POINTER TO DWORD;
+// END_VAR
+//
+//
+// pt := ADR(X);
+// REAL_TO_DW := pt^;
+// END_FUNCTION
 
 FUNCTION REFLECT : DWORD
 VAR_INPUT
@@ -8772,105 +8752,104 @@ END_IF;
 
 END_FUNCTION_BLOCK
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION CRC_GEN : DWORD
-
-VAR_INPUT
-	PT : POINTER TO ARRAY[0..32000] OF BYTE;
-	SIZE : INT;
-	PL : INT;
-	PN : DWORD;
-	INIT : DWORD;
-	REV_IN : BOOL;
-	REV_OUT : BOOL;
-	XOR_OUT : DWORD;
-END_VAR
-VAR
-	pos : INT;
-	shift : INT;
-	dx: BYTE;
-	bits: INT;
-END_VAR
-
-
-(* align polygon *)
-shift := 32 - PL;
-PN := SHL(PN, shift);
-
-(* load first 4 bytes into register minimum message size is 4 bytes
-	for smaller messages fill with 0#s at the beginning*)
-FOR pos := 0 TO 3 DO
-	IF REV_IN THEN CRC_GEN := SHL(CRC_GEN, 8) OR REVERSE(PT^[pos]); ELSE CRC_GEN := SHL(CRC_GEN, 8) OR PT^[pos]; END_IF;
-END_FOR;
-pos := 4;
-
-(* xor with init value *)
-CRC_GEN := CRC_GEN XOR SHL(init, shift);
-
-(* calculate CRC for each byte *)
-WHILE pos < size DO
-	IF REV_IN THEN DX := REVERSE(PT^[pos]); ELSE DX := PT^[pos]; END_IF;
-	pos := pos + 1;
-	(* crc calculation for one byte *)
-	FOR bits := 0 TO 7 DO
-		IF CRC_GEN.31 THEN
-			CRC_GEN := (SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7)) XOR PN;
-		ELSE
-			CRC_GEN := SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7);
-		END_IF;
-		dx := SHL(dx, 1);
-	END_FOR;
-END_WHILE;
-
-(* all bytes are processed, need to finish the registers 32 bits *)
-FOR bits := 0 TO 31 DO
-	IF CRC_GEN.31 THEN
-		CRC_GEN := (SHL(CRC_GEN, 1) ) XOR PN;
-	ELSE
-		CRC_GEN := SHL(CRC_GEN, 1);
-	END_IF;
-END_FOR;
-
-(* final XOR *)
-CRC_GEN := SHR(CRC_GEN, shift) XOR XOR_OUT;
-
-(* reverse the crc_out put if necessary *)
-IF REV_OUT THEN CRC_GEN := REFLECT(CRC_GEN, PL); END_IF;
-
-(* suggested optimization by deninis klopke
-die betreffs genannte Funktion kann folgenderma�en optimiert werden:
-In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil �OR BOOL_TO_DWORD(DX.7)� entfallen, da nach 8maligem Linksshift von �DX� in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
-*)
-
-(* typical crc polynoms
-
-CRC-4-ITU 			x4 + x + 1 					(ITU G.704, p. 12) 	0x3 or 0xC (0x9)
-CRC-5-ITU 			x5 + x4 + x2 + 1 			(ITU G.704, p. 9) 	0x15 or 0x15 (0x0B) Bluetooth
-CRC-5-USB 			x5 + x2 + 1 				(use: USB token packets) 	0x05 or 0x14 (0x9)
-CRC-6-ITU 			x6 + x + 1 					(ITU G.704, p. 3) 	0x03 or 0x30 (0x21)
-CRC-7 				x7 + x3 + 1 				(use: telecom systems, MMC) 	0x09 or 0x48 (0x11)
-CRC-8-ATM 			x8 + x2 + x + 1 				(use: ATM HEC) 	0x07 or 0xE0 (0xC1)
-CRC-8-CCITT 		x8 + x7 + x3 + x2 + 1 		(use: 1-Wire bus) 	0x8D or 0xB1 (0x63)
-CRC-8-Dallas/Maxim 	x8 + x5 + x4 + 1 			(use: 1-Wire bus) 	0x31 or 0x8C (0x19)
-CRC-8 				x8 + x7 + x6 + x4 + x2 + 1 	0xD5 or 0xAB (0x57)
-CRC-8-SAE J1850 	x8 + x4 + x3 + x2 + 1 		0x1D or 0xB8
-CRC-10 				x10 + x9 + x5 + x4 + x + 1 	0x233 or 0x331 (0x263)
-CRC-12 				x12 + x11 + x3 + x2 + x + 1 (use: telecom systems) 	0x80F or 0xF01 (0xE03)
-CRC-15-CAN 			x15 + x14 + x10 + x8 + x7 + x4 + x3 + 1 	0x4599 or 0x4CD1 (0x19A3)
-CRC-16-Fletcher 	Not a CRC; see Fletcher's checksum 	Used in Adler-32 A & B CRCs
-CRC-16-CCITT 	x16 + x12 + x5 + 1 (XMODEM,X.25, V.41, Bluetooth, PPP, IrDA; known as "CRC-CCITT") 	0x1021 or 0x8408 (0x0811)
-CRC-16-IBM 	x16 + x15 + x2 + 1 (USB, many others; also known as "CRC-16") 	0x8005 or 0xA001 (0x4003)
-CRC-24-Radix-64 	x24 + x23 + x18 + x17 + x14 + x11 + x10 + x7 + x6 + x5 + x4 + x3 + x + 1 	0x864CFB or 0xDF3261 (0xBE64C3)
-CRC-32-Adler 	Not a CRC; see Adler-32 	See Adler-32
-CRC-32-MPEG2 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 	0x04C11DB7 or 0xEDB88320 (0xDB710641) Also used in IEEE 802.3
-CRC-32-IEEE 802.3 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 (V.42) 	0x04C11DB7 or 0xEDB88320 (0xDB710641)
-CRC-32C (Castagnoli) 	x32 + x28 + x27 + x26 + x25 + x23 + x22 + x20 + x19 + x18 + x14 + x13 + x11 + x10 + x9 + x8 + x6 + 1 	0x1EDC6F41 or 0x82F63B78 (0x05EC76F1)
-CRC-64-ISO 	x64 + x4 + x3 + x + 1 (use: ISO 3309) 	0x000000000000001B or 0xD800000000000000 (0xB000000000000001)
-CRC-64-ECMA-182 	x64 + x62 + x57 + x55 + x54 + x53 + x52 + x47 + x46 + x45 + x40 + x39 + x38 + x37 + x35 + x33 + x32 + x31 + x29 + x27 + x24 + x23 + x22 + x21 + x19 + x17 + x13 + x12 + x10 + x9 + x7 + x4 + x + 1
-(as described in ECMA-182 p.63) 	0x42F0E1EBA9EA3693 or 0xC96C5795D7870F42 (0x92D8AF2BAF0E1E85)
-*)
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION CRC_GEN : DWORD
+//
+// VAR_INPUT
+// 	PT : POINTER TO ARRAY[0..32000] OF BYTE;
+// 	SIZE : INT;
+// 	PL : INT;
+// 	PN : DWORD;
+// 	INIT : DWORD;
+// 	REV_IN : BOOL;
+// 	REV_OUT : BOOL;
+// 	XOR_OUT : DWORD;
+// END_VAR
+// VAR
+// 	pos : INT;
+// 	shift : INT;
+// 	dx: BYTE;
+// 	bits: INT;
+// END_VAR
+//
+//
+// (* align polygon *)
+// shift := 32 - PL;
+// PN := SHL(PN, shift);
+//
+// (* load first 4 bytes into register minimum message size is 4 bytes
+// 	for smaller messages fill with 0#s at the beginning*)
+// FOR pos := 0 TO 3 DO
+// 	IF REV_IN THEN CRC_GEN := SHL(CRC_GEN, 8) OR REVERSE(PT^[pos]); ELSE CRC_GEN := SHL(CRC_GEN, 8) OR PT^[pos]; END_IF;
+// END_FOR;
+// pos := 4;
+//
+// (* xor with init value *)
+// CRC_GEN := CRC_GEN XOR SHL(init, shift);
+//
+// (* calculate CRC for each byte *)
+// WHILE pos < size DO
+// 	IF REV_IN THEN DX := REVERSE(PT^[pos]); ELSE DX := PT^[pos]; END_IF;
+// 	pos := pos + 1;
+// 	(* crc calculation for one byte *)
+// 	FOR bits := 0 TO 7 DO
+// 		IF CRC_GEN.31 THEN
+// 			CRC_GEN := (SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7)) XOR PN;
+// 		ELSE
+// 			CRC_GEN := SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7);
+// 		END_IF;
+// 		dx := SHL(dx, 1);
+// 	END_FOR;
+// END_WHILE;
+//
+// (* all bytes are processed, need to finish the registers 32 bits *)
+// FOR bits := 0 TO 31 DO
+// 	IF CRC_GEN.31 THEN
+// 		CRC_GEN := (SHL(CRC_GEN, 1) ) XOR PN;
+// 	ELSE
+// 		CRC_GEN := SHL(CRC_GEN, 1);
+// 	END_IF;
+// END_FOR;
+//
+// (* final XOR *)
+// CRC_GEN := SHR(CRC_GEN, shift) XOR XOR_OUT;
+//
+// (* reverse the crc_out put if necessary *)
+// IF REV_OUT THEN CRC_GEN := REFLECT(CRC_GEN, PL); END_IF;
+//
+// (* suggested optimization by deninis klopke
+// die betreffs genannte Funktion kann folgenderma�en optimiert werden:
+// In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil �OR BOOL_TO_DWORD(DX.7)� entfallen, da nach 8maligem Linksshift von �DX� in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
+// *)
+//
+// (* typical crc polynoms
+//
+// CRC-4-ITU 			x4 + x + 1 					(ITU G.704, p. 12) 	0x3 or 0xC (0x9)
+// CRC-5-ITU 			x5 + x4 + x2 + 1 			(ITU G.704, p. 9) 	0x15 or 0x15 (0x0B) Bluetooth
+// CRC-5-USB 			x5 + x2 + 1 				(use: USB token packets) 	0x05 or 0x14 (0x9)
+// CRC-6-ITU 			x6 + x + 1 					(ITU G.704, p. 3) 	0x03 or 0x30 (0x21)
+// CRC-7 				x7 + x3 + 1 				(use: telecom systems, MMC) 	0x09 or 0x48 (0x11)
+// CRC-8-ATM 			x8 + x2 + x + 1 				(use: ATM HEC) 	0x07 or 0xE0 (0xC1)
+// CRC-8-CCITT 		x8 + x7 + x3 + x2 + 1 		(use: 1-Wire bus) 	0x8D or 0xB1 (0x63)
+// CRC-8-Dallas/Maxim 	x8 + x5 + x4 + 1 			(use: 1-Wire bus) 	0x31 or 0x8C (0x19)
+// CRC-8 				x8 + x7 + x6 + x4 + x2 + 1 	0xD5 or 0xAB (0x57)
+// CRC-8-SAE J1850 	x8 + x4 + x3 + x2 + 1 		0x1D or 0xB8
+// CRC-10 				x10 + x9 + x5 + x4 + x + 1 	0x233 or 0x331 (0x263)
+// CRC-12 				x12 + x11 + x3 + x2 + x + 1 (use: telecom systems) 	0x80F or 0xF01 (0xE03)
+// CRC-15-CAN 			x15 + x14 + x10 + x8 + x7 + x4 + x3 + 1 	0x4599 or 0x4CD1 (0x19A3)
+// CRC-16-Fletcher 	Not a CRC; see Fletcher's checksum 	Used in Adler-32 A & B CRCs
+// CRC-16-CCITT 	x16 + x12 + x5 + 1 (XMODEM,X.25, V.41, Bluetooth, PPP, IrDA; known as "CRC-CCITT") 	0x1021 or 0x8408 (0x0811)
+// CRC-16-IBM 	x16 + x15 + x2 + 1 (USB, many others; also known as "CRC-16") 	0x8005 or 0xA001 (0x4003)
+// CRC-24-Radix-64 	x24 + x23 + x18 + x17 + x14 + x11 + x10 + x7 + x6 + x5 + x4 + x3 + x + 1 	0x864CFB or 0xDF3261 (0xBE64C3)
+// CRC-32-Adler 	Not a CRC; see Adler-32 	See Adler-32
+// CRC-32-MPEG2 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 	0x04C11DB7 or 0xEDB88320 (0xDB710641) Also used in IEEE 802.3
+// CRC-32-IEEE 802.3 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 (V.42) 	0x04C11DB7 or 0xEDB88320 (0xDB710641)
+// CRC-32C (Castagnoli) 	x32 + x28 + x27 + x26 + x25 + x23 + x22 + x20 + x19 + x18 + x14 + x13 + x11 + x10 + x9 + x8 + x6 + 1 	0x1EDC6F41 or 0x82F63B78 (0x05EC76F1)
+// CRC-64-ISO 	x64 + x4 + x3 + x + 1 (use: ISO 3309) 	0x000000000000001B or 0xD800000000000000 (0xB000000000000001)
+// CRC-64-ECMA-182 	x64 + x62 + x57 + x55 + x54 + x53 + x52 + x47 + x46 + x45 + x40 + x39 + x38 + x37 + x35 + x33 + x32 + x31 + x29 + x27 + x24 + x23 + x22 + x21 + x19 + x17 + x13 + x12 + x10 + x9 + x7 + x4 + x + 1
+// (as described in ECMA-182 p.63) 	0x42F0E1EBA9EA3693 or 0xC96C5795D7870F42 (0x92D8AF2BAF0E1E85)
+// *)
+// END_FUNCTION
 
 FUNCTION_BLOCK MATRIX
 VAR_INPUT
@@ -8952,580 +8931,561 @@ Y4 := temp.3;
 
 END_FUNCTION_BLOCK
 
-(* Commented out for beedance: it uses CODE, which is commented out.
-FUNCTION_BLOCK PIN_CODE
-VAR_INPUT
-	CB : BYTE;
-	E : BOOL;
-END_VAR
-VAR_INPUT CONSTANT
-	PIN : STRING(8);
-END_VAR
-VAR_OUTPUT
-	TP : BOOL;
-END_VAR
-VAR
-	POS: INT := 1;
-END_VAR
-
-tp := FALSE;
-IF e THEN
-	IF CB = CODE(pin, pos) THEN
-		pos := pos + 1;
-		IF pos > LEN(PIN) THEN
-			(* proper code is detected *)
-			TP := TRUE;
-			pos := 1;
-		END_IF;
-	ELSE
-		pos := 1;
-	END_IF;
-END_IF;
-
-END_FUNCTION_BLOCK
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_ABS : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-FOR i := 0 TO stop DO
-	PT^[i] := ABS(PT^[i]);
-END_FOR;
-_ARRAY_ABS := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_ADD : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-	X : REAL;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-FOR i := 0 TO stop DO
-	PT^[i] := PT^[i] + X;
-END_FOR;
-_ARRAY_ADD := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_INIT : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-	init : REAL;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-FOR i := 0 TO stop DO
-	pt^[i] := init;
-END_FOR;
-
-_array_init := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_MEDIAN : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-_ARRAY_SORT(pt,size);
-stop := SHR(size,2)-1;
-IF EVEN(UINT_TO_INT(stop)) THEN
-	_ARRAY_MEDIAN := pt^[SHR(stop,1)];
-ELSE
-	i := SHR(stop,1);
-	_ARRAY_MEDIAN := (pt^[i] + pt^[i+1]) * 0.5;
-END_IF;
-
-(* old code
-stop := (size - SIZEOF(pt)) / SIZEOF(pt);
-FOR i := 0 TO stop - 1 DO
-	FOR m := i + 1 TO stop DO
-		IF pt^[i] > pt^[m] THEN
-			temp := pt^[i];
-			pt^[i] := pt^[m];
-			pt^[m] := temp;
-		END_IF;
-	END_FOR;
-END_FOR;
-IF even(stop) THEN
-	_array_median := pt^[stop/2];
-ELSE
-	i := stop/2;
-	_array_median := (pt^[i] + pt^[i+1])/2;
-END_IF;
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_MUL : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-	X : REAL;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-FOR i := 0 TO stop DO
-	PT^[i] := PT^[i] * X;
-END_FOR;
-_ARRAY_MUL := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_SHUFFLE : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	temp : REAL;
-	pos  : INT;
-	i: INT;
-	stop: INT;
-END_VAR
-
-stop := UINT_TO_INT(SHR(size,2)-1);
-FOR i := 0 TO stop DO
-        pos := RDM2(i+pos,0,stop);
-        (* swap elements *)
-        temp := pt^[i];
-        pt^[i] := pt^[pos];
-        pt^[pos] := temp;
-END_FOR;
-
-_ARRAY_SHUFFLE := TRUE;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION _ARRAY_SORT : BOOL
-VAR_INPUT
-	PT : POINTER TO ARRAY[1..32000] OF REAL;
-	SIZE : UINT;
-END_VAR
-VAR
-	stack_count: UINT;				(* Laufvariable Stack*)
-	stack: ARRAY[1..32] OF UINT;	(* Stackgr��e~ 1,6*Log(n)/log(2) *)
-										(* Stackgr��e 32 => ~1 Mio Elemente *)
-	links: UINT;						(* Anfangselement des Arrays *)
-	rechts: UINT;						(* Endelement des Arrays *)
-	pivot: REAL;						(* tempor�rer Schwellwert f�r Tauschbedingung *)
-	i: UINT;							(* Laufvariable1 *)
-	j: UINT;							(* Laufvariable2 *)
-	ende_innen: BOOL;				(* Ende innere Schleife *)
-	ende_aussen: BOOL;				(* Ende �u�ere Schleife *)
-	tmp: REAL;						(* Hilfsvariable zum Tauschen von Werten *)
-END_VAR
-
-(* Startwerte zur Arraygr��e *)
-links := 1;					(* Anfangselement des Arrays *)
-rechts := SHR(size,2);		(* Endelement des Arrays *)
-stack_count := 1;			(* Laufvariable Stack *)
-
-WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
-	IF links < rechts THEN
-		pivot := PT^[SHR(rechts+links,1)];			(* Wert des mittleren Elements als Pivot-Wert *)
-		i := links -1;
-		j := rechts +1;
-
-		(* innere Schleife, teile Feld *)
-		ende_innen := FALSE;
-		REPEAT
-
-			(* steigende Reihenfolge *)
-			REPEAT	i := i+1;	UNTIL (PT^[i] >= pivot) OR NOT (i < rechts)	END_REPEAT;
-			REPEAT	j := j-1;	UNTIL (PT^[j] <= pivot) OR NOT (j > links)	END_REPEAT;
-
-
-			(*sinkende Reihenfolge *)
-(*			REPEAT	i := i+1;	UNTIL (PT^[i] <= pivot) OR NOT (i < rechts)	END_REPEAT	*)
-(*			REPEAT	j := j-1;	UNTIL (PT^[j] >= pivot) OR NOT (j > links)	END_REPEAT	*)
-
-			IF i >= j THEN
-				ende_innen := TRUE;
-			ELSE
-				   tmp := PT^[j];
-				PT^[j] := PT^[i];
-				PT^[i] := tmp;
-			END_IF;
-
-		UNTIL ende_innen END_REPEAT;
-
-		(* Push stack *)
-		stack[stack_count] := rechts;		(* rechten Teil sp�ter sortieren *)
-		IF Stack_count < 32 THEN
-			stack_count := stack_count +1;
-		ELSE
-			ende_aussen := TRUE;
-			_ARRAY_SORT := FALSE;					(* Fehler: Stack zu klein *)
-		END_IF;
-
-		(* linken Teil sortiern *)
-		rechts := MAX(links, i-1);
-
-	ELSE
-
-		IF stack_count = 1 THEN
-			ende_aussen := TRUE;
-		ELSE
-
-			links := rechts+1;
-
-			(* pop stack *)
-			stack_count := stack_count -1;		(* jetzt rechten Teil sortierne *)
-			rechts:= stack[stack_count];
-		END_IF;
-
-	END_IF;
-
-END_WHILE;
-
-_ARRAY_SORT := TRUE;				(* Sortierung beendet *)
-
-
-(* algorithm used before rev 2.0
-
-size := SHR(size,2);
-size2 := UINT_TO_INT(SHR(size,1));
-FOR i := SIZE2  TO 1 BY -1 DO
-	j:=i;
-    WHILE j <= SIZE2 DO
-     	stop := j * 2 + 1;
-        IF stop > UINT_TO_INT(SIZE) THEN stop := stop - 1;
-        ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
-		END_IF;
-        IF pt^[j] < pt^[stop] THEN
-         	temp := pt^[j];
-            pt^[j] := pt^[stop];
-            pt^[stop] := temp;
-        END_IF;
-        j := stop;
-    END_WHILE;
-END_FOR;
-
-*)
-
-(* heapsort
-FOR heapsize := UINT_TO_INT(size) TO 1 BY -1 DO
-	popmax := pt^[1];
-	pt^[1] := pt^[heapsize];
-   	i := 1;
-	hs2 := SHR(heapsize,1);
-	WHILE i <= hs2 DO
-       	stop := i * 2 + 1;  
-        	IF stop > heapsize THEN stop := stop - 1;
-        	ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
-	 	END_IF;
-        	IF pt^[i] < pt^[stop] THEN
-            		temp := pt^[i];
-            		pt^[i] := pt^[stop];
-            		pt^[stop] := temp;
-        	END_IF;
-        	i := stop;
-    	END_WHILE;
-	pt^[heapsize] := popmax;
-END_FOR;
-
-_ARRAY_SORT2 := TRUE;
-*)
-
-(* old algorithm bubble sort used before rev 1.2
-stop := (size - SIZEOF(pt)) / SIZEOF(pt);
-FOR i := 0 TO stop - 1 DO
-	FOR m := i + 1 TO stop DO
-		IF pt^[i] > pt^[m] THEN
-			temp := pt^[i];
-			pt^[i] := pt^[m];
-			pt^[m] := temp;
-		END_IF;
-	END_FOR;
-END_FOR;
-_array_sort := TRUE;
-
-*)
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_AVG : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-ARRAY_AVG := pt^[0];
-FOR i := 1 TO stop DO
-	ARRAY_AVG := ARRAY_AVG + pt^[i];
-END_FOR;
-ARRAY_AVG := ARRAY_AVG / UINT_TO_REAL(stop + 1);
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_GAV : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-ARRAY_GAV := 1.0;
-FOR i := 0 TO stop DO
-	IF pt^[i] > 0.0 THEN
-		ARRAY_GAV := ARRAY_GAV * pt^[i];
-	ELSE
-		ARRAY_GAV := 0.0;
-		RETURN;
-	END_IF;
-END_FOR;
-ARRAY_GAV := SQRTN(ARRAY_GAV,UINT_TO_INT(stop)+1);
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_HAV : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-FOR i := 0 TO stop DO
-	IF pt^[i] <> 0.0 THEN
-		ARRAY_HAV := ARRAY_HAV + 1.0 / pt^[i];
-	ELSE
-		ARRAY_HAV := 0.0;
-		RETURN;
-	END_IF;
-END_FOR;
-ARRAY_HAV := UINT_TO_REAL(stop + 1) / ARRAY_HAV;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_MAX : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := (size -SIZEOF(pt)) / SIZEOF(pt);
-array_max := pt^[0];
-FOR i := 1 TO stop DO
-	IF pt^[i] > array_max THEN array_max := pt^[i]; END_IF;
-END_FOR;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_MIN : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := (size - SIZEOF(pt)) / SIZEOF(pt);
-array_min := pt^[0];
-FOR i := 1 TO stop DO
-	IF pt^[i] < array_min THEN array_min := pt^[i]; END_IF;
-END_FOR;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_SDV : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-
-(* standard deviation is simply the square root of the variance *)
-
-array_sdv := SQRT(array_var(pt, size));
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_SPR : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-	array_max : REAL;
-	array_min : REAL;
-END_VAR
-
-stop := (size -SIZEOF(pt)) / SIZEOF(pt);
-array_min := pt^[0];
-array_max := pt^[0];
-FOR i := 1 TO stop DO
-	IF pt^[i] > array_max THEN array_max := pt^[i];
-	ELSIF pt^[i] < array_min THEN array_min := pt^[i];
-	END_IF;
-END_FOR;
-array_spr := array_max - array_min;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_SUM : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-stop := (size -SIZEOF(pt)) / SIZEOF(pt);
-array_sum := pt^[0];
-FOR i := 1 TO stop DO
-	array_sum := array_sum + pt^[i];
-END_FOR;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_TREND : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	i: UINT;
-	stop: UINT;
-	x: REAL;
-	stop2: UINT;
-END_VAR
-
-stop := SHR(size,2)-1;
-stop2 := SHR(stop,1);
-FOR i := 0 TO stop2 DO x := x - pt^[i]; END_FOR;
-IF EVEN(UINT_TO_INT(stop)) THEN
-	FOR i := stop2 TO stop DO X := X + pt^[i]; END_FOR;
-ELSE
-	FOR i := stop2 + 1 TO stop DO X := X + pt^[i]; END_FOR;
-END_IF;
-ARRAY_TREND := x / UINT_TO_REAL(stop2 + 1);
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION ARRAY_VAR : REAL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-	avg : REAL;
-	i: UINT;
-	stop: UINT;
-END_VAR
-
-(* at first we calualte the arithmetic average of the array *)
-
-stop := SHR(size,2)-1;
-avg := pt^[0];
-FOR i := 1 TO stop DO
-	avg := avg + pt^[i];
-END_FOR;
-avg := avg / UINT_TO_REAL(stop + 1);
-
-(* in a second run we calculate the variance of the array *)
-
-array_var := (pt^[0] - avg) * (pt^[0] - avg);
-FOR i := 1 TO stop DO
-	array_var := array_var + (pt^[i] - avg) * (pt^[i] - avg);
-END_FOR;
-ARRAY_VAR := ARRAY_VAR / UINT_TO_REAL(stop);
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_SORTED : BOOL
-VAR_INPUT
-	pt : POINTER TO ARRAY[0..32000] OF REAL;
-	size : UINT;
-END_VAR
-VAR
-
-	stop: INT;
-	i: INT;
-END_VAR
-
-stop := UINT_TO_INT(SHR(size,2)-2);
-FOR i := 0 TO stop DO
-	IF pt^[i] > pt^[i+1] THEN
-		IS_SORTED := FALSE;
-		RETURN;
-	END_IF;
-END_FOR;
-
-IS_SORTED := TRUE;
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses CODE, which is commented out.
+// FUNCTION_BLOCK PIN_CODE
+// VAR_INPUT
+// 	CB : BYTE;
+// 	E : BOOL;
+// END_VAR
+// VAR_INPUT CONSTANT
+// 	PIN : STRING(8);
+// END_VAR
+// VAR_OUTPUT
+// 	TP : BOOL;
+// END_VAR
+// VAR
+// 	POS: INT := 1;
+// END_VAR
+//
+// tp := FALSE;
+// IF e THEN
+// 	IF CB = CODE(pin, pos) THEN
+// 		pos := pos + 1;
+// 		IF pos > LEN(PIN) THEN
+// 			(* proper code is detected *)
+// 			TP := TRUE;
+// 			pos := 1;
+// 		END_IF;
+// 	ELSE
+// 		pos := 1;
+// 	END_IF;
+// END_IF;
+//
+// END_FUNCTION_BLOCK
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_ABS : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// FOR i := 0 TO stop DO
+// 	PT^[i] := ABS(PT^[i]);
+// END_FOR;
+// _ARRAY_ABS := TRUE;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_ADD : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// 	X : REAL;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// FOR i := 0 TO stop DO
+// 	PT^[i] := PT^[i] + X;
+// END_FOR;
+// _ARRAY_ADD := TRUE;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_INIT : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// 	init : REAL;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// FOR i := 0 TO stop DO
+// 	pt^[i] := init;
+// END_FOR;
+//
+// _array_init := TRUE;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_MEDIAN : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// _ARRAY_SORT(pt,size);
+// stop := SHR(size,2)-1;
+// IF EVEN(UINT_TO_INT(stop)) THEN
+// 	_ARRAY_MEDIAN := pt^[SHR(stop,1)];
+// ELSE
+// 	i := SHR(stop,1);
+// 	_ARRAY_MEDIAN := (pt^[i] + pt^[i+1]) * 0.5;
+// END_IF;
+//
+// (* old code
+// stop := (size - SIZEOF(pt)) / SIZEOF(pt);
+// FOR i := 0 TO stop - 1 DO
+// 	FOR m := i + 1 TO stop DO
+// 		IF pt^[i] > pt^[m] THEN
+// 			temp := pt^[i];
+// 			pt^[i] := pt^[m];
+// 			pt^[m] := temp;
+// 		END_IF;
+// 	END_FOR;
+// END_FOR;
+// IF even(stop) THEN
+// 	_array_median := pt^[stop/2];
+// ELSE
+// 	i := stop/2;
+// 	_array_median := (pt^[i] + pt^[i+1])/2;
+// END_IF;
+// *)
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_MUL : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// 	X : REAL;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// FOR i := 0 TO stop DO
+// 	PT^[i] := PT^[i] * X;
+// END_FOR;
+// _ARRAY_MUL := TRUE;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_SHUFFLE : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	temp : REAL;
+// 	pos  : INT;
+// 	i: INT;
+// 	stop: INT;
+// END_VAR
+//
+// stop := UINT_TO_INT(SHR(size,2)-1);
+// FOR i := 0 TO stop DO
+//         pos := RDM2(i+pos,0,stop);
+//         (* swap elements *)
+//         temp := pt^[i];
+//         pt^[i] := pt^[pos];
+//         pt^[pos] := temp;
+// END_FOR;
+//
+// _ARRAY_SHUFFLE := TRUE;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION _ARRAY_SORT : BOOL
+// VAR_INPUT
+// 	PT : POINTER TO ARRAY[1..32000] OF REAL;
+// 	SIZE : UINT;
+// END_VAR
+// VAR
+// 	stack_count: UINT;				(* Laufvariable Stack*)
+// 	stack: ARRAY[1..32] OF UINT;	(* Stackgr��e~ 1,6*Log(n)/log(2) *)
+// 										(* Stackgr��e 32 => ~1 Mio Elemente *)
+// 	links: UINT;						(* Anfangselement des Arrays *)
+// 	rechts: UINT;						(* Endelement des Arrays *)
+// 	pivot: REAL;						(* tempor�rer Schwellwert f�r Tauschbedingung *)
+// 	i: UINT;							(* Laufvariable1 *)
+// 	j: UINT;							(* Laufvariable2 *)
+// 	ende_innen: BOOL;				(* Ende innere Schleife *)
+// 	ende_aussen: BOOL;				(* Ende �u�ere Schleife *)
+// 	tmp: REAL;						(* Hilfsvariable zum Tauschen von Werten *)
+// END_VAR
+//
+// (* Startwerte zur Arraygr��e *)
+// links := 1;					(* Anfangselement des Arrays *)
+// rechts := SHR(size,2);		(* Endelement des Arrays *)
+// stack_count := 1;			(* Laufvariable Stack *)
+//
+// WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
+// 	IF links < rechts THEN
+// 		pivot := PT^[SHR(rechts+links,1)];			(* Wert des mittleren Elements als Pivot-Wert *)
+// 		i := links -1;
+// 		j := rechts +1;
+//
+// 		(* innere Schleife, teile Feld *)
+// 		ende_innen := FALSE;
+// 		REPEAT
+//
+// 			(* steigende Reihenfolge *)
+// 			REPEAT	i := i+1;	UNTIL (PT^[i] >= pivot) OR NOT (i < rechts)	END_REPEAT;
+// 			REPEAT	j := j-1;	UNTIL (PT^[j] <= pivot) OR NOT (j > links)	END_REPEAT;
+//
+//
+// 			(*sinkende Reihenfolge *)
+// (*			REPEAT	i := i+1;	UNTIL (PT^[i] <= pivot) OR NOT (i < rechts)	END_REPEAT	*)
+// (*			REPEAT	j := j-1;	UNTIL (PT^[j] >= pivot) OR NOT (j > links)	END_REPEAT	*)
+//
+// 			IF i >= j THEN
+// 				ende_innen := TRUE;
+// 			ELSE
+// 				   tmp := PT^[j];
+// 				PT^[j] := PT^[i];
+// 				PT^[i] := tmp;
+// 			END_IF;
+//
+// 		UNTIL ende_innen END_REPEAT;
+//
+// 		(* Push stack *)
+// 		stack[stack_count] := rechts;		(* rechten Teil sp�ter sortieren *)
+// 		IF Stack_count < 32 THEN
+// 			stack_count := stack_count +1;
+// 		ELSE
+// 			ende_aussen := TRUE;
+// 			_ARRAY_SORT := FALSE;					(* Fehler: Stack zu klein *)
+// 		END_IF;
+//
+// 		(* linken Teil sortiern *)
+// 		rechts := MAX(links, i-1);
+//
+// 	ELSE
+//
+// 		IF stack_count = 1 THEN
+// 			ende_aussen := TRUE;
+// 		ELSE
+//
+// 			links := rechts+1;
+//
+// 			(* pop stack *)
+// 			stack_count := stack_count -1;		(* jetzt rechten Teil sortierne *)
+// 			rechts:= stack[stack_count];
+// 		END_IF;
+//
+// 	END_IF;
+//
+// END_WHILE;
+//
+// _ARRAY_SORT := TRUE;				(* Sortierung beendet *)
+//
+//
+// (* algorithm used before rev 2.0
+//
+// size := SHR(size,2);
+// size2 := UINT_TO_INT(SHR(size,1));
+// FOR i := SIZE2  TO 1 BY -1 DO
+// 	j:=i;
+//     WHILE j <= SIZE2 DO
+//      	stop := j * 2 + 1;
+//         IF stop > UINT_TO_INT(SIZE) THEN stop := stop - 1;
+//         ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
+// 		END_IF;
+//         IF pt^[j] < pt^[stop] THEN
+//          	temp := pt^[j];
+//             pt^[j] := pt^[stop];
+//             pt^[stop] := temp;
+//         END_IF;
+//         j := stop;
+//     END_WHILE;
+// END_FOR;
+//
+// *)
+//
+// (* heapsort
+// FOR heapsize := UINT_TO_INT(size) TO 1 BY -1 DO
+// 	popmax := pt^[1];
+// 	pt^[1] := pt^[heapsize];
+//    	i := 1;
+// 	hs2 := SHR(heapsize,1);
+// 	WHILE i <= hs2 DO
+//        	stop := i * 2 + 1;
+//         	IF stop > heapsize THEN stop := stop - 1;
+//         	ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
+// 	 	END_IF;
+//         	IF pt^[i] < pt^[stop] THEN
+//             		temp := pt^[i];
+//             		pt^[i] := pt^[stop];
+//             		pt^[stop] := temp;
+//         	END_IF;
+//         	i := stop;
+//     	END_WHILE;
+// 	pt^[heapsize] := popmax;
+// END_FOR;
+//
+// _ARRAY_SORT2 := TRUE;
+// *)
+//
+// (* old algorithm bubble sort used before rev 1.2
+// stop := (size - SIZEOF(pt)) / SIZEOF(pt);
+// FOR i := 0 TO stop - 1 DO
+// 	FOR m := i + 1 TO stop DO
+// 		IF pt^[i] > pt^[m] THEN
+// 			temp := pt^[i];
+// 			pt^[i] := pt^[m];
+// 			pt^[m] := temp;
+// 		END_IF;
+// 	END_FOR;
+// END_FOR;
+// _array_sort := TRUE;
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_AVG : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// ARRAY_AVG := pt^[0];
+// FOR i := 1 TO stop DO
+// 	ARRAY_AVG := ARRAY_AVG + pt^[i];
+// END_FOR;
+// ARRAY_AVG := ARRAY_AVG / UINT_TO_REAL(stop + 1);
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_GAV : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// ARRAY_GAV := 1.0;
+// FOR i := 0 TO stop DO
+// 	IF pt^[i] > 0.0 THEN
+// 		ARRAY_GAV := ARRAY_GAV * pt^[i];
+// 	ELSE
+// 		ARRAY_GAV := 0.0;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// ARRAY_GAV := SQRTN(ARRAY_GAV,UINT_TO_INT(stop)+1);
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_HAV : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// FOR i := 0 TO stop DO
+// 	IF pt^[i] <> 0.0 THEN
+// 		ARRAY_HAV := ARRAY_HAV + 1.0 / pt^[i];
+// 	ELSE
+// 		ARRAY_HAV := 0.0;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// ARRAY_HAV := UINT_TO_REAL(stop + 1) / ARRAY_HAV;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_MAX : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := (size -SIZEOF(pt)) / SIZEOF(pt);
+// array_max := pt^[0];
+// FOR i := 1 TO stop DO
+// 	IF pt^[i] > array_max THEN array_max := pt^[i]; END_IF;
+// END_FOR;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_MIN : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := (size - SIZEOF(pt)) / SIZEOF(pt);
+// array_min := pt^[0];
+// FOR i := 1 TO stop DO
+// 	IF pt^[i] < array_min THEN array_min := pt^[i]; END_IF;
+// END_FOR;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_SDV : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+//
+// (* standard deviation is simply the square root of the variance *)
+//
+// array_sdv := SQRT(array_var(pt, size));
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_SPR : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// 	array_max : REAL;
+// 	array_min : REAL;
+// END_VAR
+//
+// stop := (size -SIZEOF(pt)) / SIZEOF(pt);
+// array_min := pt^[0];
+// array_max := pt^[0];
+// FOR i := 1 TO stop DO
+// 	IF pt^[i] > array_max THEN array_max := pt^[i];
+// 	ELSIF pt^[i] < array_min THEN array_min := pt^[i];
+// 	END_IF;
+// END_FOR;
+// array_spr := array_max - array_min;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_SUM : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// stop := (size -SIZEOF(pt)) / SIZEOF(pt);
+// array_sum := pt^[0];
+// FOR i := 1 TO stop DO
+// 	array_sum := array_sum + pt^[i];
+// END_FOR;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_TREND : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	i: UINT;
+// 	stop: UINT;
+// 	x: REAL;
+// 	stop2: UINT;
+// END_VAR
+//
+// stop := SHR(size,2)-1;
+// stop2 := SHR(stop,1);
+// FOR i := 0 TO stop2 DO x := x - pt^[i]; END_FOR;
+// IF EVEN(UINT_TO_INT(stop)) THEN
+// 	FOR i := stop2 TO stop DO X := X + pt^[i]; END_FOR;
+// ELSE
+// 	FOR i := stop2 + 1 TO stop DO X := X + pt^[i]; END_FOR;
+// END_IF;
+// ARRAY_TREND := x / UINT_TO_REAL(stop2 + 1);
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION ARRAY_VAR : REAL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+// 	avg : REAL;
+// 	i: UINT;
+// 	stop: UINT;
+// END_VAR
+//
+// (* at first we calualte the arithmetic average of the array *)
+//
+// stop := SHR(size,2)-1;
+// avg := pt^[0];
+// FOR i := 1 TO stop DO
+// 	avg := avg + pt^[i];
+// END_FOR;
+// avg := avg / UINT_TO_REAL(stop + 1);
+//
+// (* in a second run we calculate the variance of the array *)
+//
+// array_var := (pt^[0] - avg) * (pt^[0] - avg);
+// FOR i := 1 TO stop DO
+// 	array_var := array_var + (pt^[i] - avg) * (pt^[i] - avg);
+// END_FOR;
+// ARRAY_VAR := ARRAY_VAR / UINT_TO_REAL(stop);
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_SORTED : BOOL
+// VAR_INPUT
+// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	size : UINT;
+// END_VAR
+// VAR
+//
+// 	stop: INT;
+// 	i: INT;
+// END_VAR
+//
+// stop := UINT_TO_INT(SHR(size,2)-2);
+// FOR i := 0 TO stop DO
+// 	IF pt^[i] > pt^[i+1] THEN
+// 		IS_SORTED := FALSE;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+//
+// IS_SORTED := TRUE;
+//
+// END_FUNCTION
 
 FUNCTION CABS : REAL
 VAR_INPUT
@@ -11172,56 +11132,55 @@ IF X <> 0.0 THEN INV := 1.0 / X; END_IF;
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses REAL_TO_DW, which is commented out.
-FUNCTION LAMBERT_W : REAL
-VAR_INPUT
-	X : REAL;
-END_VAR
-VAR
-	w : REAL;
-	i : INT;
-	we: REAL;
-	w1e: REAL;
-	last: DWORD;
-	ewx: REAL;
-END_VAR
-
-(* check for valid input and return -1000 if too low *)
-IF x < -0.367879441171442 THEN
-	LAMBERT_W := -1000.0;
-	RETURN;
-(* return 0 if x = 0 *)
-ELSIF x = 0.0 THEN
-	RETURN;
-(* first an estimate is calculated *)
-ELSIF x <= 500.0 THEN
-	w := LN(x + 1.0);
-	w := 0.665 * (1.0 + 0.0195 * w) * w + 0.04;
-ELSE
-	w := LN(x - 4.0) - (1.0 - 1.0/LN(x)) * LN(LN(x));
-END_IF;
-(* use estimate to calculate exact result *)
-FOR i := 0 TO 5 DO
-	ewx := EXP(w);
-	we := w * ewx - x;
-	w1e := (w+1.0) * ewx;
-	last := REAL_TO_DW(w) AND 16#FFFF_FFFC;
-	w := w - (we / (w1e - (w+2.0) * we / (2.0 * w + 2.0)));
-	IF (REAL_TO_DW(w) AND 16#FFFF_FFFC) = last THEN EXIT; END_IF;
-END_FOR;
-LAMBERT_W := w;
-
-
-(* revision hisdtory
-hm	26. oct. 2008	rev 1.0
-	original version
-
-hm	10. mar. 2009	rev 1.1
-	real constants updated to new systax using dot
-
-*)
-END_FUNCTION
-*)
+// Commented out for beedance: it uses REAL_TO_DW, which is commented out.
+// FUNCTION LAMBERT_W : REAL
+// VAR_INPUT
+// 	X : REAL;
+// END_VAR
+// VAR
+// 	w : REAL;
+// 	i : INT;
+// 	we: REAL;
+// 	w1e: REAL;
+// 	last: DWORD;
+// 	ewx: REAL;
+// END_VAR
+//
+// (* check for valid input and return -1000 if too low *)
+// IF x < -0.367879441171442 THEN
+// 	LAMBERT_W := -1000.0;
+// 	RETURN;
+// (* return 0 if x = 0 *)
+// ELSIF x = 0.0 THEN
+// 	RETURN;
+// (* first an estimate is calculated *)
+// ELSIF x <= 500.0 THEN
+// 	w := LN(x + 1.0);
+// 	w := 0.665 * (1.0 + 0.0195 * w) * w + 0.04;
+// ELSE
+// 	w := LN(x - 4.0) - (1.0 - 1.0/LN(x)) * LN(LN(x));
+// END_IF;
+// (* use estimate to calculate exact result *)
+// FOR i := 0 TO 5 DO
+// 	ewx := EXP(w);
+// 	we := w * ewx - x;
+// 	w1e := (w+1.0) * ewx;
+// 	last := REAL_TO_DW(w) AND 16#FFFF_FFFC;
+// 	w := w - (we / (w1e - (w+2.0) * we / (2.0 * w + 2.0)));
+// 	IF (REAL_TO_DW(w) AND 16#FFFF_FFFC) = last THEN EXIT; END_IF;
+// END_FOR;
+// LAMBERT_W := w;
+//
+//
+// (* revision hisdtory
+// hm	26. oct. 2008	rev 1.0
+// 	original version
+//
+// hm	10. mar. 2009	rev 1.1
+// 	real constants updated to new systax using dot
+//
+// *)
+// END_FUNCTION
 
 FUNCTION LANGEVIN : REAL
 VAR_INPUT
@@ -11809,100 +11768,99 @@ IF s7 <> X7  AND cnt < 4 THEN
 END_IF;
 END_FUNCTION_BLOCK
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION_BLOCK ESR_MON_R4
-VAR_INPUT
-	R0, R1, R2, R3 : REAL;
-	DT_in : DT;
-END_VAR
-VAR_INPUT CONSTANT
-	a0, a1, a2, a3 : STRING(10);
-	s0, s1, s2, s3 : REAL;
-END_VAR
-VAR_OUTPUT
-	ESR_Flag : BOOL;
-END_VAR
-VAR_IN_OUT
-	ESR_Out: ARRAY [0..3] OF esr_data;
-END_VAR
-VAR
-	p0, p1, p2, p3 : POINTER TO DWORD;
-	x0, x1, x2, x3 : REAL;
-	tx: TIME;
-	cnt : INT;
-END_VAR
-
-
-(* read system timer *)
-tx := DWORD_TO_TIME(T_PLC_MS());
-P0 := ADR(R0);
-P1 := ADR(R1);
-P2 := ADR(R2);
-P3 := ADR(R3);
-
-ESR_Flag := FALSE;
-esr_out[3].typ := 0;
-esr_out[2].typ := 0;
-esr_out[1].typ := 0;
-esr_out[0].typ := 0;
-cnt := 0;
-
-(* check if inputs have chaged and fill buffer *)
-IF DIFFER(R0,  X0, S0) THEN
-	esr_out[cnt].typ := 20;
-	esr_out[cnt].adress := a0;
-	esr_out[cnt].DS := DT_in;
-	esr_out[cnt].TS := TX;
-	esr_out[cnt].data[0] := Byte_of_Dword(P0^,0);
-	esr_out[cnt].data[1] := Byte_of_Dword(P0^,1);
-	esr_out[cnt].data[2] := Byte_of_Dword(P0^,2);
-	esr_out[cnt].data[3] := Byte_of_Dword(P0^,3);
-	X0 := R0;
-	cnt := cnt + 1;
-	esr_flag := TRUE;
-END_IF;
-IF differ(R1,  X1, S1) THEN
-	esr_out[cnt].typ := 20;
-	esr_out[cnt].adress := a1;
-	esr_out[cnt].DS := DT_in;
-	esr_out[cnt].TS := TX;
-	esr_out[cnt].data[0] := Byte_of_Dword(P1^,0);
-	esr_out[cnt].data[1] := Byte_of_Dword(P1^,1);
-	esr_out[cnt].data[2] := Byte_of_Dword(P1^,2);
-	esr_out[cnt].data[3] := Byte_of_Dword(P1^,3);
-	X1 := R1;
-	cnt := cnt + 1;
-	esr_flag := TRUE;
-END_IF;
-IF differ(R2,  X2, S2) THEN
-	esr_out[cnt].typ := 20;
-	esr_out[cnt].adress := a2;
-	esr_out[cnt].DS := DT_in;
-	esr_out[cnt].TS := TX;
-	esr_out[cnt].data[0] := Byte_of_Dword(P2^,0);
-	esr_out[cnt].data[1] := Byte_of_Dword(P2^,1);
-	esr_out[cnt].data[2] := Byte_of_Dword(P2^,2);
-	esr_out[cnt].data[3] := Byte_of_Dword(P2^,3);
-	X2 := R2;
-	cnt := cnt + 1;
-	esr_flag := TRUE;
-END_IF;
-IF DIFFER(R3,  X3, S3) THEN
-	esr_out[cnt].typ := 20;
-	esr_out[cnt].adress := a3;
-	esr_out[cnt].DS := DT_in;
-	esr_out[cnt].TS := TX;
-	esr_out[cnt].data[0] := Byte_of_Dword(P3^,0);
-	esr_out[cnt].data[1] := Byte_of_Dword(P3^,1);
-	esr_out[cnt].data[2] := Byte_of_Dword(P3^,2);
-	esr_out[cnt].data[3] := Byte_of_Dword(P3^,3);
-	X3 := R3;
-	cnt := cnt + 1;
-	esr_flag := TRUE;
-END_IF;
-
-END_FUNCTION_BLOCK
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION_BLOCK ESR_MON_R4
+// VAR_INPUT
+// 	R0, R1, R2, R3 : REAL;
+// 	DT_in : DT;
+// END_VAR
+// VAR_INPUT CONSTANT
+// 	a0, a1, a2, a3 : STRING(10);
+// 	s0, s1, s2, s3 : REAL;
+// END_VAR
+// VAR_OUTPUT
+// 	ESR_Flag : BOOL;
+// END_VAR
+// VAR_IN_OUT
+// 	ESR_Out: ARRAY [0..3] OF esr_data;
+// END_VAR
+// VAR
+// 	p0, p1, p2, p3 : POINTER TO DWORD;
+// 	x0, x1, x2, x3 : REAL;
+// 	tx: TIME;
+// 	cnt : INT;
+// END_VAR
+//
+//
+// (* read system timer *)
+// tx := DWORD_TO_TIME(T_PLC_MS());
+// P0 := ADR(R0);
+// P1 := ADR(R1);
+// P2 := ADR(R2);
+// P3 := ADR(R3);
+//
+// ESR_Flag := FALSE;
+// esr_out[3].typ := 0;
+// esr_out[2].typ := 0;
+// esr_out[1].typ := 0;
+// esr_out[0].typ := 0;
+// cnt := 0;
+//
+// (* check if inputs have chaged and fill buffer *)
+// IF DIFFER(R0,  X0, S0) THEN
+// 	esr_out[cnt].typ := 20;
+// 	esr_out[cnt].adress := a0;
+// 	esr_out[cnt].DS := DT_in;
+// 	esr_out[cnt].TS := TX;
+// 	esr_out[cnt].data[0] := Byte_of_Dword(P0^,0);
+// 	esr_out[cnt].data[1] := Byte_of_Dword(P0^,1);
+// 	esr_out[cnt].data[2] := Byte_of_Dword(P0^,2);
+// 	esr_out[cnt].data[3] := Byte_of_Dword(P0^,3);
+// 	X0 := R0;
+// 	cnt := cnt + 1;
+// 	esr_flag := TRUE;
+// END_IF;
+// IF differ(R1,  X1, S1) THEN
+// 	esr_out[cnt].typ := 20;
+// 	esr_out[cnt].adress := a1;
+// 	esr_out[cnt].DS := DT_in;
+// 	esr_out[cnt].TS := TX;
+// 	esr_out[cnt].data[0] := Byte_of_Dword(P1^,0);
+// 	esr_out[cnt].data[1] := Byte_of_Dword(P1^,1);
+// 	esr_out[cnt].data[2] := Byte_of_Dword(P1^,2);
+// 	esr_out[cnt].data[3] := Byte_of_Dword(P1^,3);
+// 	X1 := R1;
+// 	cnt := cnt + 1;
+// 	esr_flag := TRUE;
+// END_IF;
+// IF differ(R2,  X2, S2) THEN
+// 	esr_out[cnt].typ := 20;
+// 	esr_out[cnt].adress := a2;
+// 	esr_out[cnt].DS := DT_in;
+// 	esr_out[cnt].TS := TX;
+// 	esr_out[cnt].data[0] := Byte_of_Dword(P2^,0);
+// 	esr_out[cnt].data[1] := Byte_of_Dword(P2^,1);
+// 	esr_out[cnt].data[2] := Byte_of_Dword(P2^,2);
+// 	esr_out[cnt].data[3] := Byte_of_Dword(P2^,3);
+// 	X2 := R2;
+// 	cnt := cnt + 1;
+// 	esr_flag := TRUE;
+// END_IF;
+// IF DIFFER(R3,  X3, S3) THEN
+// 	esr_out[cnt].typ := 20;
+// 	esr_out[cnt].adress := a3;
+// 	esr_out[cnt].DS := DT_in;
+// 	esr_out[cnt].TS := TX;
+// 	esr_out[cnt].data[0] := Byte_of_Dword(P3^,0);
+// 	esr_out[cnt].data[1] := Byte_of_Dword(P3^,1);
+// 	esr_out[cnt].data[2] := Byte_of_Dword(P3^,2);
+// 	esr_out[cnt].data[3] := Byte_of_Dword(P3^,3);
+// 	X3 := R3;
+// 	cnt := cnt + 1;
+// 	esr_flag := TRUE;
+// END_IF;
+//
+// END_FUNCTION_BLOCK
 
 FUNCTION_BLOCK ESR_MON_X8
 VAR_INPUT
@@ -12022,279 +11980,271 @@ status_to_ESR.data[0] := status;
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BIN_TO_BYTE : BYTE
-VAR_INPUT
-	BIN : STRING(12);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BIN_TO_BYTE : BYTE
+// VAR_INPUT
+// 	BIN : STRING(12);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(bin);
+// stop := LEN(bin);
+// FOR I := 1 TO stop DO
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X = 48 THEN
+// 		BIN_TO_BYTE := SHL(BIN_TO_BYTE,1);
+// 	ELSIF X = 49 THEN
+// 		BIN_TO_BYTE := SHL(BIN_TO_BYTE,1) OR 1;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep. 2008	rev 1.1
+// 	changed length of input string from 20 to 12
+//
+// hm	26. jul. 2009	rev 1.2
+// 	optimized code
+// *)
+//
+// END_FUNCTION
 
-pt := ADR(bin);
-stop := LEN(bin);
-FOR I := 1 TO stop DO
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X = 48 THEN
-		BIN_TO_BYTE := SHL(BIN_TO_BYTE,1);
-	ELSIF X = 49 THEN
-		BIN_TO_BYTE := SHL(BIN_TO_BYTE,1) OR 1;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BIN_TO_DWORD : DWORD
+// VAR_INPUT
+// 	BIN : STRING(40);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(bin);
+// stop := LEN(bin);
+// FOR I := 1 TO stop DO
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X = 48 THEN
+// 		BIN_TO_DWORD := SHL(BIN_TO_DWORD,1);
+// 	ELSIF X = 49 THEN
+// 		BIN_TO_DWORD := SHL(BIN_TO_DWORD,1) OR 1;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep. 2008	rev 1.1
+// 	changed length of input dtring from 20 to 40
+//
+// hm	26. jul 2009	rev 1.2
+// 	optimized code
+// *)
+//
+// END_FUNCTION
 
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BYTE_TO_STRB : STRING(8)
+// VAR_INPUT
+// 	IN : BYTE;
+// END_VAR
+// VAR
+// 	i: INT;
+// 	pt : POINTER TO BYTE;
+// END_VAR
+//
+//
+// (* pointer f�r die ausgabe ermitteln *)
+// pt := ADR(BYTE_TO_STRB);
+// (* die 8 ausgabecharacter ermitteln und schreiben *)
+// FOR i := 1 TO 8 DO
+// 	pt^ := BOOL_TO_BYTE(in.7) + 48;
+// 	in := SHL(in,1);
+// 	pt := pt + 1;
+// END_FOR;
+//
+// (* der ausgabestring muss noch mit 0 abgeschlossen werden *)
+// pt^ := 0;
+//
+// (* code before rev 1.1
+// FOR i := 1 TO 8 DO
+// 	IF in.0 = 0 THEN temp := CONCAT('0', temp); ELSE temp := CONCAT('1', temp); END_IF;
+// 	in := SHR(in, 1);
+// END_FOR;
+// BYTE_TO_STRB := temp;
+// *)
+// END_FUNCTION
 
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION BYTE_TO_STRH : STRING(2)
+// VAR_INPUT
+// 	IN : BYTE;
+// END_VAR
+// VAR
+// 	temp : BYTE;
+// 	PT : POINTER TO BYTE;
+// END_VAR
+//
+//
+// (* read pointer to output string *)
+// PT := ADR(BYTE_TO_STRH);
+// (* calculate high order hex value *)
+// temp := SHR(in,4);
+// (* convert value to hex character *)
+// IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
+// (* write friat character to output string *)
+// PT^ := temp;
+// (* calculate low order hex value *)
+// temp := in AND 2#00001111;
+// IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
+// (* increment pointer and wirte low order character *)
+// pt := pt + 1;
+// pt^ := temp;
+// (* set pointer at the end of the output string and close the string with 0 *)
+// pt := pt + 1;
+// pt^:= 0;
+//
+//
+// (* code before rev 1.2
+// FOR i := 1 TO 2 DO
+// 	X := in AND 2#1111;
+// 	IF X <= 9 THEN X := X + 48; ELSE X := X + 55; END_IF;
+// 	Cx := CHR(X);
+// 	temp := CONCAT(Cx, temp);
+// 	in := SHR(in,4);
+// END_FOR;
+// BYTE_TO_STRH := temp;
+// *)
+// END_FUNCTION
 
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION CAPITALIZE : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	PT : POINTER TO BYTE;
+// 	pos : INT;
+// 	L : INT;
+// 	first : BOOL := TRUE;
+// END_VAR
+//
+// PT := ADR(CAPITALIZE);
+// CAPITALIZE := str;
+// L := LEN(str);
+// FOR pos := 1 TO l DO
+// 	IF first THEN pt^ := TO_UPPER(pt^);	END_IF;
+// 	(* remember in first if the next char needs to capitalized *)
+// 	first := pt^= 32;
+// 	PT := pt + 1;
+// END_FOR;
+//
+// (* revision histroy
+// hm		4. mar 2008	rev 1.0
+// 	original release
+//
+// hm	29. mar. 2008	rev 1.1
+// 	changed STRING to STRING(STRING_LENGTH)
+//
+// hm	20. jun. 2008	rev 1.2
+// 	improved performance
+//
+// *)
+//
+// END_FUNCTION
 
-hm	20. sep. 2008	rev 1.1
-	changed length of input string from 20 to 12
+// Commented out for beedance: it uses CODE, which is commented out.
+// FUNCTION CHARCODE : BYTE
+// VAR_INPUT
+// 	STR : STRING(10);
+// END_VAR
+// VAR
+// 	found: STRING(1);
+// 	search : STRING(10);
+// 	pos: INT;
+// 	i: INT;
+// END_VAR
+//
+// IF LEN(str) = 1 THEN
+// 	CHARCODE := CODE(STR, 1);
+// ELSIF str <> '' THEN
+// 	(* construct search string *)
+// 	search := CONCAT('&', str);
+// 	search := CONCAT(search, ';');
+// 	WHILE pos = 0 AND (i < 4) DO
+// 		i := i + 1;
+// 		pos := FIND(setup.CHARNAMES[i], search);
+// 	END_WHILE;
+// 	found := MID(setup.CHARNAMES[i], 1, pos - 1);
+// 	CHARCODE := CODE(found, 1);
+// END_IF;
+//
+// END_FUNCTION
 
-hm	26. jul. 2009	rev 1.2
-	optimized code
-*)	
+// Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
+// FUNCTION CHARNAME : STRING(10)
+// VAR_INPUT
+// 	C : BYTE;
+// END_VAR
+// VAR
+// 	pos: INT;
+// 	i : INT;
+// END_VAR
+//
+// IF C <> 0 THEN
+// 	(* construct search string from code followed by $ sign, also clear charname string*)
+// 	CHARNAME := CHR_TO_STRING(C);
+// 	CHARNAME := CONCAT(CHARNAME,'&');
+// 	CHARNAME := CONCAT(';', CHARNAME);
+// 	WHILE pos = 0 AND (i < 4) DO
+// 		i := i + 1;
+// 		pos := FIND(setup.CHARNAMES[i], CHARNAME);
+// 	END_WHILE;
+// 	IF pos > 0 THEN
+// 		CHARNAME := MID(setup.CHARNAMES[i], 10, pos + 3);
+// 		(* search for end of name and truncate *)
+// 		pos := FIND(CHARNAME, ';');
+// 		CHARNAME := LEFT(CHARNAME,pos - 1);
+// 	ELSE
+// 		CHARNAME := CHR_TO_STRING(C);
+// 	END_IF;
+// ELSE
+// 	CHARNAME := '';
+// END_IF;
+//
+// END_FUNCTION
 
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BIN_TO_DWORD : DWORD
-VAR_INPUT
-	BIN : STRING(40);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
-
-pt := ADR(bin);
-stop := LEN(bin);
-FOR I := 1 TO stop DO
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X = 48 THEN
-		BIN_TO_DWORD := SHL(BIN_TO_DWORD,1);
-	ELSIF X = 49 THEN
-		BIN_TO_DWORD := SHL(BIN_TO_DWORD,1) OR 1;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	20. sep. 2008	rev 1.1
-	changed length of input dtring from 20 to 40
-
-hm	26. jul 2009	rev 1.2
-	optimized code
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BYTE_TO_STRB : STRING(8)
-VAR_INPUT
-	IN : BYTE;
-END_VAR
-VAR
-	i: INT;
-	pt : POINTER TO BYTE;
-END_VAR
-
-
-(* pointer f�r die ausgabe ermitteln *)
-pt := ADR(BYTE_TO_STRB);
-(* die 8 ausgabecharacter ermitteln und schreiben *)
-FOR i := 1 TO 8 DO
-	pt^ := BOOL_TO_BYTE(in.7) + 48;
-	in := SHL(in,1);
-	pt := pt + 1;
-END_FOR;
-
-(* der ausgabestring muss noch mit 0 abgeschlossen werden *)
-pt^ := 0;
-
-(* code before rev 1.1
-FOR i := 1 TO 8 DO
-	IF in.0 = 0 THEN temp := CONCAT('0', temp); ELSE temp := CONCAT('1', temp); END_IF;
-	in := SHR(in, 1);
-END_FOR;
-BYTE_TO_STRB := temp;
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION BYTE_TO_STRH : STRING(2)
-VAR_INPUT
-	IN : BYTE;
-END_VAR
-VAR
-	temp : BYTE;
-	PT : POINTER TO BYTE;
-END_VAR
-
-
-(* read pointer to output string *)
-PT := ADR(BYTE_TO_STRH);
-(* calculate high order hex value *)
-temp := SHR(in,4);
-(* convert value to hex character *)
-IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
-(* write friat character to output string *)
-PT^ := temp;
-(* calculate low order hex value *)
-temp := in AND 2#00001111;
-IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
-(* increment pointer and wirte low order character *)
-pt := pt + 1;
-pt^ := temp;
-(* set pointer at the end of the output string and close the string with 0 *)
-pt := pt + 1;
-pt^:= 0;
-
-
-(* code before rev 1.2
-FOR i := 1 TO 2 DO
-	X := in AND 2#1111;
-	IF X <= 9 THEN X := X + 48; ELSE X := X + 55; END_IF;
-	Cx := CHR(X);
-	temp := CONCAT(Cx, temp);
-	in := SHR(in,4);
-END_FOR;
-BYTE_TO_STRH := temp;
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION CAPITALIZE : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	PT : POINTER TO BYTE;
-	pos : INT;
-	L : INT;
-	first : BOOL := TRUE;
-END_VAR
-
-PT := ADR(CAPITALIZE);
-CAPITALIZE := str;
-L := LEN(str);
-FOR pos := 1 TO l DO
-	IF first THEN pt^ := TO_UPPER(pt^);	END_IF;
-	(* remember in first if the next char needs to capitalized *)
-	first := pt^= 32;
-	PT := pt + 1;
-END_FOR;
-
-(* revision histroy
-hm		4. mar 2008	rev 1.0
-	original release
-
-hm	29. mar. 2008	rev 1.1
-	changed STRING to STRING(STRING_LENGTH)
-
-hm	20. jun. 2008	rev 1.2
-	improved performance
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses CODE, which is commented out.
-FUNCTION CHARCODE : BYTE
-VAR_INPUT
-	STR : STRING(10);
-END_VAR
-VAR
-	found: STRING(1);
-	search : STRING(10);
-	pos: INT;
-	i: INT;
-END_VAR
-
-IF LEN(str) = 1 THEN
-	CHARCODE := CODE(STR, 1);
-ELSIF str <> '' THEN
-	(* construct search string *)
-	search := CONCAT('&', str);
-	search := CONCAT(search, ';');
-	WHILE pos = 0 AND (i < 4) DO
-		i := i + 1;
-		pos := FIND(setup.CHARNAMES[i], search);
-	END_WHILE;
-	found := MID(setup.CHARNAMES[i], 1, pos - 1);
-	CHARCODE := CODE(found, 1);
-END_IF;
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
-FUNCTION CHARNAME : STRING(10)
-VAR_INPUT
-	C : BYTE;
-END_VAR
-VAR
-	pos: INT;
-	i : INT;
-END_VAR
-
-IF C <> 0 THEN
-	(* construct search string from code followed by $ sign, also clear charname string*)
-	CHARNAME := CHR_TO_STRING(C);
-	CHARNAME := CONCAT(CHARNAME,'&');
-	CHARNAME := CONCAT(';', CHARNAME);
-	WHILE pos = 0 AND (i < 4) DO
-		i := i + 1;
-		pos := FIND(setup.CHARNAMES[i], CHARNAME);
-	END_WHILE;
-	IF pos > 0 THEN
-		CHARNAME := MID(setup.CHARNAMES[i], 10, pos + 3);
-		(* search for end of name and truncate *)
-		pos := FIND(CHARNAME, ';');
-		CHARNAME := LEFT(CHARNAME,pos - 1);
-	ELSE
-		CHARNAME := CHR_TO_STRING(C);
-	END_IF;
-ELSE
-	CHARNAME := '';
-END_IF;
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION CHR_TO_STRING : STRING(1)
-VAR_INPUT
-	C : BYTE;
-END_VAR
-VAR
-	PT : POINTER TO BYTE;
-END_VAR
-
-PT := ADR(CHR_TO_STRING);
-PT^ := C;
-pt := pt + 1;
-pt^ := 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION CHR_TO_STRING : STRING(1)
+// VAR_INPUT
+// 	C : BYTE;
+// END_VAR
+// VAR
+// 	PT : POINTER TO BYTE;
+// END_VAR
+//
+// PT := ADR(CHR_TO_STRING);
+// PT^ := C;
+// pt := pt + 1;
+// pt^ := 0;
+// END_FUNCTION
 
 FUNCTION CLEAN : STRING(STRING_LENGTH)
 VAR_INPUT
@@ -12322,47 +12272,45 @@ WHILE pos <= stop DO
 END_WHILE;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION CODE : BYTE
-VAR_INPUT
-	STR : STRING(STRING_LENGTH);
-	POS : INT;
-END_VAR
-VAR
-	PT : POINTER TO BYTE;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION CODE : BYTE
+// VAR_INPUT
+// 	STR : STRING(STRING_LENGTH);
+// 	POS : INT;
+// END_VAR
+// VAR
+// 	PT : POINTER TO BYTE;
+// END_VAR
+//
+// IF pos < 1 OR pos > LEN(str) THEN
+// 	CODE := 0;
+// 	RETURN;
+// ELSE
+// 	PT := ADR(STR) + INT_TO_DWORD(pos - 1);
+// 	CODE := pt^;
+// END_IF;
+// END_FUNCTION
 
-IF pos < 1 OR pos > LEN(str) THEN
-	CODE := 0;
-	RETURN;
-ELSE
-	PT := ADR(STR) + INT_TO_DWORD(pos - 1);
-	CODE := pt^;
-END_IF;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION COUNT_CHAR : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	chr : BYTE;
-END_VAR
-VAR
-	l: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-l := LEN(str);
-COUNT_CHAR := 0;
-FOR pos := 1 TO l DO
-	IF pt^ = CHR THEN COUNT_CHAR := COUNT_CHAR + 1; END_IF;
-    PT := PT + 1;
-END_FOR;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION COUNT_CHAR : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	chr : BYTE;
+// END_VAR
+// VAR
+// 	l: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// l := LEN(str);
+// COUNT_CHAR := 0;
+// FOR pos := 1 TO l DO
+// 	IF pt^ = CHR THEN COUNT_CHAR := COUNT_CHAR + 1; END_IF;
+//     PT := PT + 1;
+// END_FOR;
+// END_FUNCTION
 
 FUNCTION COUNT_SUBSTRING : INT
 VAR_INPUT
@@ -12393,122 +12341,119 @@ END_REPEAT;
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DEC_TO_BYTE : BYTE
-VAR_INPUT
-	DEC : STRING(10);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DEC_TO_BYTE : BYTE
+// VAR_INPUT
+// 	DEC : STRING(10);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(dec);
+// stop := LEN(DEC);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 58 THEN
+// 		DEC_TO_BYTE := DEC_TO_BYTE * 10 + X - 48;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	20. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	30. sep.2008	rev 1.1
+// 	changed length of input string from 20 to 10
+// 	corrected an error where decoding of characters 8 and 9 would fail
+//
+// *)
+//
+// END_FUNCTION
 
-pt := ADR(dec);
-stop := LEN(DEC);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 58 THEN
-		DEC_TO_BYTE := DEC_TO_BYTE * 10 + X - 48;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DEC_TO_DWORD : DWORD
+// VAR_INPUT
+// 	DEC : STRING(20);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(dec);
+// stop := LEN(dec);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 58 THEN
+// 		DEC_TO_DWORD := DEC_TO_DWORD * 10 + X - 48;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	20. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	30. sep. 2008	rev 1.1
+// 	corrected an error where decoding of characters 8 and 9 would fail
+// *)
+//
+// END_FUNCTION
 
-
-
-(* revision histroy
-hm	20. jun. 2008	rev 1.0
-	original release
-
-hm	30. sep.2008	rev 1.1
-	changed length of input string from 20 to 10
-	corrected an error where decoding of characters 8 and 9 would fail
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DEC_TO_DWORD : DWORD
-VAR_INPUT
-	DEC : STRING(20);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
-
-pt := ADR(dec);
-stop := LEN(dec);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 58 THEN
-		DEC_TO_DWORD := DEC_TO_DWORD * 10 + X - 48;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-(* revision histroy
-hm	20. jun. 2008	rev 1.0
-	original release
-
-hm	30. sep. 2008	rev 1.1
-	corrected an error where decoding of characters 8 and 9 would fail
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DEC_TO_INT : INT
-VAR_INPUT
-	DEC : STRING(10);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	sign: BOOL;
-	stop: INT;
-END_VAR
-
-pt := ADR(dec);
-stop := LEN(dec);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 58 THEN
-		DEC_TO_INT := DEC_TO_INT * 10 + X - 48;
-	ELSIF X = 45 AND DEC_TO_INT = 0 THEN
-		sign := TRUE;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-IF sign THEN DEC_TO_INT := -DEC_TO_INT; END_IF;
-
-
-(* revision histroy
-hm	20. jun. 2008	rev 1.0
-	original release
-
-hm	30. sep. 2008	rev 1.1
-	changed length of input string from 20 to 10
-	corrected an error where decoding of characters 8 and 9 would fail
-*)	
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DEC_TO_INT : INT
+// VAR_INPUT
+// 	DEC : STRING(10);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	sign: BOOL;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(dec);
+// stop := LEN(dec);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 58 THEN
+// 		DEC_TO_INT := DEC_TO_INT * 10 + X - 48;
+// 	ELSIF X = 45 AND DEC_TO_INT = 0 THEN
+// 		sign := TRUE;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+// IF sign THEN DEC_TO_INT := -DEC_TO_INT; END_IF;
+//
+//
+// (* revision histroy
+// hm	20. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	30. sep. 2008	rev 1.1
+// 	changed length of input string from 20 to 10
+// 	corrected an error where decoding of characters 8 and 9 would fail
+// *)
+//
+// END_FUNCTION
 
 FUNCTION DEL_CHARS : STRING(STRING_LENGTH)
 VAR_INPUT
@@ -12536,407 +12481,397 @@ WHILE pos <= stop DO
 END_WHILE;
 END_FUNCTION
 
-(* Commented out for beedance: it uses CODE, which is commented out.
-FUNCTION DT_TO_STRF : STRING
-VAR_INPUT
-	DTI : DT;
-	MS : INT;
-	FMT : STRING;
-	LANG : INT;
-END_VAR
-VAR CONSTANT
-	FILL : STRING(1) := '0';
-	BLANK : STRING(1) := ' ';
-END_VAR
-VAR
-	ly : INT;
-	dx: DATE;
-	fs: STRING(10);
-	td: TOD;
-	tmp : INT;
-	pos : INT;
-	f : INT;
-END_VAR
+// Commented out for beedance: it uses CODE, which is commented out.
+// FUNCTION DT_TO_STRF : STRING
+// VAR_INPUT
+// 	DTI : DT;
+// 	MS : INT;
+// 	FMT : STRING;
+// 	LANG : INT;
+// END_VAR
+// VAR CONSTANT
+// 	FILL : STRING(1) := '0';
+// 	BLANK : STRING(1) := ' ';
+// END_VAR
+// VAR
+// 	ly : INT;
+// 	dx: DATE;
+// 	fs: STRING(10);
+// 	td: TOD;
+// 	tmp : INT;
+// 	pos : INT;
+// 	f : INT;
+// END_VAR
+//
+// IF LANG < 1 THEN ly := language.DEFAULT; ELSE ly := MIN(language.LMAX, LANG); END_IF;
+//
+// (* decode date and time information *)
+// dx := DT_TO_DATE(DTI);
+// td := DT_TO_TOD(DTI);
+//
+// (* parse the format string *)
+// DT_TO_STRF := FMT;
+// pos := FIND(DT_TO_STRF, '#');
+// WHILE pos > 0 DO
+// 	(* retrieve format identifier *)
+// 	f := CODE(DT_TO_STRF, pos + 1);
+// 	(* generate the return string according to the format character *)
+// 	fs := '';
+// 	CASE f OF
+// 		65 : (* letter A retunrs the year in 4 digits *)
+// 			fs := INT_TO_STRING(YEAR_OF_DATE(dx));
+// 		66 : (* letter B returns the year in exactly 2 digits *)
+// 			fs := RIGHT(INT_TO_STRING(YEAR_OF_DATE(dx)),2);
+// 		67 : (* letter C returns the month with 1 or 2 digits *)
+// 			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
+// 		68 : (* letter D returns the month with exactly 2 digits *)
+// 			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT('0', fs); END_IF;
+// 		69 : (* letter E returns the month with 3 characters *)
+// 			fs := MONTH_TO_STRING(MONTH_OF_DATE(dx), ly, 3);
+// 		70 : (* letter F returns the month with all characters *)
+// 			fs := MONTH_TO_STRING(MONTH_OF_DATE(dx), ly, 0);
+// 		71 : (* letter G returns the day with up to 2 digits *)
+// 			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
+// 		72 : (* letter H returns the day of the month with exactly 2 digits *)
+// 			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
+// 		73 : (* letter I returns the weekday as the number 1..7 1 = monday *)
+// 			fs := INT_TO_STRING(DAY_OF_WEEK(dx));
+// 		74 : (* letter J returns the weekday in 2 character writing *)
+// 			fs := WEEKDAY_TO_STRING(DAY_OF_WEEK(dx), ly, 2);
+// 		75 : (* letter K returns the weekday with all characters *)
+// 			fs := WEEKDAY_TO_STRING(DAY_OF_WEEK(dx), ly, 0);
+// 		76 : (* letter L returns AM or PM for the given DateTime *)
+// 			IF td >= TOD#12:00:00 THEN fs := 'PM'; ELSE fs := 'AM'; END_IF;
+// 		77 : (* letter M returns the hour in 1 or 2 digit form 0..24h *)
+// 			fs := INT_TO_STRING(HOUR(td));
+// 		78 : (* letter N returns the hour in exactly 2 digit form 0..24h *)
+// 			fs := INT_TO_STRING(HOUR(td));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
+// 		79 : (* letter O returns the hour in 1 or 2 digit form 0..12h *)
+// 			tmp := HOUR(td) MOD 12;
+// 			IF tmp = 0 THEN tmp := 12; END_IF;
+// 			fs := INT_TO_STRING(tmp);
+// 		80 : (* letter P returns the hour in exactly 2 digit form 0..12h *)
+// 			tmp := HOUR(td) MOD 12;
+// 			IF tmp = 0 THEN tmp := 12; END_IF;
+// 			fs := INT_TO_STRING(tmp);
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
+// 		81 : (* letter Q returns the minute of the hour in 1 or two digit form *)
+// 			fs := INT_TO_STRING(MINUTE(td));
+// 		82 : (* letter R returns the minute of the hour in exactly two digit form *)
+// 			fs := INT_TO_STRING(MINUTE(td));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
+// 		83 : (* letter S returns the second of the minute in 1 or two digit form *)
+// 			fs := INT_TO_STRING(REAL_TO_INT(SECOND(td)));
+// 		84 : (* letter T returns the second of the minute in exactly two digit form *)
+// 			fs := INT_TO_STRING(REAL_TO_INT(SECOND(td)));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
+// 		85 : (* letter U returns the milliseconds in 1 to 3 digits *)
+// 			fs := INT_TO_STRING(MS);
+// 		86 : (* letter V returns the milliseconds in exactly 3 digit form *)
+// 			fs := INT_TO_STRING(MS);
+// 			fs := CONCAT('00',fs);
+// 			fs := RIGHT(fs, 3);
+// 		87 : (* letter W returns the day of the month with exactly 2 digits first digit is filled with blank if necessary *)
+// 			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(BLANK, fs); END_IF;
+// 		88 : (* letter X returns the month with exactly 2 digits first digit is filled with blank if necessary *)
+// 			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
+// 			IF LEN(fs) < 2 THEN fs := CONCAT(BLANK, fs); END_IF;
+// 		END_CASE;
+// 	DT_TO_STRF := REPLACE(DT_TO_STRF, fs, 2, pos);
+// 	pos := FIND(DT_TO_STRF, '#');
+// END_WHILE;
+//
+// END_FUNCTION
 
-IF LANG < 1 THEN ly := language.DEFAULT; ELSE ly := MIN(language.LMAX, LANG); END_IF;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DWORD_TO_STRB : STRING(32)
+// VAR_INPUT
+// 	IN : DWORD;
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// END_VAR
+//
+// (* pointer f�r die ausgabe ermitteln *)
+// pt := ADR(DWORD_TO_STRB);
+// (* die 8 ausgabecharacter ermitteln und schreiben *)
+// FOR i := 1 TO 32 DO
+// 	pt^:= BOOL_TO_BYTE(in.31) + 48;
+// 	in := SHL(in,1);
+// 	pt := pt + 1;
+// END_FOR;
+//
+// (* der ausgabestring muss nochg mit 0 abgeschlossen werden *)
+// pt^ := 0;
+//
+// END_FUNCTION
 
-(* decode date and time information *)
-dx := DT_TO_DATE(DTI);
-td := DT_TO_TOD(DTI);
+// Commented out for beedance: it uses FIX, which is commented out.
+// FUNCTION DWORD_TO_STRF : STRING(20)
+// VAR_INPUT
+// 	IN : DWORD;
+// 	N : INT;
+// END_VAR
+//
+//
+//
+// (* limit N to max 20 characters *)
+// (* convert dword to string first and cut to length N *)
+// DWORD_TO_STRF := FIX(DWORD_TO_STRING(in),LIMIT(0,N,20),48,1);
+//
+// END_FUNCTION
 
-(* parse the format string *)
-DT_TO_STRF := FMT;
-pos := FIND(DT_TO_STRF, '#');
-WHILE pos > 0 DO
-	(* retrieve format identifier *)
-	f := CODE(DT_TO_STRF, pos + 1);
-	(* generate the return string according to the format character *)
-	fs := '';
-	CASE f OF
-		65 : (* letter A retunrs the year in 4 digits *)
-			fs := INT_TO_STRING(YEAR_OF_DATE(dx));
-		66 : (* letter B returns the year in exactly 2 digits *)
-			fs := RIGHT(INT_TO_STRING(YEAR_OF_DATE(dx)),2);
-		67 : (* letter C returns the month with 1 or 2 digits *)
-			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
-		68 : (* letter D returns the month with exactly 2 digits *)
-			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
-			IF LEN(fs) < 2 THEN fs := CONCAT('0', fs); END_IF;
-		69 : (* letter E returns the month with 3 characters *)
-			fs := MONTH_TO_STRING(MONTH_OF_DATE(dx), ly, 3);
-		70 : (* letter F returns the month with all characters *)
-			fs := MONTH_TO_STRING(MONTH_OF_DATE(dx), ly, 0);
-		71 : (* letter G returns the day with up to 2 digits *)
-			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
-		72 : (* letter H returns the day of the month with exactly 2 digits *)
-			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
-			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
-		73 : (* letter I returns the weekday as the number 1..7 1 = monday *)
-			fs := INT_TO_STRING(DAY_OF_WEEK(dx));
-		74 : (* letter J returns the weekday in 2 character writing *)
-			fs := WEEKDAY_TO_STRING(DAY_OF_WEEK(dx), ly, 2);
-		75 : (* letter K returns the weekday with all characters *)
-			fs := WEEKDAY_TO_STRING(DAY_OF_WEEK(dx), ly, 0);
-		76 : (* letter L returns AM or PM for the given DateTime *)
-			IF td >= TOD#12:00:00 THEN fs := 'PM'; ELSE fs := 'AM'; END_IF;
-		77 : (* letter M returns the hour in 1 or 2 digit form 0..24h *)
-			fs := INT_TO_STRING(HOUR(td));
-		78 : (* letter N returns the hour in exactly 2 digit form 0..24h *)
-			fs := INT_TO_STRING(HOUR(td));
-			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
-		79 : (* letter O returns the hour in 1 or 2 digit form 0..12h *)
-			tmp := HOUR(td) MOD 12;
-			IF tmp = 0 THEN tmp := 12; END_IF;
-			fs := INT_TO_STRING(tmp);
-		80 : (* letter P returns the hour in exactly 2 digit form 0..12h *)
-			tmp := HOUR(td) MOD 12;
-			IF tmp = 0 THEN tmp := 12; END_IF;
-			fs := INT_TO_STRING(tmp);
-			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
-		81 : (* letter Q returns the minute of the hour in 1 or two digit form *)
-			fs := INT_TO_STRING(MINUTE(td));
-		82 : (* letter R returns the minute of the hour in exactly two digit form *)
-			fs := INT_TO_STRING(MINUTE(td));
-			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
-		83 : (* letter S returns the second of the minute in 1 or two digit form *)
-			fs := INT_TO_STRING(REAL_TO_INT(SECOND(td)));
-		84 : (* letter T returns the second of the minute in exactly two digit form *)
-			fs := INT_TO_STRING(REAL_TO_INT(SECOND(td)));
-			IF LEN(fs) < 2 THEN fs := CONCAT(FILL, fs); END_IF;
-		85 : (* letter U returns the milliseconds in 1 to 3 digits *)
-			fs := INT_TO_STRING(MS);
-		86 : (* letter V returns the milliseconds in exactly 3 digit form *)
-			fs := INT_TO_STRING(MS);
-			fs := CONCAT('00',fs);
-			fs := RIGHT(fs, 3);
-		87 : (* letter W returns the day of the month with exactly 2 digits first digit is filled with blank if necessary *)
-			fs := INT_TO_STRING(DAY_OF_MONTH(dx));
-			IF LEN(fs) < 2 THEN fs := CONCAT(BLANK, fs); END_IF;
-		88 : (* letter X returns the month with exactly 2 digits first digit is filled with blank if necessary *)
-			fs := INT_TO_STRING(MONTH_OF_DATE(dx));
-			IF LEN(fs) < 2 THEN fs := CONCAT(BLANK, fs); END_IF;
-		END_CASE;
-	DT_TO_STRF := REPLACE(DT_TO_STRF, fs, 2, pos);
-	pos := FIND(DT_TO_STRF, '#');
-END_WHILE;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION DWORD_TO_STRH : STRING(8)
+// VAR_INPUT
+// 	IN : DWORD;
+// END_VAR
+// VAR
+// 	i : INT;
+// 	temp : BYTE;
+// 	pt : POINTER TO BYTE;
+// END_VAR
+//
+//
+// (* read output adress to pointer *)
+// pt := ADR(DWORD_TO_STRH) + 8;
+// (* wirte the closing byte for the string *)
+// pt^:= 0;
+//
+// (* write the 8 hex characters backwards *)
+// FOR i := 1 TO 8 DO;
+// 	(* decrement the pointer *)
+// 	pt := pt - 1;
+// 	(* read the lowest order hex value *)
+// 	temp := DWORD_TO_BYTE(in AND 16#0000000F);
+// 	(* convert value to hex character *)
+// 	IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
+// 	(* write character to output string *)
+// 	PT^ := temp;
+// 	(* shift in for nect hex character *)
+// 	in := SHR(in,4);
+// END_FOR;
+//
+//
+// (* code beofre rev 1.2
+// FOR i := 1 TO 8 DO
+// 	X := DWORD_TO_BYTE(in AND 2#1111);
+// 	IF X <= 9 THEN X := X + 48; ELSE X := X + 55; END_IF;
+// 	Cx := CHR(X);
+// 	temp := CONCAT(Cx, temp);
+// 	in := SHR(in,4);
+// END_FOR;
+// DWORD_TO_STRH := temp;
+// *)
+//
+// END_FUNCTION
 
-END_FUNCTION
-*)
+// Commented out for beedance: it uses FINDB_NONUM, which is commented out.
+// FUNCTION EXEC : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	pos: INT;
+// 	R1: REAL;
+// 	R2: REAL;
+// 	operator: STRING(10);
+// END_VAR
+//
+// (* extract both numbers and operator *)
+// EXEC := UPPERCASE(TRIM(str));
+//
+// pos := FINDB_NONUM(EXEC);
+// IF pos > 1 THEN R1 := STRING_TO_REAL(LEFT(EXEC,pos-1)); END_IF;
+// R2 := STRING_TO_REAL(RIGHT(EXEC,LEN(EXEC)-pos));
+// EXEC := LEFT(EXEC,pos);
+// pos := FINDB_NUM(EXEC);
+// operator := RIGHT(EXEC,LEN(EXEC) - pos);
+// IF operator = '' AND LEN(str) = 0 THEN
+// 	EXEC := '';
+// 	RETURN;
+// ELSIF operator = '' THEN
+// 	EXEC := str;
+// 	RETURN;
+// END_IF;
+// IF operator = '^' THEN
+// 	EXEC := REAL_TO_STRING(EXPT(R1, R2));
+// ELSIF operator = 'SQRT' THEN
+// 	EXEC := REAL_TO_STRING(SQRT(R2));
+// ELSIF operator = 'SIN' THEN
+// 	EXEC := REAL_TO_STRING(SIN(r2));
+// ELSIF operator = 'COS' THEN
+// 	EXEC := REAL_TO_STRING(COS(r2));
+// ELSIF operator = 'TAN' THEN
+// 	EXEC := REAL_TO_STRING(TAN(R2));
+// ELSIF operator = '*' THEN
+// 	EXEC := REAL_TO_STRING(R1 * R2);
+// ELSIF operator = '/' THEN
+// 	IF R2 <> 0 THEN EXEC := REAL_TO_STRING(R1 / R2); ELSE EXEC := 'ERROR'; END_IF;
+// ELSIF operator = '+' THEN
+// 	EXEC := REAL_TO_STRING(r1 + r2);
+// ELSIF operator = '-' THEN
+// 	EXEC := REAL_TO_STRING(r1 - r2);
+// ELSE
+// 	EXEC := 'ERROR';
+// END_IF;
+//
+// IF EXEC = 'ERROR' THEN
+// 	RETURN;
+// (* some systems deliver integer instead of real *)
+// ELSIF FIND(EXEC,'.') = 0 THEN
+// 	EXEC := CONCAT(EXEC, '.0');
+// (* some systems deliver n. instead of n.0 ! *)
+// ELSIF RIGHT(EXEC,1) = '.' THEN
+// 	EXEC := CONCAT(EXEC,'0');
+// END_IF;
+// END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DWORD_TO_STRB : STRING(32)
-VAR_INPUT
-	IN : DWORD;
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-END_VAR
+// Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
+// FUNCTION FILL : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	C : BYTE;
+// 	L : INT;
+// END_VAR
+// VAR
+// 	i: INT;
+// 	sx: STRING(1);
+// END_VAR
+// VAR
+// 	L_work : INT;
+// END_VAR
+// (* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
+// L_work := L;
+//
+// Sx := CHR_TO_STRING(c);
+// (* limit L to maximum 80 characters the length of a standard string *)
+// L_work := LIMIT(0,L_work,STRING_LENGTH);
+// (* create a string of characters to be connected to str *)
+// FOR i := 1 TO 8 DO
+// 	FILL := CONCAT(FILL,FILL);
+// 	IF L_work.7 THEN FILL := CONCAT(FILL,Sx); END_IF;
+// 	L_work := SHL(L_work,1);
+// END_FOR;
+//
+//
+//
+//
+// (* revision histroy
+// hm	29. mar. 2008	rev 1.0
+// 	original release
+//
+// hm	17. dec. 2008	rev 1.1
+// 	changed function chr to chr_to_string
+//
+// *)
+// END_FUNCTION
 
-(* pointer f�r die ausgabe ermitteln *)
-pt := ADR(DWORD_TO_STRB);
-(* die 8 ausgabecharacter ermitteln und schreiben *)
-FOR i := 1 TO 32 DO
-	pt^:= BOOL_TO_BYTE(in.31) + 48;
-	in := SHL(in,1);
-	pt := pt + 1;
-END_FOR;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FIND_CHAR : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	pos : INT;
+// END_VAR
+// VAR
+// 	i: INT;
+// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	stop: INT;
+// 	X: BYTE;
+// END_VAR
+//
+// pt := ADR(str);
+// stop := LEN(str);
+// FOR i := MAX(pos,1) TO stop DO;
+// 	X := pt^[i];
+// 	IF X > 31 AND ((setup.EXTENDED_ASCII AND X <> 127) OR (NOT setup.EXTENDED_ASCII AND X < 127)) THEN
+// 		FIND_CHAR := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// FIND_CHAR := 0;
+//
+//
+// END_FUNCTION
 
-(* der ausgabestring muss nochg mit 0 abgeschlossen werden *)
-pt^ := 0;
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FIND_CTRL : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	pos : INT;
+// END_VAR
+// VAR
+// 	i: INT;
+// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	stop: INT;
+// 	x: BYTE;
+// END_VAR
+//
+// pt := ADR(str);
+// stop := LEN(str);
+// FOR i := MAX(pos,1) TO stop DO;
+// 	x := PT^[I];
+// 	IF x < 32 OR X = 127 THEN
+// 		FIND_CTRL := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// FIND_CTRL := 0;
+// END_FUNCTION
 
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FIND_NONUM : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	pos : INT;
+// END_VAR
+// VAR
+// 	i: INT;
+// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	end: INT;
+// 	X: BYTE;
+// END_VAR
+//
+// pt := ADR(str);
+// end := LEN(str);
+// FOR i := MAX(pos,1) TO end DO;
+// 	X := pt^[i];
+// 	IF (X < 48 AND X <> 46) OR X > 57 THEN
+// 		FIND_NONUM := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// FIND_NONUM := 0;
+// END_FUNCTION
 
-(* Commented out for beedance: it uses FIX, which is commented out.
-FUNCTION DWORD_TO_STRF : STRING(20)
-VAR_INPUT
-	IN : DWORD;
-	N : INT;
-END_VAR
-
-
-
-(* limit N to max 20 characters *)
-(* convert dword to string first and cut to length N *)
-DWORD_TO_STRF := FIX(DWORD_TO_STRING(in),LIMIT(0,N,20),48,1);
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION DWORD_TO_STRH : STRING(8)
-VAR_INPUT
-	IN : DWORD;
-END_VAR
-VAR
-	i : INT;
-	temp : BYTE;
-	pt : POINTER TO BYTE;
-END_VAR
-
-
-(* read output adress to pointer *)
-pt := ADR(DWORD_TO_STRH) + 8;
-(* wirte the closing byte for the string *)
-pt^:= 0;
-
-(* write the 8 hex characters backwards *)
-FOR i := 1 TO 8 DO;
-	(* decrement the pointer *)
-	pt := pt - 1;
-	(* read the lowest order hex value *)
-	temp := DWORD_TO_BYTE(in AND 16#0000000F);
-	(* convert value to hex character *)
-	IF temp <= 9 THEN temp := temp + 48; ELSE temp := temp + 55; END_IF;
-	(* write character to output string *)
-	PT^ := temp;
-	(* shift in for nect hex character *)
-	in := SHR(in,4);
-END_FOR;
-
-
-(* code beofre rev 1.2
-FOR i := 1 TO 8 DO
-	X := DWORD_TO_BYTE(in AND 2#1111);
-	IF X <= 9 THEN X := X + 48; ELSE X := X + 55; END_IF;
-	Cx := CHR(X);
-	temp := CONCAT(Cx, temp);
-	in := SHR(in,4);
-END_FOR;
-DWORD_TO_STRH := temp;
-*)
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses FINDB_NONUM, which is commented out.
-FUNCTION EXEC : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	pos: INT;
-	R1: REAL;
-	R2: REAL;
-	operator: STRING(10);
-END_VAR
-
-(* extract both numbers and operator *)
-EXEC := UPPERCASE(TRIM(str));
-
-pos := FINDB_NONUM(EXEC);
-IF pos > 1 THEN R1 := STRING_TO_REAL(LEFT(EXEC,pos-1)); END_IF;
-R2 := STRING_TO_REAL(RIGHT(EXEC,LEN(EXEC)-pos));
-EXEC := LEFT(EXEC,pos);
-pos := FINDB_NUM(EXEC);
-operator := RIGHT(EXEC,LEN(EXEC) - pos);
-IF operator = '' AND LEN(str) = 0 THEN
-	EXEC := '';
-	RETURN;
-ELSIF operator = '' THEN
-	EXEC := str;
-	RETURN;
-END_IF;
-IF operator = '^' THEN
-	EXEC := REAL_TO_STRING(EXPT(R1, R2));
-ELSIF operator = 'SQRT' THEN
-	EXEC := REAL_TO_STRING(SQRT(R2));
-ELSIF operator = 'SIN' THEN
-	EXEC := REAL_TO_STRING(SIN(r2));
-ELSIF operator = 'COS' THEN
-	EXEC := REAL_TO_STRING(COS(r2));
-ELSIF operator = 'TAN' THEN
-	EXEC := REAL_TO_STRING(TAN(R2));
-ELSIF operator = '*' THEN
-	EXEC := REAL_TO_STRING(R1 * R2);
-ELSIF operator = '/' THEN
-	IF R2 <> 0 THEN EXEC := REAL_TO_STRING(R1 / R2); ELSE EXEC := 'ERROR'; END_IF;
-ELSIF operator = '+' THEN
-	EXEC := REAL_TO_STRING(r1 + r2);
-ELSIF operator = '-' THEN
-	EXEC := REAL_TO_STRING(r1 - r2);
-ELSE
-	EXEC := 'ERROR';
-END_IF;
-
-IF EXEC = 'ERROR' THEN
-	RETURN;
-(* some systems deliver integer instead of real *)
-ELSIF FIND(EXEC,'.') = 0 THEN
-	EXEC := CONCAT(EXEC, '.0');
-(* some systems deliver n. instead of n.0 ! *)
-ELSIF RIGHT(EXEC,1) = '.' THEN
-	EXEC := CONCAT(EXEC,'0');
-END_IF;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
-FUNCTION FILL : STRING(STRING_LENGTH)
-VAR_INPUT
-	C : BYTE;
-	L : INT;
-END_VAR
-VAR
-	i: INT;
-	sx: STRING(1);
-END_VAR
-VAR
-	L_work : INT;
-END_VAR
-(* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
-L_work := L;
-
-Sx := CHR_TO_STRING(c);
-(* limit L to maximum 80 characters the length of a standard string *)
-L_work := LIMIT(0,L_work,STRING_LENGTH);
-(* create a string of characters to be connected to str *)
-FOR i := 1 TO 8 DO
-	FILL := CONCAT(FILL,FILL);
-	IF L_work.7 THEN FILL := CONCAT(FILL,Sx); END_IF;
-	L_work := SHL(L_work,1);
-END_FOR;
-
-
-
-
-(* revision histroy
-hm	29. mar. 2008	rev 1.0
-	original release
-
-hm	17. dec. 2008	rev 1.1
-	changed function chr to chr_to_string
-
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FIND_CHAR : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	pos : INT;
-END_VAR
-VAR
-	i: INT;
-	pt : POINTER TO ARRAY[1..255] OF BYTE;
-	stop: INT;
-	X: BYTE;
-END_VAR
-
-pt := ADR(str);
-stop := LEN(str);
-FOR i := MAX(pos,1) TO stop DO;
-	X := pt^[i];
-	IF X > 31 AND ((setup.EXTENDED_ASCII AND X <> 127) OR (NOT setup.EXTENDED_ASCII AND X < 127)) THEN
-		FIND_CHAR := i;
-		RETURN;
-	END_IF;
-END_FOR;
-FIND_CHAR := 0;
-
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FIND_CTRL : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	pos : INT;
-END_VAR
-VAR
-	i: INT;
-	pt : POINTER TO ARRAY[1..255] OF BYTE;
-	stop: INT;
-	x: BYTE;
-END_VAR
-
-pt := ADR(str);
-stop := LEN(str);
-FOR i := MAX(pos,1) TO stop DO;
-	x := PT^[I];
-	IF x < 32 OR X = 127 THEN
-		FIND_CTRL := i;
-		RETURN;
-	END_IF;
-END_FOR;
-FIND_CTRL := 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FIND_NONUM : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	pos : INT;
-END_VAR
-VAR
-	i: INT;
-	pt : POINTER TO ARRAY[1..255] OF BYTE;
-	end: INT;
-	X: BYTE;
-END_VAR
-
-pt := ADR(str);
-end := LEN(str);
-FOR i := MAX(pos,1) TO end DO;
-	X := pt^[i];
-	IF (X < 48 AND X <> 46) OR X > 57 THEN
-		FIND_NONUM := i;
-		RETURN;
-	END_IF;
-END_FOR;
-FIND_NONUM := 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FIND_NUM : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	pos : INT;
-END_VAR
-VAR
-	i : INT;
-	pt : POINTER TO ARRAY[1..255] OF BYTE;
-	stop : INT;
-	X: BYTE;
-END_VAR
-
-pt := ADR(str);
-stop := LEN(str);
-FOR i := MAX(pos,1) TO stop DO;
-	X := pt^[i];
-	IF (X > 47 AND X < 58) OR X = 46 THEN
-		FIND_NUM := i;
-		RETURN;
-	END_IF;
-END_FOR;
-FIND_NUM := 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FIND_NUM : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	pos : INT;
+// END_VAR
+// VAR
+// 	i : INT;
+// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	stop : INT;
+// 	X: BYTE;
+// END_VAR
+//
+// pt := ADR(str);
+// stop := LEN(str);
+// FOR i := MAX(pos,1) TO stop DO;
+// 	X := pt^[i];
+// 	IF (X > 47 AND X < 58) OR X = 46 THEN
+// 		FIND_NUM := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// FIND_NUM := 0;
+// END_FUNCTION
 
 FUNCTION FINDB : INT
 VAR_INPUT
@@ -12958,49 +12893,47 @@ END_FOR;
 FindB := 0;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FINDB_NONUM : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	pos: INT;
-	pt : POINTER TO BYTE;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FINDB_NONUM : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	pos: INT;
+// 	pt : POINTER TO BYTE;
+// END_VAR
+//
+// pt := ADR(str) + LEN(str) - 1;
+// FOR pos := LEN(str) TO 1 BY -1 DO;
+// 	IF (PT^ < 48 AND PT^ <> 46) OR PT^ > 57 THEN
+// 		FINDB_NONUM := pos;
+// 		RETURN;
+// 	END_IF;
+// 	PT := PT - 1;
+// END_FOR;
+// FINDB_NONUM := 0;
+// END_FUNCTION
 
-pt := ADR(str) + LEN(str) - 1;
-FOR pos := LEN(str) TO 1 BY -1 DO;
-	IF (PT^ < 48 AND PT^ <> 46) OR PT^ > 57 THEN
-		FINDB_NONUM := pos;
-		RETURN;
-	END_IF;
-	PT := PT - 1;
-END_FOR;
-FINDB_NONUM := 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FINDB_NUM : INT
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	pos: INT;
-	pt : POINTER TO BYTE;
-END_VAR
-
-pt := ADR(str) + LEN(str) - 1;
-FOR pos := LEN(str) TO 1 BY -1 DO;
-	IF (PT^ > 47 AND PT^ < 58) OR PT^ = 46 THEN
-		FINDB_NUM := pos;
-		RETURN;
-	END_IF;
-	PT := PT - 1;
-END_FOR;
-FINDB_NUM := 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FINDB_NUM : INT
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	pos: INT;
+// 	pt : POINTER TO BYTE;
+// END_VAR
+//
+// pt := ADR(str) + LEN(str) - 1;
+// FOR pos := LEN(str) TO 1 BY -1 DO;
+// 	IF (PT^ > 47 AND PT^ < 58) OR PT^ = 46 THEN
+// 		FINDB_NUM := pos;
+// 		RETURN;
+// 	END_IF;
+// 	PT := PT - 1;
+// END_FOR;
+// FINDB_NUM := 0;
+// END_FUNCTION
 
 FUNCTION FINDP : INT
 VAR_INPUT
@@ -13040,550 +12973,538 @@ hm	29. mar. 2008	rev 1.2
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses FILL, which is commented out.
-FUNCTION FIX : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-	L : INT;
-	C : BYTE;
-	M : INT;
-END_VAR
-VAR
-	N : INT;
-	SX: STRING(STRING_LENGTH);
-END_VAR
-
-(* make sure L does not exceed the limits of a string *)
-N := LIMIT(0,L,STRING_LENGTH) - LEN(str);
-IF N <= 0 THEN
-	(* truncate the string at length N *)
-	IF M = 1 THEN
-		FIX := RIGHT(str,L);
-	ELSE
-		FIX := LEFT(str,L);
-	END_IF;
-ELSIF M = 1 THEN
-	(* connect fill characters at the beginning *)
-	sx := FILL(C,N);
-	FIX := CONCAT(sx,str);
-ELSIF M = 2 THEN
-	(* center str beween fill characters *)
-	(* for an uneven number of fill characters, there is one more at the end *)
-	sx := FILL(C,SHR(N+1,1));
-	FIX := CONCAT(str,sx);
-	SX := LEFT(sx,SHR(N,1));
-	FIX := CONCAT(sx,FIX);
-ELSE
-	(* connect fill characters at the end *)
-	SX := FILL(C,N);
-	FIX := CONCAT(str,SX);
-END_IF;
-
-
-(* revision histroy
-hm	29. mar. 2008	rev 1.0
-	original release
-
-*)
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION FLOAT_TO_REAL : REAL
-VAR_INPUT
-	FLT : STRING(20);
-END_VAR
-VAR
-	pt : POINTER TO ARRAY[1..20] OF BYTE;
-	i: INT;
-	X: BYTE;
-	sign: INT := 1;
-	stop: INT;
-	tmp: DINT;
-	d : INT;
-END_VAR
-
-pt := ADR(FLT);
-stop := LEN(FLT);
-
-(* we first check for sign and exit if first number or dot is reached *)
-FOR i := 1 TO stop DO
-	X := pt^[i];
-	IF X > 47 AND X < 58 OR X = 46 THEN
-		EXIT;
-	ELSIF X = 45 THEN
-		(* code 45 is sign *)
-		sign := -1;
-	END_IF;
-END_FOR;
-
-(* now we scan numbers till end or dot or E is reached *)
-FOR i := i TO stop DO
-	X := pt^[i];
-	IF X = 44 OR X = 46 OR X = 69 OR X = 101 THEN
-		EXIT;
-	(* calculate the value of the digit *)
-	ELSIF X > 47 AND x < 58 THEN
-		tmp := tmp * 10 + X - 48;
-	END_IF;
-END_FOR;
-
-(* process the portion after the comma if comma or dot is reached exit if exponent starts *)
-IF x = 44 OR X = 46 THEN
-	FOR i := i + 1 TO stop DO
-		X := pt^[i];
-		IF X = 69 OR X = 101 THEN
-			EXIT;
-		ELSIF x > 47 AND x < 58 THEN
-			tmp := tmp * 10 + X - 48;
-			d := d - 1;
-		END_IF;
-	END_FOR;
-END_IF;
-
-(* process exponent if present *)
-IF X = 69 OR X = 101 THEN
-	d := d + DEC_TO_INT(RIGHT(FLT, stop - i));
-END_IF;
-
-FLOAT_TO_REAL :=  EXPN(10, d) * DINT_TO_REAL(TMP * SIGN);
-
-
-
-
-(* revision histroy
-hm	22. jun. 2008	rev 1.0
-	original release
-
-hm	2. oct. 2008	rev 1.1
-	fixed an error, characters 8 and 9 would not be converted
-
-hm	22. oct. 2008	rev 1.2
-	last fix was not done correctly
-
-hm	23. oct. 2008	rev 1.3
-	optimzed code
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses BIN_TO_BYTE, which is commented out.
-FUNCTION FSTRING_TO_BYTE : BYTE
-VAR_INPUT
-	IN : STRING(12);
-END_VAR
-
-IF LEFT(IN, 2) = '2#' THEN
-	(* we need to convert binary *)
-	FSTRING_TO_BYTE := BIN_TO_BYTE(RIGHT(in, LEN(in) - 2));
-ELSIF LEFT(in, 2) = '8#' THEN
-	(* weneed to convert octals *)
-	FSTRING_TO_BYTE := OCT_TO_BYTE(RIGHT(in, LEN(in) - 2));
-ELSIF LEFT(in, 3) = '16#' THEN
-	(* we need to convert hexadecimal *)
-	FSTRING_TO_BYTE := HEX_TO_BYTE(RIGHT(in, LEN(in) - 3));
-ELSE
-	(* we assume decimal representation *)
-	FSTRING_TO_BYTE := DEC_TO_BYTE(CLEAN(in,'0123456789'));
-END_IF;
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	20. sep. 2008	rev 1.1
-	changed length of input string from 20 to 12
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses FSTRING_TO_MONTH, which is commented out.
-FUNCTION FSTRING_TO_DT : DT
-VAR_INPUT
-	SDT : STRING(60);
-	FMT : STRING(60);
-END_VAR
-VAR CONSTANT
-	ignore: STRING(1) := '*';  (* ignore character is * *)
-	fchar : STRING(1) := '#';  (* format character is # *)
-END_VAR
-VAR
-	c: STRING(1);
-	tmp: STRING(20);
-	end: INT;
-	dy : INT := 1970;
-	dm : INT := 1;
-	dd : INT := 1;
-	th : INT;
-	tm : INT;
-	ts : INT;
-END_VAR
-VAR
-	SDT_work : STRING;
-	FMT_work : STRING;
-END_VAR
-(* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
-SDT_work := SDT;
-FMT_work := FMT;
-
-(* scan input string *)
-WHILE FMT_work <> '' DO
-	c := LEFT(FMT_work,1);
-	IF c = ignore THEN
-		(* skip ignore characters *)
-		FMT_work := DELETE(FMT_work,1,1);
-		SDT_work := DELETE(SDT_work,1,1);
-	ELSIF C = fchar THEN
-		(* format chracter found skip format char and read identifier *)
-		(* store format identifier in c and skip to next char in fmt *)
-		c := MID(FMT_work,1,2);
-		FMT_work := DELETE(FMT_work,2,1);
-		(* extract the substring until the end of sdt or to next char of fmt *)
-		IF FMT_work = '' THEN
-			tmp := SDT_work;
-		ELSE
-			(* serach for end of substring *)
-			end := FIND(SDT_work, LEFT(FMT_work,1))-1;
-			tmp := LEFT(SDT_work, end);
-			SDT_work := DELETE(SDT_work, end,1);
-		END_IF;
-		(* extract information from substring *)
-		IF c = 'Y' THEN
-			dy := STRING_TO_INT(tmp);
-			IF dy < 100 THEN dy := dy + 2000; END_IF;
-		ELSIF c = 'M' THEN
-			dm := STRING_TO_INT(tmp);
-		ELSIF c = 'N' THEN
-			dm := FSTRING_TO_MONTH(tmp,0);
-		ELSIF c = 'D' THEN
-			dd := STRING_TO_INT(tmp);
-		ELSIF c = 'h' THEN
-			th := STRING_TO_INT(tmp);
-		ELSIF c = 'm' THEN
-			tm := STRING_TO_INT(tmp);
-		ELSIF c = 's' THEN
-			ts := STRING_TO_INT(tmp);
-		END_IF;
-	ELSIF c = LEFT(SDT_work,1) THEN
-		(* skip matching characters *)
-		FMT_work := DELETE(FMT_work,1,1);
-		SDT_work := DELETE(SDT_work,1,1);
-	ELSE
-		RETURN;
-	END_IF;
-END_WHILE;
-
-FSTRING_TO_DT := SET_DT(dy,dm,dd,th,tm,ts);
-
-
-(* revision histroy
-hm	24. sep. 2008	rev 1.0
-	original release
-
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses BIN_TO_DWORD, which is commented out.
-FUNCTION FSTRING_TO_DWORD : DWORD
-VAR_INPUT
-	IN : STRING(40);
-END_VAR
-
-IF LEFT(IN, 2) = '2#' THEN
-	(* we need to convert binary *)
-	FSTRING_TO_DWORD := BIN_TO_DWORD(RIGHT(in, LEN(in) - 2));
-ELSIF LEFT(in, 2) = '8#' THEN
-	(* weneed to convert octals *)
-	FSTRING_TO_DWORD := OCT_TO_DWORD(RIGHT(in, LEN(in) - 2));
-ELSIF LEFT(in, 3) = '16#' THEN
-	(* we need to convert hexadecimal *)
-	FSTRING_TO_DWORD := HEX_TO_DWORD(RIGHT(in, LEN(in) - 3));
-ELSE
-	(* we assume decimal representation *)
-	FSTRING_TO_DWORD := DEC_TO_DWORD(CLEAN(in,'0123456789'));
-END_IF;
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	20. sep. 2008	rev 1.1
-	changed length of input dtring from 20 to 40
-
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses CAPITALIZE, which is commented out.
-FUNCTION FSTRING_TO_MONTH : INT
-VAR_INPUT
-	MTH : STRING(20);
-	LANG : INT;
-END_VAR
-VAR
-	lx: INT;
-END_VAR
-VAR
-	MTH_work : STRING;
-END_VAR
-(* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
-MTH_work := MTH;
-
-IF LANG = 0 THEN lx := LANGUAGE.DEFAULT; ELSE lx := MIN(LANG, LANGUAGE.LMAX); END_IF;
-MTH_work := TRIM(MTH_work);
-MTH_work := CAPITALIZE(LOWERCASE(MTH_work));
-
-FOR FSTRING_TO_MONTH := 1 TO 12 DO
-	IF MTH_work = language.MONTHS[lx, FSTRING_TO_MONTH] THEN RETURN; END_IF;
-	IF MTH_work = language.MONTHS3[lx, FSTRING_TO_MONTH] THEN RETURN; END_IF;
-END_FOR;
-
-(* since no name matched try to decode as integer *)
-FSTRING_TO_MONTH := STRING_TO_INT(MTH_work);
-
-
-
-
-(* revision histroy
-hm	25. sep. 2008	rev 1.0
-	original release
-
-hm	19. oct. 2008	rev 1.1
-	changed language setup constants
-
-hm	25. oct. 2008	rev 1.2
-	optimized code
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses FSTRING_TO_WEEKDAY, which is commented out.
-FUNCTION FSTRING_TO_WEEK : BYTE
-VAR_INPUT
-	WEEK : STRING(60);
-	LANG : INT;
-END_VAR
-VAR
-	pos: INT;
-END_VAR
-VAR
-	WEEK_work : STRING;
-END_VAR
-(* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
-WEEK_work := WEEK;
-
-pos := FIND(WEEK_work, ',');
-WHILE pos > 0 DO
-	FSTRING_TO_WEEK := FSTRING_TO_WEEK OR SHR(BYTE#128, FSTRING_TO_WEEKDAY(MID(WEEK_work, pos - 1, 1), LANG));
-	WEEK_work := RIGHT(WEEK_work, LEN(WEEK_work) - pos);
-	pos := FIND(WEEK_work, ',');
-END_WHILE;
-FSTRING_TO_WEEK := (FSTRING_TO_WEEK OR SHR(BYTE#128, FSTRING_TO_WEEKDAY(WEEK_work, LANG))) AND BYTE#127;
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	25. oct. 2008	rev 1.1
-	using language defauls and input lang
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses CAPITALIZE, which is commented out.
-FUNCTION FSTRING_TO_WEEKDAY : INT
-VAR_INPUT
-	WDAY : STRING(20);
-	LANG : INT;
-END_VAR
-VAR
-	tmp: STRING(2);
-	i: INT;
-	ly: INT;
-END_VAR
-
-IF LANG = 0 THEN ly := LANGUAGE.DEFAULT; ELSE ly := MIN(LANG, LANGUAGE.LMAX); END_IF;
-(* tmp needs to be calculated first otherwise find can return wrong values *)
-tmp := TRIM(wday);
-tmp := CAPITALIZE(LOWERCASE(tmp));
-FOR i := 1 TO 7 DO
-	IF language.WEEKDAYS2[ly, i] = tmp THEN
-		FSTRING_TO_WEEKDAY := i;
-		RETURN;
-	END_IF;
-END_FOR;
-FSTRING_TO_WEEKDAY := STRING_TO_INT(WDAY);
-
-
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	18. jul. 2008	rev 1.1
-	changed nested call of left(trim()) for compatibility reasons
-
-hm	25. oct. 2008	rev 1.2
-	using language constants
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION HEX_TO_BYTE : BYTE
-VAR_INPUT
-	HEX : STRING(5);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
-
-pt := ADR(hex);
-stop := LEN(hex);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 58 THEN
-		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 48;
-	ELSIF X > 64 AND X < 71 THEN
-		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 55;
-	ELSIF X > 96 AND X < 103 THEN
-		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 87;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	20. sep.2008	rev 1.1
-	changed length of input string from 20 to 5
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION HEX_TO_DWORD : DWORD
-VAR_INPUT
-	Hex : STRING(20);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
-
-pt := ADR(hex);
-stop := LEN(hex);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 58 THEN
-		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 48;
-	ELSIF X > 64 AND X < 71 THEN
-		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 55;
-	ELSIF X > 96 AND X < 103 THEN
-		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 87;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-(* revision histroy
-hm	2.10.2007		rev 1.0
-	original release
-
-hm	19.11.2007		rev 1.1
-	changed type of function from int to dword
-
-hm 	4. mar 2008		rev 1.2
-	added support for a..f and return 0 for invalid string
-
-hm	29. mar. 2008	rev 1.3
-	changed STRING to STRING(8)
-
-hm	18. jun. 2008	rev 1.4
-	changed input hex to STRING(20)
-	function now ignores wrong characters
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_ALNUM : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_ALPHA(pt^) OR ISC_NUM(pt^)) THEN
-		IS_ALNUM := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_ALNUM := L > 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_ALPHA : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT ISC_ALPHA(pt^) THEN
-		IS_ALPHA := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_ALPHA := L > 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses FILL, which is commented out.
+// FUNCTION FIX : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// 	L : INT;
+// 	C : BYTE;
+// 	M : INT;
+// END_VAR
+// VAR
+// 	N : INT;
+// 	SX: STRING(STRING_LENGTH);
+// END_VAR
+//
+// (* make sure L does not exceed the limits of a string *)
+// N := LIMIT(0,L,STRING_LENGTH) - LEN(str);
+// IF N <= 0 THEN
+// 	(* truncate the string at length N *)
+// 	IF M = 1 THEN
+// 		FIX := RIGHT(str,L);
+// 	ELSE
+// 		FIX := LEFT(str,L);
+// 	END_IF;
+// ELSIF M = 1 THEN
+// 	(* connect fill characters at the beginning *)
+// 	sx := FILL(C,N);
+// 	FIX := CONCAT(sx,str);
+// ELSIF M = 2 THEN
+// 	(* center str beween fill characters *)
+// 	(* for an uneven number of fill characters, there is one more at the end *)
+// 	sx := FILL(C,SHR(N+1,1));
+// 	FIX := CONCAT(str,sx);
+// 	SX := LEFT(sx,SHR(N,1));
+// 	FIX := CONCAT(sx,FIX);
+// ELSE
+// 	(* connect fill characters at the end *)
+// 	SX := FILL(C,N);
+// 	FIX := CONCAT(str,SX);
+// END_IF;
+//
+//
+// (* revision histroy
+// hm	29. mar. 2008	rev 1.0
+// 	original release
+//
+// *)
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION FLOAT_TO_REAL : REAL
+// VAR_INPUT
+// 	FLT : STRING(20);
+// END_VAR
+// VAR
+// 	pt : POINTER TO ARRAY[1..20] OF BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	sign: INT := 1;
+// 	stop: INT;
+// 	tmp: DINT;
+// 	d : INT;
+// END_VAR
+//
+// pt := ADR(FLT);
+// stop := LEN(FLT);
+//
+// (* we first check for sign and exit if first number or dot is reached *)
+// FOR i := 1 TO stop DO
+// 	X := pt^[i];
+// 	IF X > 47 AND X < 58 OR X = 46 THEN
+// 		EXIT;
+// 	ELSIF X = 45 THEN
+// 		(* code 45 is sign *)
+// 		sign := -1;
+// 	END_IF;
+// END_FOR;
+//
+// (* now we scan numbers till end or dot or E is reached *)
+// FOR i := i TO stop DO
+// 	X := pt^[i];
+// 	IF X = 44 OR X = 46 OR X = 69 OR X = 101 THEN
+// 		EXIT;
+// 	(* calculate the value of the digit *)
+// 	ELSIF X > 47 AND x < 58 THEN
+// 		tmp := tmp * 10 + X - 48;
+// 	END_IF;
+// END_FOR;
+//
+// (* process the portion after the comma if comma or dot is reached exit if exponent starts *)
+// IF x = 44 OR X = 46 THEN
+// 	FOR i := i + 1 TO stop DO
+// 		X := pt^[i];
+// 		IF X = 69 OR X = 101 THEN
+// 			EXIT;
+// 		ELSIF x > 47 AND x < 58 THEN
+// 			tmp := tmp * 10 + X - 48;
+// 			d := d - 1;
+// 		END_IF;
+// 	END_FOR;
+// END_IF;
+//
+// (* process exponent if present *)
+// IF X = 69 OR X = 101 THEN
+// 	d := d + DEC_TO_INT(RIGHT(FLT, stop - i));
+// END_IF;
+//
+// FLOAT_TO_REAL :=  EXPN(10, d) * DINT_TO_REAL(TMP * SIGN);
+//
+//
+//
+//
+// (* revision histroy
+// hm	22. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	2. oct. 2008	rev 1.1
+// 	fixed an error, characters 8 and 9 would not be converted
+//
+// hm	22. oct. 2008	rev 1.2
+// 	last fix was not done correctly
+//
+// hm	23. oct. 2008	rev 1.3
+// 	optimzed code
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses BIN_TO_BYTE, which is commented out.
+// FUNCTION FSTRING_TO_BYTE : BYTE
+// VAR_INPUT
+// 	IN : STRING(12);
+// END_VAR
+//
+// IF LEFT(IN, 2) = '2#' THEN
+// 	(* we need to convert binary *)
+// 	FSTRING_TO_BYTE := BIN_TO_BYTE(RIGHT(in, LEN(in) - 2));
+// ELSIF LEFT(in, 2) = '8#' THEN
+// 	(* weneed to convert octals *)
+// 	FSTRING_TO_BYTE := OCT_TO_BYTE(RIGHT(in, LEN(in) - 2));
+// ELSIF LEFT(in, 3) = '16#' THEN
+// 	(* we need to convert hexadecimal *)
+// 	FSTRING_TO_BYTE := HEX_TO_BYTE(RIGHT(in, LEN(in) - 3));
+// ELSE
+// 	(* we assume decimal representation *)
+// 	FSTRING_TO_BYTE := DEC_TO_BYTE(CLEAN(in,'0123456789'));
+// END_IF;
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep. 2008	rev 1.1
+// 	changed length of input string from 20 to 12
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses FSTRING_TO_MONTH, which is commented out.
+// FUNCTION FSTRING_TO_DT : DT
+// VAR_INPUT
+// 	SDT : STRING(60);
+// 	FMT : STRING(60);
+// END_VAR
+// VAR CONSTANT
+// 	ignore: STRING(1) := '*';  (* ignore character is * *)
+// 	fchar : STRING(1) := '#';  (* format character is # *)
+// END_VAR
+// VAR
+// 	c: STRING(1);
+// 	tmp: STRING(20);
+// 	end: INT;
+// 	dy : INT := 1970;
+// 	dm : INT := 1;
+// 	dd : INT := 1;
+// 	th : INT;
+// 	tm : INT;
+// 	ts : INT;
+// END_VAR
+// VAR
+// 	SDT_work : STRING;
+// 	FMT_work : STRING;
+// END_VAR
+// (* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
+// SDT_work := SDT;
+// FMT_work := FMT;
+//
+// (* scan input string *)
+// WHILE FMT_work <> '' DO
+// 	c := LEFT(FMT_work,1);
+// 	IF c = ignore THEN
+// 		(* skip ignore characters *)
+// 		FMT_work := DELETE(FMT_work,1,1);
+// 		SDT_work := DELETE(SDT_work,1,1);
+// 	ELSIF C = fchar THEN
+// 		(* format chracter found skip format char and read identifier *)
+// 		(* store format identifier in c and skip to next char in fmt *)
+// 		c := MID(FMT_work,1,2);
+// 		FMT_work := DELETE(FMT_work,2,1);
+// 		(* extract the substring until the end of sdt or to next char of fmt *)
+// 		IF FMT_work = '' THEN
+// 			tmp := SDT_work;
+// 		ELSE
+// 			(* serach for end of substring *)
+// 			end := FIND(SDT_work, LEFT(FMT_work,1))-1;
+// 			tmp := LEFT(SDT_work, end);
+// 			SDT_work := DELETE(SDT_work, end,1);
+// 		END_IF;
+// 		(* extract information from substring *)
+// 		IF c = 'Y' THEN
+// 			dy := STRING_TO_INT(tmp);
+// 			IF dy < 100 THEN dy := dy + 2000; END_IF;
+// 		ELSIF c = 'M' THEN
+// 			dm := STRING_TO_INT(tmp);
+// 		ELSIF c = 'N' THEN
+// 			dm := FSTRING_TO_MONTH(tmp,0);
+// 		ELSIF c = 'D' THEN
+// 			dd := STRING_TO_INT(tmp);
+// 		ELSIF c = 'h' THEN
+// 			th := STRING_TO_INT(tmp);
+// 		ELSIF c = 'm' THEN
+// 			tm := STRING_TO_INT(tmp);
+// 		ELSIF c = 's' THEN
+// 			ts := STRING_TO_INT(tmp);
+// 		END_IF;
+// 	ELSIF c = LEFT(SDT_work,1) THEN
+// 		(* skip matching characters *)
+// 		FMT_work := DELETE(FMT_work,1,1);
+// 		SDT_work := DELETE(SDT_work,1,1);
+// 	ELSE
+// 		RETURN;
+// 	END_IF;
+// END_WHILE;
+//
+// FSTRING_TO_DT := SET_DT(dy,dm,dd,th,tm,ts);
+//
+//
+// (* revision histroy
+// hm	24. sep. 2008	rev 1.0
+// 	original release
+//
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses BIN_TO_DWORD, which is commented out.
+// FUNCTION FSTRING_TO_DWORD : DWORD
+// VAR_INPUT
+// 	IN : STRING(40);
+// END_VAR
+//
+// IF LEFT(IN, 2) = '2#' THEN
+// 	(* we need to convert binary *)
+// 	FSTRING_TO_DWORD := BIN_TO_DWORD(RIGHT(in, LEN(in) - 2));
+// ELSIF LEFT(in, 2) = '8#' THEN
+// 	(* weneed to convert octals *)
+// 	FSTRING_TO_DWORD := OCT_TO_DWORD(RIGHT(in, LEN(in) - 2));
+// ELSIF LEFT(in, 3) = '16#' THEN
+// 	(* we need to convert hexadecimal *)
+// 	FSTRING_TO_DWORD := HEX_TO_DWORD(RIGHT(in, LEN(in) - 3));
+// ELSE
+// 	(* we assume decimal representation *)
+// 	FSTRING_TO_DWORD := DEC_TO_DWORD(CLEAN(in,'0123456789'));
+// END_IF;
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep. 2008	rev 1.1
+// 	changed length of input dtring from 20 to 40
+//
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses CAPITALIZE, which is commented out.
+// FUNCTION FSTRING_TO_MONTH : INT
+// VAR_INPUT
+// 	MTH : STRING(20);
+// 	LANG : INT;
+// END_VAR
+// VAR
+// 	lx: INT;
+// END_VAR
+// VAR
+// 	MTH_work : STRING;
+// END_VAR
+// (* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
+// MTH_work := MTH;
+//
+// IF LANG = 0 THEN lx := LANGUAGE.DEFAULT; ELSE lx := MIN(LANG, LANGUAGE.LMAX); END_IF;
+// MTH_work := TRIM(MTH_work);
+// MTH_work := CAPITALIZE(LOWERCASE(MTH_work));
+//
+// FOR FSTRING_TO_MONTH := 1 TO 12 DO
+// 	IF MTH_work = language.MONTHS[lx, FSTRING_TO_MONTH] THEN RETURN; END_IF;
+// 	IF MTH_work = language.MONTHS3[lx, FSTRING_TO_MONTH] THEN RETURN; END_IF;
+// END_FOR;
+//
+// (* since no name matched try to decode as integer *)
+// FSTRING_TO_MONTH := STRING_TO_INT(MTH_work);
+//
+//
+//
+//
+// (* revision histroy
+// hm	25. sep. 2008	rev 1.0
+// 	original release
+//
+// hm	19. oct. 2008	rev 1.1
+// 	changed language setup constants
+//
+// hm	25. oct. 2008	rev 1.2
+// 	optimized code
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses FSTRING_TO_WEEKDAY, which is commented out.
+// FUNCTION FSTRING_TO_WEEK : BYTE
+// VAR_INPUT
+// 	WEEK : STRING(60);
+// 	LANG : INT;
+// END_VAR
+// VAR
+// 	pos: INT;
+// END_VAR
+// VAR
+// 	WEEK_work : STRING;
+// END_VAR
+// (* IEC 61131-3 does not let a POU assign to its inputs, so the body works on copies. *)
+// WEEK_work := WEEK;
+//
+// pos := FIND(WEEK_work, ',');
+// WHILE pos > 0 DO
+// 	FSTRING_TO_WEEK := FSTRING_TO_WEEK OR SHR(BYTE#128, FSTRING_TO_WEEKDAY(MID(WEEK_work, pos - 1, 1), LANG));
+// 	WEEK_work := RIGHT(WEEK_work, LEN(WEEK_work) - pos);
+// 	pos := FIND(WEEK_work, ',');
+// END_WHILE;
+// FSTRING_TO_WEEK := (FSTRING_TO_WEEK OR SHR(BYTE#128, FSTRING_TO_WEEKDAY(WEEK_work, LANG))) AND BYTE#127;
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	25. oct. 2008	rev 1.1
+// 	using language defauls and input lang
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses CAPITALIZE, which is commented out.
+// FUNCTION FSTRING_TO_WEEKDAY : INT
+// VAR_INPUT
+// 	WDAY : STRING(20);
+// 	LANG : INT;
+// END_VAR
+// VAR
+// 	tmp: STRING(2);
+// 	i: INT;
+// 	ly: INT;
+// END_VAR
+//
+// IF LANG = 0 THEN ly := LANGUAGE.DEFAULT; ELSE ly := MIN(LANG, LANGUAGE.LMAX); END_IF;
+// (* tmp needs to be calculated first otherwise find can return wrong values *)
+// tmp := TRIM(wday);
+// tmp := CAPITALIZE(LOWERCASE(tmp));
+// FOR i := 1 TO 7 DO
+// 	IF language.WEEKDAYS2[ly, i] = tmp THEN
+// 		FSTRING_TO_WEEKDAY := i;
+// 		RETURN;
+// 	END_IF;
+// END_FOR;
+// FSTRING_TO_WEEKDAY := STRING_TO_INT(WDAY);
+//
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	18. jul. 2008	rev 1.1
+// 	changed nested call of left(trim()) for compatibility reasons
+//
+// hm	25. oct. 2008	rev 1.2
+// 	using language constants
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION HEX_TO_BYTE : BYTE
+// VAR_INPUT
+// 	HEX : STRING(5);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(hex);
+// stop := LEN(hex);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 58 THEN
+// 		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 48;
+// 	ELSIF X > 64 AND X < 71 THEN
+// 		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 55;
+// 	ELSIF X > 96 AND X < 103 THEN
+// 		HEX_TO_BYTE := SHL(HEX_TO_BYTE,4) + X - 87;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep.2008	rev 1.1
+// 	changed length of input string from 20 to 5
+//
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION HEX_TO_DWORD : DWORD
+// VAR_INPUT
+// 	Hex : STRING(20);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(hex);
+// stop := LEN(hex);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 58 THEN
+// 		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 48;
+// 	ELSIF X > 64 AND X < 71 THEN
+// 		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 55;
+// 	ELSIF X > 96 AND X < 103 THEN
+// 		HEX_TO_DWORD := SHL(HEX_TO_DWORD,4) + X - 87;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	2.10.2007		rev 1.0
+// 	original release
+//
+// hm	19.11.2007		rev 1.1
+// 	changed type of function from int to dword
+//
+// hm 	4. mar 2008		rev 1.2
+// 	added support for a..f and return 0 for invalid string
+//
+// hm	29. mar. 2008	rev 1.3
+// 	changed STRING to STRING(8)
+//
+// hm	18. jun. 2008	rev 1.4
+// 	changed input hex to STRING(20)
+// 	function now ignores wrong characters
+// *)
+//
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_ALNUM : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_ALPHA(pt^) OR ISC_NUM(pt^)) THEN
+// 		IS_ALNUM := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_ALNUM := L > 0;
+// END_FUNCTION
+
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_ALPHA : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT ISC_ALPHA(pt^) THEN
+// 		IS_ALPHA := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_ALPHA := L > 0;
+// END_FUNCTION
 
 FUNCTION IS_CC : BOOL
 VAR_INPUT
@@ -13602,77 +13523,74 @@ END_FOR;
 IS_CC := L > 0;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_CTRL : BOOL
-VAR_INPUT
-	STR : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_CTRL : BOOL
+// VAR_INPUT
+// 	STR : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_CTRL(pt^)) THEN
+// 		IS_CTRL := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_CTRL := L > 0;
+// END_FUNCTION
 
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_CTRL(pt^)) THEN
-		IS_CTRL := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_CTRL := L > 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_HEX : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_HEX(pt^)) THEN
+// 		IS_HEX := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_HEX := L > 0;
+// END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_HEX : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_HEX(pt^)) THEN
-		IS_HEX := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_HEX := L > 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_LOWER : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	l: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_LOWER(pt^)) THEN
-		IS_LOWER := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_LOWER := L > 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_LOWER : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	l: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_LOWER(pt^)) THEN
+// 		IS_LOWER := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_LOWER := L > 0;
+// END_FUNCTION
 
 FUNCTION IS_NCC : BOOL
 VAR_INPUT
@@ -13691,53 +13609,51 @@ END_FOR;
 IS_NCC := TRUE;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_NUM : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L : INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_NUM : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L : INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_NUM(pt^)) THEN
+// 		IS_NUM := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_NUM := L > 0;
+// END_FUNCTION
 
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_NUM(pt^)) THEN
-		IS_NUM := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_NUM := L > 0;
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION IS_UPPER : BOOL
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L: INT;
-	pt : POINTER TO BYTE;
-	pos: INT;
-END_VAR
-
-PT := ADR(str);
-L := LEN(str);
-FOR pos := 1 TO L DO
-	IF NOT (ISC_UPPER(pt^)) THEN
-		IS_UPPER := FALSE;
-		RETURN;
-	END_IF;
-    	PT := PT + 1;
-END_FOR;
-IS_UPPER := L > 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION IS_UPPER : BOOL
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L: INT;
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// END_VAR
+//
+// PT := ADR(str);
+// L := LEN(str);
+// FOR pos := 1 TO L DO
+// 	IF NOT (ISC_UPPER(pt^)) THEN
+// 		IS_UPPER := FALSE;
+// 		RETURN;
+// 	END_IF;
+//     	PT := PT + 1;
+// END_FOR;
+// IS_UPPER := L > 0;
+// END_FUNCTION
 
 FUNCTION ISC_ALPHA : BOOL
 VAR_INPUT
@@ -13800,42 +13716,41 @@ ELSE
 END_IF;
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION LOWERCASE : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	PT : POINTER TO BYTE;
-	pos: INT;
-	l: INT;
-END_VAR
-
-PT := ADR(LOWERCASE);
-lowercase := str;
-l := LEN(str);
-FOR pos := 1 TO l DO
-	pt^ := TO_LOWER(pt^);
-	PT := PT + 1;
-END_FOR;
-
-(* revision histroy
-hm	6. oct. 2006	rev 1.0
-	original release
-
-hm	4. feb. 2008	rev 1.1
-	improved performance
-	added �.�,�
-
-hm	6. mar. 2008	rev 1.2
-	added support for exteded Ascii
-
-hm	29. mar. 2008	rev 1.3
-	changed STRING to STRING(STRING_LENGTH)
-*)	
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION LOWERCASE : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	PT : POINTER TO BYTE;
+// 	pos: INT;
+// 	l: INT;
+// END_VAR
+//
+// PT := ADR(LOWERCASE);
+// lowercase := str;
+// l := LEN(str);
+// FOR pos := 1 TO l DO
+// 	pt^ := TO_LOWER(pt^);
+// 	PT := PT + 1;
+// END_FOR;
+//
+// (* revision histroy
+// hm	6. oct. 2006	rev 1.0
+// 	original release
+//
+// hm	4. feb. 2008	rev 1.1
+// 	improved performance
+// 	added �.�,�
+//
+// hm	6. mar. 2008	rev 1.2
+// 	added support for exteded Ascii
+//
+// hm	29. mar. 2008	rev 1.3
+// 	changed STRING to STRING(STRING_LENGTH)
+// *)
+//
+// END_FUNCTION
 
 FUNCTION_BLOCK MESSAGE_4R
 VAR_INPUT
@@ -13931,39 +13846,38 @@ END_IF;
 
 END_FUNCTION_BLOCK
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION MIRROR : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	pi : POINTER TO ARRAY[1..255] OF BYTE;
-	po : POINTER TO BYTE;
-	lx: INT;
-	i: INT;
-END_VAR
-
-pi := ADR(str);
-po := ADR(mirror);
-lx := LEN(str);
-FOR i := lx TO 1 BY - 1 DO
-	po^ := pi^[i];
-	po := po + 1;
-END_FOR;
-(* close output string *)
-po^:= 0;
-
-
-(* revision histroy
-hm	4. feb. 2008	rev 1.0
-	original release
-
-hm	29. mar. 2008	rev 1.1
-	changed STRING to STRING(STRING_LENGTH)
-*)	
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION MIRROR : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	pi : POINTER TO ARRAY[1..255] OF BYTE;
+// 	po : POINTER TO BYTE;
+// 	lx: INT;
+// 	i: INT;
+// END_VAR
+//
+// pi := ADR(str);
+// po := ADR(mirror);
+// lx := LEN(str);
+// FOR i := lx TO 1 BY - 1 DO
+// 	po^ := pi^[i];
+// 	po := po + 1;
+// END_FOR;
+// (* close output string *)
+// po^:= 0;
+//
+//
+// (* revision histroy
+// hm	4. feb. 2008	rev 1.0
+// 	original release
+//
+// hm	29. mar. 2008	rev 1.1
+// 	changed STRING to STRING(STRING_LENGTH)
+// *)
+//
+// END_FUNCTION
 
 FUNCTION MONTH_TO_STRING : STRING(10)
 VAR_INPUT
@@ -13998,80 +13912,78 @@ hm 16.  jul 2024   rev 1.2
 *)
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION OCT_TO_BYTE : BYTE
-VAR_INPUT
-	OCT : STRING(10);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION OCT_TO_BYTE : BYTE
+// VAR_INPUT
+// 	OCT : STRING(10);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(oct);
+// stop := LEN(oct);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 56 THEN
+// 		OCT_TO_BYTE := SHL(OCT_TO_BYTE,3) + X - 48;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+// hm	20. sep. 2008	rev 1.1
+// 	changed length of input string from 20 to 10
+//
+// *)
+//
+// END_FUNCTION
 
-pt := ADR(oct);
-stop := LEN(oct);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 56 THEN
-		OCT_TO_BYTE := SHL(OCT_TO_BYTE,3) + X - 48;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-hm	20. sep. 2008	rev 1.1
-	changed length of input string from 20 to 10
-
-*)	
-
-END_FUNCTION
-*)
-
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION OCT_TO_DWORD : DWORD
-VAR_INPUT
-	OCT : STRING(20);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	i: INT;
-	X: BYTE;
-	stop: INT;
-END_VAR
-
-pt := ADR(oct);
-stop := LEN(oct);
-FOR I := 1 TO stop DO
-	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
-	x := pt^;
-	(* calculate the value of the digit *)
-	IF X > 47 AND x < 56 THEN
-		OCT_TO_DWORD := SHL(OCT_TO_DWORD,3) + X - 48;
-	END_IF;
-	pt := pt + 1;
-END_FOR;
-
-
-
-
-(* revision histroy
-hm	18. jun. 2008	rev 1.0
-	original release
-
-
-*)	
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION OCT_TO_DWORD : DWORD
+// VAR_INPUT
+// 	OCT : STRING(20);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	i: INT;
+// 	X: BYTE;
+// 	stop: INT;
+// END_VAR
+//
+// pt := ADR(oct);
+// stop := LEN(oct);
+// FOR I := 1 TO stop DO
+// 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
+// 	x := pt^;
+// 	(* calculate the value of the digit *)
+// 	IF X > 47 AND x < 56 THEN
+// 		OCT_TO_DWORD := SHL(OCT_TO_DWORD,3) + X - 48;
+// 	END_IF;
+// 	pt := pt + 1;
+// END_FOR;
+//
+//
+//
+//
+// (* revision histroy
+// hm	18. jun. 2008	rev 1.0
+// 	original release
+//
+//
+// *)
+//
+// END_FUNCTION
 
 FUNCTION REAL_TO_STRF : STRING(20)
 VAR_INPUT
@@ -14177,51 +14089,50 @@ END_FOR;
 
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION REPLACE_UML : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	L : INT;
-	pt : POINTER TO BYTE;
-	pto : POINTER TO BYTE;
-	ptm : POINTER TO BYTE;
-	pt1, pt2 : POINTER TO BYTE;
-	su : STRING(2);
-	pos : INT;
-END_VAR
-
-PT := ADR(str);
-pto := ADR(REPLACE_UML);
-ptm := pto + INT_TO_DWORD(string_length);
-pt1 := ADR(su);
-pt2 := pt1 + 1;
-L := LEN(str);
-WHILE pos < L AND pos < string_length DO
-	IF pt^ < 127 THEN
-		(* no uml character simlply copy the character*)
-		pto^ := pt^;
-	ELSE
-		(* convert the uml character *)
-		su := TO_UML(pt^);
-		(* we must make sure pointer are not out of range *)
-		pto^ := pt1^;
-		IF pto < ptm AND pt2^ > 0 THEN
-			pto := pto + 1;
-			pto^ := pt2^;
-		END_IF;
-	END_IF;
-	(* increment pointers *)
-	pt := pt + 1;
-	pto := pto + 1;
-	pos := pos + 1;
-END_WHILE;
-
-(* properly close the output string *)
-pto^ := 0;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION REPLACE_UML : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	L : INT;
+// 	pt : POINTER TO BYTE;
+// 	pto : POINTER TO BYTE;
+// 	ptm : POINTER TO BYTE;
+// 	pt1, pt2 : POINTER TO BYTE;
+// 	su : STRING(2);
+// 	pos : INT;
+// END_VAR
+//
+// PT := ADR(str);
+// pto := ADR(REPLACE_UML);
+// ptm := pto + INT_TO_DWORD(string_length);
+// pt1 := ADR(su);
+// pt2 := pt1 + 1;
+// L := LEN(str);
+// WHILE pos < L AND pos < string_length DO
+// 	IF pt^ < 127 THEN
+// 		(* no uml character simlply copy the character*)
+// 		pto^ := pt^;
+// 	ELSE
+// 		(* convert the uml character *)
+// 		su := TO_UML(pt^);
+// 		(* we must make sure pointer are not out of range *)
+// 		pto^ := pt1^;
+// 		IF pto < ptm AND pt2^ > 0 THEN
+// 			pto := pto + 1;
+// 			pto^ := pt2^;
+// 		END_IF;
+// 	END_IF;
+// 	(* increment pointers *)
+// 	pt := pt + 1;
+// 	pto := pto + 1;
+// 	pos := pos + 1;
+// END_WHILE;
+//
+// (* properly close the output string *)
+// pto^ := 0;
+// END_FUNCTION
 
 FUNCTION_BLOCK TICKER
 
@@ -14276,32 +14187,31 @@ ELSE
 END_IF;
 END_FUNCTION
 
-(* Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
-FUNCTION TO_UML : STRING(2)
-VAR_INPUT
-	IN : BYTE;
-END_VAR
-
-CASE in OF
-	196:	(* � *)
-		TO_UML := 'Ae';
-	214:	(* � *)
-		TO_UML := 'Oe';
-	220:	(* � *)
-		TO_UML := 'Ue';
-	223:	(* � *)
-		TO_UML := 'ss';
-	228:	(* � *)
-		TO_UML := 'ae';
-	246:	(* � *)
-		TO_UML := 'oe';
-	252:	(* � *)
-		TO_UML := 'ue';
-ELSE
-	TO_UML := CHR_TO_STRING(IN);
-END_CASE;
-END_FUNCTION
-*)
+// Commented out for beedance: it uses CHR_TO_STRING, which is commented out.
+// FUNCTION TO_UML : STRING(2)
+// VAR_INPUT
+// 	IN : BYTE;
+// END_VAR
+//
+// CASE in OF
+// 	196:	(* � *)
+// 		TO_UML := 'Ae';
+// 	214:	(* � *)
+// 		TO_UML := 'Oe';
+// 	220:	(* � *)
+// 		TO_UML := 'Ue';
+// 	223:	(* � *)
+// 		TO_UML := 'ss';
+// 	228:	(* � *)
+// 		TO_UML := 'ae';
+// 	246:	(* � *)
+// 		TO_UML := 'oe';
+// 	252:	(* � *)
+// 		TO_UML := 'ue';
+// ELSE
+// 	TO_UML := CHR_TO_STRING(IN);
+// END_CASE;
+// END_FUNCTION
 
 FUNCTION TO_UPPER : BYTE
 VAR_INPUT
@@ -14398,43 +14308,42 @@ hm	28. mar. 2008	rev 1.0
 *)
 END_FUNCTION
 
-(* Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-FUNCTION UPPERCASE : STRING(STRING_LENGTH)
-VAR_INPUT
-	str : STRING(STRING_LENGTH);
-END_VAR
-VAR
-	pt : POINTER TO BYTE;
-	pos: INT;
-	l: INT;
-END_VAR
-
-pt := ADR(UPPERCASE);
-UPPERCASE := str;
-l := LEN(str);
-FOR pos := 1 TO l DO
-	pt^ := TO_UPPER(pt^);
-	pt := pt + 1;
-END_FOR;
-
-(* revision histroy
-hm	6. oct. 2006	rev 1.0
-	original release
-
-hm	4. feb. 2008	rev 1.1
-	improved performance
-	added �,�,�
-
-hm	6. mar. 2008	rev 1.2
-	added support for exteded Ascii
-
-hm	29. mar. 2008	rev 1.3
-	changed STRING to STRING(STRING_LENGTH)
-
-*)	
-
-END_FUNCTION
-*)
+// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// FUNCTION UPPERCASE : STRING(STRING_LENGTH)
+// VAR_INPUT
+// 	str : STRING(STRING_LENGTH);
+// END_VAR
+// VAR
+// 	pt : POINTER TO BYTE;
+// 	pos: INT;
+// 	l: INT;
+// END_VAR
+//
+// pt := ADR(UPPERCASE);
+// UPPERCASE := str;
+// l := LEN(str);
+// FOR pos := 1 TO l DO
+// 	pt^ := TO_UPPER(pt^);
+// 	pt := pt + 1;
+// END_FOR;
+//
+// (* revision histroy
+// hm	6. oct. 2006	rev 1.0
+// 	original release
+//
+// hm	4. feb. 2008	rev 1.1
+// 	improved performance
+// 	added �,�,�
+//
+// hm	6. mar. 2008	rev 1.2
+// 	added support for exteded Ascii
+//
+// hm	29. mar. 2008	rev 1.3
+// 	changed STRING to STRING(STRING_LENGTH)
+//
+// *)
+//
+// END_FUNCTION
 
 FUNCTION WEEKDAY_TO_STRING : STRING(10)
 VAR_INPUT
@@ -15737,18 +15646,17 @@ ELSE
 END_IF;
 
 
-(* old code
-IF month > 2 THEN
-	count := (month - 1) * 30;
-	IF month > 7 THEN count := count + SHR(month - 3,1); ELSE count := count + SHR(month - 4,1); END_IF;
-	(* chech for leap year and add one day if true *)
-	IF year MOD 4 = 0 THEN count := count + 1; END_IF;
-ELSE
-	count := (month - 1) * 31;
-END_IF;
-
-SET_DATE := UDINT_TO_DATE((INT_TO_UDINT(count + day - 1) + (INT_TO_UDINT(year) * 1461 - 2878169) / 4) * 86400);
-*)
+// old code
+// IF month > 2 THEN
+// 	count := (month - 1) * 30;
+// 	IF month > 7 THEN count := count + SHR(month - 3,1); ELSE count := count + SHR(month - 4,1); END_IF;
+// 	(* chech for leap year and add one day if true *)
+// 	IF year MOD 4 = 0 THEN count := count + 1; END_IF;
+// ELSE
+// 	count := (month - 1) * 31;
+// END_IF;
+//
+// SET_DATE := UDINT_TO_DATE((INT_TO_UDINT(count + day - 1) + (INT_TO_UDINT(year) * 1461 - 2878169) / 4) * 86400);
 END_FUNCTION
 
 FUNCTION SET_DT : DT

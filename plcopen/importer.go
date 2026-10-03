@@ -19,9 +19,9 @@ import (
 	"os"
 	"strings"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // Import unmarshals PLCopen TC6 XML data into a Project struct.

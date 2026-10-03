@@ -16,9 +16,9 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // corpus covers every kind of declaration, statement and expression, so the

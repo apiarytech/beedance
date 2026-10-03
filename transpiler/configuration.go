@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // transpileConfigurationDeclaration transpiles a CONFIGURATION into main.

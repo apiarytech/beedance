@@ -14,9 +14,9 @@ import (
 	"os"
 	"testing"
 
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // TestOscatLibraryRuns evaluates the converted OSCAT BASIC library with a

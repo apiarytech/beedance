@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 func ident(name string) *ast.Identifier { return &ast.Identifier{Value: name} }

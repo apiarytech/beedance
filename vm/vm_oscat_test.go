@@ -14,10 +14,10 @@ import (
 	"os"
 	"testing"
 
-	"beedance/compiler"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // TestOscatLibraryRuns compiles the converted OSCAT BASIC library with a

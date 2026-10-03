@@ -10,7 +10,7 @@
 package vm
 
 import (
-	_ "beedance/stdlib"
+	_ "github.com/apiarytech/beedance/stdlib"
 	"testing"
 )
 

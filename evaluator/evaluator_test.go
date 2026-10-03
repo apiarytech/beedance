@@ -1,8 +1,8 @@
 package evaluator
 
 import (
-	"beedance/object"
-	_ "beedance/stdlib"
+	"github.com/apiarytech/beedance/object"
+	_ "github.com/apiarytech/beedance/stdlib"
 	"math"
 	"strings"
 	"testing"

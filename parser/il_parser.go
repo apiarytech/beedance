@@ -10,8 +10,8 @@
 package parser
 
 import (
-	"beedance/ast"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 	"strings"
 )
 

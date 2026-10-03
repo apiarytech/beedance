@@ -11,11 +11,11 @@
 package compiler
 
 import (
-	"beedance/ast"
-	"beedance/code"
-	"beedance/object"
 	"bytes"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/object"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +27,101 @@ import (
 type CompiledProgram struct {
 	InitBytecode   *Bytecode
 	CyclicBytecode *Bytecode
+	// Variables are the program's variables a host may bind to its own data
+	// (tags, retain storage), in declaration order.
+	Variables []Variable
+}
+
+// Variable is a program variable as a host sees it while the program runs:
+// in a global slot of the VM (VM.Globals), or, for a located variable, in the
+// VM's I/O image under its address (VM.IO).
+type Variable struct {
+	Name string
+	// Block is the declaration block: VAR_GLOBAL, VAR_INPUT, VAR_OUTPUT,
+	// VAR_IN_OUT or VAR.
+	Block string
+	// Type is the declared type as written, e.g. "INT" or "TON".
+	Type string
+	// Global is the variable's slot in the VM's globals; -1 for a located
+	// variable.
+	Global int
+	// Address is a located variable's address, e.g. "%IX0.0"; empty
+	// otherwise.
+	Address  string
+	Retain   bool
+	Constant bool
+}
+
+// CompileProgramUnit compiles the PROGRAM called name in a source file
+// together with what it needs from that file: its function blocks,
+// functions and types, and the standard function blocks it uses. Those
+// definitions go into the initialization bytecode, ahead of the program's
+// variables; the program's body is the cyclic bytecode, as in
+// CompileProgram. Other programs in the file are left out.
+func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*CompiledProgram, error) {
+	c.buildPouInfo(program)
+	c.rootProgram = program
+	var target *ast.ProgramDeclaration
+	var pous []ast.Statement
+	for _, s := range c.withStandardFBs(program) {
+		if pd, ok := s.(*ast.ProgramDeclaration); ok {
+			if pd.Name != nil && strings.EqualFold(pd.Name.Value, name) {
+				target = pd
+			}
+			continue
+		}
+		pous = append(pous, s)
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no PROGRAM %s in the source", name)
+	}
+	c.predefineGlobals(pous)
+	c.predefineFunctionBlocks(pous)
+	for _, s := range c.orderByInheritance(pous) {
+		if err := c.Compile(s); err != nil {
+			return nil, err
+		}
+	}
+	return c.CompileProgram(target)
+}
+
+// variables lists node's variables after its declarations were compiled.
+func (c *Compiler) variables(node *ast.ProgramDeclaration) []Variable {
+	var out []Variable
+	add := func(block string, d *ast.VarDeclStatement) {
+		if d == nil || d.Name == nil {
+			return
+		}
+		if _, ok := d.Value.(*ast.MacroLiteral); ok {
+			return // a macro has no runtime value
+		}
+		v := Variable{Name: d.Name.Value, Block: block, Global: -1, Retain: d.IsRetain, Constant: d.IsConstant}
+		if d.DataType != nil {
+			v.Type = c.flattenExpressionToString(d.DataType)
+		}
+		if d.Location != nil {
+			v.Address = d.Location.Location.String()
+		} else if sym, ok := c.symbolTable.Resolve(d.Name.Value); ok && sym.Scope == GlobalScope {
+			v.Global = sym.Index
+		} else {
+			return // not stored where a host can reach it
+		}
+		out = append(out, v)
+	}
+	for _, g := range node.VarGlobal {
+		for _, d := range g.Vars {
+			add("VAR_GLOBAL", d)
+		}
+	}
+	for _, b := range []struct {
+		name  string
+		decls []*ast.VarDeclStatement
+	}{{"VAR_INPUT", node.VarInputs}, {"VAR_OUTPUT", node.VarOutputs}, {"VAR_IN_OUT", node.VarInOuts}, {"VAR", node.Vars}} {
+		for _, d := range b.decls {
+			add(b.name, d)
+		}
+	}
+	return out
 }
 
 // Compiler holds the state of the compilation process, including the symbol table,
@@ -366,6 +461,7 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	return &CompiledProgram{
 		InitBytecode:   initBytecode,
 		CyclicBytecode: cyclicCompiler.Bytecode(),
+		Variables:      c.variables(node),
 	}, nil
 }
 

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
 )
 
 // IL modifiers are split off only operators that take them; SIN, LN, TAN and

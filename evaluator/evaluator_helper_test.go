@@ -1,10 +1,10 @@
 package evaluator
 
 import (
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
 	"fmt"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 	"math"
 	"strings"
 	"testing"

@@ -11,10 +11,10 @@
 package repl
 
 import (
-	"beedance/object"
-	_ "beedance/stdlib"
 	"bytes"
 	"flag"
+	"github.com/apiarytech/beedance/object"
+	_ "github.com/apiarytech/beedance/stdlib"
 	"strings"
 	"testing"
 )

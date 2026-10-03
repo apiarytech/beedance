@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 func init() {

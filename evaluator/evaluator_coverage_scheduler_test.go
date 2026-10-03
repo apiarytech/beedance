@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 )
 
 const schedulerConfig = `

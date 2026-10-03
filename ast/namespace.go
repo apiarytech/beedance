@@ -10,8 +10,8 @@
 package ast
 
 import (
-	"beedance/token"
 	"bytes"
+	"github.com/apiarytech/beedance/token"
 )
 
 // NamespaceDeclaration represents a NAMESPACE ... END_NAMESPACE block.

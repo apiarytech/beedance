@@ -10,7 +10,7 @@
 
 package stdlib
 
-import "beedance/object"
+import "github.com/apiarytech/beedance/object"
 
 func init() {
 	object.RegisterBuiltin(BuiltinMux, "MUX", muxBuiltin)

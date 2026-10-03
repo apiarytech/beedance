@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 // compileWithClock compiles input with the clock builtin the standard timers read.

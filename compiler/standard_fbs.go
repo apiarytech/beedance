@@ -22,9 +22,9 @@ import (
 	"strings"
 	"sync"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 const standardFBSource = `

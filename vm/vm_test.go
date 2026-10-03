@@ -1,15 +1,15 @@
 package vm
 
 import (
-	"beedance/ast"
-	"beedance/code"
-	"beedance/compiler"
-	"beedance/evaluator"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
-	_ "beedance/stdlib" // Import for side-effect of registering built-ins
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
+	_ "github.com/apiarytech/beedance/stdlib" // Import for side-effect of registering built-ins
 	"strings"
 	"testing"
 )

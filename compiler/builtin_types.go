@@ -13,8 +13,8 @@ package compiler
 import (
 	"strings"
 
-	"beedance/ast"
-	"beedance/object"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 // conversionTargets are the types a conversion function X_TO_Y can return,

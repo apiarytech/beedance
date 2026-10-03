@@ -17,8 +17,8 @@ package plcopen
 import (
 	"strings"
 
-	"beedance/lexer"
-	"beedance/token"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/token"
 )
 
 // varBlockStarts are the tokens that open a variable block.

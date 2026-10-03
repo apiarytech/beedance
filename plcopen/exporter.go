@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // Export converts a parsed IEC 61131-3 AST into a PLCopen TC6 XML project.

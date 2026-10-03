@@ -10,10 +10,10 @@
 package evaluator
 
 import (
-	"beedance/ast"
-	"beedance/object"
-	"beedance/token"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 )
 
 // quote is the entry point for handling the `EXPR` built-in. It takes an AST

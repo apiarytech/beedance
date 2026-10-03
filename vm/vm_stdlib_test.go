@@ -11,9 +11,9 @@
 package vm
 
 import (
-	"beedance/code"
-	"beedance/compiler"
-	"beedance/object"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/object"
 	"strings"
 	"testing"
 )
