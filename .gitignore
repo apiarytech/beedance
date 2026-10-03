@@ -1,0 +1,33 @@
+# Binaries built from this repository
+/beedance
+*.exe
+*.dll
+*.so
+*.dylib
+
+# The embedded example's build outputs (CI builds the firmware as artifacts)
+embedded/example/raspberrypi/myapp
+*.elf
+*.uf2
+*.hex
+*.bin
+
+# Test binaries, coverage and profiles
+*.test
+*.out
+coverage.*
+*.prof
+*.pprof
+
+# Local Go workspace
+go.work
+go.work.sum
+
+# Editors and operating systems (extensions.json is shared)
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
