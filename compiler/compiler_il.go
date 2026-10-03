@@ -11,9 +11,9 @@
 package compiler
 
 import (
-	"beedance/ast"
-	"beedance/code"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
 	"strings"
 )
 

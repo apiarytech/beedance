@@ -4,10 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"beedance/evaluator"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 )
 
 func TestEdgeCases(t *testing.T) {

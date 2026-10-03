@@ -10,9 +10,9 @@
 package evaluator
 
 import (
-	"beedance/ast"
-	"beedance/object"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 	"strings"
 )
 

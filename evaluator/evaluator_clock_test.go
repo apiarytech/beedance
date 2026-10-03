@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"beedance/object"
-	"beedance/stdlib"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/stdlib"
 )
 
 // TestTimeFunction checks TIME(), the CODESYS clock OSCAT's T_PLC_MS reads.

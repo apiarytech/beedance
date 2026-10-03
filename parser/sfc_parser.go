@@ -10,8 +10,8 @@
 package parser
 
 import (
-	"beedance/ast"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 )
 
 // isSFC provides a heuristic check to determine if the current token indicates the

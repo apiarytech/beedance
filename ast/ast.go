@@ -17,7 +17,7 @@ import (
 	"strings"
 	"unicode"
 
-	"beedance/token"
+	"github.com/apiarytech/beedance/token"
 )
 
 // Node is the base interface for all nodes in the abstract syntax tree.

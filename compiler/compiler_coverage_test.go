@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/code"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
 )
 
 // checkCompiles compiles each input and fails on any error. The behaviour

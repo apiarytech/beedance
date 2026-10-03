@@ -21,17 +21,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"beedance/ast"
-	"beedance/compiler"
-	"beedance/evaluator"
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
-	"beedance/plcopen"
-	"beedance/repl"
-	_ "beedance/stdlib" // Import for side-effect of registering built-ins
-	"beedance/transpiler"
-	"beedance/vm"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/evaluator"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
+	"github.com/apiarytech/beedance/plcopen"
+	"github.com/apiarytech/beedance/repl"
+	_ "github.com/apiarytech/beedance/stdlib" // Import for side-effect of registering built-ins
+	"github.com/apiarytech/beedance/transpiler"
+	"github.com/apiarytech/beedance/vm"
 )
 
 const version = "0.1.0"
@@ -159,13 +159,21 @@ func executeFile(filepath string, out io.Writer, engine string) {
 
 		// Since we are executing a file, which is likely a full PROGRAM,
 		// we use the new CompileProgram function to get separated bytecode.
-		programDecl, ok := program.Statements[0].(*ast.ProgramDeclaration)
-		if !ok {
+		// The first PROGRAM in the file, compiled with the function blocks,
+		// functions and types the file declares.
+		var programDecl *ast.ProgramDeclaration
+		for _, s := range program.Statements {
+			if pd, ok := s.(*ast.ProgramDeclaration); ok {
+				programDecl = pd
+				break
+			}
+		}
+		if programDecl == nil {
 			fmt.Fprintln(out, "Error: IEC file does not contain a valid PROGRAM declaration.")
 			return
 		}
 
-		compiledProg, err := comp.CompileProgram(programDecl)
+		compiledProg, err := comp.CompileProgramUnit(program, programDecl.Name.Value)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
 			return

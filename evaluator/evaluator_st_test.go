@@ -1,9 +1,9 @@
 package evaluator
 
 import (
-	"beedance/lexer"
-	"beedance/object"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/parser"
 	"strings"
 	"testing"
 	"time"

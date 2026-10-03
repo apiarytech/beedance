@@ -15,10 +15,10 @@ package compiler
 // IEC 61131-3 default value of that type when none is given.
 
 import (
-	"beedance/ast"
-	"beedance/code"
-	"beedance/object"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/object"
 	"strings"
 	"time"
 )

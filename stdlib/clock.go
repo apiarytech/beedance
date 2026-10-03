@@ -13,7 +13,7 @@ package stdlib
 import (
 	"time"
 
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 )
 
 // started is when the clock starts, as the program loads.
@@ -31,6 +31,23 @@ func clockFn(name string) object.BuiltinFunction {
 		}
 		return &object.Time{Value: Clock()}
 	}
+}
+
+// ClockBuiltins returns the clock built-ins (__CLOCK, which the standard
+// timers read, and TIME) reading clock instead of the process clock, by
+// built-in index. A host that runs programs on its own schedule (royaljelly's
+// tasks) gives each VM its task's clock with vm.SetBuiltin, so the timers of
+// one program follow its task, not the process.
+func ClockBuiltins(clock func() time.Duration) map[int]*object.Builtin {
+	fn := func(name string) *object.Builtin {
+		return &object.Builtin{Fn: func(args ...object.Object) object.Object {
+			if len(args) != 0 {
+				return object.NewBuiltinError("%s takes no arguments, got %d", name, len(args))
+			}
+			return &object.Time{Value: clock()}
+		}}
+	}
+	return map[int]*object.Builtin{BuiltinClock: fn("__CLOCK"), BuiltinTime: fn("TIME")}
 }
 
 func init() {

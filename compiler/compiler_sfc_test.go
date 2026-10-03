@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"beedance/code"
-	_ "beedance/stdlib"
+	"github.com/apiarytech/beedance/code"
+	_ "github.com/apiarytech/beedance/stdlib"
 	"testing"
 )
 

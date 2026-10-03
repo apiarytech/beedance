@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // processImageSize is the number of entries in each array of royaljelly's

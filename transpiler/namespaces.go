@@ -18,7 +18,7 @@ package transpiler
 import (
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // namespaceFlattener renames the declarations of namespaces.

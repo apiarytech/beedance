@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/lexer"
-	"beedance/parser"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
 )
 
 // transpileSource parses and transpiles input, returning the Go code with

@@ -10,10 +10,10 @@
 package evaluator
 
 import (
-	"beedance/ast"
-	"beedance/object"
 	"context"
 	"fmt"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 	"math"
 	"sort"
 	"strconv"
@@ -1502,6 +1502,12 @@ func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) obje
 	var result object.Object
 
 	for _, statement := range block.Statements {
+		if overBudget() {
+			return newError(statement, "execution budget exceeded")
+		}
+		if traceFn != nil {
+			traceFn(statement, env)
+		}
 		result = Eval(statement, env)
 
 		// If a statement returns a value that should halt execution (like a RETURN or an ERROR),
@@ -2036,6 +2042,9 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 // and executes the body until the condition becomes false.
 func evalWhileStatement(ws *ast.WhileStatement, env *object.Environment) object.Object {
 	for {
+		if overBudget() {
+			return newError(ws, "execution budget exceeded")
+		}
 		condition := Eval(ws.Condition, env)
 		if isError(condition) {
 			return condition
@@ -2063,6 +2072,9 @@ func evalWhileStatement(ws *ast.WhileStatement, env *object.Environment) object.
 // least once, then checks the condition and continues until it becomes true.
 func evalRepeatStatement(rs *ast.RepeatStatement, env *object.Environment) object.Object {
 	for {
+		if overBudget() {
+			return newError(rs, "execution budget exceeded")
+		}
 		result := Eval(rs.Body, env)
 		if result != nil {
 			rt := result.Type()

@@ -16,10 +16,10 @@ import (
 	"strings"
 	"testing"
 
-	"beedance/ast"
-	"beedance/lexer"
-	"beedance/parser"
-	"beedance/token"
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/parser"
+	"github.com/apiarytech/beedance/token"
 )
 
 // The programs below were checked by compiling the generated Go against

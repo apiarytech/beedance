@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"beedance/object"
+	"github.com/apiarytech/beedance/object"
 )
 
 func TestTimeDateLiteralEvaluation(t *testing.T) {

@@ -13,7 +13,7 @@ package transpiler
 import (
 	"strings"
 
-	"beedance/ast"
+	"github.com/apiarytech/beedance/ast"
 )
 
 // isClockCall reports whether a call is TIME(), the CODESYS function that
