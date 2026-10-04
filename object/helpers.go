@@ -216,6 +216,13 @@ func GenericConversionBuiltin(fromType, toType string) *Builtin {
 
 // ApplyConversion handles the logic for converting an object from one type to another.
 func ApplyConversion(input Object, fromType, toType string) Object {
+	// A named constant (SIZE : INT := LOG_MAX) converts as its value.
+	if c, ok := input.(*Constant); ok {
+		input = c.Value
+		if fromType == string(CONSTANT_OBJ) {
+			fromType = string(input.Type())
+		}
+	}
 	actualType := string(input.Type())
 	isValidFromType := false
 	if (IsIntegerType(fromType) && IsIntegerType(actualType)) ||
@@ -317,6 +324,9 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		case *Real, *LReal:
 			floatVal, _ := GetFloat64Value(val)
 			return &String{Value: fmt.Sprintf("%f", floatVal)}
+		case *BitString:
+			// BYTE_TO_STRING(16#C0) is '192', as in CODESYS.
+			return &String{Value: strconv.FormatUint(val.Value, 10)}
 		default:
 			return &String{Value: input.Inspect()}
 		}
@@ -350,10 +360,18 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			}
 			return &BitString{Value: uint64(iVal), Width: width}
 		case *BitString:
-			if val.Value > maxVal {
-				return NewBuiltinError("value %d is out of range for type %s (0 to %d)", val.Value, toType, maxVal)
+			// A narrower bit string keeps the low bits (DWORD_TO_BYTE).
+			return &BitString{Value: val.Value & maxVal, Width: width}
+		case *String:
+			// STRING_TO_DWORD reads a decimal number after blanks, or 0, and
+			// keeps the bits that fit, as beebread's OSCAT port does.
+			s := strings.TrimPrefix(strings.TrimLeft(val.Value, " "), "+")
+			n := 0
+			for n < len(s) && s[n] >= '0' && s[n] <= '9' {
+				n++
 			}
-			return &BitString{Value: val.Value, Width: width}
+			v, _ := strconv.ParseUint(s[:n], 10, 64)
+			return &BitString{Value: v & maxVal, Width: width}
 		default:
 			return NewBuiltinError("conversion from %s to %s is not supported", input.Type(), toType)
 		}
@@ -542,6 +560,13 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		if bits, ok := integerAsBitString(left, right.(*BitString).Width); ok {
 			return evalBitStringInfix(bits, operator, right)
 		}
+	case IsArithmeticOperator(operator) && (left.Type() == BITSTRING_OBJ || right.Type() == BITSTRING_OBJ):
+		// A bit string with an integer variable computes as an integer, as
+		// CODESYS promotes BYTE * UDINT. (A literal next to a bit string
+		// arrives here as a bit string already: see LiteralAsBitString.)
+		if l, r, ok := bitStringsAsIntegers(left, right); ok {
+			return EvalNumericInfix(l, r, operator)
+		}
 	case left.Type() == ENUMERATED_VALUE_OBJ && right.Type() == ENUMERATED_VALUE_OBJ:
 		// Enumerated values support equality only. They are equal when they
 		// name the same value of the same type; names are case-insensitive.
@@ -672,12 +697,102 @@ func evalBitStringInfix(left Object, operator string, right Object) Object {
 		return nativeBoolToBooleanObject(leftVal <= rightVal)
 	case ">=", "GE":
 		return nativeBoolToBooleanObject(leftVal >= rightVal)
+	case "+", "-", "*", "/", "MOD":
+		// Arithmetic as unsigned integers of the width, wrapping around as
+		// the PLC's registers do (DWORD 1 - 2 = 16#FFFFFFFF).
+		var v uint64
+		switch operator {
+		case "+":
+			v = leftVal + rightVal
+		case "-":
+			v = leftVal - rightVal
+		case "*":
+			v = leftVal * rightVal
+		default:
+			if rightVal == 0 {
+				return NewBuiltinError("division by zero")
+			}
+			if operator == "/" {
+				v = leftVal / rightVal
+			} else {
+				v = leftVal % rightVal
+			}
+		}
+		if width < 64 {
+			v &= 1<<width - 1
+		}
+		return &BitString{Value: v, Width: width}
 	default:
 		return NewBuiltinError("unknown operator for bitstrings: %s", operator)
 	}
 }
 
+// IsArithmeticOperator reports whether op is one of + - * / MOD.
+func IsArithmeticOperator(op string) bool {
+	switch op {
+	case "+", "-", "*", "/", "MOD":
+		return true
+	}
+	return false
+}
+
+// LiteralAsBitString returns an integer literal's value lit as a bit string
+// of the width of the other operand other, when other is a bit string, as a
+// literal computed or compared with a bit string takes its type (myByte +
+// 10, 160 + myByte). Otherwise it returns lit unchanged.
+func LiteralAsBitString(lit, other Object) Object {
+	b, ok := other.(*BitString)
+	if !ok {
+		return lit
+	}
+	if bits, ok := integerAsBitString(lit, b.Width); ok {
+		return bits
+	}
+	return lit
+}
+
+// IntegerToBitString returns an integer val as a bit string of width bits,
+// keeping its low bits (two's complement for a negative value), as an
+// integer assigned to a BYTE or DWORD variable is stored. It returns false
+// for a value that is not an integer.
+func IntegerToBitString(val Object, width int) (*BitString, bool) {
+	n, _, ok := GetIntegerObjectValue(val)
+	if !ok || IsRealType(string(val.Type())) {
+		return nil, false
+	}
+	v := uint64(n)
+	if width < 64 {
+		v &= 1<<width - 1
+	}
+	return &BitString{Value: v, Width: width}, true
+}
+
+// bitStringsAsIntegers returns a bit string and an integer as two integers,
+// the bit string as the unsigned value it holds.
+func bitStringsAsIntegers(left, right Object) (Object, Object, bool) {
+	conv := func(o Object) (Object, bool) {
+		if b, ok := o.(*BitString); ok {
+			return &LInt{Value: int64(b.Value)}, true
+		}
+		switch o.Type() {
+		case SINT_OBJ, INT_OBJ, DINT_OBJ, LINT_OBJ, USINT_OBJ, UINT_OBJ, UDINT_OBJ, ULINT_OBJ:
+			return o, true
+		}
+		return nil, false
+	}
+	l, ok1 := conv(left)
+	r, ok2 := conv(right)
+	return l, r, ok1 && ok2
+}
+
 func evalTimeInfix(left Object, operator string, right Object) Object {
+	// A bit string scales a TIME as its unsigned value (T#1s * myByte).
+	if b, ok := right.(*BitString); ok {
+		right = &LInt{Value: int64(b.Value)}
+	}
+	if b, ok := left.(*BitString); ok {
+		left = &LInt{Value: int64(b.Value)}
+	}
 	if left.Type() == TIME_OBJ && right.Type() == TIME_OBJ {
 		lVal := left.(*Time).Value
 		rVal := right.(*Time).Value
@@ -723,6 +838,16 @@ func evalDateInfix(left Object, operator string, right Object) Object {
 			return &Time{Value: lVal.Sub(rVal)}
 		}
 		return evalGenericComparison(operator, lVal.UnixNano(), rVal.UnixNano())
+	}
+	// A DATE moved by a duration stays a DATE, at midnight: dat + T#1d is
+	// the next day.
+	if left.Type() == DATE_OBJ && right.Type() == TIME_OBJ && (operator == "+" || operator == "-") {
+		d := right.(*Time).Value
+		if operator == "-" {
+			d = -d
+		}
+		t := left.(*Date).Value.Add(d)
+		return &Date{Value: time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())}
 	}
 	return NewBuiltinError("unsupported operator '%s' for types %s and %s", operator, left.Type(), right.Type())
 }

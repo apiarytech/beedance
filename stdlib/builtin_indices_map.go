@@ -626,4 +626,8 @@ var BuiltinNameToIndex = map[string]int{
 	"XOR":                 BuiltinXor,
 	"__CLOCK":             BuiltinClock,
 	"TIME":                BuiltinTime,
+	"__NATIVE_NEW":        BuiltinNativeNew,
+	"__NATIVE_SET":        BuiltinNativeSet,
+	"__NATIVE_RUN":        BuiltinNativeRun,
+	"__NATIVE_GET":        BuiltinNativeGet,
 }

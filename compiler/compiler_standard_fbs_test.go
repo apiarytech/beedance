@@ -173,10 +173,11 @@ func TestBuiltinResultTypes(t *testing.T) {
 			t.Errorf("%s: %s %v, want %s %v", tt.name, got, ok, tt.want, tt.ok)
 		}
 	}
-	// DWORD arithmetic on a conversion's result is caught when compiling.
+	// DWORD arithmetic on a conversion's result is allowed, as in CODESYS
+	// (OSCAT divides DATE_TO_DWORD results); the literal takes DWORD.
 	_, err := compileWithClock(t, "VAR d : DATE; w : DWORD; END_VAR w := DATE_TO_DWORD(d) / 86400;")
-	if err == nil || !strings.Contains(err.Error(), "not defined for types DWORD and LINT") {
-		t.Errorf("DWORD arithmetic: %v", err)
+	if err != nil && strings.Contains(err.Error(), "not defined for types") {
+		t.Errorf("DWORD arithmetic rejected: %v", err)
 	}
 }
 

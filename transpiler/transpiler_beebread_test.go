@@ -120,6 +120,45 @@ PROGRAM P VAR x : REAL; END_VAR x := DEAD_BAND(1.0); END_PROGRAM`)
 	}
 }
 
+// The OSCAT BUILDING and NETWORK libraries are called like BASIC: a block of
+// each, a function, a global variable of NETWORK and a constant, and the
+// TwinCAT TCP/IP blocks NETWORK uses, whose Go names are mixed case.
+func TestBeebreadBuildingAndNetwork(t *testing.T) {
+	src := `PROGRAM Main
+VAR coil : ACTUATOR_COIL; conn : FB_SocketConnect; on : BOOL; ip : STRING; lvl : BYTE; n : UINT; END_VAR
+coil(IN := TRUE);
+on := coil.out;
+ip := IP4_TO_STRING(16#C0A80001);
+conn(sRemoteHost := ip, nRemotePort := 502, bExecute := on);
+lvl := LOG_CL.LEVEL;
+n := NETWORK_BUFFER_SHORT_SIZE;
+END_PROGRAM`
+	checkContains(t, src,
+		"coil oscatactuators.ACTUATOR_COIL",
+		"conn oscattcpip.FB_SocketConnect",
+		"p.coil.IN = true",
+		"p.on = p.coil.OUT",
+		"p.ip = oscatencoding.IP4_TO_STRING(iec.DWORD(3232235521))",
+		"p.conn.SREMOTEHOST = p.ip",
+		"p.conn.Execute(now)",
+		"p.lvl = oscatnet.LOG_CL.LEVEL",
+		"p.n = oscatnet.NETWORK_BUFFER_SHORT_SIZE")
+	out, err := GoFile(parseForTest(t, src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`oscatactuators "github.com/apiarytech/beebread/building/actuators"`,
+		`oscatnet "github.com/apiarytech/beebread/network"`,
+		`oscatencoding "github.com/apiarytech/beebread/network/encoding"`,
+		`oscattcpip "github.com/apiarytech/beebread/network/tcpip"`,
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("expected %s in:\n%s", want, out)
+		}
+	}
+}
+
 // GoFile imports the beebread packages the code uses.
 func TestBeebreadImports(t *testing.T) {
 	out, err := GoFile(parseForTest(t, "PROGRAM P VAR f : FT_PT1; b : ARRAY[0..3] OF BYTE; x : BOOL; END_VAR f(IN := 1.0); x := _BUFFER_CLEAR(ADR(b), SIZEOF(b)); END_PROGRAM"))

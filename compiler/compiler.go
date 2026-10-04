@@ -152,6 +152,16 @@ type Compiler struct {
 	rootProgram     *ast.Program                         // Reference to the root program node
 	// predefined holds the symbols predefineGlobals made, by declaration.
 	predefined map[ast.Node]Symbol
+
+	// AllowInputWrites lets a POU assign to its own VAR_INPUT variables, as
+	// CODESYS and TwinCAT do (the POU works on a copy) and libraries written
+	// for them, such as OSCAT, need. IEC 61131-3 makes inputs read-only,
+	// which is the default.
+	AllowInputWrites bool
+
+	// constDepth guards evaluateConstantInteger against constants defined
+	// through each other.
+	constDepth int
 }
 
 // NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
@@ -1118,7 +1128,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 						return fmt.Errorf("cannot assign to a constant variable '%s'", varDecl.Name.Value)
 					}
 					// Check for read-only (VAR_INPUT)
-					if varDecl.Scope == "VAR_INPUT" {
+					if varDecl.Scope == "VAR_INPUT" && !c.AllowInputWrites {
 						return fmt.Errorf("cannot assign to read-only variable '%s'", target.Value)
 					}
 
@@ -1400,14 +1410,22 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// --- End of new type-checking logic ---
 
-		err = c.Compile(node.Left)
-		if err != nil {
-			return err
-		}
-
-		err = c.Compile(node.Right)
-		if err != nil {
-			return err
+		// A literal computed with a bit string is a constant of its type,
+		// so myByte + 10 wraps at 8 bits as the type check says.
+		for _, side := range []struct {
+			e   ast.Expression
+			typ object.ObjectType
+		}{{node.Left, leftType}, {node.Right, rightType}} {
+			lit, isLit := side.e.(*ast.IntegerLiteral)
+			if w := bitStringWidth(side.typ); isLit && w > 0 && side.typ != object.BOOLEAN_OBJ && isArithmeticOperator(node.Operator) && lit.Value >= 0 {
+				v := uint64(lit.Value)
+				if w < 64 {
+					v &= 1<<w - 1
+				}
+				c.emitConstant(c.addConstant(&object.BitString{Value: v, Width: w}))
+			} else if err := c.Compile(side.e); err != nil {
+				return err
+			}
 		}
 
 		switch node.Operator {
@@ -2028,6 +2046,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// A CallExpression compiles the function/callable and all arguments, then
 	// emits an OpCall instruction.
 	case *ast.CallExpression:
+		// SIZEOF(x) is a constant: see sizeof.go.
+		if c.isSizeofCall(node) {
+			return c.compileSizeof(node)
+		}
 		// Calling a function block instance runs its body; see compileFunctionBlockCall.
 		if fbDef := c.calleeFunctionBlock(node.Function); fbDef != nil {
 			return c.compileFunctionBlockCall(node, fbDef)
@@ -2476,6 +2498,9 @@ func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, er
 		// For prefix expressions, the type is usually the same as the operand's type.
 		return c.getExpressionType(e.Right)
 	case *ast.CallExpression:
+		if c.isSizeofCall(e) {
+			return object.LINT_OBJ, nil
+		}
 		// This requires looking up the function's return type.
 		if ident, ok := e.Function.(*ast.Identifier); ok {
 			if funcDefNode, ok := c.resolveTypeName(ident.Value); ok {
@@ -2603,10 +2628,16 @@ func isTemporalType(t object.ObjectType) bool {
 // temporalResultType returns the type of an arithmetic operation involving a
 // time or date operand, following IEC 61131-3, and false if it is not defined.
 func temporalResultType(op string, left, right object.ObjectType) (object.ObjectType, bool) {
+	// A bit string scales a TIME as an integer does, as CODESYS allows
+	// (OSCAT writes CYCLE_TIME * BAND_B(...)).
 	isNumeric := func(t object.ObjectType) bool {
-		return object.IsIntegerType(string(t)) || object.IsRealType(string(t))
+		return object.IsIntegerType(string(t)) || object.IsRealType(string(t)) ||
+			(object.IsBitStringType(string(t)) && t != object.BOOLEAN_OBJ)
 	}
 	switch {
+	case left == object.DATE_OBJ && right == object.TIME_OBJ && (op == "+" || op == "-"):
+		// A DATE moved by a duration, e.g. tomorrow is dat + T#1d.
+		return object.DATE_OBJ, true
 	case left == object.TIME_OBJ && right == object.TIME_OBJ && (op == "+" || op == "-"):
 		return object.TIME_OBJ, true
 	case left == object.TIME_OBJ && isNumeric(right) && (op == "*" || op == "/"):
@@ -2655,15 +2686,26 @@ func literalOperandTypes(e *ast.InfixExpression, left, right object.ObjectType) 
 	switch {
 	case isLogicalOperator(e.Operator):
 		return literalAsBitString(e.Left, left, right), literalAsBitString(e.Right, right, left)
-	case object.IsComparisonOperator(e.Operator):
-		if _, ok := e.Left.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(right)) {
+	case object.IsComparisonOperator(e.Operator), isArithmeticOperator(e.Operator):
+		// Compared or computed with a bit string, a literal has its type
+		// (myByte = 0, now - 16#100, 160 + myByte).
+		if _, ok := e.Left.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(right)) && right != object.BOOLEAN_OBJ {
 			left = right
 		}
-		if _, ok := e.Right.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(left)) {
+		if _, ok := e.Right.(*ast.IntegerLiteral); ok && object.IsBitStringType(string(left)) && left != object.BOOLEAN_OBJ {
 			right = left
 		}
 	}
 	return left, right
+}
+
+// isArithmeticOperator reports whether op is one of + - * / MOD.
+func isArithmeticOperator(op string) bool {
+	switch strings.ToUpper(op) {
+	case "+", "-", "*", "/", "MOD":
+		return true
+	}
+	return false
 }
 
 // elementaryTypeName returns the name the type checker uses for an
@@ -2709,6 +2751,26 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 			return right, nil
 		}
 		return left, nil
+	}
+
+	// Bit strings (BYTE, WORD, DWORD, LWORD) take part in arithmetic as
+	// unsigned integers of their width, as in CODESYS and TwinCAT, whose
+	// libraries (OSCAT) compute with them: two bit strings give the wider,
+	// and with an integer they are promoted like integers.
+	isBits := func(t object.ObjectType) bool {
+		return object.IsBitStringType(string(t)) && t != object.BOOLEAN_OBJ
+	}
+	switch op {
+	case "+", "-", "*", "/", "MOD":
+		switch {
+		case isBits(left) && isBits(right):
+			if bitStringWidth(right) > bitStringWidth(left) {
+				return right, nil
+			}
+			return left, nil
+		case isBits(left) && object.IsIntegerType(string(right)), object.IsIntegerType(string(left)) && isBits(right):
+			return object.LINT_OBJ, nil
+		}
 	}
 
 	switch op {
@@ -2757,6 +2819,11 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 			return object.BOOLEAN_OBJ, nil
 		}
 		if object.IsBitStringType(string(left)) && object.IsBitStringType(string(right)) {
+			return object.BOOLEAN_OBJ, nil
+		}
+		// An integer compares with a bit string as an unsigned value
+		// (UDINT < DWORD), as in CODESYS.
+		if (isBits(left) && object.IsIntegerType(string(right))) || (object.IsIntegerType(string(left)) && isBits(right)) {
 			return object.BOOLEAN_OBJ, nil
 		}
 		// Any two values of the same type (e.g. an enumeration) can be tested for equality.
@@ -3073,7 +3140,7 @@ func (c *Compiler) setSymbol(s Symbol) error {
 	if s.IsConstant {
 		return fmt.Errorf("cannot assign to a constant variable '%s'", s.Name)
 	}
-	if s.IsReadOnly {
+	if s.IsReadOnly && !c.AllowInputWrites {
 		return fmt.Errorf("cannot assign to read-only variable '%s'", s.Name)
 	}
 	switch s.Scope {
@@ -3615,6 +3682,22 @@ func (c *Compiler) evaluateConstantInteger(expr ast.Expression) (int64, error) {
 			return -right, nil
 		}
 		return 0, fmt.Errorf("unsupported prefix operator in constant integer expression: %s", e.Operator)
+	case *ast.Identifier:
+		// A named constant, such as LOG_MAX in ARRAY[0..LOG_MAX]: the value
+		// of its CONSTANT declaration, in the scopes from the innermost out.
+		if c.constDepth > 16 {
+			return 0, fmt.Errorf("constant %s is defined through itself", e.Value)
+		}
+		for i := c.scopeIndex; i >= 0; i-- {
+			for name, decl := range c.scopes[i].varDecls {
+				if strings.EqualFold(name, e.Value) && decl.IsConstant && decl.Value != nil {
+					c.constDepth++
+					v, err := c.evaluateConstantInteger(decl.Value)
+					c.constDepth--
+					return v, err
+				}
+			}
+		}
 	}
 	return 0, fmt.Errorf("expression is not a constant integer")
 }

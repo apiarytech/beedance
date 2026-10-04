@@ -326,9 +326,9 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`RIGHT("abc");`, "BUILTIN ERROR: wrong number of arguments for RIGHT. got=1, want=2"},
 
 		// MID (P=2, L=3) -> 'bcd'
-		{`MID('abcdef', 2, 3);`, "bcd"},
-		{`MID("abcdef", 2, 3);`, wstringExpectation{"bcd"}},
-		{`MID('abcdef', 1, 10);`, "abcdef"},
+		{`MID('abcdef', 3, 2);`, "bcd"},
+		{`MID("abcdef", 3, 2);`, wstringExpectation{"bcd"}},
+		{`MID('abcdef', 10, 1);`, "abcdef"},
 		{`MID(123, 1, 1);`, "BUILTIN ERROR: argument 1 to `MID` must be STRING or WSTRING, got LINT"},
 		{`MID('abc', 'a', 1);`, "BUILTIN ERROR: argument 2 to `MID` must be INTEGER, got STRING"},
 		{`MID("abc", 1, "a");`, "BUILTIN ERROR: argument 3 to `MID` must be INTEGER, got WSTRING"},
@@ -341,9 +341,9 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`FIND(1, 1);`, "BUILTIN ERROR: argument 1 to `FIND` must be STRING, WSTRING, or ARRAY, got LINT"},
 
 		// REPLACE
-		{`REPLACE('abcdef', 'XX', 2, 3);`, "aXXef"},
-		{`REPLACE("abcdef", "XX", 2, 3);`, wstringExpectation{"aXXef"}},
-		{`REPLACE('abc', 'XX', 4, 2);`, "abcXX"},
+		{`REPLACE('abcdef', 'XX', 3, 2);`, "aXXef"},
+		{`REPLACE("abcdef", "XX", 3, 2);`, wstringExpectation{"aXXef"}},
+		{`REPLACE('abc', 'XX', 2, 4);`, "abcXX"},
 		{`REPLACE(1, 'a', 1, 1);`, "BUILTIN ERROR: argument 1 to `REPLACE` must be STRING or WSTRING, got LINT"},
 		{`REPLACE('a', 1, 1, 1);`, "BUILTIN ERROR: argument 2 to `REPLACE` must be STRING, got LINT"},
 
@@ -353,15 +353,15 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`CONCAT('a', 1);`, "BUILTIN ERROR: all arguments to `CONCAT` must be of the same type (STRING), got LINT"},
 
 		// DELETE (for strings)
-		{`DELETE('abcdef', 3, 2);`, "abef"},
-		{`DELETE("abcdef", 3, 2);`, wstringExpectation{"abef"}},
-		{`DELETE('abc', 1, 10);`, ""}, // L > len, truncates
+		{`DELETE('abcdef', 2, 3);`, "abef"},
+		{`DELETE("abcdef", 2, 3);`, wstringExpectation{"abef"}},
+		{`DELETE('abc', 10, 1);`, ""}, // L > len, truncates
 		{`DELETE(123, 1, 1);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE('abc', 'a', 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got STRING"},
 
 		// INSERT (for strings)
-		{`INSERT('abcdef', 'XX', 3);`, "abXXcdef"},
-		{`INSERT("abcdef", "XX", 3);`, wstringExpectation{"abXXcdef"}},
+		{`INSERT('abcdef', 'XX', 2);`, "abXXcdef"},
+		{`INSERT("abcdef", "XX", 2);`, wstringExpectation{"abXXcdef"}},
 		{`INSERT(123, 'a', 1);`, "BUILTIN ERROR: argument 1 to `INSERT` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`INSERT('abc', 1, 1);`, "BUILTIN ERROR: argument 2 to `INSERT` for strings must be STRING, got LINT"},
 	}
@@ -576,14 +576,14 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		// DELETE
 		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}},
 		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},    // P=1, L=1
-		{`DELETE([1, 2, 3], 3, 1);`, []int{1, 2}},    // P=3, L=1
-		{`DELETE([1, 2, 3], 5, 1);`, []int{1, 2, 3}}, // p > len, returns original
-		{`DELETE([1, 2, 3], 2, 3);`, []int{1}},       // P=2, L=3 -> l > remaining, truncates
-		{`DELETE([1, 2, 3], 1, 4);`, []int{}},        // P=1, L=4 -> l > len, truncates
-		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // p < 1, returns original
-		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // l <= 0, returns original
-		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}},
-		{`DELETE(1, 2, 3);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
+		{`DELETE([1, 2, 3], 1, 3);`, []int{1, 2}},    // P=3, L=1
+		{`DELETE([1, 2, 3], 1, 5);`, []int{1, 2, 3}}, // p > len, returns original
+		{`DELETE([1, 2, 3], 3, 2);`, []int{1}},       // P=2, L=3 -> l > remaining, truncates
+		{`DELETE([1, 2, 3], 4, 1);`, []int{}},        // P=1, L=4 -> l > len, truncates
+		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // p < 1, returns original
+		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // l <= 0, returns original
+		{`DELETE([1, 2, 3], 1, -1);`, []int{1, 2, 3}},
+		{`DELETE(1, 3, 2);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE([], "a", 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1, "a");`, "BUILTIN ERROR: argument 3 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1);`, "wrong number of arguments for DELETE. got=2, want=3"},

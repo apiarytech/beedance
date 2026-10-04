@@ -400,6 +400,16 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		if isError(right) {
 			return right
 		}
+		// A literal computed with a bit string takes its type, as the
+		// compiler types it: myByte + 10 wraps at 8 bits.
+		if object.IsArithmeticOperator(node.Operator) {
+			if _, ok := node.Left.(*ast.IntegerLiteral); ok {
+				left = object.LiteralAsBitString(left, right)
+			}
+			if _, ok := node.Right.(*ast.IntegerLiteral); ok {
+				right = object.LiteralAsBitString(right, left)
+			}
+		}
 		return object.EvalInfix(left, node.Operator, right)
 
 	case *ast.MemberAccessExpression:
@@ -497,6 +507,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 				return newError(node, "wrong number of arguments for EXPR. got=%d, want=1", len(node.Arguments))
 			}
 			return quote(node.Arguments[0], env)
+		}
+		if isSizeofCall(node, env) {
+			return evalSizeof(node, env)
 		}
 
 		var function object.Object
@@ -1375,6 +1388,12 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 			}
 			// An array keeps the bounds its variable was declared with.
 			keepArrayBounds(existing, val)
+			// A bit string variable keeps its type when given an integer.
+			if b, ok := existing.(*object.BitString); ok && val.Type() != object.BITSTRING_OBJ {
+				if bits, ok := object.IntegerToBitString(val, b.Width); ok {
+					val = bits
+				}
+			}
 		}
 		env.Assign(target.Value, val)
 
@@ -1586,6 +1605,10 @@ func aliasTypeDeclaration(node *ast.VarDeclStatement, env *object.Environment) *
 }
 
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
+	// The declaration says what the value cannot, such as an INT's size.
+	if node.Name != nil {
+		env.SetDeclaration(node.Name.Value, node)
+	}
 	// Handle located variables (AT %) first.
 	if node.Location != nil {
 		address := node.Location.Location.String()
@@ -1648,6 +1671,13 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 					return convertedVal
 				}
 				val = convertedVal
+			}
+			// An integer initial value of a BYTE, WORD, DWORD or LWORD is
+			// stored as that bit string, so arithmetic on it wraps.
+			if width, ok := object.GetBitStringWidth(targetType); ok && targetType != "BOOL" && val.Type() != object.BITSTRING_OBJ {
+				if bits, ok := object.IntegerToBitString(val, width); ok {
+					val = bits
+				}
 			}
 		}
 	} else {

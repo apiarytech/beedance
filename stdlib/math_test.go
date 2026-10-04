@@ -122,7 +122,9 @@ func TestBuiltinTimeDateFunctions(t *testing.T) {
 		{"SUB(TOD#10:00:00, TOD#08:00:00);", 2 * time.Hour},
 		{"SUB(DT#2026-05-21-10:00:00, T#30m);", time.Date(2026, 5, 21, 9, 30, 0, 0, time.UTC)},
 		{"SUB(DT#2026-05-21-10:00:00, DT#2026-05-20-10:00:00);", 24 * time.Hour},
-		{"SUB(D#2026-05-21, T#1s);", "BUILTIN ERROR: unsupported argument types for SUB: DATE - TIME"},
+		// A DATE moves by a TIME and stays a DATE (CODESYS; OSCAT's dat + T#1d).
+		{"SUB(D#2026-05-21, T#1d);", time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)},
+		{"ADD(D#2026-05-21, T#1d);", time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC)},
 
 		// --- MUL ---
 		{"MUL(T#10s, 5);", 50 * time.Second},

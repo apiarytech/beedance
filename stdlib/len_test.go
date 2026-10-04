@@ -28,37 +28,37 @@ func TestBuiltinStringFunctions(t *testing.T) {
 		{`RIGHT(123, 1);`, "BUILTIN ERROR: argument 1 to `RIGHT` must be STRING or WSTRING, got LINT"},
 
 		// MID
-		{`MID('abcdef', 3, 2);`, "cd"},
-		{`MID("abcdef", 1, 4);`, wstringExpectation{"abcd"}},
-		{`MID('abcdef', 5, 4);`, "ef"}, // Length goes past end of string
-		{`MID('abcdef', 0, 2);`, ""},   // Position <= 0
-		{`MID('abcdef', 2, 0);`, ""},   // Length <= 0
+		{`MID('abcdef', 2, 3);`, "cd"},
+		{`MID("abcdef", 4, 1);`, wstringExpectation{"abcd"}},
+		{`MID('abcdef', 4, 5);`, "ef"}, // Length goes past end of string
+		{`MID('abcdef', 2, 0);`, ""},   // Position <= 0
+		{`MID('abcdef', 0, 2);`, ""},   // Length <= 0
 		{`MID(123, 1, 1);`, "BUILTIN ERROR: argument 1 to `MID` must be STRING or WSTRING, got LINT"},
 
 		// REPLACE
-		{`REPLACE('abcdef', 'XX', 3, 2);`, "abXXef"}, // Replace 'cd' with 'XX'
-		{`REPLACE('abc', 'XYZ', 2, 1);`, "aXYZc"},    // Replace 'b' with 'XYZ'
-		{`REPLACE('abc', 'X', 1, 3);`, "X"},          // Replace entire string
-		{`REPLACE('abc', 'X', 4, 1);`, "abcX"},       // Position > length, appends
-		{`REPLACE('abc', 'X', 2, 5);`, "aX"},         // Length > remaining string
-		{`REPLACE('abc', 'X', 2, 0);`, "aXbc"},       // Length is 0, acts as insert
+		{`REPLACE('abcdef', 'XX', 2, 3);`, "abXXef"}, // Replace 'cd' with 'XX'
+		{`REPLACE('abc', 'XYZ', 1, 2);`, "aXYZc"},    // Replace 'b' with 'XYZ'
+		{`REPLACE('abc', 'X', 3, 1);`, "X"},          // Replace entire string
+		{`REPLACE('abc', 'X', 1, 4);`, "abcX"},       // Position > length, appends
+		{`REPLACE('abc', 'X', 5, 2);`, "aX"},         // Length > remaining string
+		{`REPLACE('abc', 'X', 0, 2);`, "aXbc"},       // Length is 0, acts as insert
 		{`REPLACE(1, 'a', 1, 1);`, "BUILTIN ERROR: argument 1 to `REPLACE` must be STRING or WSTRING, got LINT"},
 
 		// INSERT
-		{`INSERT('ac', 'b', 2);`, "abc"},
-		{`INSERT("ac", "b", 2);`, wstringExpectation{"abc"}},
-		{`INSERT('abc', 'X', 1);`, "Xabc"},
-		{`INSERT('abc', 'X', 4);`, "abcX"},
-		{`INSERT('abc', 'X', 0);`, "Xabc"}, // Position < 1, prepends
+		{`INSERT('ac', 'b', 1);`, "abc"},
+		{`INSERT("ac", "b", 1);`, wstringExpectation{"abc"}},
+		{`INSERT('abc', 'X', 0);`, "Xabc"},
+		{`INSERT('abc', 'X', 3);`, "abcX"},
+		{`INSERT('abc', 'X', -1);`, "Xabc"}, // P < 0 prepends
 		{`INSERT(1, 'a', 1);`, "BUILTIN ERROR: argument 1 to `INSERT` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`INSERT('a', 1, 1);`, "BUILTIN ERROR: argument 2 to `INSERT` for strings must be STRING, got LINT"},
 
 		// DELETE
-		{`DELETE('abcdef', 3, 2);`, "abef"},                     // Corrected: P=3, L=2
-		{`DELETE("abcdef", 3, 2);`, wstringExpectation{"abef"}}, // Corrected: P=3, L=2
+		{`DELETE('abcdef', 2, 3);`, "abef"},                     // P=3, L=2
+		{`DELETE("abcdef", 2, 3);`, wstringExpectation{"abef"}}, // P=3, L=2
 		{`DELETE('abc', 1, 1);`, "bc"},
-		{`DELETE('abc', 1, 10);`, ""},   // L > len, truncates
-		{`DELETE('abc', 0, 1);`, "abc"}, // l <= 0, returns original
+		{`DELETE('abc', 10, 1);`, ""},   // L > len, truncates
+		{`DELETE('abc', 1, 0);`, "abc"}, // l <= 0, returns original
 		{`DELETE(1, 1, 1);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 
 		// CONCAT
@@ -121,14 +121,14 @@ func TestBuiltinArrayFunctions(t *testing.T) {
 		// DELETE
 		{`DELETE([1, 2, 3, 4], 2, 2);`, []int{1, 4}}, // P=2, L=2
 		{`DELETE([1, 2, 3], 1, 1);`, []int{2, 3}},    // P=1, L=1
-		{`DELETE([1, 2, 3], 3, 1);`, []int{1, 2}},    // P=3, L=1
-		{`DELETE([1, 2, 3], 5, 1);`, []int{1, 2, 3}}, // p > len, returns original
-		{`DELETE([1, 2, 3], 2, 3);`, []int{1}},       // P=2, L=3 -> l > remaining, truncates
-		{`DELETE([1, 2, 3], 1, 4);`, []int{}},        // P=1, L=4 -> l > len, truncates
-		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // l <= 0, returns original
-		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // p < 1, returns original
-		{`DELETE([1, 2, 3], -1, 1);`, []int{1, 2, 3}},
-		{`DELETE(1, 2, 3);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
+		{`DELETE([1, 2, 3], 1, 3);`, []int{1, 2}},    // P=3, L=1
+		{`DELETE([1, 2, 3], 1, 5);`, []int{1, 2, 3}}, // p > len, returns original
+		{`DELETE([1, 2, 3], 3, 2);`, []int{1}},       // P=2, L=3 -> l > remaining, truncates
+		{`DELETE([1, 2, 3], 4, 1);`, []int{}},        // P=1, L=4 -> l > len, truncates
+		{`DELETE([1, 2, 3], 1, 0);`, []int{1, 2, 3}}, // l <= 0, returns original
+		{`DELETE([1, 2, 3], 0, 1);`, []int{1, 2, 3}}, // p < 1, returns original
+		{`DELETE([1, 2, 3], 1, -1);`, []int{1, 2, 3}},
+		{`DELETE(1, 3, 2);`, "BUILTIN ERROR: argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got LINT"},
 		{`DELETE([], "a", 1);`, "BUILTIN ERROR: argument 2 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1, "a");`, "BUILTIN ERROR: argument 3 to `DELETE` must be INTEGER, got WSTRING"},
 		{`DELETE([], 1);`, "BUILTIN ERROR: wrong number of arguments for DELETE. got=2, want=3"},

@@ -201,13 +201,8 @@ var insertFn = func(args ...object.Object) object.Object {
 			return object.NewBuiltinError("argument 2 to `INSERT` for strings must be STRING, got %s", args[1].Type())
 		}
 		strLen := int64(len(in1.Value))
-		if p < 1 {
-			p = 1
-		}
-		if p > strLen+1 {
-			p = strLen + 1
-		}
-		idx := p - 1
+		// IEC 61131-3: IN2 goes after the P-th character of IN1 (P 0: in front).
+		idx := min(max(p, 0), strLen)
 		return &object.String{Value: in1.Value[:idx] + in2.Value + in1.Value[idx:]}
 	case *object.WString:
 		in2, ok := args[1].(*object.WString)
@@ -215,13 +210,8 @@ var insertFn = func(args ...object.Object) object.Object {
 			return object.NewBuiltinError("argument 2 to `INSERT` for wstrings must be WSTRING, got %s", args[1].Type())
 		}
 		strLen := int64(len(in1.Value))
-		if p < 1 {
-			p = 1
-		}
-		if p > strLen+1 {
-			p = strLen + 1
-		}
-		idx := p - 1
+		// IEC 61131-3: IN2 goes after the P-th character of IN1 (P 0: in front).
+		idx := min(max(p, 0), strLen)
 		return &object.WString{Value: in1.Value[:idx] + in2.Value + in1.Value[idx:]}
 	default:
 		return object.NewBuiltinError("argument 1 to `INSERT` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
@@ -232,12 +222,12 @@ var deleteFn = func(args ...object.Object) object.Object {
 	if len(args) != 3 {
 		return object.NewBuiltinError("wrong number of arguments for DELETE. got=%d, want=3", len(args))
 	}
-	// Standard signature is DELETE(IN, P, L).
-	p, _, ok := object.GetIntegerObjectValue(args[1]) // P is the position
+	// IEC 61131-3: DELETE(IN, L, P) deletes L characters from position P.
+	l, _, ok := object.GetIntegerObjectValue(args[1]) // L is the length
 	if !ok {
 		return object.NewBuiltinError("argument 2 to `DELETE` must be INTEGER, got %s", args[1].Type())
 	}
-	l, _, ok := object.GetIntegerObjectValue(args[2]) // L is the length
+	p, _, ok := object.GetIntegerObjectValue(args[2]) // P is the position
 	if !ok {
 		return object.NewBuiltinError("argument 3 to `DELETE` must be INTEGER, got %s", args[2].Type())
 	}
@@ -397,13 +387,14 @@ var midFn = func(args ...object.Object) object.Object {
 	if len(args) != 3 {
 		return object.NewBuiltinError("wrong number of arguments for MID. got=%d, want=3", len(args))
 	}
-	l, _, okL := object.GetIntegerObjectValue(args[2]) // L is the 3rd argument
+	// IEC 61131-3: MID(IN, L, P) is L characters from position P.
+	l, _, okL := object.GetIntegerObjectValue(args[1]) // L is the 2nd argument
 	if !okL {
-		return object.NewBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
-	}
-	p, _, okP := object.GetIntegerObjectValue(args[1]) // P is the 2nd argument
-	if !okP {
 		return object.NewBuiltinError("argument 2 to `MID` must be INTEGER, got %s", args[1].Type())
+	}
+	p, _, okP := object.GetIntegerObjectValue(args[2]) // P is the 3rd argument
+	if !okP {
+		return object.NewBuiltinError("argument 3 to `MID` must be INTEGER, got %s", args[2].Type())
 	}
 	switch str := args[0].(type) {
 	case *object.String:
@@ -469,13 +460,15 @@ var replaceFn = func(args ...object.Object) object.Object {
 	if len(args) != 4 {
 		return object.NewBuiltinError("wrong number of arguments for REPLACE. got=%d, want=4", len(args))
 	}
-	l, _, okL := object.GetIntegerObjectValue(args[3]) // L is the 4th argument
+	// IEC 61131-3: REPLACE(IN1, IN2, L, P) replaces L characters of IN1
+	// from position P with IN2.
+	l, _, okL := object.GetIntegerObjectValue(args[2]) // L is the 3rd argument
 	if !okL {
-		return object.NewBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
-	}
-	p, _, okP := object.GetIntegerObjectValue(args[2]) // P is the 3rd argument
-	if !okP {
 		return object.NewBuiltinError("argument 3 to `REPLACE` must be INTEGER, got %s", args[2].Type())
+	}
+	p, _, okP := object.GetIntegerObjectValue(args[3]) // P is the 4th argument
+	if !okP {
+		return object.NewBuiltinError("argument 4 to `REPLACE` must be INTEGER, got %s", args[3].Type())
 	}
 	if l < 0 {
 		l = 0

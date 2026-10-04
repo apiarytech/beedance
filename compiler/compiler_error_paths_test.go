@@ -128,7 +128,8 @@ func TestOperandTypeErrors(t *testing.T) {
 	runCompileErrorTests(t, []compileErrorCase{
 		{"BOOL from 2", "VAR x : BOOL := 2; END_VAR", "cannot initialize 'x' of type BOOL with a value of type LINT"},
 		{"BOOL from a typed integer", "VAR x : BOOL := INT#1; END_VAR", "cannot initialize 'x' of type BOOL with a value of type INT"},
-		{"integer with bit string", "VAR x : INT := 1; y : BYTE := 1; END_VAR x = y;",
-			"type error in expression '(x = y)': comparison operator '=' not defined for types INT and BYTE"},
+		// An integer compares with a bit string (CODESYS), but not with a string.
+		{"integer with string", "VAR x : INT := 1; y : STRING; END_VAR x = y;",
+			"type error in expression '(x = y)': comparison operator '=' not defined for types INT and STRING"},
 	})
 }

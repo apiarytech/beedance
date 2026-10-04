@@ -490,7 +490,7 @@ func TestBuiltinFunctions(t *testing.T) {
 		},
 		{`LEFT('abcde', 2);`, "ab"},    // Test #21
 		{`RIGHT('abcde', 2);`, "de"},   // Test #22
-		{`MID('abcde', 2, 3);`, "bcd"}, // Test #23, MID(IN, P, L)
+		{`MID('abcde', 3, 2);`, "bcd"}, // Test #23, MID(IN, P, L)
 		{`FIND('abcabc', 'b');`, 2},    // Test #24
 
 		// Selection Functions

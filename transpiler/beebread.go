@@ -98,7 +98,7 @@ func (t *Transpiler) beebreadTypeOf(dataType ast.Expression) (beebreadFunctionBl
 // of an instance or variable expression.
 func (t *Transpiler) beebreadTypeOfValue(exp ast.Expression) (beebreadFunctionBlock, bool) {
 	if g, ok := t.beebreadGlobal(exp); ok {
-		b, ok := beebreadFunctionBlocks[beebreadGlobals[strings.TrimPrefix(g, "oscat.")]]
+		b, ok := beebreadFunctionBlocks[beebreadGlobals[g[strings.LastIndex(g, ".")+1:]].typ]
 		return b, ok
 	}
 	// The result of the current function, such as STATUS_TO_ESR.TYP.
@@ -305,10 +305,11 @@ func (t *Transpiler) beebreadGlobal(exp ast.Expression) (string, bool) {
 		return "", false
 	}
 	up := strings.ToUpper(name)
-	if _, ok := beebreadGlobals[up]; !ok {
+	g, ok := beebreadGlobals[up]
+	if !ok {
 		return "", false
 	}
-	return "oscat." + up, true
+	return g.pkg + "." + up, true // e.g. oscat.MATH, oscatnet.LOG_CL
 }
 
 // beebreadLowerBound returns the lower bound OSCAT declares for the index of

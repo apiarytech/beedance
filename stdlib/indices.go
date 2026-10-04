@@ -624,4 +624,8 @@ const (
 	BuiltinXor                     // XOR
 	BuiltinClock                   // __CLOCK
 	BuiltinTime                    // TIME
+	BuiltinNativeNew               // __NATIVE_NEW
+	BuiltinNativeSet               // __NATIVE_SET
+	BuiltinNativeRun               // __NATIVE_RUN
+	BuiltinNativeGet               // __NATIVE_GET
 )

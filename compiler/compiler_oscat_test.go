@@ -33,8 +33,12 @@ const oscatPath = "../reference/beedance_oscat_basic.st"
 
 // oscatDeclarations returns the declarations of the OSCAT library units that
 // parse: its POUs, TYPE blocks and global variable blocks.
-func oscatDeclarations(t *testing.T) []ast.Statement {
-	data, err := os.ReadFile(oscatPath)
+func oscatDeclarations(t *testing.T) []ast.Statement { return oscatDeclarationsAt(t, oscatPath) }
+
+// oscatDeclarationsAt reads the declarations of an OSCAT library source,
+// each parsed on its own so that one that does not parse is left out.
+func oscatDeclarationsAt(t *testing.T, path string) []ast.Statement {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("OSCAT library not present: %v", err)
 	}

@@ -10,7 +10,11 @@
 
 package object
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/apiarytech/beedance/ast"
+)
 
 // NewEnclosedEnvironment creates a new, nested environment that is enclosed by an outer one.
 // This is used for creating local scopes, like inside a function call.
@@ -33,6 +37,29 @@ type Environment struct {
 	store map[string]Object
 	names map[string]string // The stored spelling of each name, by its upper case.
 	outer *Environment
+	// decls are the declarations of the variables of this scope, by upper
+	// case name, for what only the declaration says, such as SIZEOF of an
+	// INT that the evaluator holds in a 64-bit value.
+	decls map[string]*ast.VarDeclStatement
+}
+
+// SetDeclaration records the declaration of a variable of this scope.
+func (e *Environment) SetDeclaration(name string, decl *ast.VarDeclStatement) {
+	if e.decls == nil {
+		e.decls = make(map[string]*ast.VarDeclStatement)
+	}
+	e.decls[strings.ToUpper(name)] = decl
+}
+
+// Declaration returns the declaration of a variable, in this scope or an
+// enclosing one.
+func (e *Environment) Declaration(name string) (*ast.VarDeclStatement, bool) {
+	for env := e; env != nil; env = env.outer {
+		if d, ok := env.decls[strings.ToUpper(name)]; ok {
+			return d, true
+		}
+	}
+	return nil, false
 }
 
 // key returns the spelling name is stored with in this scope, if it is.

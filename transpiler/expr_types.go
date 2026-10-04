@@ -61,10 +61,11 @@ func (t *Transpiler) exprGoType(e ast.Expression) string {
 			return iecOnly(t.mapIecTypeToGo(t.currentFunc.ReturnType))
 		}
 		if g, ok := t.beebreadGlobal(e); ok {
-			if _, isStruct := beebreadFunctionBlocks[beebreadGlobals[strings.TrimPrefix(g, "oscat.")]]; !isStruct {
-				return "iec.INT"
+			gv := beebreadGlobals[g[strings.LastIndex(g, ".")+1:]]
+			if _, isStruct := beebreadFunctionBlocks[gv.typ]; isStruct {
+				return ""
 			}
-			return ""
+			return gv.typ // the Go type of an IEC value, e.g. iec.UINT
 		}
 		return t.elementaryGoType(e)
 	case *ast.MemberAccessExpression:

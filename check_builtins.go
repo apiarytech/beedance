@@ -97,8 +97,10 @@ func checkBuiltins() {
 		expectedMapKeys[key] = true
 	}
 
+	// A built-in no program may name starts with "__" (__CLOCK), which the
+	// constant (BuiltinClock) leaves out.
 	for key := range expectedMapKeys {
-		if _, ok := mapKeys[key]; !ok {
+		if _, ok := mapKeys[key]; !ok && !mapKeys["__"+key] {
 			fmt.Printf("ERROR: Constant 'Builtin%s' exists in indices.go, but key '%s' is missing from BuiltinNameToIndex map.\n", key, key)
 			errorsFound = true
 		}
@@ -106,7 +108,7 @@ func checkBuiltins() {
 
 	for key := range mapKeys {
 		// Convert snake_case key to PascalCase to match iota constant naming
-		pascalKey := snakeToPascal(key)
+		pascalKey := snakeToPascal(strings.TrimLeft(key, "_"))
 		constName := "Builtin" + pascalKey
 		if _, ok := iotaConsts[constName]; !ok {
 			fmt.Printf("ERROR: Key '%s' exists in BuiltinNameToIndex map, but constant '%s' is missing from indices.go.\n", key, constName)

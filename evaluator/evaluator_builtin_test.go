@@ -47,7 +47,7 @@ func TestBuiltinFunctions(t *testing.T) {
 		{`CONCAT('a');`, "BUILTIN ERROR: wrong number of arguments for CONCAT. got=1, want>=2"},
 		{`LEFT('abcde', 2);`, "ab"},
 		{`RIGHT('abcde', 2);`, "de"},
-		{`MID('abcde', 2, 3);`, "bcd"},
+		{`MID('abcde', 3, 2);`, "bcd"},
 		{`FIND('abcabc', 'b');`, int64(2)},
 
 		// Selection Functions
