@@ -60,11 +60,11 @@ func makeReference(node ast.Node, target ast.Expression, env *object.Environment
 		// A VAR_IN_OUT, or a located variable, stands for another variable.
 		if ptr, isPtr := raw.(*object.Pointer); isPtr {
 			if ptr.Env == nil {
-				return &object.Reference{IO: ioMap, Name: ptr.Name}
+				return &object.Reference{IO: ioMap, Name: ptr.Name, DataType: declaredType(t, env)}
 			}
-			return &object.Reference{Env: ptr.Env, Name: ptr.Name}
+			scope, name = ptr.Env, ptr.Name
 		}
-		return &object.Reference{Env: scope, Name: name}
+		return variableReference(scope, name)
 	case *ast.IndexExpression:
 		container := Eval(t.Left, env)
 		if isError(container) {
@@ -78,6 +78,7 @@ func makeReference(node ast.Node, target ast.Expression, env *object.Environment
 		if err != nil {
 			return newError(node, "%s", err)
 		}
+		ref.DataType = declaredType(t, env)
 		return ref
 	case *ast.MemberAccessExpression:
 		owner := Eval(t.Struct, env)
@@ -90,7 +91,7 @@ func makeReference(node ast.Node, target ast.Expression, env *object.Environment
 				return newError(node, "%s has no member '%s'", t.Struct.String(), t.Member.Value)
 			}
 			scope, name, _ := o.Env.Owner(t.Member.Value)
-			return &object.Reference{Env: scope, Name: name}
+			return variableReference(scope, name)
 		case *object.Hash:
 			key, ok := hashMemberKey(o, t.Member.Value)
 			if !ok {
@@ -108,6 +109,53 @@ func makeReference(node ast.Node, target ast.Expression, env *object.Environment
 		return Eval(t.Pointer, env)
 	}
 	return newError(node, "REF needs a variable, got %s", target.String())
+}
+
+// variableReference returns a reference to the variable name of scope, with
+// its declared type when known. It refers to the variable while the scope
+// lasts: a function's local variable until the call returns.
+func variableReference(scope *object.Environment, name string) *object.Reference {
+	ref := &object.Reference{Env: scope, Name: name, Live: func() bool { return !scope.Ended() }}
+	if decl, ok := scope.Declaration(name); ok {
+		ref.DataType = decl.DataType
+	}
+	return ref
+}
+
+// declaredType returns the declared type of a variable, an array element or
+// a variable a reference refers to, or nil when it is not known.
+func declaredType(e ast.Expression, env *object.Environment) ast.Expression {
+	switch t := e.(type) {
+	case *ast.Identifier:
+		if decl, ok := env.Declaration(t.Value); ok {
+			return decl.DataType
+		}
+	case *ast.IndexExpression:
+		if def, ok := declaredType(t.Left, env).(*ast.ArrayDefinition); ok {
+			return def.DataType
+		}
+	case *ast.DereferenceExpression:
+		if rt, ok := declaredType(t.Pointer, env).(*ast.RefToType); ok {
+			return rt.BaseType
+		}
+	}
+	return nil
+}
+
+// checkReferenceType reports an error when val, given to name declared with
+// the reference type rt, refers to a variable of another type: a reference
+// refers to a whole variable of its type, so a POINTER TO BYTE does not
+// refer to a STRING.
+func checkReferenceType(node ast.Node, name string, rt *ast.RefToType, val object.Object) object.Object {
+	ref, ok := val.(*object.Reference)
+	if !ok || ref.DataType == nil {
+		return nil
+	}
+	if object.ReferenceTypeKey(ref.DataType) != object.ReferenceTypeKey(rt.BaseType) {
+		return newError(node, "%s refers to a %s, but %s is declared %s: a reference refers to a whole variable of its type, and beedance references have no byte access",
+			ref.Inspect(), object.ReferenceTypeKey(ref.DataType), name, rt.String())
+	}
+	return nil
 }
 
 // isRefToType reports whether a declared type is a reference type.
@@ -131,6 +179,9 @@ func nullReference(rt *ast.RefToType, env *object.Environment) *object.Reference
 func bindReference(node ast.Node, name string, rt *ast.RefToType, val object.Object, env *object.Environment) object.Object {
 	switch val.(type) {
 	case *object.Reference, *object.Null:
+		if err := checkReferenceType(node, name, rt, val); err != nil {
+			return err
+		}
 		return nullReference(rt, env).Retarget(val)
 	}
 	return newError(node, "%s is declared %s; it takes REF(), ADR() or NULL, not a %s", name, rt.String(), val.Type())

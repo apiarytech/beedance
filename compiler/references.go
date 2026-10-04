@@ -208,9 +208,9 @@ func (c *Compiler) checkReferenceValue(name string, declared ast.Expression, val
 			if target == nil {
 				return nil
 			}
-			if referenceTypeKey(target) != referenceTypeKey(rt.BaseType) {
+			if object.ReferenceTypeKey(target) != object.ReferenceTypeKey(rt.BaseType) {
 				return fmt.Errorf("%s refers to a %s, but %s is declared %s: a reference refers to a whole variable of its type, and beedance references have no byte access",
-					v.String(), referenceTypeKey(target), name, rt.String())
+					v.String(), object.ReferenceTypeKey(target), name, rt.String())
 			}
 			return nil
 		}
@@ -228,7 +228,7 @@ func (c *Compiler) checkReferenceValue(name string, declared ast.Expression, val
 	if !isRef {
 		return fmt.Errorf("%s is declared %s; it takes REF(), ADR() or NULL, not %s", name, rt.String(), value.String())
 	}
-	if referenceTypeKey(other.BaseType) != referenceTypeKey(rt.BaseType) {
+	if object.ReferenceTypeKey(other.BaseType) != object.ReferenceTypeKey(rt.BaseType) {
 		return fmt.Errorf("%s is declared %s, but %s is %s", name, rt.String(), value.String(), other.String())
 	}
 	return nil
@@ -250,33 +250,6 @@ func (c *Compiler) referencedType(target ast.Expression) ast.Expression {
 		return nil
 	}
 	return c.declaredTypeOf(target)
-}
-
-// referenceTypeKey names a type as references compare it: an array by its
-// element type, as a reference to an array indexes it through its own
-// bounds; a string without its length; POINTER TO as REF_TO.
-func referenceTypeKey(t ast.Expression) string {
-	switch v := t.(type) {
-	case *ast.RefToType:
-		return "REF_TO " + referenceTypeKey(v.BaseType)
-	case *ast.ArrayDefinition:
-		return "ARRAY OF " + referenceTypeKey(v.DataType)
-	case *ast.CallExpression: // STRING(20)
-		return referenceTypeKey(v.Function)
-	case nil:
-		return ""
-	}
-	name := strings.ToUpper(t.String())
-	if i := strings.IndexAny(name, "(["); i > 0 {
-		name = name[:i]
-	}
-	switch name {
-	case "TOD":
-		return "TIME_OF_DAY"
-	case "DT":
-		return "DATE_AND_TIME"
-	}
-	return name
 }
 
 // referenceExpressionType returns the type the type checker gives a
@@ -343,6 +316,35 @@ func (c *Compiler) declaredTypeOf(e ast.Expression) ast.Expression {
 			if d := findParameter(block, ident.Value); d != nil {
 				return d.DataType
 			}
+		}
+	}
+	return nil
+}
+
+// checkReferenceArguments checks the arguments of a call of fn given to its
+// inputs declared with a reference type, as checkReferenceValue checks an
+// assignment: positional arguments are its inputs, then its VAR_IN_OUTs, in
+// order.
+func (c *Compiler) checkReferenceArguments(fn *ast.FunctionDeclaration, args []ast.Expression) error {
+	params := append(append([]*ast.VarDeclStatement{}, fn.VarInputs...), fn.VarInOuts...)
+	positional := 0
+	for _, arg := range args {
+		var param *ast.VarDeclStatement
+		value := arg
+		if named, ok := arg.(*ast.NamedArgument); ok {
+			param, value = findParameter(params, named.Name.Value), named.Value
+		} else {
+			if positional < len(params) {
+				param = params[positional]
+			}
+			positional++
+		}
+		if param == nil {
+			continue
+		}
+		name := fmt.Sprintf("input %s of function %s", param.Name.Value, fn.Name.Value)
+		if err := c.checkReferenceValue(name, param.DataType, value); err != nil {
+			return err
 		}
 	}
 	return nil

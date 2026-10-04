@@ -41,7 +41,16 @@ type Environment struct {
 	// case name, for what only the declaration says, such as SIZEOF of an
 	// INT that the evaluator holds in a 64-bit value.
 	decls map[string]*ast.VarDeclStatement
+	// ended is set when the call this scope was made for has returned (End),
+	// so that a reference to one of its variables is no longer used.
+	ended bool
 }
+
+// End marks the scope of a call as ended: the call has returned.
+func (e *Environment) End() { e.ended = true }
+
+// Ended reports whether End was called on the scope.
+func (e *Environment) Ended() bool { return e.ended }
 
 // SetDeclaration records the declaration of a variable of this scope.
 func (e *Environment) SetDeclaration(name string, decl *ast.VarDeclStatement) {

@@ -19,6 +19,9 @@ type Frame struct {
 	cl          *object.Closure
 	ip          int
 	basePointer int
+	// returned is set when the call has returned, so that a reference to
+	// one of its local variables is no longer used (see references.go).
+	returned bool
 }
 
 func NewFrame(cl *object.Closure, basePointer int) *Frame {

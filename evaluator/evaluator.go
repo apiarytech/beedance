@@ -1405,6 +1405,13 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				// takes only a reference or NULL.
 				switch val.(type) {
 				case *object.Reference, *object.Null:
+					if decl, ok := env.Declaration(target.Value); ok {
+						if rt, isRef := isRefToType(decl.DataType); isRef {
+							if err := checkReferenceType(node, target.Value, rt, val); err != nil {
+								return err
+							}
+						}
+					}
 					val = v.Retarget(val)
 				default:
 					return newError(node, "%s is a reference; it takes REF(), ADR() or NULL, not a %s", target.Value, val.Type())
@@ -2966,6 +2973,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 	case *object.Function:
 		// Create a new environment for the function's execution, enclosed by the function's definition environment.
 		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+		defer extendedEnv.End() // a reference to a local variable ends with the call
 		if fn.Name != nil {
 			// Pre-declare the function name as a variable in the local scope.
 			// This prevents assignments to the function name (which sets the return value)
@@ -3141,6 +3149,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// Its environment `fn.Env` is already an enclosed environment that holds its state.
 		// We create a new temporary environment for this specific call, enclosing the instance's persistent one.
 		extendedEnv := object.NewEnclosedEnvironment(fn.Env)
+		defer extendedEnv.End() // a reference to a VAR_TEMP ends with the call
 
 		// Pre-declare the program name as a variable in the local scope for the return value.
 		extendedEnv.Set(fn.Definition.Name.Value, NULL)
@@ -3352,6 +3361,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// encloses the function block instance's environment. This gives the method
 		// access to all of the instance's variables.
 		methodEnv := object.NewEnclosedEnvironment(fn.Instance.Env)
+		defer methodEnv.End() // a reference to a local variable ends with the call
 
 		// Inject 'THIS' into the method's environment, pointing to the instance itself.
 		methodEnv.Set("THIS", fn.Instance)

@@ -148,6 +148,9 @@ func (vm *VM) Reset() {
 	vm.used = 0
 	clear(vm.stack[:vm.sp])
 	vm.sp = 0
+	for _, f := range vm.frames[1:vm.framesIndex] {
+		f.returned = true // a run that failed in a call ends the call
+	}
 	clear(vm.frames[1:vm.framesIndex])
 	vm.frames[0].ip = -1
 	vm.framesIndex = 1
@@ -1125,7 +1128,9 @@ func (vm *VM) pushFrame(f *Frame) {
 // popFrame pops the current frame from the frame stack.
 func (vm *VM) popFrame() *Frame {
 	vm.framesIndex--
-	return vm.frames[vm.framesIndex]
+	frame := vm.frames[vm.framesIndex]
+	frame.returned = true
+	return frame
 }
 
 // executeCall executes a function call.

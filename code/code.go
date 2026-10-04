@@ -283,10 +283,10 @@ var definitions = map[Opcode]*Definition{
 	OpSetBit:      {"OpSetBit", []int{1, 2}},
 
 	OpInitExternal: {"OpInitExternal", []int{2}},
-	OpRef:      {"OpRef", []int{1, 2}},
-	OpRefIndex: {"OpRefIndex", []int{}},
-	OpDeref:    {"OpDeref", []int{2}},
-	OpSetDeref: {"OpSetDeref", []int{}},
+	OpRef:          {"OpRef", []int{1, 2}},
+	OpRefIndex:     {"OpRefIndex", []int{}},
+	OpDeref:        {"OpDeref", []int{2}},
+	OpSetDeref:     {"OpSetDeref", []int{}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

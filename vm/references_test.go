@@ -101,3 +101,51 @@ func TestReferenceTargets(t *testing.T) {
 		t.Errorf("a pointer to INT arrays given a REAL array: %v", err)
 	}
 }
+
+// A reference given to an input is checked as an assignment is: a function's
+// or a function block's input declared POINTER TO INT takes no ADR of a REAL.
+func TestReferenceArgumentErrors(t *testing.T) {
+	for _, tt := range []struct{ input, want string }{
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : REAL; END_VAR G(ADR(x));",
+			"ADR(x) refers to a REAL, but input pt of function G is declared POINTER TO INT"},
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : REAL; END_VAR G(pt := ADR(x));",
+			"input pt of function G is declared POINTER TO INT"},
+		{"FUNCTION F : BOOL VAR_INPUT pt : POINTER TO BYTE; END_VAR F := TRUE; END_FUNCTION VAR str : STRING; END_VAR F(ADR(str));",
+			"ADR(str) refers to a STRING, but input pt of function F is declared POINTER TO BYTE"},
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := 0; END_FUNCTION G(5);",
+			"it takes REF(), ADR() or NULL, not 5"},
+		{"FUNCTION_BLOCK Fb VAR_INPUT pt : POINTER TO INT; END_VAR END_FUNCTION_BLOCK VAR f : Fb; x : REAL; END_VAR f(pt := ADR(x));",
+			"input pt of function block 'Fb' is declared POINTER TO INT"},
+	} {
+		err := compiler.New().Compile(parse(t, tt.input))
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: %v, want an error containing %q", tt.input, err, tt.want)
+		}
+	}
+	runVmTests(t, []vmTestCase{
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : INT := 4; END_VAR G(pt := ADR(x));", 4},
+		{"FUNCTION_BLOCK Fb VAR_INPUT pt : POINTER TO INT; END_VAR VAR_OUTPUT o : INT; END_VAR o := pt^; END_FUNCTION_BLOCK VAR f : Fb; x : INT := 6; END_VAR f(pt := ADR(x)); f.o;", 6},
+	})
+}
+
+// A reference to a function's local variable is used while the call runs;
+// after it returns, the variable is gone and its stack slot belongs to
+// other calls, so dereferencing the reference is an error, not a read of
+// another call's variable.
+func TestReferenceToReturnedLocal(t *testing.T) {
+	input := `VAR g : REF_TO INT; END_VAR
+FUNCTION Leak : BOOL VAR v : INT := 7; END_VAR g := REF(v); Leak := g^ = 7; END_FUNCTION
+FUNCTION Other : INT VAR w : INT := 99; END_VAR Other := w; END_FUNCTION
+Leak(); Other(); g^;`
+	err := New(compileForTest(t, input)).Run()
+	if err == nil || !strings.Contains(err.Error(), "local variable of a call that has returned") {
+		t.Errorf("got %v", err)
+	}
+	machine := New(compileForTest(t, "VAR g : REF_TO INT; END_VAR FUNCTION Leak : BOOL VAR v : INT; END_VAR g := REF(v); Leak := TRUE; END_FUNCTION Leak(); g^ := 1;"))
+	if err := machine.Run(); err == nil || !strings.Contains(err.Error(), "has returned") {
+		t.Errorf("writing through it: %v", err)
+	}
+	runVmTests(t, []vmTestCase{
+		{"VAR g : REF_TO INT; END_VAR FUNCTION Leak : BOOL VAR v : INT := 7; END_VAR g := REF(v); Leak := g^ = 7; END_FUNCTION Leak();", true},
+	})
+}

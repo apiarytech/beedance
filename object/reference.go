@@ -13,6 +13,8 @@ package object
 import (
 	"fmt"
 	"strings"
+
+	"github.com/apiarytech/beedance/ast"
 )
 
 // REFERENCE_OBJ is the type of a reference made by REF() or ADR().
@@ -41,6 +43,14 @@ type Reference struct {
 	// through `pt : POINTER TO ARRAY[0..9] OF REAL`, pt^[0] is the first
 	// element of the array pt refers to, whatever its own bounds.
 	Lower []int64
+
+	// DataType is the declared type of the variable referred to, when it is
+	// known, so that a reference to a REAL is not given to a REF_TO INT.
+	DataType ast.Expression
+
+	// Live, when set, reports whether the variable still exists: a VM
+	// function's local variable exists until the call returns.
+	Live func() bool
 }
 
 // Type returns the object's type.
@@ -72,15 +82,22 @@ func (r *Reference) Retarget(other Object) *Reference {
 	if o, ok := other.(*Reference); ok {
 		out.Env, out.Name, out.IO, out.Slot = o.Env, o.Name, o.IO, o.Slot
 		out.Container, out.Index = o.Container, o.Index
+		out.DataType, out.Live = o.DataType, o.Live
 	}
 	return out
 }
+
+// errGone is the error for a reference to a function's local variable used
+// after the function has returned.
+var errGone = fmt.Errorf("the variable a reference refers to no longer exists: it is a local variable of a call that has returned")
 
 // Get returns the value of the variable the reference refers to.
 func (r *Reference) Get() (Object, error) {
 	switch {
 	case r.IsNull():
 		return nil, fmt.Errorf("dereferencing a NULL reference")
+	case r.Live != nil && !r.Live():
+		return nil, errGone
 	case r.Slot != nil:
 		return *r.Slot, nil
 	case r.IO != nil:
@@ -103,6 +120,8 @@ func (r *Reference) Set(v Object) error {
 	switch {
 	case r.IsNull():
 		return fmt.Errorf("dereferencing a NULL reference")
+	case r.Live != nil && !r.Live():
+		return errGone
 	case r.Slot != nil:
 		*r.Slot = v
 	case r.IO != nil:
@@ -272,3 +291,30 @@ func CompareReferences(left Object, operator string, right Object) (result bool,
 // is on a 32-bit CODESYS target, which OSCAT assumes when it divides by
 // SIZEOF(pt).
 const ReferenceSize = 4
+
+// ReferenceTypeKey names a type as references compare it: an array by its
+// element type, as a reference to an array indexes it through its own
+// bounds; a string without its length; POINTER TO as REF_TO.
+func ReferenceTypeKey(t ast.Expression) string {
+	switch v := t.(type) {
+	case *ast.RefToType:
+		return "REF_TO " + ReferenceTypeKey(v.BaseType)
+	case *ast.ArrayDefinition:
+		return "ARRAY OF " + ReferenceTypeKey(v.DataType)
+	case *ast.CallExpression: // STRING(20)
+		return ReferenceTypeKey(v.Function)
+	case nil:
+		return ""
+	}
+	name := strings.ToUpper(t.String())
+	if i := strings.IndexAny(name, "(["); i > 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "TOD":
+		return "TIME_OF_DAY"
+	case "DT":
+		return "DATE_AND_TIME"
+	}
+	return name
+}

@@ -108,6 +108,10 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 	outputAssigns := []*ast.AssignmentStatement{}
 
 	setInput := func(param *ast.VarDeclStatement, value ast.Expression) error {
+		// An input declared REF_TO takes REF(), ADR() or NULL of its type.
+		if err := c.checkReferenceValue(fmt.Sprintf("input %s of %s", param.Name.Value, describePOU(fbDef)), param.DataType, value); err != nil {
+			return err
+		}
 		if findParameter(inOuts, param.Name.Value) != nil {
 			if !isAssignable(value) {
 				return fmt.Errorf("argument for VAR_IN_OUT '%s' of %s must be a variable, got %s", param.Name.Value, describePOU(fbDef), value.String())

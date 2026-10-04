@@ -13,6 +13,9 @@ package object
 import (
 	"strings"
 	"testing"
+
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 )
 
 func TestReferenceTargets(t *testing.T) {
@@ -140,5 +143,48 @@ func TestArrayViewAndRetarget(t *testing.T) {
 	}
 	if (&Reference{}).Type() != REFERENCE_OBJ || ReferenceSize != 4 {
 		t.Error("type and size")
+	}
+}
+
+func TestReferenceLiveAndTypeKey(t *testing.T) {
+	var slot Object = &Int{Value: 1}
+	live := true
+	r := &Reference{Slot: &slot, Live: func() bool { return live }, DataType: &ast.Identifier{Value: "int"}}
+	if v, err := r.Get(); err != nil || v.Inspect() != "1" {
+		t.Fatalf("live: %v %v", v, err)
+	}
+	if got := (&Reference{}).Retarget(r); got.Live == nil || got.DataType == nil {
+		t.Error("Retarget keeps Live and DataType")
+	}
+	live = false
+	if _, err := r.Get(); err == nil {
+		t.Error("reading a variable that is gone")
+	}
+	if err := r.Set(&Int{}); err == nil {
+		t.Error("writing a variable that is gone")
+	}
+	env := NewEnvironment()
+	if env.Ended() {
+		t.Error("a new scope has not ended")
+	}
+	env.End()
+	if !env.Ended() {
+		t.Error("End")
+	}
+	for _, tt := range []struct {
+		t    ast.Expression
+		want string
+	}{
+		{&ast.Identifier{Value: "tod"}, "TIME_OF_DAY"},
+		{&ast.Identifier{Value: "DT"}, "DATE_AND_TIME"},
+		{&ast.RefToType{Pointer: true, BaseType: &ast.Identifier{Value: "INT"}}, "REF_TO INT"},
+		{&ast.ArrayDefinition{DataType: &ast.TypeSpecifier{Token: token.Token{Literal: "real"}}}, "ARRAY OF REAL"},
+		{&ast.CallExpression{Function: &ast.Identifier{Value: "STRING"}}, "STRING"},
+		{&ast.Identifier{Value: "STRING[20]"}, "STRING"},
+		{nil, ""},
+	} {
+		if got := ReferenceTypeKey(tt.t); got != tt.want {
+			t.Errorf("ReferenceTypeKey(%v) = %q, want %q", tt.t, got, tt.want)
+		}
 	}
 }

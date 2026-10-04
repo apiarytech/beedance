@@ -35,7 +35,9 @@ func (vm *VM) executeReference(op code.Opcode, ins code.Instructions, ip int) er
 		case code.RefGlobal:
 			ref = &object.Reference{Slot: &vm.globals[index]}
 		case code.RefLocal:
-			ref = &object.Reference{Slot: &vm.stack[frame.basePointer+index]}
+			// A local variable lives on the stack until its call returns;
+			// after that, the slot belongs to other calls.
+			ref = &object.Reference{Slot: &vm.stack[frame.basePointer+index], Live: func() bool { return !frame.returned }}
 		case code.RefFree:
 			ref = &object.Reference{Slot: &frame.cl.Free[index]}
 		case code.RefExternal:

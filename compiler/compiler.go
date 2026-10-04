@@ -2150,6 +2150,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 		if calleeFn != nil {
+			// An input declared REF_TO takes REF(), ADR() or NULL of its type.
+			if err := c.checkReferenceArguments(calleeFn, inputArgs); err != nil {
+				return err
+			}
 			for _, out := range outputArgs {
 				declared := false
 				for _, o := range calleeFn.VarOutputs {

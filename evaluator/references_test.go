@@ -76,3 +76,31 @@ func TestReferenceTargets(t *testing.T) {
 		{"VAR x : INT; END_VAR x^;", "ERROR: not applicable to type"},
 	})
 }
+
+// The evaluator checks references given to inputs, and to variables, by the
+// declared types of the variables referred to, as the compiler does.
+func TestReferenceArgumentErrors(t *testing.T) {
+	checkEval(t, []evalCase{
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : REAL; END_VAR G(ADR(x));", "ERROR: refers to a REAL, but pt is declared POINTER TO INT"},
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : REAL; END_VAR G(pt := ADR(x));", "ERROR: refers to a REAL, but pt is declared POINTER TO INT"},
+		{"FUNCTION F : BOOL VAR_INPUT pt : POINTER TO BYTE; END_VAR F := TRUE; END_FUNCTION VAR str : STRING; END_VAR F(ADR(str));", "ERROR: refers to a STRING, but pt is declared POINTER TO BYTE"},
+		{"FUNCTION_BLOCK Fb VAR_INPUT pt : POINTER TO INT; END_VAR END_FUNCTION_BLOCK VAR f : Fb; x : REAL; END_VAR f(pt := ADR(x));", "ERROR: refers to a REAL, but pt is declared POINTER TO INT"},
+		{"VAR x : REAL; ra : REF_TO INT; END_VAR ra := REF(x);", "ERROR: refers to a REAL, but ra is declared REF_TO INT"},
+		{"VAR a : ARRAY[0..1] OF REAL; ra : REF_TO INT; END_VAR ra := REF(a[1]);", "ERROR: refers to a REAL, but ra is declared REF_TO INT"},
+		{"VAR x : REAL; ra : REF_TO INT := REF(x); END_VAR ra;", "ERROR: refers to a REAL, but ra is declared REF_TO INT"},
+		{"FUNCTION G : INT VAR_INPUT pt : POINTER TO INT; END_VAR G := pt^; END_FUNCTION VAR x : INT := 4; END_VAR G(pt := ADR(x));", "4"},
+		{"FUNCTION_BLOCK Fb VAR_INPUT pt : POINTER TO INT; END_VAR VAR_OUTPUT o : INT; END_VAR o := pt^; END_FUNCTION_BLOCK VAR f : Fb; x : INT := 6; END_VAR f(pt := ADR(x)); f.o;", "6"},
+	})
+}
+
+// A reference to a function's local variable ends with the call, as in the VM.
+func TestReferenceToReturnedLocal(t *testing.T) {
+	const decls = `VAR g : REF_TO INT; END_VAR
+FUNCTION Leak : BOOL VAR v : INT := 7; END_VAR g := REF(v); Leak := g^ = 7; END_FUNCTION
+FUNCTION Other : INT VAR w : INT := 99; END_VAR Other := w; END_FUNCTION `
+	checkEval(t, []evalCase{
+		{decls + "Leak();", "true"},
+		{decls + "Leak(); Other(); g^;", "ERROR: local variable of a call that has returned"},
+		{decls + "Leak(); g^ := 1;", "ERROR: local variable of a call that has returned"},
+	})
+}
