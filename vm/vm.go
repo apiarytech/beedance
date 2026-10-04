@@ -485,6 +485,18 @@ func (vm *VM) Run() (runErr error) {
 			}
 			vm.io[address] = vm.pop()
 
+		case code.OpInitExternal:
+			// Gives a located variable its starting value, unless the host
+			// has set its address in the I/O image already.
+			address, addrErr := vm.externalAddress(ins, ip)
+			if addrErr != nil {
+				return addrErr
+			}
+			value := vm.pop()
+			if _, set := vm.io[address]; !set {
+				vm.io[address] = value
+			}
+
 		case code.OpSetFree:
 			// Assigns to a variable captured by the current closure.
 			freeIndex := code.ReadUint8(ins[ip+1:])

@@ -265,13 +265,17 @@ func TestLocatedVariablesUseTheIOImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// An address never written reads as NULL.
-	machine = New(compileForTest(t, "VAR in AT %IX0.0 : BOOL; END_VAR in;"))
+	// An address the host has not set starts with its type's default, as
+	// any variable does, and so do the image entries of the program.
+	machine = New(compileForTest(t, "VAR in AT %IX0.0 : BOOL; n AT %IW2 : INT; END_VAR in;"))
 	if err := machine.Run(); err != nil {
 		t.Fatalf("vm error: %s", err)
 	}
-	if machine.LastPoppedStackElem() != Null {
-		t.Fatalf("expected NULL, got %v", machine.LastPoppedStackElem())
+	if err := testBooleanObject(false, machine.LastPoppedStackElem()); err != nil {
+		t.Fatal(err)
+	}
+	if err := testIntegerObject(0, machine.IO()["%IW2"]); err != nil {
+		t.Fatalf("%%IW2: %s", err)
 	}
 }
 

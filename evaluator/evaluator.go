@@ -43,6 +43,10 @@ var (
 // ioMap simulates a hardware I/O map for located variables (AT %).
 var ioMap = make(map[string]object.Object)
 
+// ioTypes holds the declared type of each located variable, by address, so
+// that a host converts the values it exchanges through ioMap (see IOTypes).
+var ioTypes = make(map[string]string)
+
 // integerTypeRanges defines the minimum and maximum values for standard IEC integer types.
 // This is used for overflow/underflow checking during type conversions and arithmetic.
 var integerTypeRanges = map[string]struct {
@@ -1604,6 +1608,24 @@ func aliasTypeDeclaration(node *ast.VarDeclStatement, env *object.Environment) *
 	}
 }
 
+// typeDefault returns the default value of the type a declaration names, the
+// value a variable of that type without an initial value starts with, or
+// NULL for a declaration without a type.
+func typeDefault(node *ast.VarDeclStatement, env *object.Environment) object.Object {
+	if node.DataType == nil {
+		return NULL
+	}
+	scratch := object.NewEnclosedEnvironment(env)
+	decl := &ast.VarDeclStatement{Token: node.Token, Name: node.Name, DataType: node.DataType}
+	if res := evalVarDeclStatement(decl, scratch); isError(res) {
+		return res
+	}
+	if val, ok := scratch.Get(node.Name.Value); ok && val != nil {
+		return val
+	}
+	return NULL
+}
+
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
 	// The declaration says what the value cannot, such as an INT's size.
 	if node.Name != nil {
@@ -1616,6 +1638,9 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 		// Use a Pointer with a nil Env to signify a located variable.
 		locatedObj := &object.Pointer{Name: address, Env: nil}
 		env.Set(node.Name.Value, locatedObj)
+		if node.DataType != nil {
+			ioTypes[address] = node.DataType.String()
+		}
 
 		// Set the initial value in the shared I/O map.
 		if node.Value != nil {
@@ -1625,9 +1650,14 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 			}
 			ioMap[address] = val
 		} else if _, ok := ioMap[address]; !ok {
-			// If no initial value is given and the address isn't already in the map,
-			// initialize it to NULL.
-			ioMap[address] = NULL
+			// If no initial value is given and the host has not set the
+			// address, the variable starts with its type's default, as any
+			// variable does.
+			val := typeDefault(node, env)
+			if isError(val) {
+				return val
+			}
+			ioMap[address] = val
 		}
 		return locatedObj
 	}

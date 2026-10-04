@@ -30,10 +30,10 @@ var sessionMu sync.Mutex
 // a time: Session waits until the previous session has ended.
 func Session(now func() time.Time) (end func()) {
 	sessionMu.Lock()
-	prevNow, prevIO := nowFunc, ioMap
-	nowFunc, ioMap = now, make(map[string]object.Object)
+	prevNow, prevIO, prevTypes := nowFunc, ioMap, ioTypes
+	nowFunc, ioMap, ioTypes = now, make(map[string]object.Object), make(map[string]string)
 	return func() {
-		nowFunc, ioMap, traceFn = prevNow, prevIO, nil
+		nowFunc, ioMap, ioTypes, traceFn = prevNow, prevIO, prevTypes, nil
 		budget, remaining = 0, 0
 		sessionMu.Unlock()
 	}
@@ -42,6 +42,12 @@ func Session(now func() time.Time) (end func()) {
 // IO returns the I/O image of the current session: the values of located
 // variables by address.
 func IO() map[string]object.Object { return ioMap }
+
+// IOTypes returns the declared type of each located variable of the current
+// session by address, e.g. "INT" for `x AT %IW1 : INT`, as the declaration
+// writes it. A host exchanging values with IO converts them to these types:
+// %IW1 may hold an INT, not only a WORD.
+func IOTypes() map[string]string { return ioTypes }
 
 // traceFn, when set, is called before each statement of a statement list is
 // evaluated (see Trace).

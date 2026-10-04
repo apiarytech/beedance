@@ -162,6 +162,12 @@ const (
 	// integer with its bit named by the first operand set to the BOOL; the
 	// second operand names the declared type, as for OpGetBit.
 	OpSetBit
+
+	// OpInitExternal pops a value and writes it to the located variable or
+	// access path whose address the operand names, unless the I/O image
+	// holds a value for that address already: the default a located
+	// variable starts with does not overwrite an input the host has set.
+	OpInitExternal
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -252,6 +258,8 @@ var definitions = map[Opcode]*Definition{
 	OpCopy:        {"OpCopy", []int{}},
 	OpGetBit:      {"OpGetBit", []int{1, 2}},
 	OpSetBit:      {"OpSetBit", []int{1, 2}},
+
+	OpInitExternal: {"OpInitExternal", []int{2}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

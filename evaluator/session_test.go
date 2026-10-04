@@ -84,3 +84,28 @@ func TestBudget(t *testing.T) {
 		t.Errorf("a short program: %v", out.Inspect())
 	}
 }
+
+// TestSessionIO: a host sets an input before the program declares it, the
+// declaration keeps it, an input the host has not set starts with its type's
+// default, and IOTypes gives each address's declared type.
+func TestSessionIO(t *testing.T) {
+	end := Session(time.Now)
+	defer end()
+	IO()["%IW1"] = &object.Int{Value: 41}
+	src := "VAR w AT %IW1 : INT; b AT %IX0.2 : BOOL; o AT %QW3 : INT; END_VAR o := w + 1;"
+	if res := Eval(parser.New(lexer.New(src)).ParseProgram(), object.NewEnvironment()); isError(res) {
+		t.Fatal(res.Inspect())
+	}
+	if got := IO()["%QW3"]; got == nil || got.Inspect() != "42" {
+		t.Errorf("%%QW3 = %v, want 42", got)
+	}
+	if got := IO()["%IX0.2"]; got != FALSE {
+		t.Errorf("%%IX0.2 = %v, want FALSE", got)
+	}
+	want := map[string]string{"%IW1": "INT", "%IX0.2": "BOOL", "%QW3": "INT"}
+	for address, typ := range want {
+		if got := IOTypes()[address]; got != typ {
+			t.Errorf("IOTypes()[%s] = %q, want %q", address, got, typ)
+		}
+	}
+}

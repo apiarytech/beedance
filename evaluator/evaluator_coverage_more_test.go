@@ -250,9 +250,10 @@ func TestMoreEvaluationBranches(t *testing.T) {
 		{"PROGRAM Seq VAR x : INT; END_VAR INITIAL_STEP S1: A1(N); END_STEP ACTION A1: x := missing; END_ACTION END_PROGRAM Seq();", "ERROR: identifier not found: missing"},
 		// A structure's member may be assigned by its name as an index.
 		{"TYPE Pt : STRUCT px : INT; END_STRUCT; END_TYPE VAR p : Pt; END_VAR p['px'] := 5; p.px;", "5"},
-		// A located output keeps its initial value; an input not yet read is NULL.
+		// A located output keeps its initial value; an input the host has not
+		// set starts with its type's default.
 		{"VAR q AT %QX0.0 : BOOL := TRUE; END_VAR q;", "true"},
-		{"VAR x AT %IX0.3 : BOOL; END_VAR x;", "null"},
+		{"VAR x AT %IX0.3 : BOOL; END_VAR x;", "false"},
 		{"VAR t1 : TIME; END_VAR t1 := T#5;", `ERROR: invalid duration format in "5"`},
 		{"VAR x : INT; END_VAR CASE x OF missing: x := 1; END_CASE", "ERROR: identifier not found: missing"},
 		{"VAR x : INT := 2; y : INT; END_VAR CASE x OF 1..3: y := 1; END_CASE y;", "1"},

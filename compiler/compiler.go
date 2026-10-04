@@ -1368,6 +1368,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return err
 				}
 				c.emit(code.OpSetExternal, symbol.Index)
+				return nil
+			}
+			// Otherwise the variable starts with its type's default, as any
+			// variable does, unless the host has set its address already.
+			if node.DataType != nil {
+				if err := c.compileStartingValue(node.Name.Value, node.DataType, nil, map[ast.Node]bool{}); err != nil {
+					return err
+				}
+				c.emit(code.OpInitExternal, symbol.Index)
 			}
 			return nil // This declaration is fully handled.
 		}
