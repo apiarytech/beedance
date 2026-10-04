@@ -42,6 +42,13 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+    # A module of its own, which ./... above does not reach.
+    - name: Test the honeycomb connector
+      working-directory: connectors/honeycomb
+      run: |
+        go vet ./...
+        go test -v ./...
+
   lint-race:
     name: Format and race detector
     runs-on: ubuntu-latest
@@ -63,6 +70,10 @@ jobs:
         fi
 
     - name: Test with race detector
+      run: go test -race -count=1 ./...
+
+    - name: Test the honeycomb connector with race detector
+      working-directory: connectors/honeycomb
       run: go test -race -count=1 ./...
 
   raspberry-pi:
