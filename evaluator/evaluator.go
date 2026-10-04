@@ -414,6 +414,13 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 				right = object.LiteralAsBitString(right, left)
 			}
 		}
+		// r = NULL, r1 <> r2: references compare by what they refer to.
+		if equal, ok, err := object.CompareReferences(left, node.Operator, right); ok {
+			if err != nil {
+				return newError(node, "%s", err)
+			}
+			return nativeBoolToBooleanObject(equal)
+		}
 		return object.EvalInfix(left, node.Operator, right)
 
 	case *ast.MemberAccessExpression:
@@ -514,6 +521,10 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		}
 		if isSizeofCall(node, env) {
 			return evalSizeof(node, env)
+		}
+		// REF and ADR; see references.go.
+		if res, ok := evalReferenceCall(node, env); ok {
+			return res
 		}
 
 		var function object.Object
@@ -1389,6 +1400,15 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 					v.Env.Assign(v.Name, val)
 				}
 				return val
+			case *object.Reference:
+				// A reference variable keeps its declared type's view, and
+				// takes only a reference or NULL.
+				switch val.(type) {
+				case *object.Reference, *object.Null:
+					val = v.Retarget(val)
+				default:
+					return newError(node, "%s is a reference; it takes REF(), ADR() or NULL, not a %s", target.Value, val.Type())
+				}
 			}
 			// An array keeps the bounds its variable was declared with.
 			keepArrayBounds(existing, val)
@@ -1400,6 +1420,20 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 			}
 		}
 		env.Assign(target.Value, val)
+
+	case *ast.DereferenceExpression:
+		// r^ := value writes the variable r refers to.
+		ref := Eval(target.Pointer, env)
+		if isError(ref) {
+			return ref
+		}
+		switch r := ref.(type) {
+		case *object.Reference:
+			return assignThroughReference(node, r, val)
+		case *object.Null:
+			return newError(node, "dereferencing a NULL reference")
+		}
+		return newError(node, "dereference operator (^) not applicable to type %s", ref.Type())
 
 	case *ast.IndexExpression:
 		left := Eval(target.Left, env)
@@ -1660,6 +1694,28 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 			ioMap[address] = val
 		}
 		return locatedObj
+	}
+
+	// A reference, REF_TO or POINTER TO, starts as NULL or its initial value,
+	// REF(x) or ADR(x).
+	if rt, ok := isRefToType(node.DataType); ok {
+		var val object.Object = nullReference(rt, env)
+		if node.Value != nil {
+			init := Eval(node.Value, env)
+			if isError(init) {
+				return init
+			}
+			val = bindReference(node, node.Name.Value, rt, init, env)
+			if isError(val) {
+				return val
+			}
+		}
+		if node.IsConstant {
+			env.Set(node.Name.Value, &object.Constant{Value: val})
+		} else {
+			env.Set(node.Name.Value, val)
+		}
+		return val
 	}
 
 	// Structures, enumerations and structure initializers such as `(PT := T#1s)`.
@@ -2726,6 +2782,11 @@ func evalIdentifier(
 		}
 	}
 
+	// NULL, the reference to nothing, unless a variable is called NULL.
+	if strings.EqualFold(node.Value, "NULL") {
+		return NULL
+	}
+
 	return newError(node, "identifier not found: %s", node.Value)
 }
 
@@ -2752,6 +2813,11 @@ func evalDereferenceExpression(node *ast.DereferenceExpression, env *object.Envi
 		// This is a VAR_IN_OUT or REFERENCE TO variable.
 		// We need to follow the pointer to get the underlying value.
 		return dereferencePointer(node, p)
+	case *object.Reference:
+		// A REF_TO or POINTER TO variable: the variable it refers to.
+		return evalReferenceDeref(node, p)
+	case *object.Null:
+		return newError(node, "dereferencing a NULL reference")
 	default:
 		return newError(node, "dereference operator (^) not applicable to type %s", ptr.Type())
 	}
@@ -3404,7 +3470,12 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 				if isError(val) {
 					return nil, nil, val.(*object.Error)
 				}
-				targetEnv.Set(paramName, object.CopyValue(val))
+				// A reference takes the view of its declared type.
+				bound := bindParameter(arg, findParamDecl(def, paramName), val, callEnv)
+				if isError(bound) {
+					return nil, nil, bound.(*object.Error)
+				}
+				targetEnv.Set(paramName, bound)
 			}
 
 		case *ast.OutputArgument: // Handle `OutputName => TargetVar`
@@ -3446,8 +3517,13 @@ func extendFunctionEnv(def object.Object, args []ast.Expression, callEnv *object
 					return nil, nil, newError(arg, "argument for VAR_IN_OUT parameter '%s' must be a variable", paramDecl.Name.Value)
 				}
 			} else {
-				// It's a VAR_INPUT, so pass by value: an array or structure is copied.
-				targetEnv.Set(paramDecl.Name.Value, object.CopyValue(val))
+				// It's a VAR_INPUT, so pass by value: an array or structure is
+				// copied, and a reference takes the view of its declared type.
+				bound := bindParameter(arg, paramDecl, val, callEnv)
+				if isError(bound) {
+					return nil, nil, bound.(*object.Error)
+				}
+				targetEnv.Set(paramDecl.Name.Value, bound)
 			}
 			positionalParamIndex++
 		}

@@ -1103,6 +1103,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// and prevent panics if the parser produces an unexpected AST node.
 		switch target := node.Left.(type) {
 		case *ast.Identifier:
+			// A reference takes REF(), ADR() or NULL of its type.
+			if err := c.checkReferenceValue(target.Value, c.declaredTypeOf(target), node.Value); err != nil {
+				return err
+			}
 			// An assignment to the current function's name sets its result. It
 			// does not return: the rest of the body still runs, and the function
 			// returns the result when it ends or at RETURN.
@@ -1170,6 +1174,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 				return fmt.Errorf("undefined variable %s", target.Value)
 			}
 			return c.setSymbol(symbol)
+
+		case *ast.DereferenceExpression:
+			// r^ := value writes the variable r refers to.
+			if !isInstanceSelf(target.Pointer) {
+				return c.compileSetDereference(target, node.Value)
+			}
+			return fmt.Errorf("cannot assign to %s", target.String())
 
 		case *ast.IndexExpression:
 			if err := c.checkArrayBounds(target.Left, target.Index); err != nil {
@@ -1390,6 +1401,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// The starting value is compiled before the name is defined, so that an
 		// initial value cannot refer to the variable being declared, and a
 		// variable named like its type (`counter : Counter`) still sees the type.
+		if node.Value != nil {
+			if err := c.checkReferenceValue(node.Name.Value, node.DataType, node.Value); err != nil {
+				return err
+			}
+		}
 		if err := c.compileVarValue(node); err != nil {
 			return err
 		}
@@ -1609,7 +1625,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// `THIS^`, `THIS` is already the instance reference, so the dereference
 		// is effectively a no-op for the compiler's purpose. We just compile
 		// the expression being pointed to.
-		return c.Compile(node.Pointer)
+		if isInstanceSelf(node.Pointer) {
+			return c.Compile(node.Pointer)
+		}
+		// r^, the variable a REF_TO or POINTER TO variable refers to.
+		return c.compileDereference(node)
 
 	// A ForLoopStatement is compiled into a sequence of initialization, condition
 	// check, body, increment, and jump instructions to create the loop structure.
@@ -1824,6 +1844,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 				memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
 				return c.Compile(memberAccess)
 			}
+		}
+
+		// NULL, the reference to nothing, unless a variable is called NULL.
+		if strings.EqualFold(node.Value, "NULL") {
+			c.emit(code.OpNull)
+			return nil
 		}
 
 		// If we are here, the symbol was not found in any scope and is not an implicit THIS member.
@@ -2058,6 +2084,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// SIZEOF(x) is a constant: see sizeof.go.
 		if c.isSizeofCall(node) {
 			return c.compileSizeof(node)
+		}
+		// REF(x) and ADR(x); see references.go.
+		if c.isReferenceCall(node) {
+			return c.compileReference(node)
 		}
 		// Calling a function block instance runs its body; see compileFunctionBlockCall.
 		if fbDef := c.calleeFunctionBlock(node.Function); fbDef != nil {
@@ -2418,6 +2448,10 @@ func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.
 
 // getExpressionType recursively determines the data type of an AST expression node.
 func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, error) {
+	// References, NULL and what they refer to; see references.go.
+	if t, ok := c.referenceExpressionType(expr); ok {
+		return t, nil
+	}
 	switch e := expr.(type) {
 	case *copiedValue:
 		return c.getExpressionType(e.Expression)

@@ -2536,6 +2536,11 @@ func (t *Transpiler) transpileExpression(exp ast.Expression) error {
 	case *ast.BitAccessExpression:
 		return t.transpileBitRead(exp)
 	case *ast.Identifier:
+		// NULL, the reference to nothing, unless a variable is called NULL.
+		if t.isNull(exp) {
+			t.write("nil")
+			return nil
+		}
 		// A global variable of OSCAT BASIC, such as MATH.
 		if g, ok := t.beebreadGlobal(exp); ok {
 			t.write("%s", g)
@@ -2731,6 +2736,9 @@ func (t *Transpiler) mapIecTypeToGo(dataType ast.Expression) string {
 		}
 		elemType := t.mapIecTypeToGo(dt.DataType)
 		return dims + elemType
+	case *ast.RefToType:
+		// REF_TO T is *T; a reference to an array is a slice; see references.go.
+		return t.refToGoType(dt)
 	case *ast.ReferenceType:
 		baseType := t.mapIecTypeToGo(dt.BaseType)
 		return "*" + baseType
@@ -3018,6 +3026,10 @@ func (t *Transpiler) transpileStructLiteral(lit *ast.StructLiteral) error {
 // It distinguishes between standard function calls and function block calls (which involve
 // setting inputs, calling a `Logic` method, and handling outputs).
 func (t *Transpiler) transpileCallExpression(exp *ast.CallExpression) error {
+	// REF(x) and ADR(x); see references.go.
+	if t.isReferenceCall(exp) {
+		return t.transpileReference(exp)
+	}
 	// --- Check for SUPER call ---
 	if memberAccess, ok := exp.Function.(*ast.MemberAccessExpression); ok {
 		if deref, ok := memberAccess.Struct.(*ast.DereferenceExpression); ok {
@@ -3406,6 +3418,10 @@ func (t *Transpiler) transpileDereferenceExpression(exp *ast.DereferenceExpressi
 		}
 		t.write("%s", t.programVarName)
 		return nil
+	}
+	// A reference to an array is a slice, used as it is.
+	if t.refToArray(exp.Pointer) != nil {
+		return t.transpileExpression(exp.Pointer)
 	}
 
 	// Set a flag to prevent the identifier transpiler from adding another dereference.

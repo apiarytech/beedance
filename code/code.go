@@ -168,6 +168,29 @@ const (
 	// holds a value for that address already: the default a located
 	// variable starts with does not overwrite an input the host has set.
 	OpInitExternal
+	// OpRef pushes a reference (REF or ADR) to a variable: the first operand
+	// is its scope (RefGlobal, RefLocal, RefFree or RefExternal), the second
+	// its index, as OpGetGlobal, OpGetLocal, OpGetFree or OpGetExternal take.
+	OpRef
+	// OpRefIndex pops an index and an array, structure or function block
+	// instance, and pushes a reference to that element or member.
+	OpRefIndex
+	// OpDeref pops a reference and pushes the variable it refers to (r^).
+	// Its operand is 1 + the constant index of the lower bounds the
+	// reference's declared array type indexes from, or 0: through
+	// POINTER TO ARRAY[0..9] OF REAL, pt^[0] is the first element.
+	OpDeref
+	// OpSetDeref pops a value and a reference, and writes the value to the
+	// variable the reference refers to (r^ := value).
+	OpSetDeref
+)
+
+// The scopes of the variable OpRef refers to.
+const (
+	RefGlobal = iota
+	RefLocal
+	RefFree
+	RefExternal
 )
 
 // Definition describes an opcode, including its name and the width (in bytes) of its operands.
@@ -260,6 +283,10 @@ var definitions = map[Opcode]*Definition{
 	OpSetBit:      {"OpSetBit", []int{1, 2}},
 
 	OpInitExternal: {"OpInitExternal", []int{2}},
+	OpRef:      {"OpRef", []int{1, 2}},
+	OpRefIndex: {"OpRefIndex", []int{}},
+	OpDeref:    {"OpDeref", []int{2}},
+	OpSetDeref: {"OpSetDeref", []int{}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

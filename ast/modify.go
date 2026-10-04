@@ -216,6 +216,8 @@ func Modify(node Node, modifier ModifierFunc) Node {
 		}
 	case *ReferenceType:
 		node.BaseType, _ = Modify(node.BaseType, modifier).(Expression)
+	case *RefToType:
+		node.BaseType, _ = Modify(node.BaseType, modifier).(Expression)
 
 	case *FunctionBlockDeclaration:
 		node.Name, _ = Modify(node.Name, modifier).(*Identifier)

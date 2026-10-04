@@ -1134,6 +1134,9 @@ func (t *Transpiler) indexedArray(exp ast.Expression) (*ast.ArrayDefinition, int
 	switch e := exp.(type) {
 	case *ast.Identifier:
 		return t.arrayDecls[e.Value], 0
+	case *ast.DereferenceExpression:
+		// pt^ is indexed through the bounds of the array type pt refers to.
+		return t.refToArray(e.Pointer), 0
 	case *ast.IndexExpression:
 		def, dim := t.indexedArray(e.Left)
 		return def, dim + 1

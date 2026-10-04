@@ -328,9 +328,9 @@ func (p *Parser) isIlInstruction() bool {
 	if p.peekTokenIs(token.ASSIGN) {
 		return false
 	}
-	// No IL operand starts with '.' or '[', so a mnemonic followed by one
-	// names a variable, as in `s.Q1` or `r[1] := x`.
-	if p.peekTokenIs(token.DOT) || p.peekTokenIs(token.LBRACKET) {
+	// No IL operand starts with '.', '[' or '^', so a mnemonic followed by
+	// one names a variable, as in `s.Q1`, `r[1] := x` or `r^ := x`.
+	if p.peekTokenIs(token.DOT) || p.peekTokenIs(token.LBRACKET) || p.peekTokenIs(token.CARET) {
 		return false
 	}
 
@@ -516,8 +516,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	// A contextual keyword naming a variable at the start of a statement, e.g.
-	// STEP := STEP + 1.
-	p.nameInContext(token.ASSIGN, token.DOT, token.LBRACKET, token.LPAREN)
+	// STEP := STEP + 1, or a reference r^ := 1.
+	p.nameInContext(token.ASSIGN, token.DOT, token.LBRACKET, token.LPAREN, token.CARET)
 
 	// Handle empty statements (just a semicolon).
 	if p.curTokenIs(token.SEMICOLON) {
@@ -1202,7 +1202,12 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		p.nextToken() // Consume ':', move to data type
 		// The data type can be a simple identifier (INT) or a qualified one (MyLib.MyType).
 		// We parse it as a general expression to handle member access paths.
-		dataType := p.parseExpression(CALL)
+		var dataType ast.Expression
+		if pointer, ok := p.refToStart(); ok {
+			dataType = p.parseRefToType(pointer)
+		} else {
+			dataType = p.parseExpression(CALL)
+		}
 		if dataType == nil {
 			return nil
 		}
@@ -1655,6 +1660,8 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 		return p.parseArrayDefinition()
 	} else if p.curTokenIs(token.REFERENCE) {
 		return p.parseReferenceType()
+	} else if pointer, ok := p.refToStart(); ok {
+		return p.parseRefToType(pointer)
 	}
 	if p.isDataTypeToken(p.curToken) {
 		return &ast.TypeSpecifier{Token: p.curToken}
@@ -1662,6 +1669,47 @@ func (p *Parser) parseTypeSpecifier() ast.Expression {
 
 	p.errors = append(p.errors, fmt.Sprintf("expected a data type, got %s", p.curToken.Type))
 	return nil
+}
+
+// refToStart reports whether the current token starts a reference type,
+// REF_TO or POINTER TO, and whether it is written POINTER TO. Both words are
+// identifiers to the lexer, so a variable may still be called POINTER.
+func (p *Parser) refToStart() (pointer bool, ok bool) {
+	if !p.curTokenIs(token.IDENT) {
+		return false, false
+	}
+	if strings.EqualFold(p.curToken.Literal, "REF_TO") {
+		return false, true
+	}
+	if strings.EqualFold(p.curToken.Literal, "POINTER") && p.peekTokenIs(token.TO) {
+		return true, true
+	}
+	return false, false
+}
+
+// parseRefToType parses the reference type `REF_TO <data_type>`, or, with
+// pointer, `POINTER TO <data_type>`, which is the same typed reference.
+func (p *Parser) parseRefToType(pointer bool) ast.Expression {
+	defer untrace(trace("parseRefToType"))
+	refType := &ast.RefToType{Token: p.curToken, Pointer: pointer}
+	if pointer {
+		p.nextToken() // 'POINTER' to 'TO'
+	}
+	p.nextToken() // to the base data type
+	// The base type is parsed as a variable's type is: an array, another
+	// reference, or a type name, which may be qualified.
+	switch nested, ok := p.refToStart(); {
+	case ok:
+		refType.BaseType = p.parseRefToType(nested)
+	case p.curTokenIs(token.ARRAY):
+		refType.BaseType = p.parseArrayDefinition()
+	default:
+		refType.BaseType = p.parseExpression(CALL)
+	}
+	if refType.BaseType == nil {
+		return nil // Error already logged
+	}
+	return refType
 }
 
 // parseReferenceType parses a `REFERENCE TO <data_type>` specifier.

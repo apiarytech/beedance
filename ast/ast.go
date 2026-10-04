@@ -2296,6 +2296,33 @@ func (rt *ReferenceType) String() string {
 	return out.String()
 }
 
+// RefToType is the IEC 61131-3 reference type REF_TO <data_type>, or the
+// CODESYS POINTER TO <data_type>, which beedance treats as the same typed
+// reference: REF(x) or ADR(x) makes one, r^ is the variable it refers to,
+// and NULL refers to nothing. There is no pointer arithmetic.
+type RefToType struct {
+	Token    token.Token // The REF_TO or POINTER token
+	Pointer  bool        // Written POINTER TO
+	BaseType Expression  // The data type referred to
+}
+
+// expressionNode marks RefToType as an expression node.
+func (rt *RefToType) expressionNode() {}
+
+// Pos returns the position of the REF_TO or POINTER token.
+func (rt *RefToType) Pos() (int, int) { return rt.Token.Row, rt.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (rt *RefToType) TokenLiteral() string { return rt.Token.Literal }
+
+// String returns the type as written: REF_TO INT or POINTER TO INT.
+func (rt *RefToType) String() string {
+	if rt.Pointer {
+		return "POINTER TO " + rt.BaseType.String()
+	}
+	return "REF_TO " + rt.BaseType.String()
+}
+
 // MethodDeclaration represents a method signature within an INTERFACE.
 type MethodDeclaration struct {
 	Token      token.Token // The 'METHOD' token

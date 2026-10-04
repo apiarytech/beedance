@@ -496,6 +496,9 @@ func (vm *VM) Run() (runErr error) {
 			if _, set := vm.io[address]; !set {
 				vm.io[address] = value
 			}
+		case code.OpRef, code.OpRefIndex, code.OpDeref, code.OpSetDeref:
+			// REF/ADR, r^ and r^ := value; see references.go.
+			err = vm.executeReference(op, ins, ip)
 
 		case code.OpSetFree:
 			// Assigns to a variable captured by the current closure.
@@ -688,6 +691,17 @@ func (vm *VM) executeBinaryRealOperation(
 func (vm *VM) executeComparison(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+
+	// r = NULL, r1 <> r2: references compare by what they refer to.
+	if op == code.OpEqual || op == code.OpNotEqual {
+		operator := map[code.Opcode]string{code.OpEqual: "=", code.OpNotEqual: "<>"}[op]
+		if equal, ok, err := object.CompareReferences(left, operator, right); ok {
+			if err != nil {
+				return err
+			}
+			return vm.push(nativeBoolToBooleanObject(equal))
+		}
+	}
 
 	if isInteger(left) && isInteger(right) {
 		return vm.executeIntegerComparison(op, left, right)
