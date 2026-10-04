@@ -95,3 +95,37 @@ func TestMultiDimensionalInitialValues(t *testing.T) {
 		t.Errorf("five elements for four: %s", got.Inspect())
 	}
 }
+
+// TestOscatReferenceUnitsRun evaluates OSCAT units that pass arrays by
+// POINTER TO and ADR, which the library now writes as REF_TO and REF; see
+// the VM's test of the same name. A size of 16 is SIZEOF four REALs.
+func TestOscatReferenceUnitsRun(t *testing.T) {
+	library, err := os.ReadFile("../reference/beedance_oscat_basic.st")
+	if err != nil {
+		t.Skipf("OSCAT library not present: %v", err)
+	}
+	p := parser.New(lexer.New(string(library)))
+	program := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("the library does not parse: %v", p.Errors()[0])
+	}
+	env := object.NewEnvironment()
+	if result := Eval(program, env); isError(result) {
+		t.Fatalf("the library does not evaluate: %s", result.Inspect())
+	}
+	const decls = "VAR a : ARRAY[1..4] OF REAL := [4.0, 1.0, 3.0, 2.0]; b : ARRAY[0..2] OF BYTE := [97, 66, 99]; c : ARRAY[0..2] OF BYTE := [66, 99, 1]; ok : BOOL; END_VAR "
+	for _, check := range []string{
+		"ARRAY_AVG(REF(a), 16) = 2.5",
+		"_ARRAY_MEDIAN(REF(a), 16) = 2.5",
+		"NOT IS_SORTED(REF(a), 16)",
+		"ok := _ARRAY_SORT(REF(a), 16); a[1] = 1.0 AND a[2] = 2.0 AND a[3] = 3.0 AND a[4] = 4.0 AND IS_SORTED(REF(a), 16)",
+		"ok := _ARRAY_SORT(REF(a), 16); ARRAY_TREND(REF(a), 16) = 2.0",
+		"ok := _ARRAY_ADD(REF(a), 16, 1.0); a[1] = 5.0 AND a[4] = 3.0",
+		"BUFFER_COMP(REF(b), 3, REF(c), 2, 0) = 1",
+	} {
+		got := Eval(parser.New(lexer.New(decls+check+";")).ParseProgram(), env)
+		if b, ok := got.(*object.Boolean); !ok || !b.Value {
+			t.Errorf("%s: got %s", check, got.Inspect())
+		}
+	}
+}

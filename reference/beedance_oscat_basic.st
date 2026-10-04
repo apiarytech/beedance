@@ -1,11 +1,11 @@
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION _BUFFER_CLEAR : BOOL
 // VAR_INPUT
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // 	SIZE : UINT;
 // END_VAR
 // VAR
-// 	ptw : POINTER TO DWORD;
+// 	ptw : REF_TO DWORD;
 // 	temp: DWORD;
 // 	end, end32 : DWORD;
 // END_VAR
@@ -36,15 +36,15 @@
 // _BUFFER_CLEAR := TRUE;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION _BUFFER_INIT : BOOL
 // VAR_INPUT
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // 	SIZE : UINT;
 // 	INIT : BYTE;
 // END_VAR
 // VAR
-// 	ptw : POINTER TO DWORD;
+// 	ptw : REF_TO DWORD;
 // 	temp : DWORD;
 // 	end, end32 : DWORD;
 // END_VAR
@@ -76,12 +76,12 @@
 // _BUFFER_INIT := TRUE;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it uses _STRING_TO_BUFFER, which is commented out.
 // FUNCTION _BUFFER_INSERT : INT
 // VAR_INPUT
 // 	STR : STRING(STRING_LENGTH);
 // 	POS : INT;
-// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	PT : REF_TO ARRAY[0..32767] OF BYTE;
 // 	SIZE : UINT;
 // END_VAR
 // VAR
@@ -100,40 +100,39 @@
 // _BUFFER_INSERT := _STRING_TO_BUFFER(str, pos, PT, size);
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _BUFFER_UPPERCASE : BOOL
-// VAR_INPUT
-// 	PT : POINTER TO ARRAY[0..32000] OF BYTE;
-// 	SIZE : INT;
-// END_VAR
-// VAR
-// 	pos: INT;
-// END_VAR
-//
-// pos := 0;
-// WHILE pos < size DO
-// 	PT^[pos] := TO_UPPER(pt^[pos]);
-// 	pos := pos + 1;
-// END_WHILE;
-//
-// _BUFFER_UPPERCASE := TRUE;
-// END_FUNCTION
+FUNCTION _BUFFER_UPPERCASE : BOOL
+VAR_INPUT
+	PT : REF_TO ARRAY[0..32000] OF BYTE;
+	SIZE : INT;
+END_VAR
+VAR
+	pos: INT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+pos := 0;
+WHILE pos < size DO
+	PT^[pos] := TO_UPPER(pt^[pos]);
+	pos := pos + 1;
+END_WHILE;
+
+_BUFFER_UPPERCASE := TRUE;
+END_FUNCTION
+
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION _STRING_TO_BUFFER : INT
 // VAR_INPUT
 // 	STR : STRING(STRING_LENGTH);
 // 	POS : INT;
-// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	PT : REF_TO ARRAY[0..32767] OF BYTE;
 // 	SIZE : UINT;
 // END_VAR
 // VAR
-// 	ps : POINTER TO BYTE;
+// 	ps : REF_TO BYTE;
 // 	i: INT;
 // 	end: INT;
 // END_VAR
 //
-// ps := ADR(str);
+// ps := REF(str);
 // end := MIN(pos + LEN(str), UINT_TO_INT(size));
 // IF end > 0 THEN end := end -1; END_IF;
 // FOR i := pos TO end DO
@@ -144,64 +143,63 @@
 // _STRING_TO_BUFFER := i;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION BUFFER_COMP : INT
-// VAR_INPUT
-// 	PT1 : POINTER TO ARRAY[0..32767] OF BYTE;
-// 	SIZE1 : INT;
-// 	PT2 : POINTER TO ARRAY[0..32767] OF BYTE;
-// 	SIZE2 : INT;
-// 	START : INT;
-// END_VAR
-// VAR
-// 	i, j, end : INT;
-// 	firstbyte: BYTE;
-// END_VAR
-//
-// (* search for first character match *)
-// IF size2 <= size1 THEN
-// 	end := size1 - size2;
-// 	firstbyte := PT2^[0];
-// 	FOR i := START TO end DO
-// 		IF PT1^[i] = firstbyte THEN
-// 			(* first character matches, now compare rest of array *)
-// 			j := 1;
-// 			WHILE j < size2 DO
-// 				IF pt2^[j] <> pt1^[j+i] THEN EXIT; END_IF;
-// 				j := j + 1;
-// 			END_WHILE;
-// 			(* when J > size2 a match was found return the position i in buffer1 *)
-// 			IF j = size2 THEN
-// 				BUFFER_COMP := i;
-// 				RETURN;
-// 			END_IF;
-// 		END_IF;
-// 	END_FOR;
-// END_IF;
-// BUFFER_COMP := -1;
-//
-//
-// (*
-// hm 14. nov. 2008	rev 1.0
-// 	original version
-//
-// hm	12. nov. 2009	rev 1.1
-// 	performance increase
-//
-// *)
-// END_FUNCTION
+FUNCTION BUFFER_COMP : INT
+VAR_INPUT
+	PT1 : REF_TO ARRAY[0..32767] OF BYTE;
+	SIZE1 : INT;
+	PT2 : REF_TO ARRAY[0..32767] OF BYTE;
+	SIZE2 : INT;
+	START : INT;
+END_VAR
+VAR
+	i, j, end : INT;
+	firstbyte: BYTE;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+(* search for first character match *)
+IF size2 <= size1 THEN
+	end := size1 - size2;
+	firstbyte := PT2^[0];
+	FOR i := START TO end DO
+		IF PT1^[i] = firstbyte THEN
+			(* first character matches, now compare rest of array *)
+			j := 1;
+			WHILE j < size2 DO
+				IF pt2^[j] <> pt1^[j+i] THEN EXIT; END_IF;
+				j := j + 1;
+			END_WHILE;
+			(* when J > size2 a match was found return the position i in buffer1 *)
+			IF j = size2 THEN
+				BUFFER_COMP := i;
+				RETURN;
+			END_IF;
+		END_IF;
+	END_FOR;
+END_IF;
+BUFFER_COMP := -1;
+
+
+(*
+hm 14. nov. 2008	rev 1.0
+	original version
+
+hm	12. nov. 2009	rev 1.1
+	performance increase
+
+*)
+END_FUNCTION
+
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION BUFFER_SEARCH : INT
 // VAR_INPUT
-// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	PT : REF_TO ARRAY[0..32767] OF BYTE;
 // 	SIZE : INT;
 // 	STR : STRING(STRING_LENGTH);
 // 	POS : INT;
 // 	IGN : BOOL;
 // END_VAR
 // VAR
-// 	ps : POINTER TO ARRAY[0..STRING_LENGTH] OF BYTE;
+// 	ps : REF_TO ARRAY[0..STRING_LENGTH] OF BYTE;
 // 	chx : BYTE;
 // 	i: INT;
 // 	end: INT;
@@ -209,7 +207,7 @@
 // 	lx: INT;
 // END_VAR
 //
-// ps := ADR(STR);
+// ps := REF(STR);
 // lx := LEN(STR);
 // end := MIN(SIZE - lx, SIZE - 1);
 // lx := lx - 1;
@@ -226,22 +224,22 @@
 // BUFFER_SEARCH := -1;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION BUFFER_TO_STRING : STRING(STRING_LENGTH)
 // VAR_INPUT
-// 	PT : POINTER TO ARRAY[0..32767] OF BYTE;
+// 	PT : REF_TO ARRAY[0..32767] OF BYTE;
 // 	SIZE : UINT;
 // 	START : UINT;
 // 	STOP : UINT;
 // END_VAR
 // VAR
-// 	ps : POINTER TO BYTE;
+// 	ps : REF_TO BYTE;
 // 	i : UINT;
 // 	stp: UINT;
 // 	sta: UINT;
 // END_VAR
 //
-// ps := ADR(BUFFER_TO_STRING);
+// ps := REF(BUFFER_TO_STRING);
 // IF size = 0 THEN RETURN; END_IF;
 // sta := MIN(start, size -1);
 // stp := MIN(stop, size -1);
@@ -3874,7 +3872,7 @@ IF res > 0.0 THEN
 END_IF;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads the bits of a REAL as a DWORD, or back, through a pointer; a beedance reference (REF_TO) refers to a variable of its own type.
 // FUNCTION TEMP_PT : REAL
 // VAR_INPUT
 // 	Res : REAL;
@@ -3890,7 +3888,7 @@ END_FUNCTION
 // 	X: REAL;
 // 	Y: REAL;
 // 	t1: REAL;
-// 	pt : POINTER TO DWORD;
+// 	pt : REF_TO DWORD;
 // END_VAR
 //
 // X := A * R0;
@@ -3903,7 +3901,7 @@ END_FUNCTION
 // 		TEMP_PT := (-X + SQRT(t1)) / (2.0 * Y);
 // 	END_IF;
 // ELSE
-// 	pt := ADR(step);
+// 	pt := REF(step);
 // 	(* since the formula cannot be solved this is a successive approximation *)
 // 	TEMP_PT := -100.0;
 // 	WHILE step > accuracy DO
@@ -5846,7 +5844,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_CLEAN : BOOL
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -5855,14 +5853,14 @@ END_FUNCTION
 // 	LIST : STRING(LIST_LENGTH);
 // END_VAR
 // VAR
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	read : INT := 1;
 // 	write : INT := 1;
 // 	last: BYTE;
 // 	c: BYTE;
 // END_VAR
 //
-// pt := ADR(LIST);
+// pt := REF(LIST);
 //
 // FOR read := 1 TO LIST_LENGTH DO
 // 	c := pt^[read];								(* read character from list *)
@@ -5894,7 +5892,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_GET : STRING(LIST_LENGTH)
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -5906,14 +5904,14 @@ END_FUNCTION
 // VAR
 // 	i : INT := 1;
 // 	o : INT := 1;
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	cnt: INT := 0;
 // 	c: BYTE;
 // END_VAR
 //
-// pt := ADR(LIST);							(* load pointers *)
-// po := ADR(LIST_GET);
+// pt := REF(LIST);							(* load pointers *)
+// po := REF(LIST_GET);
 //
 // REPEAT
 // 	c := pt^[i];
@@ -5945,7 +5943,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_INSERT : BOOL
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -5956,14 +5954,14 @@ END_FUNCTION
 // 	LIST : STRING(LIST_LENGTH);
 // END_VAR
 // VAR
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	read : INT := 1;
 // 	cnt : INT := 1;
 // 	sx : STRING(1);
 // END_VAR
 //
 // (* load pointers *)
-// pt := ADR(LIST);
+// pt := REF(LIST);
 //
 // IF LEN(ins) + 1 + LEN(LIST) > LIST_LENGTH THEN
 // 	LIST_INSERT := FALSE;
@@ -6006,7 +6004,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_LEN : INT
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -6015,12 +6013,12 @@ END_FUNCTION
 // 	LIST : STRING(LIST_LENGTH);
 // END_VAR
 // VAR
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	pos: INT := 1;
 // 	c: BYTE;
 // END_VAR
 //
-// pt := ADR(LIST);
+// pt := REF(LIST);
 // LIST_LEN := 0;
 // REPEAT
 // 	c := pt^[pos];
@@ -6049,7 +6047,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION_BLOCK LIST_NEXT
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -6064,14 +6062,14 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	pos : INT := 1;
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	c: BYTE;
 // 	write: INT;
 // END_VAR
 //
-// pt := ADR(LIST);
-// po := ADR(LEL);
+// pt := REF(LIST);
+// po := REF(LEL);
 //
 // IF rst THEN
 // 	pos := 1;
@@ -6112,7 +6110,7 @@ END_FUNCTION
 //
 // END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_RETRIEVE : STRING(LIST_LENGTH)
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -6125,15 +6123,15 @@ END_FUNCTION
 // 	i :	INT;
 // 	o : INT := 1;
 // 	w : INT := 1;
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
-// 	po : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	po : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	cnt: INT := 0;
 // 	c: BYTE;
 // END_VAR
 //
 // (* load pointers *)
-// pt := ADR(LIST);
-// po := ADR(LIST_RETRIEVE);
+// pt := REF(LIST);
+// po := REF(LIST_RETRIEVE);
 //
 // IF pos > 0 THEN
 // 	FOR i := 1 TO LIST_LENGTH DO
@@ -6171,7 +6169,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION LIST_RETRIEVE_LAST : STRING(LIST_LENGTH)
 // VAR_INPUT
 // 	SEP : BYTE;
@@ -6182,12 +6180,12 @@ END_FUNCTION
 // VAR
 // 	i :	INT;
 // 	last : INT := 1;
-// 	pt : POINTER TO ARRAY[1..LIST_LENGTH] OF BYTE;
+// 	pt : REF_TO ARRAY[1..LIST_LENGTH] OF BYTE;
 // 	c: BYTE;
 // END_VAR
 //
 // (* load pointers *)
-// pt := ADR(LIST);
+// pt := REF(LIST);
 //
 // (* search position of last element *)
 // FOR i := 1 TO LIST_LENGTH DO
@@ -7044,18 +7042,18 @@ check_parity := even(cnt) XOR P;
 *)
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads the bits of a REAL as a DWORD, or back, through a pointer; a beedance reference (REF_TO) refers to a variable of its own type.
 // FUNCTION CHK_REAL : BYTE
 // VAR_INPUT
 // 	X : REAL;
 // END_VAR
 // VAR
-// 	pt : POINTER TO DWORD;
+// 	pt : REF_TO DWORD;
 // 	tmp : DWORD;
 // END_VAR
 //
 //
-// pt := ADR(X);				(* move real to dword, real_to_dword does not work becasze it treats dword as a number on many systems *)
+// pt := REF(X);				(* move real to dword, real_to_dword does not work becasze it treats dword as a number on many systems *)
 // tmp := ROL(pt^,1);			(* rotate left foir easy checking, sign will be at lease significant digit *)
 // IF tmp < 16#FF000000 THEN
 // 	CHK_REAL := 16#00;		(* normalized and denormalized numbers *)
@@ -7145,17 +7143,17 @@ CASE X OF
 END_CASE;
 END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads the bits of a REAL as a DWORD, or back, through a pointer; a beedance reference (REF_TO) refers to a variable of its own type.
 // FUNCTION DW_TO_REAL : REAL
 // VAR_INPUT
 // 	X : DWORD;
 // END_VAR
 // VAR
-// 	pt : POINTER TO REAL;
+// 	pt : REF_TO REAL;
 // END_VAR
 //
 //
-// pt := ADR(X);
+// pt := REF(X);
 // DW_TO_REAL := pt^;
 // END_FUNCTION
 
@@ -7251,17 +7249,17 @@ IF (cnt MOD 2) = 1 THEN parity := TRUE; ELSE parity := FALSE; END_IF;
 *)
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads the bits of a REAL as a DWORD, or back, through a pointer; a beedance reference (REF_TO) refers to a variable of its own type.
 // FUNCTION REAL_TO_DW : DWORD
 // VAR_INPUT
 // 	X : REAL;
 // END_VAR
 // VAR
-// 	pt : POINTER TO DWORD;
+// 	pt : REF_TO DWORD;
 // END_VAR
 //
 //
-// pt := ADR(X);
+// pt := REF(X);
 // REAL_TO_DW := pt^;
 // END_FUNCTION
 
@@ -8752,104 +8750,104 @@ END_IF;
 
 END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION CRC_GEN : DWORD
-//
-// VAR_INPUT
-// 	PT : POINTER TO ARRAY[0..32000] OF BYTE;
-// 	SIZE : INT;
-// 	PL : INT;
-// 	PN : DWORD;
-// 	INIT : DWORD;
-// 	REV_IN : BOOL;
-// 	REV_OUT : BOOL;
-// 	XOR_OUT : DWORD;
-// END_VAR
-// VAR
-// 	pos : INT;
-// 	shift : INT;
-// 	dx: BYTE;
-// 	bits: INT;
-// END_VAR
-//
-//
-// (* align polygon *)
-// shift := 32 - PL;
-// PN := SHL(PN, shift);
-//
-// (* load first 4 bytes into register minimum message size is 4 bytes
-// 	for smaller messages fill with 0#s at the beginning*)
-// FOR pos := 0 TO 3 DO
-// 	IF REV_IN THEN CRC_GEN := SHL(CRC_GEN, 8) OR REVERSE(PT^[pos]); ELSE CRC_GEN := SHL(CRC_GEN, 8) OR PT^[pos]; END_IF;
-// END_FOR;
-// pos := 4;
-//
-// (* xor with init value *)
-// CRC_GEN := CRC_GEN XOR SHL(init, shift);
-//
-// (* calculate CRC for each byte *)
-// WHILE pos < size DO
-// 	IF REV_IN THEN DX := REVERSE(PT^[pos]); ELSE DX := PT^[pos]; END_IF;
-// 	pos := pos + 1;
-// 	(* crc calculation for one byte *)
-// 	FOR bits := 0 TO 7 DO
-// 		IF CRC_GEN.31 THEN
-// 			CRC_GEN := (SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7)) XOR PN;
-// 		ELSE
-// 			CRC_GEN := SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7);
-// 		END_IF;
-// 		dx := SHL(dx, 1);
-// 	END_FOR;
-// END_WHILE;
-//
-// (* all bytes are processed, need to finish the registers 32 bits *)
-// FOR bits := 0 TO 31 DO
-// 	IF CRC_GEN.31 THEN
-// 		CRC_GEN := (SHL(CRC_GEN, 1) ) XOR PN;
-// 	ELSE
-// 		CRC_GEN := SHL(CRC_GEN, 1);
-// 	END_IF;
-// END_FOR;
-//
-// (* final XOR *)
-// CRC_GEN := SHR(CRC_GEN, shift) XOR XOR_OUT;
-//
-// (* reverse the crc_out put if necessary *)
-// IF REV_OUT THEN CRC_GEN := REFLECT(CRC_GEN, PL); END_IF;
-//
-// (* suggested optimization by deninis klopke
-// die betreffs genannte Funktion kann folgenderma�en optimiert werden:
-// In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil �OR BOOL_TO_DWORD(DX.7)� entfallen, da nach 8maligem Linksshift von �DX� in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
-// *)
-//
-// (* typical crc polynoms
-//
-// CRC-4-ITU 			x4 + x + 1 					(ITU G.704, p. 12) 	0x3 or 0xC (0x9)
-// CRC-5-ITU 			x5 + x4 + x2 + 1 			(ITU G.704, p. 9) 	0x15 or 0x15 (0x0B) Bluetooth
-// CRC-5-USB 			x5 + x2 + 1 				(use: USB token packets) 	0x05 or 0x14 (0x9)
-// CRC-6-ITU 			x6 + x + 1 					(ITU G.704, p. 3) 	0x03 or 0x30 (0x21)
-// CRC-7 				x7 + x3 + 1 				(use: telecom systems, MMC) 	0x09 or 0x48 (0x11)
-// CRC-8-ATM 			x8 + x2 + x + 1 				(use: ATM HEC) 	0x07 or 0xE0 (0xC1)
-// CRC-8-CCITT 		x8 + x7 + x3 + x2 + 1 		(use: 1-Wire bus) 	0x8D or 0xB1 (0x63)
-// CRC-8-Dallas/Maxim 	x8 + x5 + x4 + 1 			(use: 1-Wire bus) 	0x31 or 0x8C (0x19)
-// CRC-8 				x8 + x7 + x6 + x4 + x2 + 1 	0xD5 or 0xAB (0x57)
-// CRC-8-SAE J1850 	x8 + x4 + x3 + x2 + 1 		0x1D or 0xB8
-// CRC-10 				x10 + x9 + x5 + x4 + x + 1 	0x233 or 0x331 (0x263)
-// CRC-12 				x12 + x11 + x3 + x2 + x + 1 (use: telecom systems) 	0x80F or 0xF01 (0xE03)
-// CRC-15-CAN 			x15 + x14 + x10 + x8 + x7 + x4 + x3 + 1 	0x4599 or 0x4CD1 (0x19A3)
-// CRC-16-Fletcher 	Not a CRC; see Fletcher's checksum 	Used in Adler-32 A & B CRCs
-// CRC-16-CCITT 	x16 + x12 + x5 + 1 (XMODEM,X.25, V.41, Bluetooth, PPP, IrDA; known as "CRC-CCITT") 	0x1021 or 0x8408 (0x0811)
-// CRC-16-IBM 	x16 + x15 + x2 + 1 (USB, many others; also known as "CRC-16") 	0x8005 or 0xA001 (0x4003)
-// CRC-24-Radix-64 	x24 + x23 + x18 + x17 + x14 + x11 + x10 + x7 + x6 + x5 + x4 + x3 + x + 1 	0x864CFB or 0xDF3261 (0xBE64C3)
-// CRC-32-Adler 	Not a CRC; see Adler-32 	See Adler-32
-// CRC-32-MPEG2 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 	0x04C11DB7 or 0xEDB88320 (0xDB710641) Also used in IEEE 802.3
-// CRC-32-IEEE 802.3 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 (V.42) 	0x04C11DB7 or 0xEDB88320 (0xDB710641)
-// CRC-32C (Castagnoli) 	x32 + x28 + x27 + x26 + x25 + x23 + x22 + x20 + x19 + x18 + x14 + x13 + x11 + x10 + x9 + x8 + x6 + 1 	0x1EDC6F41 or 0x82F63B78 (0x05EC76F1)
-// CRC-64-ISO 	x64 + x4 + x3 + x + 1 (use: ISO 3309) 	0x000000000000001B or 0xD800000000000000 (0xB000000000000001)
-// CRC-64-ECMA-182 	x64 + x62 + x57 + x55 + x54 + x53 + x52 + x47 + x46 + x45 + x40 + x39 + x38 + x37 + x35 + x33 + x32 + x31 + x29 + x27 + x24 + x23 + x22 + x21 + x19 + x17 + x13 + x12 + x10 + x9 + x7 + x4 + x + 1
-// (as described in ECMA-182 p.63) 	0x42F0E1EBA9EA3693 or 0xC96C5795D7870F42 (0x92D8AF2BAF0E1E85)
-// *)
-// END_FUNCTION
+FUNCTION CRC_GEN : DWORD
+
+VAR_INPUT
+	PT : REF_TO ARRAY[0..32000] OF BYTE;
+	SIZE : INT;
+	PL : INT;
+	PN : DWORD;
+	INIT : DWORD;
+	REV_IN : BOOL;
+	REV_OUT : BOOL;
+	XOR_OUT : DWORD;
+END_VAR
+VAR
+	pos : INT;
+	shift : INT;
+	dx: BYTE;
+	bits: INT;
+	PN_work : DWORD;
+END_VAR
+
+
+(* align polygon *)
+shift := 32 - PL;
+PN_work := SHL(PN, shift); (* beedance: a copy, as IEC 61131-3 does not let a function assign its input *)
+
+(* load first 4 bytes into register minimum message size is 4 bytes
+	for smaller messages fill with 0#s at the beginning*)
+FOR pos := 0 TO 3 DO
+	IF REV_IN THEN CRC_GEN := SHL(CRC_GEN, 8) OR REVERSE(PT^[pos]); ELSE CRC_GEN := SHL(CRC_GEN, 8) OR PT^[pos]; END_IF;
+END_FOR;
+pos := 4;
+
+(* xor with init value *)
+CRC_GEN := CRC_GEN XOR SHL(init, shift);
+
+(* calculate CRC for each byte *)
+WHILE pos < size DO
+	IF REV_IN THEN DX := REVERSE(PT^[pos]); ELSE DX := PT^[pos]; END_IF;
+	pos := pos + 1;
+	(* crc calculation for one byte *)
+	FOR bits := 0 TO 7 DO
+		IF CRC_GEN.31 THEN
+			CRC_GEN := (SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7)) XOR PN_work;
+		ELSE
+			CRC_GEN := SHL(CRC_GEN, 1) OR BOOL_TO_DWORD(DX.7);
+		END_IF;
+		dx := SHL(dx, 1);
+	END_FOR;
+END_WHILE;
+
+(* all bytes are processed, need to finish the registers 32 bits *)
+FOR bits := 0 TO 31 DO
+	IF CRC_GEN.31 THEN
+		CRC_GEN := (SHL(CRC_GEN, 1) ) XOR PN_work;
+	ELSE
+		CRC_GEN := SHL(CRC_GEN, 1);
+	END_IF;
+END_FOR;
+
+(* final XOR *)
+CRC_GEN := SHR(CRC_GEN, shift) XOR XOR_OUT;
+
+(* reverse the crc_out put if necessary *)
+IF REV_OUT THEN CRC_GEN := REFLECT(CRC_GEN, PL); END_IF;
+
+(* suggested optimization by deninis klopke
+die betreffs genannte Funktion kann folgenderma�en optimiert werden:
+In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil �OR BOOL_TO_DWORD(DX.7)� entfallen, da nach 8maligem Linksshift von �DX� in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
+*)
+
+(* typical crc polynoms
+
+CRC-4-ITU 			x4 + x + 1 					(ITU G.704, p. 12) 	0x3 or 0xC (0x9)
+CRC-5-ITU 			x5 + x4 + x2 + 1 			(ITU G.704, p. 9) 	0x15 or 0x15 (0x0B) Bluetooth
+CRC-5-USB 			x5 + x2 + 1 				(use: USB token packets) 	0x05 or 0x14 (0x9)
+CRC-6-ITU 			x6 + x + 1 					(ITU G.704, p. 3) 	0x03 or 0x30 (0x21)
+CRC-7 				x7 + x3 + 1 				(use: telecom systems, MMC) 	0x09 or 0x48 (0x11)
+CRC-8-ATM 			x8 + x2 + x + 1 				(use: ATM HEC) 	0x07 or 0xE0 (0xC1)
+CRC-8-CCITT 		x8 + x7 + x3 + x2 + 1 		(use: 1-Wire bus) 	0x8D or 0xB1 (0x63)
+CRC-8-Dallas/Maxim 	x8 + x5 + x4 + 1 			(use: 1-Wire bus) 	0x31 or 0x8C (0x19)
+CRC-8 				x8 + x7 + x6 + x4 + x2 + 1 	0xD5 or 0xAB (0x57)
+CRC-8-SAE J1850 	x8 + x4 + x3 + x2 + 1 		0x1D or 0xB8
+CRC-10 				x10 + x9 + x5 + x4 + x + 1 	0x233 or 0x331 (0x263)
+CRC-12 				x12 + x11 + x3 + x2 + x + 1 (use: telecom systems) 	0x80F or 0xF01 (0xE03)
+CRC-15-CAN 			x15 + x14 + x10 + x8 + x7 + x4 + x3 + 1 	0x4599 or 0x4CD1 (0x19A3)
+CRC-16-Fletcher 	Not a CRC; see Fletcher's checksum 	Used in Adler-32 A & B CRCs
+CRC-16-CCITT 	x16 + x12 + x5 + 1 (XMODEM,X.25, V.41, Bluetooth, PPP, IrDA; known as "CRC-CCITT") 	0x1021 or 0x8408 (0x0811)
+CRC-16-IBM 	x16 + x15 + x2 + 1 (USB, many others; also known as "CRC-16") 	0x8005 or 0xA001 (0x4003)
+CRC-24-Radix-64 	x24 + x23 + x18 + x17 + x14 + x11 + x10 + x7 + x6 + x5 + x4 + x3 + x + 1 	0x864CFB or 0xDF3261 (0xBE64C3)
+CRC-32-Adler 	Not a CRC; see Adler-32 	See Adler-32
+CRC-32-MPEG2 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 	0x04C11DB7 or 0xEDB88320 (0xDB710641) Also used in IEEE 802.3
+CRC-32-IEEE 802.3 	x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1 (V.42) 	0x04C11DB7 or 0xEDB88320 (0xDB710641)
+CRC-32C (Castagnoli) 	x32 + x28 + x27 + x26 + x25 + x23 + x22 + x20 + x19 + x18 + x14 + x13 + x11 + x10 + x9 + x8 + x6 + 1 	0x1EDC6F41 or 0x82F63B78 (0x05EC76F1)
+CRC-64-ISO 	x64 + x4 + x3 + x + 1 (use: ISO 3309) 	0x000000000000001B or 0xD800000000000000 (0xB000000000000001)
+CRC-64-ECMA-182 	x64 + x62 + x57 + x55 + x54 + x53 + x52 + x47 + x46 + x45 + x40 + x39 + x38 + x37 + x35 + x33 + x32 + x31 + x29 + x27 + x24 + x23 + x22 + x21 + x19 + x17 + x13 + x12 + x10 + x9 + x7 + x4 + x + 1
+(as described in ECMA-182 p.63) 	0x42F0E1EBA9EA3693 or 0xC96C5795D7870F42 (0x92D8AF2BAF0E1E85)
+*)
+END_FUNCTION
 
 FUNCTION_BLOCK MATRIX
 VAR_INPUT
@@ -8963,366 +8961,356 @@ END_FUNCTION_BLOCK
 //
 // END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_ABS : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// FOR i := 0 TO stop DO
-// 	PT^[i] := ABS(PT^[i]);
-// END_FOR;
-// _ARRAY_ABS := TRUE;
-// END_FUNCTION
+FUNCTION _ARRAY_ABS : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_ADD : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// 	X : REAL;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// FOR i := 0 TO stop DO
-// 	PT^[i] := PT^[i] + X;
-// END_FOR;
-// _ARRAY_ADD := TRUE;
-// END_FUNCTION
+stop := ((size) / 4)-1;
+FOR i := 0 TO stop DO
+	PT^[i] := ABS(PT^[i]);
+END_FOR;
+_ARRAY_ABS := TRUE;
+END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_INIT : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// 	init : REAL;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// FOR i := 0 TO stop DO
-// 	pt^[i] := init;
-// END_FOR;
-//
-// _array_init := TRUE;
-// END_FUNCTION
+FUNCTION _ARRAY_ADD : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+	X : REAL;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_MEDIAN : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// _ARRAY_SORT(pt,size);
-// stop := SHR(size,2)-1;
-// IF EVEN(UINT_TO_INT(stop)) THEN
-// 	_ARRAY_MEDIAN := pt^[SHR(stop,1)];
-// ELSE
-// 	i := SHR(stop,1);
-// 	_ARRAY_MEDIAN := (pt^[i] + pt^[i+1]) * 0.5;
-// END_IF;
-//
-// (* old code
-// stop := (size - SIZEOF(pt)) / SIZEOF(pt);
-// FOR i := 0 TO stop - 1 DO
-// 	FOR m := i + 1 TO stop DO
-// 		IF pt^[i] > pt^[m] THEN
-// 			temp := pt^[i];
-// 			pt^[i] := pt^[m];
-// 			pt^[m] := temp;
-// 		END_IF;
-// 	END_FOR;
-// END_FOR;
-// IF even(stop) THEN
-// 	_array_median := pt^[stop/2];
-// ELSE
-// 	i := stop/2;
-// 	_array_median := (pt^[i] + pt^[i+1])/2;
-// END_IF;
-// *)
-// END_FUNCTION
+stop := ((size) / 4)-1;
+FOR i := 0 TO stop DO
+	PT^[i] := PT^[i] + X;
+END_FOR;
+_ARRAY_ADD := TRUE;
+END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_MUL : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// 	X : REAL;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// FOR i := 0 TO stop DO
-// 	PT^[i] := PT^[i] * X;
-// END_FOR;
-// _ARRAY_MUL := TRUE;
-// END_FUNCTION
+FUNCTION _ARRAY_INIT : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+	init : REAL;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_SHUFFLE : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	temp : REAL;
-// 	pos  : INT;
-// 	i: INT;
-// 	stop: INT;
-// END_VAR
-//
-// stop := UINT_TO_INT(SHR(size,2)-1);
-// FOR i := 0 TO stop DO
-//         pos := RDM2(i+pos,0,stop);
-//         (* swap elements *)
-//         temp := pt^[i];
-//         pt^[i] := pt^[pos];
-//         pt^[pos] := temp;
-// END_FOR;
-//
-// _ARRAY_SHUFFLE := TRUE;
-// END_FUNCTION
+stop := ((size) / 4)-1;
+FOR i := 0 TO stop DO
+	pt^[i] := init;
+END_FOR;
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION _ARRAY_SORT : BOOL
-// VAR_INPUT
-// 	PT : POINTER TO ARRAY[1..32000] OF REAL;
-// 	SIZE : UINT;
-// END_VAR
-// VAR
-// 	stack_count: UINT;				(* Laufvariable Stack*)
-// 	stack: ARRAY[1..32] OF UINT;	(* Stackgr��e~ 1,6*Log(n)/log(2) *)
-// 										(* Stackgr��e 32 => ~1 Mio Elemente *)
-// 	links: UINT;						(* Anfangselement des Arrays *)
-// 	rechts: UINT;						(* Endelement des Arrays *)
-// 	pivot: REAL;						(* tempor�rer Schwellwert f�r Tauschbedingung *)
-// 	i: UINT;							(* Laufvariable1 *)
-// 	j: UINT;							(* Laufvariable2 *)
-// 	ende_innen: BOOL;				(* Ende innere Schleife *)
-// 	ende_aussen: BOOL;				(* Ende �u�ere Schleife *)
-// 	tmp: REAL;						(* Hilfsvariable zum Tauschen von Werten *)
-// END_VAR
-//
-// (* Startwerte zur Arraygr��e *)
-// links := 1;					(* Anfangselement des Arrays *)
-// rechts := SHR(size,2);		(* Endelement des Arrays *)
-// stack_count := 1;			(* Laufvariable Stack *)
-//
-// WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
-// 	IF links < rechts THEN
-// 		pivot := PT^[SHR(rechts+links,1)];			(* Wert des mittleren Elements als Pivot-Wert *)
-// 		i := links -1;
-// 		j := rechts +1;
-//
-// 		(* innere Schleife, teile Feld *)
-// 		ende_innen := FALSE;
-// 		REPEAT
-//
-// 			(* steigende Reihenfolge *)
-// 			REPEAT	i := i+1;	UNTIL (PT^[i] >= pivot) OR NOT (i < rechts)	END_REPEAT;
-// 			REPEAT	j := j-1;	UNTIL (PT^[j] <= pivot) OR NOT (j > links)	END_REPEAT;
-//
-//
-// 			(*sinkende Reihenfolge *)
-// (*			REPEAT	i := i+1;	UNTIL (PT^[i] <= pivot) OR NOT (i < rechts)	END_REPEAT	*)
-// (*			REPEAT	j := j-1;	UNTIL (PT^[j] >= pivot) OR NOT (j > links)	END_REPEAT	*)
-//
-// 			IF i >= j THEN
-// 				ende_innen := TRUE;
-// 			ELSE
-// 				   tmp := PT^[j];
-// 				PT^[j] := PT^[i];
-// 				PT^[i] := tmp;
-// 			END_IF;
-//
-// 		UNTIL ende_innen END_REPEAT;
-//
-// 		(* Push stack *)
-// 		stack[stack_count] := rechts;		(* rechten Teil sp�ter sortieren *)
-// 		IF Stack_count < 32 THEN
-// 			stack_count := stack_count +1;
-// 		ELSE
-// 			ende_aussen := TRUE;
-// 			_ARRAY_SORT := FALSE;					(* Fehler: Stack zu klein *)
-// 		END_IF;
-//
-// 		(* linken Teil sortiern *)
-// 		rechts := MAX(links, i-1);
-//
-// 	ELSE
-//
-// 		IF stack_count = 1 THEN
-// 			ende_aussen := TRUE;
-// 		ELSE
-//
-// 			links := rechts+1;
-//
-// 			(* pop stack *)
-// 			stack_count := stack_count -1;		(* jetzt rechten Teil sortierne *)
-// 			rechts:= stack[stack_count];
-// 		END_IF;
-//
-// 	END_IF;
-//
-// END_WHILE;
-//
-// _ARRAY_SORT := TRUE;				(* Sortierung beendet *)
-//
-//
-// (* algorithm used before rev 2.0
-//
-// size := SHR(size,2);
-// size2 := UINT_TO_INT(SHR(size,1));
-// FOR i := SIZE2  TO 1 BY -1 DO
-// 	j:=i;
-//     WHILE j <= SIZE2 DO
-//      	stop := j * 2 + 1;
-//         IF stop > UINT_TO_INT(SIZE) THEN stop := stop - 1;
-//         ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
-// 		END_IF;
-//         IF pt^[j] < pt^[stop] THEN
-//          	temp := pt^[j];
-//             pt^[j] := pt^[stop];
-//             pt^[stop] := temp;
-//         END_IF;
-//         j := stop;
-//     END_WHILE;
-// END_FOR;
-//
-// *)
-//
-// (* heapsort
-// FOR heapsize := UINT_TO_INT(size) TO 1 BY -1 DO
-// 	popmax := pt^[1];
-// 	pt^[1] := pt^[heapsize];
-//    	i := 1;
-// 	hs2 := SHR(heapsize,1);
-// 	WHILE i <= hs2 DO
-//        	stop := i * 2 + 1;
-//         	IF stop > heapsize THEN stop := stop - 1;
-//         	ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
-// 	 	END_IF;
-//         	IF pt^[i] < pt^[stop] THEN
-//             		temp := pt^[i];
-//             		pt^[i] := pt^[stop];
-//             		pt^[stop] := temp;
-//         	END_IF;
-//         	i := stop;
-//     	END_WHILE;
-// 	pt^[heapsize] := popmax;
-// END_FOR;
-//
-// _ARRAY_SORT2 := TRUE;
-// *)
-//
-// (* old algorithm bubble sort used before rev 1.2
-// stop := (size - SIZEOF(pt)) / SIZEOF(pt);
-// FOR i := 0 TO stop - 1 DO
-// 	FOR m := i + 1 TO stop DO
-// 		IF pt^[i] > pt^[m] THEN
-// 			temp := pt^[i];
-// 			pt^[i] := pt^[m];
-// 			pt^[m] := temp;
-// 		END_IF;
-// 	END_FOR;
-// END_FOR;
-// _array_sort := TRUE;
-//
-// *)
-//
-// END_FUNCTION
+_array_init := TRUE;
+END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_AVG : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// ARRAY_AVG := pt^[0];
-// FOR i := 1 TO stop DO
-// 	ARRAY_AVG := ARRAY_AVG + pt^[i];
-// END_FOR;
-// ARRAY_AVG := ARRAY_AVG / UINT_TO_REAL(stop + 1);
-// END_FUNCTION
+FUNCTION _ARRAY_MEDIAN : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_GAV : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// ARRAY_GAV := 1.0;
-// FOR i := 0 TO stop DO
-// 	IF pt^[i] > 0.0 THEN
-// 		ARRAY_GAV := ARRAY_GAV * pt^[i];
-// 	ELSE
-// 		ARRAY_GAV := 0.0;
-// 		RETURN;
-// 	END_IF;
-// END_FOR;
-// ARRAY_GAV := SQRTN(ARRAY_GAV,UINT_TO_INT(stop)+1);
-// END_FUNCTION
+_ARRAY_SORT(pt,size);
+stop := ((size) / 4)-1;
+IF EVEN(UINT_TO_INT(stop)) THEN
+	_ARRAY_MEDIAN := pt^[((stop) / 2)];
+ELSE
+	i := ((stop) / 2);
+	_ARRAY_MEDIAN := (pt^[i] + pt^[i+1]) * 0.5;
+END_IF;
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_HAV : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// FOR i := 0 TO stop DO
-// 	IF pt^[i] <> 0.0 THEN
-// 		ARRAY_HAV := ARRAY_HAV + 1.0 / pt^[i];
-// 	ELSE
-// 		ARRAY_HAV := 0.0;
-// 		RETURN;
-// 	END_IF;
-// END_FOR;
-// ARRAY_HAV := UINT_TO_REAL(stop + 1) / ARRAY_HAV;
-// END_FUNCTION
+(* old code
+stop := (size - SIZEOF(pt)) / SIZEOF(pt);
+FOR i := 0 TO stop - 1 DO
+	FOR m := i + 1 TO stop DO
+		IF pt^[i] > pt^[m] THEN
+			temp := pt^[i];
+			pt^[i] := pt^[m];
+			pt^[m] := temp;
+		END_IF;
+	END_FOR;
+END_FOR;
+IF even(stop) THEN
+	_array_median := pt^[stop/2];
+ELSE
+	i := stop/2;
+	_array_median := (pt^[i] + pt^[i+1])/2;
+END_IF;
+*)
+END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+FUNCTION _ARRAY_MUL : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+	X : REAL;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
+
+stop := ((size) / 4)-1;
+FOR i := 0 TO stop DO
+	PT^[i] := PT^[i] * X;
+END_FOR;
+_ARRAY_MUL := TRUE;
+END_FUNCTION
+
+FUNCTION _ARRAY_SHUFFLE : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	temp : REAL;
+	pos  : INT;
+	i: INT;
+	stop: INT;
+END_VAR
+
+stop := UINT_TO_INT(((size) / 4)-1);
+FOR i := 0 TO stop DO
+        pos := RDM2(i+pos,0,stop);
+        (* swap elements *)
+        temp := pt^[i];
+        pt^[i] := pt^[pos];
+        pt^[pos] := temp;
+END_FOR;
+
+_ARRAY_SHUFFLE := TRUE;
+END_FUNCTION
+
+FUNCTION _ARRAY_SORT : BOOL
+VAR_INPUT
+	PT : REF_TO ARRAY[1..32000] OF REAL;
+	SIZE : UINT;
+END_VAR
+VAR
+	stack_count: UINT;				(* Laufvariable Stack*)
+	stack: ARRAY[1..32] OF UINT;	(* Stackgr��e~ 1,6*Log(n)/log(2) *)
+										(* Stackgr��e 32 => ~1 Mio Elemente *)
+	links: UINT;						(* Anfangselement des Arrays *)
+	rechts: UINT;						(* Endelement des Arrays *)
+	pivot: REAL;						(* tempor�rer Schwellwert f�r Tauschbedingung *)
+	i: UINT;							(* Laufvariable1 *)
+	j: UINT;							(* Laufvariable2 *)
+	ende_innen: BOOL;				(* Ende innere Schleife *)
+	ende_aussen: BOOL;				(* Ende �u�ere Schleife *)
+	tmp: REAL;						(* Hilfsvariable zum Tauschen von Werten *)
+END_VAR
+
+(* Startwerte zur Arraygr��e *)
+links := 1;					(* Anfangselement des Arrays *)
+rechts := ((size) / 4);		(* Endelement des Arrays *)
+stack_count := 1;			(* Laufvariable Stack *)
+
+WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
+	IF links < rechts THEN
+		pivot := PT^[((rechts+links) / 2)];			(* Wert des mittleren Elements als Pivot-Wert *)
+		i := links -1;
+		j := rechts +1;
+
+		(* innere Schleife, teile Feld *)
+		ende_innen := FALSE;
+		REPEAT
+
+			(* steigende Reihenfolge *)
+			REPEAT	i := i+1;	UNTIL (PT^[i] >= pivot) OR NOT (i < rechts)	END_REPEAT;
+			REPEAT	j := j-1;	UNTIL (PT^[j] <= pivot) OR NOT (j > links)	END_REPEAT;
+
+
+			(*sinkende Reihenfolge *)
+(*			REPEAT	i := i+1;	UNTIL (PT^[i] <= pivot) OR NOT (i < rechts)	END_REPEAT	*)
+(*			REPEAT	j := j-1;	UNTIL (PT^[j] >= pivot) OR NOT (j > links)	END_REPEAT	*)
+
+			IF i >= j THEN
+				ende_innen := TRUE;
+			ELSE
+				   tmp := PT^[j];
+				PT^[j] := PT^[i];
+				PT^[i] := tmp;
+			END_IF;
+
+		UNTIL ende_innen END_REPEAT;
+
+		(* Push stack *)
+		stack[stack_count] := rechts;		(* rechten Teil sp�ter sortieren *)
+		IF Stack_count < 32 THEN
+			stack_count := stack_count +1;
+		ELSE
+			ende_aussen := TRUE;
+			_ARRAY_SORT := FALSE;					(* Fehler: Stack zu klein *)
+		END_IF;
+
+		(* linken Teil sortiern *)
+		rechts := MAX(links, i-1);
+
+	ELSE
+
+		IF stack_count = 1 THEN
+			ende_aussen := TRUE;
+		ELSE
+
+			links := rechts+1;
+
+			(* pop stack *)
+			stack_count := stack_count -1;		(* jetzt rechten Teil sortierne *)
+			rechts:= stack[stack_count];
+		END_IF;
+
+	END_IF;
+
+END_WHILE;
+
+_ARRAY_SORT := TRUE;				(* Sortierung beendet *)
+
+
+(* algorithm used before rev 2.0
+
+size := SHR(size,2);
+size2 := UINT_TO_INT(SHR(size,1));
+FOR i := SIZE2  TO 1 BY -1 DO
+	j:=i;
+    WHILE j <= SIZE2 DO
+     	stop := j * 2 + 1;
+        IF stop > UINT_TO_INT(SIZE) THEN stop := stop - 1;
+        ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
+		END_IF;
+        IF pt^[j] < pt^[stop] THEN
+         	temp := pt^[j];
+            pt^[j] := pt^[stop];
+            pt^[stop] := temp;
+        END_IF;
+        j := stop;
+    END_WHILE;
+END_FOR;
+
+*)
+
+(* heapsort
+FOR heapsize := UINT_TO_INT(size) TO 1 BY -1 DO
+	popmax := pt^[1];
+	pt^[1] := pt^[heapsize];
+   	i := 1;
+	hs2 := SHR(heapsize,1);
+	WHILE i <= hs2 DO
+       	stop := i * 2 + 1;
+        	IF stop > heapsize THEN stop := stop - 1;
+        	ELSIF pt^[stop-1] > pt^[stop] THEN stop := stop - 1;
+	 	END_IF;
+        	IF pt^[i] < pt^[stop] THEN
+            		temp := pt^[i];
+            		pt^[i] := pt^[stop];
+            		pt^[stop] := temp;
+        	END_IF;
+        	i := stop;
+    	END_WHILE;
+	pt^[heapsize] := popmax;
+END_FOR;
+
+_ARRAY_SORT2 := TRUE;
+*)
+
+(* old algorithm bubble sort used before rev 1.2
+stop := (size - SIZEOF(pt)) / SIZEOF(pt);
+FOR i := 0 TO stop - 1 DO
+	FOR m := i + 1 TO stop DO
+		IF pt^[i] > pt^[m] THEN
+			temp := pt^[i];
+			pt^[i] := pt^[m];
+			pt^[m] := temp;
+		END_IF;
+	END_FOR;
+END_FOR;
+_array_sort := TRUE;
+
+*)
+
+END_FUNCTION
+
+FUNCTION ARRAY_AVG : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
+
+stop := ((size) / 4)-1;
+ARRAY_AVG := pt^[0];
+FOR i := 1 TO stop DO
+	ARRAY_AVG := ARRAY_AVG + pt^[i];
+END_FOR;
+ARRAY_AVG := ARRAY_AVG / UINT_TO_REAL(stop + 1);
+END_FUNCTION
+
+FUNCTION ARRAY_GAV : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
+
+stop := ((size) / 4)-1;
+ARRAY_GAV := 1.0;
+FOR i := 0 TO stop DO
+	IF pt^[i] > 0.0 THEN
+		ARRAY_GAV := ARRAY_GAV * pt^[i];
+	ELSE
+		ARRAY_GAV := 0.0;
+		RETURN;
+	END_IF;
+END_FOR;
+ARRAY_GAV := SQRTN(ARRAY_GAV,UINT_TO_INT(stop)+1);
+END_FUNCTION
+
+FUNCTION ARRAY_HAV : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+END_VAR
+
+stop := ((size) / 4)-1;
+FOR i := 0 TO stop DO
+	IF pt^[i] <> 0.0 THEN
+		ARRAY_HAV := ARRAY_HAV + 1.0 / pt^[i];
+	ELSE
+		ARRAY_HAV := 0.0;
+		RETURN;
+	END_IF;
+END_FOR;
+ARRAY_HAV := UINT_TO_REAL(stop + 1) / ARRAY_HAV;
+END_FUNCTION
+
+// Commented out for beedance: it uses SIZEOF, which beedance does not have yet.
 // FUNCTION ARRAY_MAX : REAL
 // VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	pt : REF_TO ARRAY[0..32000] OF REAL;
 // 	size : UINT;
 // END_VAR
 // VAR
@@ -9337,10 +9325,10 @@ END_FUNCTION_BLOCK
 // END_FOR;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it uses SIZEOF, which beedance does not have yet.
 // FUNCTION ARRAY_MIN : REAL
 // VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	pt : REF_TO ARRAY[0..32000] OF REAL;
 // 	size : UINT;
 // END_VAR
 // VAR
@@ -9355,22 +9343,21 @@ END_FUNCTION_BLOCK
 // END_FOR;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_SDV : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-//
-// (* standard deviation is simply the square root of the variance *)
-//
-// array_sdv := SQRT(array_var(pt, size));
-// END_FUNCTION
+FUNCTION ARRAY_SDV : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+(* standard deviation is simply the square root of the variance *)
+
+array_sdv := SQRT(array_var(pt, size));
+END_FUNCTION
+
+// Commented out for beedance: it uses SIZEOF, which beedance does not have yet.
 // FUNCTION ARRAY_SPR : REAL
 // VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	pt : REF_TO ARRAY[0..32000] OF REAL;
 // 	size : UINT;
 // END_VAR
 // VAR
@@ -9391,10 +9378,10 @@ END_FUNCTION_BLOCK
 // array_spr := array_max - array_min;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it uses SIZEOF, which beedance does not have yet.
 // FUNCTION ARRAY_SUM : REAL
 // VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
+// 	pt : REF_TO ARRAY[0..32000] OF REAL;
 // 	size : UINT;
 // END_VAR
 // VAR
@@ -9409,83 +9396,80 @@ END_FUNCTION_BLOCK
 // END_FOR;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_TREND : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	i: UINT;
-// 	stop: UINT;
-// 	x: REAL;
-// 	stop2: UINT;
-// END_VAR
-//
-// stop := SHR(size,2)-1;
-// stop2 := SHR(stop,1);
-// FOR i := 0 TO stop2 DO x := x - pt^[i]; END_FOR;
-// IF EVEN(UINT_TO_INT(stop)) THEN
-// 	FOR i := stop2 TO stop DO X := X + pt^[i]; END_FOR;
-// ELSE
-// 	FOR i := stop2 + 1 TO stop DO X := X + pt^[i]; END_FOR;
-// END_IF;
-// ARRAY_TREND := x / UINT_TO_REAL(stop2 + 1);
-// END_FUNCTION
+FUNCTION ARRAY_TREND : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	i: UINT;
+	stop: UINT;
+	x: REAL;
+	stop2: UINT;
+END_VAR
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION ARRAY_VAR : REAL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-// 	avg : REAL;
-// 	i: UINT;
-// 	stop: UINT;
-// END_VAR
-//
-// (* at first we calualte the arithmetic average of the array *)
-//
-// stop := SHR(size,2)-1;
-// avg := pt^[0];
-// FOR i := 1 TO stop DO
-// 	avg := avg + pt^[i];
-// END_FOR;
-// avg := avg / UINT_TO_REAL(stop + 1);
-//
-// (* in a second run we calculate the variance of the array *)
-//
-// array_var := (pt^[0] - avg) * (pt^[0] - avg);
-// FOR i := 1 TO stop DO
-// 	array_var := array_var + (pt^[i] - avg) * (pt^[i] - avg);
-// END_FOR;
-// ARRAY_VAR := ARRAY_VAR / UINT_TO_REAL(stop);
-// END_FUNCTION
+stop := ((size) / 4)-1;
+stop2 := ((stop) / 2);
+FOR i := 0 TO stop2 DO x := x - pt^[i]; END_FOR;
+IF EVEN(UINT_TO_INT(stop)) THEN
+	FOR i := stop2 TO stop DO X := X + pt^[i]; END_FOR;
+ELSE
+	FOR i := stop2 + 1 TO stop DO X := X + pt^[i]; END_FOR;
+END_IF;
+ARRAY_TREND := x / UINT_TO_REAL(stop2 + 1);
+END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
-// FUNCTION IS_SORTED : BOOL
-// VAR_INPUT
-// 	pt : POINTER TO ARRAY[0..32000] OF REAL;
-// 	size : UINT;
-// END_VAR
-// VAR
-//
-// 	stop: INT;
-// 	i: INT;
-// END_VAR
-//
-// stop := UINT_TO_INT(SHR(size,2)-2);
-// FOR i := 0 TO stop DO
-// 	IF pt^[i] > pt^[i+1] THEN
-// 		IS_SORTED := FALSE;
-// 		RETURN;
-// 	END_IF;
-// END_FOR;
-//
-// IS_SORTED := TRUE;
-//
-// END_FUNCTION
+FUNCTION ARRAY_VAR : REAL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+	avg : REAL;
+	i: UINT;
+	stop: UINT;
+END_VAR
+
+(* at first we calualte the arithmetic average of the array *)
+
+stop := ((size) / 4)-1;
+avg := pt^[0];
+FOR i := 1 TO stop DO
+	avg := avg + pt^[i];
+END_FOR;
+avg := avg / UINT_TO_REAL(stop + 1);
+
+(* in a second run we calculate the variance of the array *)
+
+array_var := (pt^[0] - avg) * (pt^[0] - avg);
+FOR i := 1 TO stop DO
+	array_var := array_var + (pt^[i] - avg) * (pt^[i] - avg);
+END_FOR;
+ARRAY_VAR := ARRAY_VAR / UINT_TO_REAL(stop);
+END_FUNCTION
+
+FUNCTION IS_SORTED : BOOL
+VAR_INPUT
+	pt : REF_TO ARRAY[0..32000] OF REAL;
+	size : UINT;
+END_VAR
+VAR
+
+	stop: INT;
+	i: INT;
+END_VAR
+
+stop := UINT_TO_INT(((size) / 4)-2);
+FOR i := 0 TO stop DO
+	IF pt^[i] > pt^[i+1] THEN
+		IS_SORTED := FALSE;
+		RETURN;
+	END_IF;
+END_FOR;
+
+IS_SORTED := TRUE;
+
+END_FUNCTION
 
 FUNCTION CABS : REAL
 VAR_INPUT
@@ -11768,7 +11752,7 @@ IF s7 <> X7  AND cnt < 4 THEN
 END_IF;
 END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads the bits of a REAL as a DWORD, or back, through a pointer; a beedance reference (REF_TO) refers to a variable of its own type.
 // FUNCTION_BLOCK ESR_MON_R4
 // VAR_INPUT
 // 	R0, R1, R2, R3 : REAL;
@@ -11785,7 +11769,7 @@ END_FUNCTION_BLOCK
 // 	ESR_Out: ARRAY [0..3] OF esr_data;
 // END_VAR
 // VAR
-// 	p0, p1, p2, p3 : POINTER TO DWORD;
+// 	p0, p1, p2, p3 : REF_TO DWORD;
 // 	x0, x1, x2, x3 : REAL;
 // 	tx: TIME;
 // 	cnt : INT;
@@ -11794,10 +11778,10 @@ END_FUNCTION_BLOCK
 //
 // (* read system timer *)
 // tx := DWORD_TO_TIME(T_PLC_MS());
-// P0 := ADR(R0);
-// P1 := ADR(R1);
-// P2 := ADR(R2);
-// P3 := ADR(R3);
+// P0 := REF(R0);
+// P1 := REF(R1);
+// P2 := REF(R2);
+// P3 := REF(R3);
 //
 // ESR_Flag := FALSE;
 // esr_out[3].typ := 0;
@@ -11980,19 +11964,19 @@ status_to_ESR.data[0] := status;
 
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION BIN_TO_BYTE : BYTE
 // VAR_INPUT
 // 	BIN : STRING(12);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(bin);
+// pt := REF(bin);
 // stop := LEN(bin);
 // FOR I := 1 TO stop DO
 // 	x := pt^;
@@ -12020,19 +12004,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION BIN_TO_DWORD : DWORD
 // VAR_INPUT
 // 	BIN : STRING(40);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(bin);
+// pt := REF(bin);
 // stop := LEN(bin);
 // FOR I := 1 TO stop DO
 // 	x := pt^;
@@ -12060,19 +12044,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION BYTE_TO_STRB : STRING(8)
 // VAR_INPUT
 // 	IN : BYTE;
 // END_VAR
 // VAR
 // 	i: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // END_VAR
 //
 //
 // (* pointer f�r die ausgabe ermitteln *)
-// pt := ADR(BYTE_TO_STRB);
+// pt := REF(BYTE_TO_STRB);
 // (* die 8 ausgabecharacter ermitteln und schreiben *)
 // FOR i := 1 TO 8 DO
 // 	pt^ := BOOL_TO_BYTE(in.7) + 48;
@@ -12092,19 +12076,19 @@ END_FUNCTION
 // *)
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION BYTE_TO_STRH : STRING(2)
 // VAR_INPUT
 // 	IN : BYTE;
 // END_VAR
 // VAR
 // 	temp : BYTE;
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // END_VAR
 //
 //
 // (* read pointer to output string *)
-// PT := ADR(BYTE_TO_STRH);
+// PT := REF(BYTE_TO_STRH);
 // (* calculate high order hex value *)
 // temp := SHR(in,4);
 // (* convert value to hex character *)
@@ -12134,19 +12118,19 @@ END_FUNCTION
 // *)
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION CAPITALIZE : STRING(STRING_LENGTH)
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // 	pos : INT;
 // 	L : INT;
 // 	first : BOOL := TRUE;
 // END_VAR
 //
-// PT := ADR(CAPITALIZE);
+// PT := REF(CAPITALIZE);
 // CAPITALIZE := str;
 // L := LEN(str);
 // FOR pos := 1 TO l DO
@@ -12231,16 +12215,16 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION CHR_TO_STRING : STRING(1)
 // VAR_INPUT
 // 	C : BYTE;
 // END_VAR
 // VAR
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // END_VAR
 //
-// PT := ADR(CHR_TO_STRING);
+// PT := REF(CHR_TO_STRING);
 // PT^ := C;
 // pt := pt + 1;
 // pt^ := 0;
@@ -12272,26 +12256,26 @@ WHILE pos <= stop DO
 END_WHILE;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION CODE : BYTE
 // VAR_INPUT
 // 	STR : STRING(STRING_LENGTH);
 // 	POS : INT;
 // END_VAR
 // VAR
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // END_VAR
 //
 // IF pos < 1 OR pos > LEN(str) THEN
 // 	CODE := 0;
 // 	RETURN;
 // ELSE
-// 	PT := ADR(STR) + INT_TO_DWORD(pos - 1);
+// 	PT := REF(STR) + INT_TO_DWORD(pos - 1);
 // 	CODE := pt^;
 // END_IF;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION COUNT_CHAR : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
@@ -12299,11 +12283,11 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	l: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // l := LEN(str);
 // COUNT_CHAR := 0;
 // FOR pos := 1 TO l DO
@@ -12341,19 +12325,19 @@ END_REPEAT;
 
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION DEC_TO_BYTE : BYTE
 // VAR_INPUT
 // 	DEC : STRING(10);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(dec);
+// pt := REF(dec);
 // stop := LEN(DEC);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -12379,19 +12363,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION DEC_TO_DWORD : DWORD
 // VAR_INPUT
 // 	DEC : STRING(20);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(dec);
+// pt := REF(dec);
 // stop := LEN(dec);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -12415,20 +12399,20 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION DEC_TO_INT : INT
 // VAR_INPUT
 // 	DEC : STRING(10);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	sign: BOOL;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(dec);
+// pt := REF(dec);
 // stop := LEN(dec);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -12587,18 +12571,18 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION DWORD_TO_STRB : STRING(32)
 // VAR_INPUT
 // 	IN : DWORD;
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // END_VAR
 //
 // (* pointer f�r die ausgabe ermitteln *)
-// pt := ADR(DWORD_TO_STRB);
+// pt := REF(DWORD_TO_STRB);
 // (* die 8 ausgabecharacter ermitteln und schreiben *)
 // FOR i := 1 TO 32 DO
 // 	pt^:= BOOL_TO_BYTE(in.31) + 48;
@@ -12626,7 +12610,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION DWORD_TO_STRH : STRING(8)
 // VAR_INPUT
 // 	IN : DWORD;
@@ -12634,12 +12618,12 @@ END_FUNCTION
 // VAR
 // 	i : INT;
 // 	temp : BYTE;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // END_VAR
 //
 //
 // (* read output adress to pointer *)
-// pt := ADR(DWORD_TO_STRH) + 8;
+// pt := REF(DWORD_TO_STRH) + 8;
 // (* wirte the closing byte for the string *)
 // pt^:= 0;
 //
@@ -12771,7 +12755,7 @@ END_FUNCTION
 // *)
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION FIND_CHAR : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
@@ -12779,12 +12763,12 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	i: INT;
-// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	pt : REF_TO ARRAY[1..255] OF BYTE;
 // 	stop: INT;
 // 	X: BYTE;
 // END_VAR
 //
-// pt := ADR(str);
+// pt := REF(str);
 // stop := LEN(str);
 // FOR i := MAX(pos,1) TO stop DO;
 // 	X := pt^[i];
@@ -12798,7 +12782,7 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION FIND_CTRL : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
@@ -12806,12 +12790,12 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	i: INT;
-// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	pt : REF_TO ARRAY[1..255] OF BYTE;
 // 	stop: INT;
 // 	x: BYTE;
 // END_VAR
 //
-// pt := ADR(str);
+// pt := REF(str);
 // stop := LEN(str);
 // FOR i := MAX(pos,1) TO stop DO;
 // 	x := PT^[I];
@@ -12823,7 +12807,7 @@ END_FUNCTION
 // FIND_CTRL := 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION FIND_NONUM : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
@@ -12831,12 +12815,12 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	i: INT;
-// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	pt : REF_TO ARRAY[1..255] OF BYTE;
 // 	end: INT;
 // 	X: BYTE;
 // END_VAR
 //
-// pt := ADR(str);
+// pt := REF(str);
 // end := LEN(str);
 // FOR i := MAX(pos,1) TO end DO;
 // 	X := pt^[i];
@@ -12848,7 +12832,7 @@ END_FUNCTION
 // FIND_NONUM := 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION FIND_NUM : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
@@ -12856,12 +12840,12 @@ END_FUNCTION
 // END_VAR
 // VAR
 // 	i : INT;
-// 	pt : POINTER TO ARRAY[1..255] OF BYTE;
+// 	pt : REF_TO ARRAY[1..255] OF BYTE;
 // 	stop : INT;
 // 	X: BYTE;
 // END_VAR
 //
-// pt := ADR(str);
+// pt := REF(str);
 // stop := LEN(str);
 // FOR i := MAX(pos,1) TO stop DO;
 // 	X := pt^[i];
@@ -12893,17 +12877,17 @@ END_FOR;
 FindB := 0;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION FINDB_NONUM : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	pos: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // END_VAR
 //
-// pt := ADR(str) + LEN(str) - 1;
+// pt := REF(str) + LEN(str) - 1;
 // FOR pos := LEN(str) TO 1 BY -1 DO;
 // 	IF (PT^ < 48 AND PT^ <> 46) OR PT^ > 57 THEN
 // 		FINDB_NONUM := pos;
@@ -12914,17 +12898,17 @@ END_FUNCTION
 // FINDB_NONUM := 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION FINDB_NUM : INT
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	pos: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // END_VAR
 //
-// pt := ADR(str) + LEN(str) - 1;
+// pt := REF(str) + LEN(str) - 1;
 // FOR pos := LEN(str) TO 1 BY -1 DO;
 // 	IF (PT^ > 47 AND PT^ < 58) OR PT^ = 46 THEN
 // 		FINDB_NUM := pos;
@@ -13020,13 +13004,13 @@ END_FUNCTION
 // *)
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION FLOAT_TO_REAL : REAL
 // VAR_INPUT
 // 	FLT : STRING(20);
 // END_VAR
 // VAR
-// 	pt : POINTER TO ARRAY[1..20] OF BYTE;
+// 	pt : REF_TO ARRAY[1..20] OF BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	sign: INT := 1;
@@ -13035,7 +13019,7 @@ END_FUNCTION
 // 	d : INT;
 // END_VAR
 //
-// pt := ADR(FLT);
+// pt := REF(FLT);
 // stop := LEN(FLT);
 //
 // (* we first check for sign and exit if first number or dot is reached *)
@@ -13368,19 +13352,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION HEX_TO_BYTE : BYTE
 // VAR_INPUT
 // 	HEX : STRING(5);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(hex);
+// pt := REF(hex);
 // stop := LEN(hex);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -13410,19 +13394,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION HEX_TO_DWORD : DWORD
 // VAR_INPUT
 // 	Hex : STRING(20);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(hex);
+// pt := REF(hex);
 // stop := LEN(hex);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -13460,18 +13444,18 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_ALNUM : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_ALPHA(pt^) OR ISC_NUM(pt^)) THEN
@@ -13483,18 +13467,18 @@ END_FUNCTION
 // IS_ALNUM := L > 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_ALPHA : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT ISC_ALPHA(pt^) THEN
@@ -13523,18 +13507,18 @@ END_FOR;
 IS_CC := L > 0;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_CTRL : BOOL
 // VAR_INPUT
 // 	STR : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_CTRL(pt^)) THEN
@@ -13546,18 +13530,18 @@ END_FUNCTION
 // IS_CTRL := L > 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_HEX : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_HEX(pt^)) THEN
@@ -13569,18 +13553,18 @@ END_FUNCTION
 // IS_HEX := L > 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_LOWER : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	l: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_LOWER(pt^)) THEN
@@ -13609,18 +13593,18 @@ END_FOR;
 IS_NCC := TRUE;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_NUM : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L : INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_NUM(pt^)) THEN
@@ -13632,18 +13616,18 @@ END_FUNCTION
 // IS_NUM := L > 0;
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION IS_UPPER : BOOL
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L: INT;
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // END_VAR
 //
-// PT := ADR(str);
+// PT := REF(str);
 // L := LEN(str);
 // FOR pos := 1 TO L DO
 // 	IF NOT (ISC_UPPER(pt^)) THEN
@@ -13716,18 +13700,18 @@ ELSE
 END_IF;
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION LOWERCASE : STRING(STRING_LENGTH)
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
-// 	PT : POINTER TO BYTE;
+// 	PT : REF_TO BYTE;
 // 	pos: INT;
 // 	l: INT;
 // END_VAR
 //
-// PT := ADR(LOWERCASE);
+// PT := REF(LOWERCASE);
 // lowercase := str;
 // l := LEN(str);
 // FOR pos := 1 TO l DO
@@ -13846,20 +13830,20 @@ END_IF;
 
 END_FUNCTION_BLOCK
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION MIRROR : STRING(STRING_LENGTH)
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
-// 	pi : POINTER TO ARRAY[1..255] OF BYTE;
-// 	po : POINTER TO BYTE;
+// 	pi : REF_TO ARRAY[1..255] OF BYTE;
+// 	po : REF_TO BYTE;
 // 	lx: INT;
 // 	i: INT;
 // END_VAR
 //
-// pi := ADR(str);
-// po := ADR(mirror);
+// pi := REF(str);
+// po := REF(mirror);
 // lx := LEN(str);
 // FOR i := lx TO 1 BY - 1 DO
 // 	po^ := pi^[i];
@@ -13912,19 +13896,19 @@ hm 16.  jul 2024   rev 1.2
 *)
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION OCT_TO_BYTE : BYTE
 // VAR_INPUT
 // 	OCT : STRING(10);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(oct);
+// pt := REF(oct);
 // stop := LEN(oct);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -13949,19 +13933,19 @@ END_FUNCTION
 //
 // END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION OCT_TO_DWORD : DWORD
 // VAR_INPUT
 // 	OCT : STRING(20);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	i: INT;
 // 	X: BYTE;
 // 	stop: INT;
 // END_VAR
 //
-// pt := ADR(oct);
+// pt := REF(oct);
 // stop := LEN(oct);
 // FOR I := 1 TO stop DO
 // 	(* read the first character and subtract 48 to get value in decimal 0 = 48 *)
@@ -14089,25 +14073,25 @@ END_FOR;
 
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it reads or writes the bytes of a STRING through a pointer; a beedance reference (REF_TO) refers to a whole variable of its type.
 // FUNCTION REPLACE_UML : STRING(STRING_LENGTH)
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
 // 	L : INT;
-// 	pt : POINTER TO BYTE;
-// 	pto : POINTER TO BYTE;
-// 	ptm : POINTER TO BYTE;
-// 	pt1, pt2 : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
+// 	pto : REF_TO BYTE;
+// 	ptm : REF_TO BYTE;
+// 	pt1, pt2 : REF_TO BYTE;
 // 	su : STRING(2);
 // 	pos : INT;
 // END_VAR
 //
-// PT := ADR(str);
-// pto := ADR(REPLACE_UML);
+// PT := REF(str);
+// pto := REF(REPLACE_UML);
 // ptm := pto + INT_TO_DWORD(string_length);
-// pt1 := ADR(su);
+// pt1 := REF(su);
 // pt2 := pt1 + 1;
 // L := LEN(str);
 // WHILE pos < L AND pos < string_length DO
@@ -14308,18 +14292,18 @@ hm	28. mar. 2008	rev 1.0
 *)
 END_FUNCTION
 
-// Commented out for beedance: it uses POINTER TO or ADR, which IEC 61131-3 does not have.
+// Commented out for beedance: it computes with pointers as addresses (pt := pt + 1); beedance references (REF_TO) have no arithmetic.
 // FUNCTION UPPERCASE : STRING(STRING_LENGTH)
 // VAR_INPUT
 // 	str : STRING(STRING_LENGTH);
 // END_VAR
 // VAR
-// 	pt : POINTER TO BYTE;
+// 	pt : REF_TO BYTE;
 // 	pos: INT;
 // 	l: INT;
 // END_VAR
 //
-// pt := ADR(UPPERCASE);
+// pt := REF(UPPERCASE);
 // UPPERCASE := str;
 // l := LEN(str);
 // FOR pos := 1 TO l DO

@@ -77,3 +77,49 @@ func TestOscatLibraryRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestOscatReferenceUnitsRun runs OSCAT units that pass arrays by POINTER TO
+// and ADR, which the library now writes as REF_TO and REF. Through
+// REF_TO ARRAY[0..32000] OF REAL, element 0 is the first element of the
+// array passed, whatever its bounds. A size of 16 is SIZEOF four REALs.
+func TestOscatReferenceUnitsRun(t *testing.T) {
+	library, err := os.ReadFile("../reference/beedance_oscat_basic.st")
+	if err != nil {
+		t.Skipf("OSCAT library not present: %v", err)
+	}
+	object.FinalizeBuiltins()
+	builtins := make([]*object.Builtin, len(object.Builtins))
+	for _, entry := range object.Builtins {
+		builtins[entry.Index] = entry.Builtin
+	}
+	const decls = "VAR a : ARRAY[1..4] OF REAL := [4.0, 1.0, 3.0, 2.0]; b : ARRAY[0..2] OF BYTE := [97, 66, 99]; c : ARRAY[0..2] OF BYTE := [66, 99, 1]; ok : BOOL; END_VAR "
+	for _, check := range []string{
+		"ARRAY_AVG(REF(a), 16) = 2.5",
+		"_ARRAY_MEDIAN(REF(a), 16) = 2.5",
+		"NOT IS_SORTED(REF(a), 16)",
+		"ok := _ARRAY_SORT(REF(a), 16); a[1] = 1.0 AND a[2] = 2.0 AND a[3] = 3.0 AND a[4] = 4.0 AND IS_SORTED(REF(a), 16)",
+		"ok := _ARRAY_SORT(REF(a), 16); ARRAY_TREND(REF(a), 16) = 2.0",
+		"ok := _ARRAY_ADD(REF(a), 16, 1.0); a[1] = 5.0 AND a[4] = 3.0",
+		"BUFFER_COMP(REF(b), 3, REF(c), 2, 0) = 1",
+		"ok := _BUFFER_UPPERCASE(REF(b), 3); b[0] = 65 AND b[1] = 66 AND b[2] = 67",
+	} {
+		p := parser.New(lexer.New(string(library) + "\n" + decls + check + ";"))
+		program := p.ParseProgram()
+		if len(p.Errors()) > 0 {
+			t.Fatalf("%s: %v", check, p.Errors()[0])
+		}
+		comp := compiler.NewCompilerWithBuiltins(object.Builtins)
+		if err := comp.Compile(program); err != nil {
+			t.Errorf("%s: compiler error: %v", check, err)
+			continue
+		}
+		machine := NewWithBuiltins(comp.Bytecode(), builtins)
+		if err := machine.Run(); err != nil {
+			t.Errorf("%s: %v", check, err)
+			continue
+		}
+		if got, ok := machine.LastPoppedStackElem().(*object.Boolean); !ok || !got.Value {
+			t.Errorf("%s: got %s", check, machine.LastPoppedStackElem().Inspect())
+		}
+	}
+}
