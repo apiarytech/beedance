@@ -42,6 +42,19 @@ func ExportSource(source, projectName string) (*Project, error) {
 	return export(program, projectName, sourceBodies(source))
 }
 
+// ExportSourceKeeping is ExportSource for source that came from the project
+// from, such as an imported project after an edit: the export keeps from's
+// additional data, so that another tool's own data survives the round trip
+// (see KeepAddData).
+func ExportSourceKeeping(source, projectName string, from *Project) (*Project, error) {
+	proj, err := ExportSource(source, projectName)
+	if err != nil {
+		return nil, err
+	}
+	KeepAddData(from, proj)
+	return proj, nil
+}
+
 // export builds the project. bodies holds the source text of each POU's
 // body by the byte offset of its keyword, or is nil.
 func export(program *ast.Program, projectName string, bodies map[int]string) (*Project, error) {
@@ -142,6 +155,7 @@ func export(program *ast.Program, projectName string, bodies map[int]string) (*P
 		}
 	}
 
+	declareBeedanceData(proj)
 	return proj, nil
 }
 
@@ -185,6 +199,7 @@ func dataTypeDecl(decl *ast.TypeDeclaration) DataTypeDecl {
 		Name:         decl.Name.Value,
 		BaseType:     baseType,
 		InitialValue: valueFromAST(decl.InitialValue),
+		AddData:      stTypeData(decl.DataType),
 	}
 }
 
@@ -325,8 +340,9 @@ func toVarLists(decls []*ast.VarDeclStatement) []VarList {
 	var lists []VarList
 	for _, d := range decls {
 		v := Variable{
-			Name: d.Name.Value,
-			Type: DataTypeFromAST(d.DataType),
+			Name:    d.Name.Value,
+			Type:    DataTypeFromAST(d.DataType),
+			AddData: stTypeData(d.DataType),
 		}
 		if d.Location != nil && d.Location.Location != nil {
 			v.Address = d.Location.Location.String()

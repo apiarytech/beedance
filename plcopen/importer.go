@@ -51,7 +51,7 @@ func ImportToIECText(xmlData []byte) (string, error) {
 			if s := dt.InitialValue.String(); s != "" {
 				initVal = " := " + s
 			}
-			fmt.Fprintf(&buf, "\t%s : %s%s;\n", dt.Name, dt.BaseType.String(), initVal)
+			fmt.Fprintf(&buf, "\t%s : %s%s;\n", dt.Name, typeText(dt.BaseType, dt.AddData), initVal)
 		}
 		buf.WriteString("END_TYPE\n\n")
 	}
@@ -209,7 +209,7 @@ func writeVarLists(buf *bytes.Buffer, sectionName string, lists []VarList) {
 			if s := v.InitialValue.String(); s != "" {
 				initVal = " := " + s
 			}
-			fmt.Fprintf(buf, "\t\t%s%s : %s%s;\n", v.Name, loc, v.Type.String(), initVal)
+			fmt.Fprintf(buf, "\t\t%s%s : %s%s;\n", v.Name, loc, typeText(v.Type, v.AddData), initVal)
 		}
 		buf.WriteString("\tEND_VAR\n\n")
 	}

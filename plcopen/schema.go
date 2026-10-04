@@ -21,12 +21,14 @@ import (
 
 // Project is the root element defined by http://www.plcopen.org/xml/tc6_0201.
 type Project struct {
-	XMLName       xml.Name      `xml:"http://www.plcopen.org/xml/tc6_0201 project"`
-	XmlnsXhtml    string        `xml:"xmlns:xhtml,attr,omitempty"`
-	FileHeader    FileHeader    `xml:"fileHeader"`
-	ContentHeader ContentHeader `xml:"contentHeader"`
-	Types         Types         `xml:"types"`
-	Instances     Instances     `xml:"instances"`
+	XMLName       xml.Name       `xml:"http://www.plcopen.org/xml/tc6_0201 project"`
+	XmlnsXhtml    string         `xml:"xmlns:xhtml,attr,omitempty"`
+	FileHeader    FileHeader     `xml:"fileHeader"`
+	ContentHeader ContentHeader  `xml:"contentHeader"`
+	Types         Types          `xml:"types"`
+	Instances     Instances      `xml:"instances"`
+	AddData       *AddData       `xml:"addData,omitempty"`
+	Doc           *FormattedText `xml:"documentation,omitempty"`
 }
 
 type FileHeader struct {
@@ -48,6 +50,8 @@ type ContentHeader struct {
 	Language             string          `xml:"language,attr,omitempty"`
 	Comment              string          `xml:"Comment,omitempty"`
 	CoordinateInfo       *CoordinateInfo `xml:"coordinateInfo,omitempty"`
+	AddDataInfo          *AddDataInfo    `xml:"addDataInfo,omitempty"`
+	AddData              *AddData        `xml:"addData,omitempty"`
 }
 
 type CoordinateInfo struct {
@@ -80,6 +84,7 @@ type DataTypeDecl struct {
 	Name         string         `xml:"name,attr"`
 	BaseType     DataType       `xml:"baseType"`
 	InitialValue *Value         `xml:"initialValue,omitempty"`
+	AddData      *AddData       `xml:"addData,omitempty"`
 	Doc          *FormattedText `xml:"documentation,omitempty"`
 }
 
@@ -93,29 +98,34 @@ type POU struct {
 	GlobalID  string         `xml:"globalId,attr,omitempty"`
 	Interface *POUInterface  `xml:"interface,omitempty"`
 	Body      POUBody        `xml:"body"`
+	AddData   *AddData       `xml:"addData,omitempty"`
 	Doc       *FormattedText `xml:"documentation,omitempty"`
 }
 
 type POUInterface struct {
-	ReturnType   *DataType `xml:"returnType,omitempty"`
-	InputVars    []VarList `xml:"inputVars,omitempty"`
-	OutputVars   []VarList `xml:"outputVars,omitempty"`
-	InOutVars    []VarList `xml:"inOutVars,omitempty"`
-	LocalVars    []VarList `xml:"localVars,omitempty"`
-	TempVars     []VarList `xml:"tempVars,omitempty"`
-	ExternalVars []VarList `xml:"externalVars,omitempty"`
-	GlobalVars   []VarList `xml:"globalVars,omitempty"`
-	AccessVars   []VarList `xml:"accessVars,omitempty"`
+	ReturnType   *DataType      `xml:"returnType,omitempty"`
+	InputVars    []VarList      `xml:"inputVars,omitempty"`
+	OutputVars   []VarList      `xml:"outputVars,omitempty"`
+	InOutVars    []VarList      `xml:"inOutVars,omitempty"`
+	LocalVars    []VarList      `xml:"localVars,omitempty"`
+	TempVars     []VarList      `xml:"tempVars,omitempty"`
+	ExternalVars []VarList      `xml:"externalVars,omitempty"`
+	GlobalVars   []VarList      `xml:"globalVars,omitempty"`
+	AccessVars   []VarList      `xml:"accessVars,omitempty"`
+	AddData      *AddData       `xml:"addData,omitempty"`
+	Doc          *FormattedText `xml:"documentation,omitempty"`
 }
 
 type VarList struct {
-	Name          string     `xml:"name,attr,omitempty"`
-	Constant      bool       `xml:"constant,attr,omitempty"`
-	Retain        bool       `xml:"retain,attr,omitempty"`
-	NonRetain     bool       `xml:"nonretain,attr,omitempty"`
-	Persistent    bool       `xml:"persistent,attr,omitempty"`
-	NonPersistent bool       `xml:"nonpersistent,attr,omitempty"`
-	Variables     []Variable `xml:"variable,omitempty"`
+	Name          string         `xml:"name,attr,omitempty"`
+	Constant      bool           `xml:"constant,attr,omitempty"`
+	Retain        bool           `xml:"retain,attr,omitempty"`
+	NonRetain     bool           `xml:"nonretain,attr,omitempty"`
+	Persistent    bool           `xml:"persistent,attr,omitempty"`
+	NonPersistent bool           `xml:"nonpersistent,attr,omitempty"`
+	Variables     []Variable     `xml:"variable,omitempty"`
+	AddData       *AddData       `xml:"addData,omitempty"`
+	Doc           *FormattedText `xml:"documentation,omitempty"`
 }
 
 type Variable struct {
@@ -124,6 +134,7 @@ type Variable struct {
 	GlobalID     string         `xml:"globalId,attr,omitempty"`
 	Type         DataType       `xml:"type"`
 	InitialValue *Value         `xml:"initialValue,omitempty"`
+	AddData      *AddData       `xml:"addData,omitempty"`
 	Doc          *FormattedText `xml:"documentation,omitempty"`
 }
 
@@ -245,9 +256,11 @@ type POUBody struct {
 	ST *FormattedText `xml:"ST,omitempty"`
 	IL *FormattedText `xml:"IL,omitempty"`
 	// Graphical bodies are kept as they are; beedance cannot import them.
-	FBD *RawXML `xml:"FBD,omitempty"`
-	LD  *RawXML `xml:"LD,omitempty"`
-	SFC *RawXML `xml:"SFC,omitempty"`
+	FBD     *RawXML        `xml:"FBD,omitempty"`
+	LD      *RawXML        `xml:"LD,omitempty"`
+	SFC     *RawXML        `xml:"SFC,omitempty"`
+	AddData *AddData       `xml:"addData,omitempty"`
+	Doc     *FormattedText `xml:"documentation,omitempty"`
 }
 
 // RawXML holds an element's content unparsed.
@@ -268,24 +281,30 @@ type Configurations struct {
 }
 
 type Configuration struct {
-	Name       string     `xml:"name,attr"`
-	Resources  []Resource `xml:"resource,omitempty"`
-	GlobalVars []VarList  `xml:"globalVars,omitempty"`
+	Name       string         `xml:"name,attr"`
+	Resources  []Resource     `xml:"resource,omitempty"`
+	GlobalVars []VarList      `xml:"globalVars,omitempty"`
+	AddData    *AddData       `xml:"addData,omitempty"`
+	Doc        *FormattedText `xml:"documentation,omitempty"`
 }
 
 type Resource struct {
-	Name         string        `xml:"name,attr"`
-	Tasks        []Task        `xml:"task,omitempty"`
-	GlobalVars   []VarList     `xml:"globalVars,omitempty"`
-	PouInstances []POUInstance `xml:"pouInstance,omitempty"`
+	Name         string         `xml:"name,attr"`
+	Tasks        []Task         `xml:"task,omitempty"`
+	GlobalVars   []VarList      `xml:"globalVars,omitempty"`
+	PouInstances []POUInstance  `xml:"pouInstance,omitempty"`
+	AddData      *AddData       `xml:"addData,omitempty"`
+	Doc          *FormattedText `xml:"documentation,omitempty"`
 }
 
 type Task struct {
-	Name         string        `xml:"name,attr"`
-	Priority     int           `xml:"priority,attr"`
-	Interval     string        `xml:"interval,attr,omitempty"`
-	Single       string        `xml:"single,attr,omitempty"`
-	PouInstances []POUInstance `xml:"pouInstance,omitempty"`
+	Name         string         `xml:"name,attr"`
+	Priority     int            `xml:"priority,attr"`
+	Interval     string         `xml:"interval,attr,omitempty"`
+	Single       string         `xml:"single,attr,omitempty"`
+	PouInstances []POUInstance  `xml:"pouInstance,omitempty"`
+	AddData      *AddData       `xml:"addData,omitempty"`
+	Doc          *FormattedText `xml:"documentation,omitempty"`
 }
 
 type POUInstance struct {
@@ -364,11 +383,12 @@ func (dt DataType) String() string {
 	case dt.Struct != nil:
 		var members []string
 		for _, v := range dt.Struct.Variables {
-			members = append(members, fmt.Sprintf("\t\t%s : %s;", v.Name, v.Type.String()))
+			members = append(members, fmt.Sprintf("\t\t%s : %s;", v.Name, typeText(v.Type, v.AddData)))
 		}
 		return "STRUCT\n" + strings.Join(members, "\n") + "\n\tEND_STRUCT"
+	// TC6 <pointer> is a pointer, as CODESYS writes POINTER TO; see references.go.
 	case dt.Pointer != nil && dt.Pointer.BaseType != nil:
-		return "REFERENCE TO " + dt.Pointer.BaseType.String()
+		return "POINTER TO " + dt.Pointer.BaseType.String()
 	case dt.SubrangeSigned != nil:
 		base := "INT"
 		if dt.SubrangeSigned.BaseType != nil {
@@ -458,6 +478,10 @@ func DataTypeFromAST(expr ast.Expression) DataType {
 			return DataType{WSTRING: length}
 		}
 		return dataTypeFromName(expr.String())
+	// REF_TO, POINTER TO and REFERENCE TO are all TC6 <pointer>; see references.go.
+	case *ast.RefToType:
+		base := DataTypeFromAST(e.BaseType)
+		return DataType{Pointer: &PointerType{BaseType: &base}}
 	case *ast.ReferenceType:
 		base := DataTypeFromAST(e.BaseType)
 		return DataType{Pointer: &PointerType{BaseType: &base}}
@@ -492,8 +516,9 @@ func DataTypeFromAST(expr ast.Expression) DataType {
 		var vars []Variable
 		for _, m := range e.Members {
 			vars = append(vars, Variable{
-				Name: m.Name.Value,
-				Type: DataTypeFromAST(m.DataType),
+				Name:    m.Name.Value,
+				Type:    DataTypeFromAST(m.DataType),
+				AddData: stTypeData(m.DataType),
 			})
 		}
 		return DataType{
