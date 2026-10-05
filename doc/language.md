@@ -13,6 +13,73 @@
   `TRANSITION`, action blocks with the qualifiers `N`, `S`, `R`, `P`, and
   the timed `D`, `L`, `SD`, `DS`, `SL`; simultaneous divergence and
   convergence.
+- **Ladder Diagram (LD)** and **Function Block Diagram (FBD)**, in
+  beedance's text form below or as graphical PLCopen XML
+  ([PLCopen XML](plcopen.md)). Both are lowered to ST statements by
+  package `diagram`, so they run alike in the evaluator, the VM and the
+  transpiler.
+
+## Ladder Diagram and Function Block Diagram as text
+
+A POU's body may be written between `LD` and `END_LD`, or `FBD` and
+`END_FBD`, after its declarations. The text keeps no layout: an editor
+computes it. Comments (`(* *)` and `//`) may stand anywhere.
+
+```
+FUNCTION_BLOCK Motor
+VAR_INPUT Start, Stop : BOOL; END_VAR
+VAR_OUTPUT Run, Done : BOOL; Starts : INT; END_VAR
+LD
+  RUNG sealin (* start, hold, stop *)
+    [ Start | Run ] /Stop ( Run )
+  RUNG delay
+    Run t1:TON(PT := T#5S) ( Done )
+  RUNG count
+    +Run cu:CTU(PV := 100, CV => Starts)
+END_LD
+END_FUNCTION_BLOCK
+```
+
+A rung is `RUNG` and an optional name, then its elements left to right,
+coils last:
+
+| Element | Text | Meaning |
+|---|---|---|
+| Contact | `A`, `/A` | `A`, `NOT A` in series (AND) |
+| Edge contact | `+A`, `-A` | a rising, falling edge of `A` (an `R_TRIG`, `F_TRIG` declared for it) |
+| Branch | `[ a b \| c ]` | the OR of its legs; legs are series, and branches nest |
+| Function contact | `EQ(Mode, 2)`, `/GT(Temp, 80.0)` | the function's BOOL result; `(` directly after the name |
+| Block | `t1:TON(PT := T#5S, ET => Elapsed)` | a function block call: the rung drives its power input and continues from its power output (`IN`/`Q` for timers, `CU`/`Q`, `CD`/`Q`, `CU`/`QU` for counters, `CLK`/`Q`, `S1`/`Q1`, `S`/`Q1`; `EN`/`ENO` for any other block); other inputs by name, outputs bound with `=>` |
+| Coil | `( X )`, `( /X )` | `X :=` the rung, or its negation |
+| Set, reset coil | `( S X )`, `( R X )` | latch, unlatch |
+| Edge coil | `( P X )`, `( N X )` | `X` TRUE for one call on a rising, falling rung |
+
+A rung ends in a coil or a block. Rungs run top to bottom.
+
+```
+FUNCTION_BLOCK Level
+VAR_INPUT L, SP : REAL; END_VAR
+VAR_OUTPUT High : BOOL; Speed : REAL; END_VAR
+FBD
+  above = GE(L, SP)                     // a wire, named
+  hold : TON(IN := above, PT := T#3S)   // an instance, declared and called
+  High := OR(hold.Q, AND(High, NOT(LT(L, SUB(SP, 5.0)))))
+  Speed := SEL(High, MUL(L, 0.5), 0.0)
+END_FBD
+END_FUNCTION_BLOCK
+```
+
+An FBD statement, one per line (or ended by `;`), is a variable written
+(`X := value`), a wire named (`w = value`) or a function block called
+(`inst : TYPE(...)`, which declares `inst` if the POU does not, or
+`inst(...)`). A value is a variable, a literal, a wire, `NOT value`, a
+function with positional inputs (`ADD(a, b, c)`; `EN := x` may come
+first), or an instance's output (`inst.Q`). Statements run in their order,
+except that a block runs before the statements reading its outputs.
+
+Package `diagram` also draws a body, from either form, as SVG
+(`diagram.SVG`): a layout computed from its wires, with rungs, contacts,
+coils and blocks as IEC 61131-3 draws them. Editors use it for previews.
 
 ## Program organization units
 
@@ -96,7 +163,8 @@ A macro variable has no runtime value: hosts do not see it as a variable.
 
 ## Not supported yet
 
-- The graphical languages: Ladder Diagram and Function Block Diagram, and
-  SFC in its graphical PLCopen form. The PLCopen importer refuses POUs with
-  graphical bodies (see [PLCopen XML](plcopen.md)).
+- SFC in its graphical PLCopen form; jumps, labels and returns in LD and
+  FBD (see [PLCopen XML](plcopen.md)).
+- `T`, `D`, `DT` and `TOD` are keywords (the short names of the time
+  types), so a variable may not have one of these names.
 - A binary file format for compiled bytecode.

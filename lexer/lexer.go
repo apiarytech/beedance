@@ -41,6 +41,20 @@ func (l *Lexer) Prepend(s string) {
 	l.input = s + l.input[l.position:]
 }
 
+// Input returns the text being read; a token's Pos is an offset into it.
+func (l *Lexer) Input() string { return l.input }
+
+// Seek moves the lexer to offset pos of its input, as if it had read
+// everything before it: the parser hands a diagram body (LD ... END_LD) to
+// its own reader and continues after it.
+func (l *Lexer) Seek(pos int) {
+	l.position, l.readPos, l.line, l.col = 0, 0, 1, 0
+	l.readChar()
+	for l.position < pos && l.readPos <= len(l.input) {
+		l.readChar()
+	}
+}
+
 // NextToken reads the input string and returns the next token it finds. It is the
 // central function of the lexer, responsible for tokenizing the source code.
 func (l *Lexer) NextToken() token.Token {

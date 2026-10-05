@@ -100,10 +100,8 @@ func (e AddDataEntry) MarshalXML(enc *xml.Encoder, start xml.StartElement) error
 	if err := enc.EncodeToken(start); err != nil {
 		return err
 	}
-	for _, tok := range e.Content {
-		if err := enc.EncodeToken(tok); err != nil {
-			return err
-		}
+	if err := e.encodeContent(enc); err != nil {
+		return err
 	}
 	return enc.EncodeToken(start.End())
 }
@@ -121,10 +119,8 @@ func (e AddDataEntry) handleUnknown() string {
 func (e AddDataEntry) Decode(v any) error {
 	var buf bytes.Buffer
 	enc := xml.NewEncoder(&buf)
-	for _, tok := range e.Content {
-		if err := enc.EncodeToken(tok); err != nil {
-			return err
-		}
+	if err := e.encodeContent(enc); err != nil {
+		return err
 	}
 	if err := enc.Flush(); err != nil {
 		return err
@@ -352,4 +348,27 @@ func keptInfo(from, to *AddDataInfo) *AddDataInfo {
 		}
 	}
 	return out
+}
+
+// encodeContent writes the entry's content without the namespace
+// declarations it was read with: its names carry their namespaces, which
+// the encoder declares again, and a second xmlns attribute on an element
+// is not well-formed XML.
+func (e AddDataEntry) encodeContent(enc *xml.Encoder) error {
+	for _, tok := range e.Content {
+		if s, ok := tok.(xml.StartElement); ok {
+			attrs := make([]xml.Attr, 0, len(s.Attr))
+			for _, a := range s.Attr {
+				if a.Name.Space != "xmlns" && !(a.Name.Space == "" && a.Name.Local == "xmlns") {
+					attrs = append(attrs, a)
+				}
+			}
+			s.Attr = attrs
+			tok = s
+		}
+		if err := enc.EncodeToken(tok); err != nil {
+			return err
+		}
+	}
+	return nil
 }

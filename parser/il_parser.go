@@ -25,7 +25,14 @@ func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatemen
 	body.Statements = []ast.Statement{}
 
 	// Loop until we hit the end of the block (e.g., END_FUNCTION_BLOCK) or EOF.
-	for !p.curTokenIs(endToken) && !p.curTokenIs(token.EOF) {
+	for {
+		// Comments may stand on their own lines between instructions.
+		for p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+		}
+		if p.curTokenIs(endToken) || p.curTokenIs(token.EOF) {
+			break
+		}
 		stmt := p.parseIlInstruction()
 		if stmt != nil {
 			body.Statements = append(body.Statements, stmt)
@@ -35,6 +42,7 @@ func (p *Parser) parseIlProgramBody(endToken token.TokenType) *ast.BlockStatemen
 		// or implicitly ended by the newline. We advance to the next token to start
 		// parsing the next instruction. If a semicolon is present, it will be consumed.
 		// If not, we move to the next token on the new line.
+		p.skipPeekComments()
 		if p.peekTokenIs(token.SEMICOLON) {
 			p.nextToken()
 		}
@@ -57,6 +65,9 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 		stmt.Label = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken() // consume the identifier
 		p.nextToken() // consume the ':'
+		for p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+		}
 	}
 
 	// 2. Parse the operator (e.g., LD, ST, ADD) and its modifiers.
@@ -71,6 +82,7 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	baseOp, modifier := p.extractIlModifiers(operatorStr)
 	stmt.Operator = baseOp
 	stmt.Modifier = modifier
+	p.skipPeekComments() // a comment may stand between operator and operand
 
 	// 3. Check for the '(' modifier, which defers the operation and takes precedence.
 	if p.peekTokenIs(token.LPAREN) {
@@ -186,3 +198,35 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
     ...
 }
 */
+
+// skipPeekComments drops comment tokens from the lookahead, so the next
+// token seen is the first one that is not a comment. IL keeps no comments.
+func (p *Parser) skipPeekComments() {
+	for p.peekTokenIs(token.COMMENT) {
+		p.peekToken = p.peek2Token
+		p.peek2Token = p.l.NextToken()
+	}
+}
+
+// ilBodyFollows reports whether a POU body starting here is IL: it starts
+// with an IL instruction or a label, after any comments. When it is IL the
+// comments are consumed; otherwise the parser is left as it was, so an ST
+// body keeps its first statement's leading comments.
+func (p *Parser) ilBodyFollows() bool {
+	startsIL := func() bool {
+		return p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON))
+	}
+	if !p.curTokenIs(token.COMMENT) {
+		return startsIL()
+	}
+	cur, peek, peek2, lex, errs := p.curToken, p.peekToken, p.peek2Token, *p.l, len(p.errors)
+	for p.curTokenIs(token.COMMENT) {
+		p.nextToken()
+	}
+	if startsIL() {
+		return true
+	}
+	p.curToken, p.peekToken, p.peek2Token, *p.l = cur, peek, peek2, lex
+	p.errors = p.errors[:errs]
+	return false
+}

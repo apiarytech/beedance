@@ -28,7 +28,7 @@ func evalTON(instanceEnv, callEnv *object.Environment) object.Object {
 			startTime = t.Value
 		}
 	}
-	timerActive := timerActiveObj == TRUE
+	timerActive := isBoolTrue(timerActiveObj)
 
 	var et time.Duration
 	q := FALSE
@@ -131,8 +131,8 @@ func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
 			startTime = t.Value
 		}
 	}
-	pulseActive := pulseActiveObj == TRUE
-	lastINBool := lastIN == TRUE
+	pulseActive := isBoolTrue(pulseActiveObj)
+	lastINBool := isBoolTrue(lastIN)
 
 	var et time.Duration
 	q := FALSE
@@ -182,7 +182,7 @@ func evalCTU(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("CTU requires CU (BOOL), R (BOOL), and PV (any INT type) inputs")
 	}
 
-	lastCUBool := lastCU == TRUE
+	lastCUBool := isBoolTrue(lastCU)
 	var cv int64
 	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
@@ -220,7 +220,7 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("CTD requires a PV (Preset Value) input of an integer type")
 	}
 
-	lastCDBool := lastCD == TRUE
+	lastCDBool := isBoolTrue(lastCD)
 	var cv int64
 	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
@@ -263,8 +263,8 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("CTUD requires CU, CD, R, LD (BOOL) and PV (INT) inputs")
 	}
 
-	lastCUBool := lastCU == TRUE
-	lastCDBool := lastCD == TRUE
+	lastCUBool := isBoolTrue(lastCU)
+	lastCDBool := isBoolTrue(lastCD)
 	var cv int64
 	if cvInt, ok := cvObj.(*object.LInt); ok {
 		cv = cvInt.Value
@@ -309,7 +309,7 @@ func evalR_TRIG(instanceEnv, callEnv *object.Environment) object.Object {
 		return FALSE
 	}
 
-	edgeMem := edgeMemObj == TRUE
+	edgeMem := isBoolTrue(edgeMemObj)
 	q := nativeBoolToBooleanObject(clk.Value && !edgeMem)
 
 	instanceEnv.Set("__edge_mem", clk)
@@ -330,7 +330,7 @@ func evalF_TRIG(instanceEnv, callEnv *object.Environment) object.Object {
 		return FALSE
 	}
 
-	edgeMem := edgeMemObj == TRUE
+	edgeMem := isBoolTrue(edgeMemObj)
 	q := nativeBoolToBooleanObject(!clk.Value && edgeMem)
 
 	instanceEnv.Set("__edge_mem", clk)
@@ -351,7 +351,7 @@ func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("SR requires S1 (BOOL) and R (BOOL) inputs")
 	}
 
-	q1 := q1Obj == TRUE
+	q1 := isBoolTrue(q1Obj)
 
 	if rBool.Value {
 		q1 = false
@@ -377,7 +377,7 @@ func evalRS(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("RS requires S (BOOL) and R1 (BOOL) inputs")
 	}
 
-	q1 := q1Obj == TRUE
+	q1 := isBoolTrue(q1Obj)
 
 	if sBool.Value {
 		q1 = true

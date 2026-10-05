@@ -216,3 +216,41 @@ func TestAddDataGetSet(t *testing.T) {
 		t.Errorf("handleUnknown defaults to implementation, as TC6 requires one: %s %v", data, err)
 	}
 }
+
+// Content written back declares each namespace once per element: the
+// declarations it was read with are not repeated beside the encoder's own.
+func TestAddDataDeclaresNamespaceOnce(t *testing.T) {
+	a, err := (*AddData)(nil).Set("http://example.com/hmi", HandlePreserve, hmiTag{Unit: "bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := Import([]byte(toolProject))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entries := range []*AddData{a, read.ContentHeader.AddData, read.Types.DataTypes.DataTypes[0].AddData} {
+		data, err := xml.Marshal(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := xml.NewDecoder(strings.NewReader(string(data)))
+		d.RawToken() // keeps attributes as written
+		for {
+			tok, err := d.RawToken()
+			if err != nil {
+				break
+			}
+			s, ok := tok.(xml.StartElement)
+			if !ok {
+				continue
+			}
+			seen := map[xml.Name]bool{}
+			for _, at := range s.Attr {
+				if seen[at.Name] {
+					t.Errorf("%s has attribute %s:%s twice: %s", s.Name.Local, at.Name.Space, at.Name.Local, data)
+				}
+				seen[at.Name] = true
+			}
+		}
+	}
+}

@@ -255,7 +255,8 @@ type StructMemberValue struct {
 type POUBody struct {
 	ST *FormattedText `xml:"ST,omitempty"`
 	IL *FormattedText `xml:"IL,omitempty"`
-	// Graphical bodies are kept as they are; beedance cannot import them.
+	// Graphical bodies are kept as they are, so an export writes them back;
+	// FBD and LD are lowered to ST on import (graphical.go).
 	FBD     *RawXML        `xml:"FBD,omitempty"`
 	LD      *RawXML        `xml:"LD,omitempty"`
 	SFC     *RawXML        `xml:"SFC,omitempty"`

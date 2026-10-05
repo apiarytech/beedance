@@ -93,8 +93,30 @@ func ImportToIECText(xmlData []byte) (string, error) {
 			body = pou.Body.ST
 		case pou.Body.IL != nil:
 			body = pou.Body.IL
-		case pou.Body.FBD != nil, pou.Body.LD != nil, pou.Body.SFC != nil:
-			return "", fmt.Errorf("pou '%s': graphical bodies (FBD, LD, SFC) cannot be converted to text", pou.Name)
+		case pou.Body.FBD != nil, pou.Body.LD != nil:
+			// Graphical FBD and LD are lowered to ST statements (graphical.go).
+			raw := pou.Body.FBD
+			if raw == nil {
+				raw = pou.Body.LD
+			}
+			low, err := LowerGraphical(pou.Name, raw.Inner, projectFunctionBlocks(proj), declaredNames(pou))
+			if err != nil {
+				return "", err
+			}
+			if len(low.Decls) > 0 {
+				buf.WriteString("\tVAR\n")
+				for _, d := range low.Decls {
+					buf.WriteString("\t\t" + d + "\n")
+				}
+				buf.WriteString("\tEND_VAR\n\n")
+			}
+			for _, line := range strings.Split(strings.TrimRight(low.Body, "\n"), "\n") {
+				if line != "" {
+					buf.WriteString("\t" + line + "\n")
+				}
+			}
+		case pou.Body.SFC != nil:
+			return "", fmt.Errorf("pou '%s': graphical SFC bodies cannot be converted to text yet", pou.Name)
 		}
 		if body != nil {
 			text, err := FormattedTextContent(body.Text)

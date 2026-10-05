@@ -25,8 +25,26 @@ project, err := plcopen.Import(xmlData)         // the XML structure
 text, err := plcopen.ConvertXMLToIECText("project.xml")
 ```
 
-POUs with **graphical bodies** (FBD, LD, or SFC in its graphical form)
-cannot be converted to text, and the import fails naming the POU.
+POUs with **FBD or LD bodies** are lowered to ST statements
+(`LowerGraphical`), as Beremiz does:
+
+- a function block becomes a call, its outputs read as `inst.OUT`; an
+  unnamed standard block (`R_TRIG`, `TON`, ...) gets a generated instance;
+- a function becomes an operator (`ADD` → `+`, `GT` → `>`) or a call;
+- an output variable, in/out variable or coil becomes an assignment;
+- contacts in series are `AND`, wires joining at one input are `OR`,
+  negation is `NOT(...)`, set/reset coils become `IF`, rising and falling
+  edges use generated `R_TRIG`/`F_TRIG` instances;
+- a block with `EN` wired runs only when it is TRUE; its outputs (and a
+  function's result) are assigned under `IF`, and `ENO` can be wired on.
+
+Statements run in `executionOrderId` order when every element has one;
+otherwise networks run top to bottom, each in dataflow order (a loop is
+cut at its topmost statement, with a warning).
+
+Not converted yet, and the import fails naming the POU: jumps, labels and
+returns; graphical SFC; a function with `EN` whose result feeds a block
+under a different enable.
 
 ## Validation
 

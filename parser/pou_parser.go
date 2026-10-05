@@ -127,7 +127,9 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 
 	// After var blocks, we have the body
-	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
+	if lang := p.diagramBody(); lang != "" {
+		stmt.Body = p.parseDiagramBody(lang, stmt.Name, &stmt.Vars, declaredNames(stmt.Name, stmt.VarInputs, stmt.VarOutputs, stmt.VarInOuts, stmt.Vars))
+	} else if p.ilBodyFollows() {
 		stmt.Body = p.parseIlProgramBody(token.END_FUNCTION)
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_FUNCTION)
@@ -206,7 +208,9 @@ var_loop:
 	}
 	// After var blocks, we have the body. Check if it's IL or ST.
 	// A simple heuristic: if it starts with an IL operator, parse as IL.
-	if p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
+	if lang := p.diagramBody(); lang != "" {
+		stmt.Body = p.parseDiagramBody(lang, stmt.Name, &stmt.Vars, declaredNames(stmt.Name, stmt.VarInputs, stmt.VarOutputs, stmt.VarInOuts, stmt.Vars, externalVars(stmt.VarExternal), tempVars(stmt.VarTemp)))
+	} else if p.ilBodyFollows() {
 		stmt.Body = p.parseIlProgramBody(token.END_PROGRAM)
 	} else if p.isSFC() {
 		stmt.Body = p.parseSFCProgram(token.END_PROGRAM)

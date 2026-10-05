@@ -174,9 +174,11 @@ var_loop:
 	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
 		// If methods were parsed, the main body can only be ST statements.
 		// If no methods were parsed, we detect the language of the body.
-		if len(body.Statements) == 0 && p.isSFC() {
+		if lang := p.diagramBody(); len(body.Statements) == 0 && lang != "" {
+			stmt.Body = p.parseDiagramBody(lang, stmt.Name, &stmt.Vars, declaredNames(stmt.Name, stmt.VarInputs, stmt.VarOutputs, stmt.VarInOuts, stmt.Vars, externalVars(stmt.VarExternal), tempVars(stmt.VarTemp)))
+		} else if len(body.Statements) == 0 && p.isSFC() {
 			stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
-		} else if len(body.Statements) == 0 && (p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON))) {
+		} else if len(body.Statements) == 0 && p.ilBodyFollows() {
 			stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
 		} else {
 			// It's an ST body, or an ST body following methods.

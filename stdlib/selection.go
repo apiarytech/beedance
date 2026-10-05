@@ -79,7 +79,7 @@ func selBuiltin(g, in0, in1 object.Object) object.Object {
 	if !ok {
 		return object.NewBuiltinError("argument 1 to `SEL` must be BOOLEAN, got %s", g.Type())
 	}
-	if in0.Type() != in1.Type() {
+	if !sameKind(in0, in1) {
 		return object.NewBuiltinError("arguments 2 and 3 to `SEL` must be of the same type, got %s and %s", in0.Type(), in1.Type())
 	}
 	if gBool.Value {
@@ -112,7 +112,7 @@ func muxBuiltin(args ...object.Object) object.Object {
 	if numInputs > 1 {
 		firstType := valueArgs[0].Type()
 		for i := 1; i < numInputs; i++ {
-			if valueArgs[i].Type() != firstType {
+			if !sameKind(valueArgs[0], valueArgs[i]) {
 				return object.NewBuiltinError("all value arguments to `MUX` must be of the same type, got %s but expected %s", valueArgs[i].Type(), firstType)
 			}
 		}
@@ -123,4 +123,12 @@ func muxBuiltin(args ...object.Object) object.Object {
 	}
 
 	return valueArgs[kVal]
+}
+
+// sameKind reports whether SEL and MUX may choose between a and b: the same
+// type, or both numeric, as MAX and MIN accept, since an integer literal
+// (LINT here) stands for whatever integer type its partner has in IEC
+// 61131-3, e.g. SEL(G, Count + 1, 0) with an INT Count.
+func sameKind(a, b object.Object) bool {
+	return a.Type() == b.Type() || (object.IsNumeric(a) && object.IsNumeric(b))
 }

@@ -445,12 +445,12 @@ func (vm *VM) Run() (runErr error) {
 			primaryReturnValue := vm.pop()
 			frame := vm.popFrame()
 
-			hash, err := vm.buildOutputHash(primaryReturnValue, frame)
-			if err != nil {
+			var hash *object.Hash
+			if hash, err = vm.buildOutputHash(primaryReturnValue, frame); err != nil {
 				return err
 			}
 			vm.sp = frame.basePointer - 1
-			err = vm.push(hash)
+			err = vm.push(hash) // checked after the switch, like every opcode's
 		case code.OpDup:
 			// OpDup duplicates the top element of the stack.
 			err = vm.push(vm.stack[vm.sp-1])

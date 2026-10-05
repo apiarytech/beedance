@@ -94,6 +94,8 @@ type (
 type Parser struct {
 	l      *lexer.Lexer
 	errors []string
+	// diagrams are the LD and FBD bodies read in the text form.
+	diagrams []DiagramBody
 
 	curToken        token.Token
 	peekToken       token.Token
@@ -446,7 +448,7 @@ func (p *Parser) currentError(format string, a ...interface{}) {
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	// noPrefixParseFnError logs an error when no prefix parsing function is found for the current token type.
-	msg := fmt.Sprintf("no prefix parse function for %s found", t)
+	msg := fmt.Sprintf("no prefix parse function for %s found at row %d, column %d", t, p.curToken.Row, p.curToken.Column)
 	p.errors = append(p.errors, msg)
 }
 
@@ -1812,6 +1814,10 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 // operator precedence, handling prefix and infix operators.
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	defer untrace(trace(fmt.Sprintf("parseExpression (precedence %d)", precedence)))
+	// Comments may stand anywhere white space may, inside expressions too.
+	for p.curTokenIs(token.COMMENT) {
+		p.nextToken()
+	}
 	var prefix prefixParseFn
 	// HACK: The 'fn' keyword for anonymous functions is a remnant of the Monkey
 	// language and not part of the IEC standard. The tests still rely on it.
@@ -1828,6 +1834,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
+	p.skipPeekComments()
 	for !p.peekTokenIs(token.SEMICOLON) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
@@ -1837,6 +1844,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		p.nextToken()
 
 		leftExp = infix(leftExp)
+		p.skipPeekComments()
 	}
 
 	return leftExp

@@ -477,7 +477,13 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 
 // Compile is the main entry point for the compilation process. It traverses the
 // AST recursively, dispatching to specific compilation methods based on the node type.
+// An error is a *PositionError at the innermost node that failed.
 func (c *Compiler) Compile(node ast.Node) error {
+	return positioned(node, c.compileNode(node))
+}
+
+// compileNode compiles one node (see Compile).
+func (c *Compiler) compileNode(node ast.Node) error {
 	switch node := node.(type) {
 	// A Program is the root of the AST, consisting of a series of statements.
 	case *ast.Program:
@@ -2451,7 +2457,14 @@ func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.
 }
 
 // getExpressionType recursively determines the data type of an AST expression node.
+// An error is a *PositionError at the innermost expression that failed.
 func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, error) {
+	t, err := c.expressionType(expr)
+	return t, positioned(expr, err)
+}
+
+// expressionType determines an expression's type (see getExpressionType).
+func (c *Compiler) expressionType(expr ast.Expression) (object.ObjectType, error) {
 	// References, NULL and what they refer to; see references.go.
 	if t, ok := c.referenceExpressionType(expr); ok {
 		return t, nil

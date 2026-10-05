@@ -1851,6 +1851,7 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 					// It's a standard function block like TON.
 					instanceEnv := object.NewEnclosedEnvironment(env)
 					instanceEnv.Set("__fb_logic__", resolvedType)
+					initStandardFBOutputs(resolvedType, instanceEnv)
 					val = &object.FunctionBlockInstance{Definition: nil, Env: instanceEnv}
 				}
 			}
@@ -3081,7 +3082,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// EN = FALSE skips the body; ENO follows EN.
 		enValue, _ := fn.Env.Get("EN")
 		fn.Env.Set("ENO", enValue)
-		if enValue == FALSE {
+		if isBoolFalse(enValue) {
 			for _, mapping := range outputMappings {
 				val, _ := fn.Env.Get(mapping.SourceParamName)
 				if result := assignValue(mapping.TargetVarNode, mapping.TargetVarNode, val, callEnv); isError(result) {
@@ -3260,7 +3261,7 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		var result object.Object
 
 		// If EN is FALSE, do not execute the function block body.
-		if enValue == FALSE {
+		if isBoolFalse(enValue) {
 			// When EN is false, the outputs must be "frozen". This means they must retain
 			// their values from the previous cycle. We achieve this by explicitly copying
 			// the output values from the FB's persistent environment (fn.Env) into the
@@ -3711,7 +3712,7 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 				return &object.Method{Definition: methodDef, Instance: l}
 			}
 
-			return newError(node, "member '%s' not found in function block instance '%s'", member, l.Definition.Name.Value)
+			return newError(node, "member '%s' not found in function block instance '%s'", member, fbInstanceName(l))
 		}
 
 		// Check access permission for direct variable access
