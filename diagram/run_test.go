@@ -13,7 +13,7 @@ import (
 	_ "github.com/apiarytech/beedance/stdlib" // registers SEL, MUX, LIMIT, ... with the evaluator
 )
 
-// Beremiz's counter test (tests/projects/iec61131_lang_test), in the text
+// A reference counter test, the same logic in each language, in the text
 // forms: three counts, a reset to 17, two counts give 19.
 const counters = `
 FUNCTION_BLOCK CounterLD

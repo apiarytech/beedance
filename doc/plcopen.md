@@ -26,7 +26,7 @@ text, err := plcopen.ConvertXMLToIECText("project.xml")
 ```
 
 POUs with **FBD or LD bodies** are lowered to ST statements
-(`LowerGraphical`), as Beremiz does:
+(`LowerGraphical`), as other IEC tools compile them:
 
 - a function block becomes a call, its outputs read as `inst.OUT`; an
   unnamed standard block (`R_TRIG`, `TON`, ...) gets a generated instance;
