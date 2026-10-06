@@ -213,6 +213,7 @@ func (l *Lexer) NextToken() token.Token {
 		if isLetter(l.peekChar()) {
 			// This is the start of a directly represented variable (e.g., %IX1.0)
 			tok.Type = token.DIRECT_VAR
+			tok.Row, tok.Column, tok.Pos = startLine, startCol, startPos
 			tok.Literal = l.readDirectVariable()
 			return tok // readDirectVariable advances the lexer, so we return early
 		}

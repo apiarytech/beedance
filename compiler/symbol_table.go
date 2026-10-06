@@ -93,10 +93,14 @@ func (s *SymbolTable) Define(name string, isConstant bool, typeName ...string) S
 
 // DefineExternal defines a symbol for a VAR_ACCESS variable. The symbol's index
 // points to the access path string in the constant pool.
-func (s *SymbolTable) DefineExternal(name string, index int) Symbol {
+func (s *SymbolTable) DefineExternal(name string, index int, typeName ...string) Symbol {
 	// For external variables, the "Index" refers to the index of the access
-	// path string in the constants table.
+	// path string in the constants table. A located variable gives its
+	// declared type, so expressions using it are typed (lvl OR 16#0100).
 	symbol := Symbol{Name: name, Scope: ExternalScope, Index: index}
+	if len(typeName) > 0 {
+		symbol.TypeName = typeName[0]
+	}
 	s.store[strings.ToUpper(name)] = symbol
 	return symbol
 }

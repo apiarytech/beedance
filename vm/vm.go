@@ -476,7 +476,9 @@ func (vm *VM) Run() (runErr error) {
 			}
 			value, ok := vm.io[address]
 			if !ok {
-				value = Null
+				// A direct variable the host has not set yet reads as its
+				// type's default, as a located variable starts.
+				value = directZero(address)
 			}
 			err = vm.push(value)
 
@@ -571,6 +573,7 @@ func (vm *VM) executeBinaryBooleanOperation(
 func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+	right, left = asBitString(right), asBitString(left)
 
 	leftType := left.Type()
 	rightType := right.Type()
@@ -694,6 +697,7 @@ func (vm *VM) executeBinaryRealOperation(
 func (vm *VM) executeComparison(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+	right, left = asBitString(right), asBitString(left)
 
 	// r = NULL, r1 <> r2: references compare by what they refer to.
 	if op == code.OpEqual || op == code.OpNotEqual {
@@ -881,6 +885,7 @@ func (vm *VM) executeRealComparison(
 // executeBangOperator performs a logical NOT operation on the top of the stack.
 func (vm *VM) executeBangOperator() error {
 	operand := vm.pop()
+	operand = asBitString(operand)
 	// Use a type switch to correctly handle different object types.
 	switch operand := operand.(type) {
 	case *object.Boolean:

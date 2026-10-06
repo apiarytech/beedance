@@ -475,6 +475,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.Identifier:
 		return evalIdentifier(node, env)
 
+	case *ast.DirectVariable:
+		return evalDirectRead(node)
+
 	case *ast.ThisExpression:
 		// 'THIS' is a special identifier that resolves to the current function block instance.
 		if val, ok := env.Get("THIS"); ok {
@@ -1377,6 +1380,8 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 	// Arrays and structures are assigned by value.
 	val = object.CopyValue(val)
 	switch target := left.(type) {
+	case *ast.DirectVariable:
+		return evalDirectWrite(node, target, val)
 	case *ast.BitAccessExpression:
 		// Writing one bit sets it in the variable, which keeps its type.
 		current := Eval(target.Target, env)
@@ -2703,8 +2708,9 @@ func evalIdentifier(
 		if ptr, isPtr := val.(*object.Pointer); isPtr && ptr.Env == nil {
 			address := ptr.Name
 			if ioVal, ok := ioMap[address]; ok {
-				// The value in ioMap is the final value, don't dereference further.
-				return ioVal
+				// The value in ioMap is the final value, don't dereference
+				// further. A host's WORD (object.Word) computes as a bit string.
+				return object.AsBitString(ioVal)
 			}
 			// If the I/O address hasn't been written to yet, return NULL.
 			return NULL

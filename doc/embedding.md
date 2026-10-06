@@ -65,6 +65,10 @@ type Variable struct {
 
 - A non-located variable lives in `globals[v.Global]`; a located one in
   `scan.IO()[v.Address]`.
+- A direct variable a program uses in statements (`x := %IW0;`) is listed
+  too, named by its address (`Name` and `Address` both `"%IW0"`, `Block`
+  `VAR`, `Type` from its size: `WORD`), unless a located variable is
+  declared at that address; a host binds it like a located variable.
 - Values are `object` values. Convert them to and from the host's types
   by the **declared** `Type`: the VM may hold a `REAL` member as an
   `LREAL`, so the runtime value's type is not the declared one.

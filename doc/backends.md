@@ -45,7 +45,8 @@ for range ticker.C {                 // every scan
   file are left out.
 - The **initialization bytecode** declares and initializes; the **cyclic
   bytecode** is the body. Both share the globals slice.
-- Located variables live in the VM's I/O image (`VM.IO()`), by address.
+- Located variables, and direct variables used in statements (`%IW0`),
+  live in the VM's I/O image (`VM.IO()`), by address.
 - A runtime error (index out of range, division by zero, malformed
   bytecode) is returned by `Run`; the VM never panics into the host.
 - No Go toolchain is needed where programs are compiled or run: a program

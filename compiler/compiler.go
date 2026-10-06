@@ -132,6 +132,9 @@ func (c *Compiler) variables(node *ast.ProgramDeclaration) []Variable {
 const outputTemp = "__output_value"
 
 type Compiler struct {
+	// directUses are the directly represented variables the program uses in
+	// statements, by address (see direct.go).
+	directUses []string
 	// stampingArray is set while an assignment to an array with declared
 	// lower bounds is compiled, before the bounds are set on the result.
 	stampingArray bool
@@ -468,10 +471,15 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 		}
 	}
 
+	// The body's direct variables join those of the declarations and POUs.
+	for _, addr := range cyclicCompiler.directUses {
+		c.noteDirect(addr)
+	}
+
 	return &CompiledProgram{
 		InitBytecode:   initBytecode,
 		CyclicBytecode: cyclicCompiler.Bytecode(),
-		Variables:      c.variables(node),
+		Variables:      c.withDirect(c.variables(node)),
 	}, nil
 }
 
@@ -1292,6 +1300,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 				return nil
 			}
 
+		case *ast.DirectVariable:
+			return c.compileDirectWrite(target, node.Value)
+
 		default:
 			// This default case catches any other type, including `nil`,
 			// preventing the panic and providing a clear error message.
@@ -1377,7 +1388,11 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		if node.Location != nil {
 			address := node.Location.Location.String()
 			constIndex := c.addConstant(&object.String{Value: address})
-			symbol := c.symbolTable.DefineExternal(node.Name.Value, constIndex)
+			var declared []string
+			if node.DataType != nil {
+				declared = append(declared, c.flattenExpressionToString(node.DataType))
+			}
+			symbol := c.symbolTable.DefineExternal(node.Name.Value, constIndex, declared...)
 
 			// If an initial value is provided, compile it and emit OpSetExternal.
 			if node.Value != nil {
@@ -1817,6 +1832,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		}
 
 	// An Identifier resolves the symbol and emits an instruction to load it.
+	case *ast.DirectVariable:
+		return c.compileDirectRead(node)
+
 	case *ast.Identifier:
 		// First, try to resolve as a local/global/free variable.
 		// This is important to correctly find parameters like 'value' in a setter
@@ -2618,6 +2636,8 @@ func (c *Compiler) expressionType(expr ast.Expression) (object.ObjectType, error
 		return object.ObjectType(strings.ToUpper(e.TypeName.Value)), nil
 	case *ast.TypedLiteral:
 		return typedLiteralType(e.TypeName), nil
+	case *ast.DirectVariable:
+		return c.directObjectType(e)
 	case *ast.IndexExpression:
 		return c.indexElementType(e), nil
 	default:
@@ -4004,6 +4024,8 @@ func (c *Compiler) getExpressionTypeName(expr ast.Expression) (string, bool) {
 			}
 		}
 		return "", false
+	case *ast.DirectVariable:
+		return ast.DirectType(e.FullAddress())
 	case *ast.ThisExpression:
 		if c.currentFB != nil {
 			return strings.ToUpper(c.currentFB.Name.Value), true

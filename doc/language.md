@@ -89,6 +89,14 @@ coils and blocks as IEC 61131-3 draws them. Editors use it for previews.
   qualifiers `CONSTANT`, `RETAIN`, `NON_RETAIN`, `R_EDGE`, `F_EDGE`.
 - Located variables (`AT %IX0.0`, `%QW4`, `%MD2`) and bit access on bit
   strings and integers (`w.3`).
+- Directly represented variables in statements: `level := %IW0;`,
+  `%QX0.1 := run;`. Their type is their size: `X` (or none, `%I0.1`) BOOL,
+  `B` BYTE, `W` WORD, `D` DWORD, `L` LWORD. An input (`%I`) is read-only.
+  One nothing has set reads as its type's default. Both engines handle them.
+- A bit string a host puts in the I/O image as `object.Byte`, `Word`, `DWord`
+  or `LWord` (as the honeycomb connector does) computes as a bit string of
+  its width: `%IW0 OR 16#0100`, `lvl AND WORD#16#00FF`, `%IB2 = 0`, `NOT %IW0`.
+  A located variable's expressions are typed by its declaration.
 - `NAMESPACE`, nested (`MyCompany.MyLibrary`), to keep library names apart.
 
 ## Object-oriented extensions
