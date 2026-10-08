@@ -1,0 +1,10 @@
+{
+  "name": "picosim",
+  "private": true,
+  "description": "Runs RP2040 (Raspberry Pi Pico) firmware under emulation and serves UART0 over TCP",
+  "type": "module",
+  "main": "run.mjs",
+  "dependencies": {
+    "rp2040js": "1.4.0"
+  }
+}

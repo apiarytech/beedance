@@ -72,7 +72,9 @@ func main() {
 		Constants:    generatedConstants,
 	}
 
-	machine := vm.New(bytecode)
+	// The default of vm.GlobalsSize slots takes 512 KB, more than the Pico's
+	// 264 KB of RAM, so size the globals to what the bytecode uses.
+	machine := vm.New(bytecode, vm.WithGlobalsSize(vm.GlobalsNeeded(bytecode)))
 	err := machine.Run()
 	if err != nil {
 		// On a microcontroller, you might flash an LED or send a serial message.

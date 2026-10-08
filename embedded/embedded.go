@@ -16,6 +16,7 @@ import (
 	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/vm"
 	"io"
 	"strings"
 )
@@ -51,7 +52,9 @@ func main() {
 		Constants:    generatedConstants,
 	}
 
-	machine := vm.New(bytecode)
+	// Globals are sized to what the bytecode uses: the default of
+	// vm.GlobalsSize slots does not fit in a microcontroller's RAM.
+	machine := vm.New(bytecode, vm.WithGlobalsSize(%d))
 	err := machine.Run()
 	if err != nil {
 		fmt.Printf("VM execution failed: %%s\n", err)
@@ -73,7 +76,7 @@ func GenerateEmbeddedGo(writer io.Writer, bytecode *compiler.Bytecode) error {
 		return fmt.Errorf("failed to generate Go literals for constants: %w", err)
 	}
 
-	source := fmt.Sprintf(goFileTemplate, instructionsStr, constantsStr)
+	source := fmt.Sprintf(goFileTemplate, instructionsStr, constantsStr, vm.GlobalsNeeded(bytecode))
 	_, err = writer.Write([]byte(source))
 	return err
 }

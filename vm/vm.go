@@ -24,7 +24,10 @@ import (
 // StackSize defines the maximum number of objects that can be on the stack.
 const StackSize = 2048
 
-// GlobalsSize defines the maximum number of global variables.
+// GlobalsSize is the default number of global variable slots of a VM made by
+// New, the most a global's 16-bit index can address. It takes 512 KB on a
+// 32-bit target and 1 MB on a 64-bit one; on a microcontroller, pass a
+// smaller size with WithGlobalsSize.
 const GlobalsSize = 65536
 
 // MaxFrames defines the maximum number of frames (call stack depth).
@@ -74,22 +77,78 @@ var ErrBudget = errors.New("vm: execution budget exceeded")
 // sets one, so a scan that loops for ever fails instead of stalling it.
 func (vm *VM) SetBudget(n int64) { vm.budget = n }
 
-// New creates a new VM instance with the given bytecode.
-func New(bytecode *compiler.Bytecode) *VM {
-	// The object.Builtins slice is guaranteed to be sorted by index
-	// thanks to the FinalizeBuiltins function called in main.
+// Option configures a VM made by New or NewWithBuiltins.
+type Option func(*options)
 
-	// Create a slice for the VM's built-ins that is explicitly sized
-	// to the highest registered index. This is more robust than relying
-	// on the length of the `object.Builtins` slice.
-	maxIndex := -1
-	for _, entry := range object.Builtins {
-		if entry.Index > maxIndex {
-			maxIndex = entry.Index
+type options struct {
+	globalsSize int
+}
+
+// WithGlobalsSize sets the number of global variable slots to n instead of
+// GlobalsSize. A program can use globals 0 to n-1; reading, writing or taking
+// a reference to a higher one fails the run. On a microcontroller, n is the
+// program's number of globals (see GlobalsNeeded), since the default does
+// not fit in its RAM. n must not be negative.
+func WithGlobalsSize(n int) Option {
+	return func(o *options) { o.globalsSize = n }
+}
+
+// GlobalsNeeded returns the number of global slots bytecode uses: one more
+// than the highest global its instructions, or those of its compiled
+// functions, read, write or take a reference to. It is the smallest
+// WithGlobalsSize that runs bytecode. For bytecode it cannot decode, it
+// returns GlobalsSize.
+func GlobalsNeeded(bytecode *compiler.Bytecode) int {
+	n := globalsNeeded(bytecode.Instructions)
+	for _, c := range bytecode.Constants {
+		if fn, ok := c.(*object.CompiledFunction); ok {
+			n = max(n, globalsNeeded(fn.Instructions))
 		}
 	}
+	return n
+}
 
-	return newVM(bytecode, defaultBuiltins(), make([]object.Object, GlobalsSize))
+// globalsNeeded returns one more than the highest global ins refers to.
+func globalsNeeded(ins code.Instructions) int {
+	n := 0
+	for ip := 0; ip < len(ins); {
+		def, err := code.Lookup(ins[ip])
+		if err != nil {
+			return GlobalsSize
+		}
+		width := 0
+		for _, w := range def.OperandWidths {
+			width += w
+		}
+		if ip+1+width > len(ins) {
+			return GlobalsSize
+		}
+		operands, _ := code.ReadOperands(def, ins[ip+1:])
+		switch code.Opcode(ins[ip]) {
+		case code.OpGetGlobal, code.OpSetGlobal:
+			n = max(n, operands[0]+1)
+		case code.OpRef:
+			if operands[0] == code.RefGlobal {
+				n = max(n, operands[1]+1)
+			}
+		}
+		ip += 1 + width
+	}
+	return n
+}
+
+// globalsFor returns the globals slice opts ask for.
+func globalsFor(opts []Option) []object.Object {
+	o := options{globalsSize: GlobalsSize}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return make([]object.Object, o.globalsSize)
+}
+
+// New creates a new VM instance with the given bytecode.
+func New(bytecode *compiler.Bytecode, opts ...Option) *VM {
+	return newVM(bytecode, defaultBuiltins(), globalsFor(opts))
 }
 
 // defaultBuiltins returns a VM's own copy of the registered built-ins, indexed
@@ -110,8 +169,8 @@ func defaultBuiltins() []*object.Builtin {
 
 // NewWithBuiltins creates a new VM with a specific set of built-in functions.
 // This is useful for testing to avoid dependency on global state.
-func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin) *VM {
-	return newVM(bytecode, builtins, make([]object.Object, GlobalsSize))
+func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin, opts ...Option) *VM {
+	return newVM(bytecode, builtins, globalsFor(opts))
 }
 
 // NewWithGlobalsStore creates a new VM with a pre-populated global variable
@@ -189,6 +248,15 @@ func (vm *VM) externalAddress(ins code.Instructions, ip int) (string, error) {
 // Globals returns the global variable store of the VM.
 func (vm *VM) Globals() []object.Object {
 	return vm.globals
+}
+
+// checkGlobal reports an error if the VM has no global slot index, as when
+// it was made with a WithGlobalsSize too small for its program.
+func (vm *VM) checkGlobal(index int) error {
+	if index >= len(vm.globals) {
+		return fmt.Errorf("global %d out of range: the VM has %d global slots (see WithGlobalsSize)", index, len(vm.globals))
+	}
+	return nil
 }
 
 // LastPoppedStackElem returns the object at the top of the stack without removing it.
@@ -274,14 +342,19 @@ func (vm *VM) Run() (runErr error) {
 
 		case code.OpSetGlobal:
 			// OpSetGlobal pops a value from the stack and stores it in the globals slice.
-			globalIndex := code.ReadUint16(ins[ip+1:])
+			globalIndex := int(code.ReadUint16(ins[ip+1:]))
 			vm.currentFrame().ip += 2 // Advance past operand
-			vm.globals[globalIndex] = vm.pop()
+			if err = vm.checkGlobal(globalIndex); err == nil {
+				vm.globals[globalIndex] = vm.pop()
+			}
 
 		case code.OpGetGlobal:
 			// OpGetGlobal retrieves a value from the globals slice and pushes it onto the stack.
-			globalIndex := code.ReadUint16(ins[ip+1:])
+			globalIndex := int(code.ReadUint16(ins[ip+1:]))
 			vm.currentFrame().ip += 2 // Advance past operand
+			if err = vm.checkGlobal(globalIndex); err != nil {
+				break
+			}
 			value := vm.globals[globalIndex]
 			if value == nil {
 				// A global that was defined but never assigned reads as NULL. This

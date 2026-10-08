@@ -33,6 +33,9 @@ func (vm *VM) executeReference(op code.Opcode, ins code.Instructions, ip int) er
 		var ref *object.Reference
 		switch scope {
 		case code.RefGlobal:
+			if err := vm.checkGlobal(index); err != nil {
+				return err
+			}
 			ref = &object.Reference{Slot: &vm.globals[index]}
 		case code.RefLocal:
 			// A local variable lives on the stack until its call returns;

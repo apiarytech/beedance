@@ -191,3 +191,27 @@ jobs:
         with:
           name: beedance-${{ matrix.target }}
           path: beedance-${{ matrix.target }}.uf2
+
+  pico-emulator:
+    name: Raspberry Pi Pico (emulated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the emulator image
+        run: docker build -f embedded/picosim/Dockerfile -t beedance-picosim .
+
+      - name: Start the emulator
+        run: docker run -d --name picosim -p 4000:4000 beedance-picosim
+
+      - name: Test the firmware
+        run: go test -count=1 -v -tags picosim ./embedded/picosim/
+
+      - name: Emulator log
+        if: always()
+        run: docker logs picosim

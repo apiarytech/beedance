@@ -25,6 +25,16 @@ tinygo build -target=pico -size short -o beedance-pico.uf2 ./embedded/example/ra
 tinygo flash -target=pico ./embedded/example/raspberrypi/
 ```
 
+To run the firmware without a board, `embedded/picosim` builds it into a
+Docker image that emulates the RP2040 and serves UART0 over TCP. See
+[embedded/picosim/README.md](../embedded/picosim/README.md).
+
+```bash
+docker build -f embedded/picosim/Dockerfile -t beedance-picosim .
+docker run -d --rm -p 4000:4000 beedance-picosim
+go test -tags picosim ./embedded/picosim/
+```
+
 On a Raspberry Pi running Linux, the regular Go toolchain builds the whole
 of beedance (ARMv6, ARMv7 and arm64 are tested in CI under QEMU).
 
@@ -45,6 +55,11 @@ Constants of these kinds are supported: integers (`LInt`), reals
 (`LReal`), strings, booleans, `TIME`, `DATE` and compiled functions. Other
 constants fail generation. The generated program runs the bytecode once;
 a scan loop, I/O and a clock are for the application to add.
+
+The generated program makes its VM with `vm.WithGlobalsSize(n)`, where `n`
+is `vm.GlobalsNeeded` of the bytecode. The default of `vm.GlobalsSize`
+slots takes 512 KB on a 32-bit target, more than the RP2040's 264 KB of RAM.
+Code that makes its own VM for a microcontroller should do the same.
 
 ## Not yet
 

@@ -1,0 +1,7 @@
+.git
+.github
+**/*.uf2
+**/*.hex
+**/*.elf
+**/*.exe
+**/node_modules

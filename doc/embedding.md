@@ -44,6 +44,8 @@ for t := range ticker.C {
 | `VM.SetBuiltin(index, b)` | Replaces a built-in for this VM only |
 | `VM.SetBudget(n)` / `vm.ErrBudget` | Bounds the instructions of each run (from one `Reset` to the next); a scan past it fails with `ErrBudget` instead of looping for ever |
 | `VM.Globals()`, `VM.IO()` | The global slots and the I/O image of located variables |
+| `vm.New(b, vm.WithGlobalsSize(n))` | A VM with `n` global slots instead of `vm.GlobalsSize` (65536, 512 KB on a 32-bit target), for a microcontroller's RAM; a global past `n` fails the run |
+| `vm.GlobalsNeeded(b)` | The global slots bytecode `b` uses. For a store shared by init and scan, size it to the larger of the two, and to the `Global` slot of any variable the host binds |
 | `stdlib.ClockBuiltins(clock)` | `__CLOCK` (read by the standard timers) and `TIME()` reading the host's clock, by built-in index |
 
 ## Binding variables
