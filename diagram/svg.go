@@ -346,18 +346,22 @@ var escaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "
 
 func esc(s string) string { return escaper.Replace(s) }
 
-func (l *layout) draw() string {
-	var p pen
-	// Column x positions, per network, from the widest element of each layer.
-	type geo struct{ x, y float64 }
-	at := map[int]geo{}
+// geo is an element's top left corner.
+type geo struct{ x, y float64 }
+
+// railLine is a network's left power rail, as drawn.
+type railLine struct {
+	net       int
+	x, y1, y2 float64
+	name      string
+}
+
+// geometry places the networks top to bottom, each column as wide as its
+// widest element: every element's corner, the rails, and the drawing's
+// size. The SVG drawing and the PLCopen XML writer share it.
+func (l *layout) geometry() (at map[int]geo, rails []railLine, width, height float64) {
+	at = map[int]geo{}
 	top := float64(margin)
-	width := 0.0
-	type railLine struct {
-		x, y1, y2 float64
-		name      string
-	}
-	var rails []railLine
 	for i, net := range l.nets {
 		layers := 0
 		rows := 0
@@ -391,11 +395,16 @@ func (l *layout) draw() string {
 			at[n.e.ID] = geo{x: xs[n.layer], y: top + float64(n.row)*rowH}
 		}
 		if hasRail {
-			rails = append(rails, railLine{x: float64(margin), y1: top - 4, y2: top + float64(rows)*rowH - 8, name: rail.Name})
+			rails = append(rails, railLine{net: i, x: float64(margin), y1: top - 4, y2: top + float64(rows)*rowH - 8, name: rail.Name})
 		}
 		top += float64(rows)*rowH + 20
 	}
-	height := top
+	return at, rails, width, top
+}
+
+func (l *layout) draw() string {
+	var p pen
+	at, rails, width, height := l.geometry()
 
 	p.f(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" font-family="ui-monospace, Consolas, monospace" font-size="12">`, width+margin, height, width+margin, height)
 	p.f(`<style>.w{stroke:var(--vscode-editor-foreground,#333);fill:none;stroke-width:1.2}.t{fill:var(--vscode-editor-foreground,#333)}` +

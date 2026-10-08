@@ -33,9 +33,24 @@ func Import(xmlData []byte) (*Project, error) {
 	return &proj, nil
 }
 
-// ImportToIECText converts PLCopen XML into IEC 61131-3 Structured Text.
-// POUs with graphical (FBD, LD or SFC) bodies cannot be converted.
+// ImportOptions choose how ImportToIECTextOptions writes bodies.
+type ImportOptions struct {
+	// KeepDiagrams writes graphical LD and FBD bodies in beedance's text
+	// form (LD ... END_LD, FBD ... END_FBD), so they stay diagrams. A body
+	// the text form cannot hold is lowered to Structured Text, with a
+	// comment saying why. Otherwise every graphical body is lowered.
+	KeepDiagrams bool
+}
+
+// ImportToIECText converts PLCopen XML into IEC 61131-3 source, graphical
+// LD and FBD bodies lowered to Structured Text. Graphical SFC bodies cannot
+// be converted yet.
 func ImportToIECText(xmlData []byte) (string, error) {
+	return ImportToIECTextOptions(xmlData, ImportOptions{})
+}
+
+// ImportToIECTextOptions is ImportToIECText with options.
+func ImportToIECTextOptions(xmlData []byte, opt ImportOptions) (string, error) {
 	proj, err := Import(xmlData)
 	if err != nil {
 		return "", err
@@ -95,9 +110,21 @@ func ImportToIECText(xmlData []byte) (string, error) {
 			body = pou.Body.IL
 		case pou.Body.FBD != nil, pou.Body.LD != nil:
 			// Graphical FBD and LD are lowered to ST statements (graphical.go).
-			raw := pou.Body.FBD
+			raw, lang := pou.Body.FBD, "FBD"
 			if raw == nil {
-				raw = pou.Body.LD
+				raw, lang = pou.Body.LD, "LD"
+			}
+			if opt.KeepDiagrams {
+				text, err := diagramText(pou, lang, raw.Inner, projectFunctionBlocks(proj))
+				if err == nil {
+					buf.WriteString("\t" + lang + "\n")
+					for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+						buf.WriteString("\t" + line + "\n")
+					}
+					buf.WriteString("\tEND_" + lang + "\n")
+					break
+				}
+				fmt.Fprintf(&buf, "\t(* The %s diagram is imported as Structured Text: %s *)\n", lang, strings.ReplaceAll(err.Error(), "*)", "* )"))
 			}
 			low, err := LowerGraphical(pou.Name, raw.Inner, projectFunctionBlocks(proj), declaredNames(pou))
 			if err != nil {

@@ -638,6 +638,17 @@ func functionText(typ string, args []string) (string, error) {
 			return "", fmt.Errorf("NOT takes one input")
 		}
 		return "NOT(" + args[0] + ")", nil
+	case u == "AND" && len(args) >= 2 && slices.Contains(args, "TRUE"):
+		// TRUE AND x is x: a ladder's power rail ANDed with a function
+		// contact's result, for one.
+		kept := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "TRUE" })
+		switch len(kept) {
+		case 0:
+			return "TRUE", nil
+		case 1:
+			return kept[0], nil
+		}
+		return wrap(strings.Join(kept, " AND ")), nil
 	case ops[u] != "":
 		if len(args) < 2 || (len(args) > 2 && (u == "SUB" || u == "DIV" || u == "MOD" || u == "EXPT")) {
 			return "", fmt.Errorf("%s with %d inputs", u, len(args))

@@ -32,14 +32,22 @@ func Export(program *ast.Program, projectName string) (*Project, error) {
 }
 
 // ExportSource parses IEC 61131-3 source and converts it into a PLCopen TC6
-// XML project, keeping each POU's body as written.
+// XML project, keeping each POU's body as written: ST and IL as text, LD
+// and FBD written in beedance's text form as graphical diagrams.
 func ExportSource(source, projectName string) (*Project, error) {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		return nil, fmt.Errorf("parser errors: %s", strings.Join(p.Errors(), "; "))
 	}
-	return export(program, projectName, sourceBodies(source))
+	proj, err := export(program, projectName, sourceBodies(source))
+	if err != nil {
+		return nil, err
+	}
+	if err := graphicalBodies(proj, p.Diagrams()); err != nil {
+		return nil, err
+	}
+	return proj, nil
 }
 
 // ExportSourceKeeping is ExportSource for source that came from the project
