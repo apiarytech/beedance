@@ -121,6 +121,33 @@ io := evaluator.IO() // located variables by address
   trace function.
 - Past the budget, evaluation returns an "execution budget exceeded" error.
 
+## Unit tests (software-in-the-loop)
+
+Package `sil` runs the `PROGRAM TEST_...` unit tests of a source on a
+simulated clock, on the evaluator, the VM or both, and returns the results
+to the caller. `beedance -test` (see [Command line](cli.md#unit-tests)) is a
+thin report over it; a Go test or a CI tool can call it directly:
+
+```go
+results, err := sil.Run(ctx, source, sil.Options{
+    Interval: 10 * time.Millisecond, // simulated time between scans
+    Engines:  []sil.Engine{sil.Evaluator, sil.VM}, // the default: both, compared
+})
+// err: a *sil.ParseError, sil.ErrNoTests, or ctx's error
+for _, r := range results {
+    if !r.Passed {
+        // r.Mismatch: the first scan and variable where the engines differ
+        for _, e := range r.Engines {
+            fmt.Println(r.Name, e.Engine, e.Problems()) // e.Scans: values after each scan
+        }
+    }
+}
+```
+
+Each engine gets its own simulated clock (an evaluator `Session`; for the
+VM, `stdlib.ClockBuiltins`) and a per-scan budget, so a runaway loop fails
+its test. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
+
 ## A complete host
 
 beehive's `logic` service is a full example: it compiles downloaded ST on

@@ -124,6 +124,10 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     ```sh
     go run main.go -iec /path/to/your/program.st -go /path/to/output.go
     ```
+*   **`-test FILE.st...`:** Runs the `PROGRAM TEST_...` unit tests in the files on a simulated clock, on both the evaluator and the VM, and compares the engines scan by scan. Exits 0 if all pass, 1 if a test fails or the engines disagree, 2 if parsing fails. See [doc/cli.md](doc/cli.md#unit-tests).
+    ```sh
+    go run . -test -interval 10ms lib.st tests.st
+    ```
 *   **`-version`:** Prints the application version.
     ```sh
     go run main.go -version
@@ -243,4 +247,4 @@ If you'd like to contribute, please follow these general steps:
 4.  **Commit Your Changes:** Make your changes and commit them with clear, descriptive messages.
 5.  **Submit a Pull Request:** Push your branch to your fork and open a pull request against the main `beedance` repository. Please link the pull request to the issue you opened.
 
-We appreciate your help in making `beedance` a better tool for the industrial automation community!
+We appreciate your help in making `beedance` a better tool for the industrial automation community!

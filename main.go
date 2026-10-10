@@ -29,6 +29,7 @@ import (
 	"github.com/apiarytech/beedance/parser"
 	"github.com/apiarytech/beedance/plcopen"
 	"github.com/apiarytech/beedance/repl"
+	"github.com/apiarytech/beedance/sil"
 	_ "github.com/apiarytech/beedance/stdlib" // Import for side-effect of registering built-ins
 	"github.com/apiarytech/beedance/transpiler"
 	"github.com/apiarytech/beedance/vm"
@@ -50,7 +51,24 @@ func main() {
 	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
 	fromXMLFile := flag.String("from-xml", "", "Path to input PLCopen TC6 XML file to convert to IEC 61131-3 text")
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
+	testFlag := flag.Bool("test", false, "Run the PROGRAM TEST_... unit tests of the FILE.st arguments on a simulated clock")
+	interval := flag.Duration("interval", 10*time.Millisecond, "With -test: simulated time between scans")
+	maxScans := flag.Int("max-scans", 50000, "With -test: a test with done that is not done by then fails")
+	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on, compared when both")
+	tol := flag.Float64("tol", 1e-3, "With -test: relative tolerance when comparing REAL values between engines")
+	runFilter := flag.String("run", "", "With -test: run only tests whose name contains this text")
+	csvDir := flag.String("csv", "", "With -test: write each test's per-scan values per engine as CSV into this directory")
 	flag.Parse()
+
+	if *testFlag {
+		engines, err := sil.ParseEngines(*enginesFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter}
+		os.Exit(runTests(flag.Args(), opts, *csvDir, os.Stdout, os.Stderr))
+	}
 
 	if *checkBuiltinsFlag {
 		checkBuiltins()

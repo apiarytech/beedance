@@ -14,7 +14,7 @@ The [README](../README.md) is the quick tour. These pages are the reference.
 | [Language support](language.md) | What of IEC 61131-3 is supported, the CODESYS/OSCAT dialect, macros |
 | [Backends](backends.md) | The evaluator, the VM and the transpiler: how each runs a program, and which to choose |
 | [Embedding beedance](embedding.md) | Running programs inside a host: scans, clocks, budgets, binding variables, engineering sessions |
-| [Command line](cli.md) | The `beedance` command and its REPL |
+| [Command line](cli.md) | The `beedance` command, its REPL, and running ST unit tests (`-test`) |
 | [PLCopen XML](plcopen.md) | Importing and exporting TC6 XML projects |
 | [Microcontrollers](embedded.md) | TinyGo, Raspberry Pi Pico, and generating a standalone VM program |
 | [Development](development.md) | Building, testing, CI, conventions and known issues |
