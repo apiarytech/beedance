@@ -23,6 +23,9 @@ go install github.com/apiarytech/beedance@latest
 
 ## Unit tests
 
+A worked example, with every flag and its output, is in
+[examples/unit_tests](../examples/unit_tests/README.md).
+
 ```bash
 beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] FILE.st...
 ```
