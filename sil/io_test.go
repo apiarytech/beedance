@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os/exec"
@@ -438,4 +439,26 @@ func TestOpenRigAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig.Close()
+}
+
+// A rig that stops answering fails the run, on a connection with
+// deadlines and on one without.
+func TestRigTimeout(t *testing.T) {
+	for name, wrap := range map[string]func(net.Conn) io.ReadWriteCloser{
+		"deadlines":    func(c net.Conn) io.ReadWriteCloser { return c },
+		"no deadlines": func(c net.Conn) io.ReadWriteCloser { return struct{ io.ReadWriteCloser }{c} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, s := net.Pipe()
+			defer s.Close()
+			go io.Copy(io.Discard, s) // a rig that reads and never answers
+			rig := NewRig(wrap(c))
+			rig.Timeout = 50 * time.Millisecond
+			start := time.Now()
+			err := rig.Begin(context.Background(), "T", VM, nil)
+			if err == nil || time.Since(start) > 2*time.Second {
+				t.Fatalf("err %v after %v", err, time.Since(start))
+			}
+		})
+	}
 }

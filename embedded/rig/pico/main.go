@@ -1,3 +1,5 @@
+//go:build tinygo
+
 /*
  * Copyright (C) 2026 Franklin D. Amador
  *

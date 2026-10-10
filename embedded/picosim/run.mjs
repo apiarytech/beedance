@@ -178,8 +178,32 @@ mcu.uart[0].onByte = (value) => {
   for (const c of clients) c.write(b);
 };
 
+// Bytes from clients wait here and go into UART0 only while its receive
+// FIFO has room, as they would arrive over a real line: fed all at once, a
+// line longer than the FIFO (32 bytes) would lose its tail.
+const rxQueue = [];
+let rxPending = false;
+
 function feed(data) {
-  for (const b of data) mcu.uart[0].feedByte(b);
+  for (const b of data) rxQueue.push(b);
+  pump();
+}
+
+function pump() {
+  const uart = mcu.uart[0];
+  const room = uart.fifosEnabled ? 32 : 1;
+  let fed = 0;
+  while (fed < rxQueue.length && (uart.rxFIFO?.itemCount ?? 0) < room) {
+    uart.feedByte(rxQueue[fed++]);
+  }
+  rxQueue.splice(0, fed);
+  if (rxQueue.length > 0 && !rxPending) {
+    rxPending = true;
+    setTimeout(() => {
+      rxPending = false;
+      pump();
+    }, 1);
+  }
 }
 
 if (uartPort > 0) {

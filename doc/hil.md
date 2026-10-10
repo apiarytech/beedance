@@ -40,18 +40,61 @@ because the plant does not give the same inputs twice.
 
 ```bash
 beedance -test -io tcp://rig.local:5000 -interval 10ms -engines vm tests.st
+beedance -test -io serial:/dev/ttyACM0 -engines eval,vm,go tests.st
+beedance -test -io serial:COM3?baud=9600 tests.st
 ```
 
-`-io` connects to a rig at that address. It implies `-realtime`: scans run
-`-interval` apart on the wall clock, and timers read it. `-realtime` on
-its own runs the tests on the wall clock without I/O. The go engine does
-not run with `-io` yet.
+`-io` connects to a rig at that address: over TCP, or over a serial port
+(Linux, macOS and Windows; 8N1, 115200 baud unless `?baud=` says
+otherwise). It implies `-realtime`: scans run `-interval` apart on the
+wall clock, and timers read it. `-realtime` on its own runs the tests on
+the wall clock without I/O.
+
+Every engine runs against the rig. On the go engine, the I/O points are the
+located variables the test program declares, exchanged through the
+transpiled program's process image. `-go-timeout` bounds each scan, not the
+whole test. A rig that does not answer a request within 10 seconds
+(`Rig.Timeout`) fails the run instead of hanging it.
+
+## The Pico rig
+
+`embedded/rig/pico` is a ready-made rig for a Raspberry Pi Pico (or a Pico W,
+Pico 2 or Pico 2 W). It speaks the rig protocol on its USB serial port. CI
+builds it with the other Pico firmware (`beedance-rig-<target>.uf2`).
+
+| Points | Pins |
+|---|---|
+| `%IX0.0` .. `%IX0.7` (BOOL) | digital inputs GP10 .. GP17, pulled down |
+| `%QX0.0` .. `%QX0.7` (BOOL) | digital outputs GP2 .. GP9 |
+| `%IW0` .. `%IW2` (INT, UINT, WORD, ...) | analog inputs ADC0 .. ADC2 (GP26 .. GP28), 0 .. 4095 |
+
+```bash
+tinygo flash -target=pico ./embedded/rig/pico
+beedance -test -io serial:/dev/ttyACM0 embedded/rig/pico/bench.st   # with GP2 wired to GP10
+```
+
+`begin` refuses a point the rig does not have, or one of the wrong type, so
+a test cannot drive a pin nobody wired. The outputs are low (the safe
+state) at power-up, at `begin` and at `end`. They also go low when the host
+says nothing for 2 seconds within a run, for example because it crashed or
+the cable came out. The pin table is at the top of `main.go`; change it to
+suit a bench.
+
+The rig also runs on the emulated Pico. picosim's `WIRES` connects pins as
+jumper wires would, and `ADC` sets analog readings. CI runs the rig's tests
+and `bench.st` this way:
+
+```bash
+docker build -f embedded/picosim/Dockerfile --build-arg PKG=./embedded/rig/pico -t beedance-picosim-rig .
+docker run -d --rm -p 4100:4000 -e UART_BACKLOG=0 -e WIRES=2:10 -e ADC=0:2048 beedance-picosim-rig
+beedance -test -io tcp://localhost:4100 -interval 20ms embedded/rig/pico/bench.st
+```
 
 ## The rig protocol
 
 A rig is a program next to the I/O, on a Raspberry Pi, a PC with an I/O card,
-or a microcontroller behind a serial-to-TCP bridge. It speaks JSON over TCP,
-one object per line, and replies to each request in turn:
+or a microcontroller. It speaks JSON, one object per line, over TCP or a
+serial port, and replies to each request in turn:
 
 ```text
 → {"op":"begin","test":"TEST_Fill","engine":"vm","points":[{"address":"%IW0","type":"INT"},{"address":"%IX0.1","type":"BOOL"},{"address":"%QX0.0","type":"BOOL"}]}
@@ -98,7 +141,7 @@ for {
 
 ```go
 results, err := sil.Run(ctx, source, sil.Options{
-    IO:            plant,  // a sil.IO: a model, sil.DialRig(ctx, "host:5000"), or your own
+    IO:            plant,  // a sil.IO: a model, sil.OpenRig(ctx, "serial:/dev/ttyACM0"), or your own
     RealTime:      false,  // a model can run on the simulated clock
     Deterministic: true,   // the model gives each engine the same inputs: compare them
 })

@@ -1,3 +1,5 @@
+//go:build !linux && !darwin && !windows
+
 /*
  * Copyright (C) 2026 Franklin D. Amador
  *
@@ -7,8 +9,6 @@
  *
  * See the LICENSE files in the project root for full license text.
  */
-
-//go:build !linux && !darwin && !windows
 
 package sil
 

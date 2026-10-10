@@ -59,6 +59,14 @@ USB CDC, which picosim does not serve.
 | `UART_BACKLOG` | `65536` | Bytes of UART output replayed to each new client |
 | `GDB_PORT` | `3333` | `0` disables |
 | `LOG_LEVEL` | `error` | `warn` shows firmware access to peripherals the emulator lacks |
+| `WIRES` | | Jumper wires, `OUT:IN,...`: `2:10` drives GP10 from GP2 |
+| `ADC` | | Analog readings, `CHANNEL:VALUE,...` (12-bit): `0:2048` |
+
+Bytes sent to UART0 enter its receive FIFO only as fast as the firmware
+empties it, as on a real line, so lines longer than the 32-byte FIFO arrive
+whole. For a request/reply protocol such as the hardware-in-the-loop rig
+(`embedded/rig/pico`), set `UART_BACKLOG=0`, so that a new client is not
+handed the replies to an earlier one.
 
 ## Limits
 

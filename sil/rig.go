@@ -59,8 +59,17 @@ type rigMessage struct {
 // MaxRigLine bounds one line of the rig protocol.
 const MaxRigLine = 1 << 20
 
+// DefaultRigTimeout bounds a request to a rig whose context has no
+// deadline: a rig that stops answering fails the run instead of hanging it.
+const DefaultRigTimeout = 10 * time.Second
+
 // Rig is an IO served by a rig over the rig protocol.
 type Rig struct {
+	// Timeout bounds each request without a context deadline; 0 is
+	// DefaultRigTimeout. On a connection without deadlines (a Windows COM
+	// port) a request that times out closes the connection.
+	Timeout time.Duration
+
 	mu    sync.Mutex
 	conn  io.ReadWriteCloser
 	in    *bufio.Reader
@@ -150,11 +159,23 @@ func (r *Rig) typeOf(addr string) string {
 func (r *Rig) call(ctx context.Context, req rigMessage) (rigMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if dl, ok := r.conn.(interface{ SetDeadline(time.Time) error }); ok {
-		deadline, _ := ctx.Deadline()
-		dl.SetDeadline(deadline)
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultRigTimeout
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(timeout)
+	}
+	dl, canDeadline := r.conn.(interface{ SetDeadline(time.Time) error })
+	if canDeadline && dl.SetDeadline(deadline) == nil {
 		stop := context.AfterFunc(ctx, func() { dl.SetDeadline(time.Unix(1, 0)) })
 		defer stop()
+	} else {
+		// No deadlines: closing the connection ends a read that waits.
+		timer := time.AfterFunc(time.Until(deadline), func() { r.conn.Close() })
+		stop := context.AfterFunc(ctx, func() { r.conn.Close() })
+		defer func() { timer.Stop(); stop() }()
 	}
 	if err := writeLine(r.conn, req); err != nil {
 		return rigMessage{}, fmt.Errorf("rig %s: %w", req.Op, err)

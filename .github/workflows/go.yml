@@ -187,11 +187,16 @@ jobs:
       - name: Build the embedded VM example
         run: tinygo build -target=${{ matrix.target }} -size short -o beedance-${{ matrix.target }}.uf2 ./embedded/example/raspberrypi/
 
+      - name: Build the hardware-in-the-loop rig
+        run: tinygo build -target=${{ matrix.target }} -size short -o beedance-rig-${{ matrix.target }}.uf2 ./embedded/rig/pico/
+
       - name: Upload the firmware
         uses: actions/upload-artifact@v4
         with:
           name: beedance-${{ matrix.target }}
-          path: beedance-${{ matrix.target }}.uf2
+          path: |
+            beedance-${{ matrix.target }}.uf2
+            beedance-rig-${{ matrix.target }}.uf2
 
   pico-emulator:
     name: Raspberry Pi Pico (emulated)
@@ -216,3 +221,21 @@ jobs:
       - name: Emulator log
         if: always()
         run: docker logs picosim
+
+      # The rig, with GP2 wired to GP10 and ADC0 at 2048: its own tests,
+      # then a Structured Text test hardware in the loop.
+      - name: Build the rig's emulator image
+        run: docker build -f embedded/picosim/Dockerfile --build-arg PKG=./embedded/rig/pico -t beedance-picosim-rig .
+
+      - name: Start the rig
+        run: docker run -d --name picosim-rig -p 4100:4000 -e UART_BACKLOG=0 -e WIRES=2:10 -e ADC=0:2048 beedance-picosim-rig
+
+      - name: Test the rig
+        run: go test -count=1 -v -tags picosimrig ./embedded/picosim/
+
+      - name: Hardware in the loop
+        run: go run . -test -io tcp://localhost:4100 -interval 20ms -engines eval,vm embedded/rig/pico/bench.st
+
+      - name: Rig log
+        if: always()
+        run: docker logs picosim-rig
