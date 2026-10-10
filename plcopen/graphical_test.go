@@ -383,10 +383,10 @@ func TestGraphicalErrors(t *testing.T) {
 	}
 }
 
-func TestGraphicalSFCStillRefused(t *testing.T) {
+func TestGraphicalSFCEmptyRefused(t *testing.T) {
 	data := project(`<pou name="S" pouType="program"><interface/><body><SFC></SFC></body></pou>`)
-	if _, err := ImportToIECText(data); err == nil || !strings.Contains(err.Error(), "SFC") {
-		t.Fatalf("graphical SFC: %v", err)
+	if _, err := ImportToIECText(data); err == nil || !strings.Contains(err.Error(), "no initial step") {
+		t.Fatalf("empty graphical SFC: %v", err)
 	}
 }
 

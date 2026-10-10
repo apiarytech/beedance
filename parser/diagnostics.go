@@ -13,6 +13,7 @@ package parser
 import (
 	"regexp"
 	"strconv"
+	"sync"
 )
 
 // Diagnostic is a parse error with its position, for editors. Row and
@@ -24,12 +25,24 @@ type Diagnostic struct {
 
 // The positions errors are written with: "... at row 3, column 7" (most),
 // "line 3, column 7: ..." (LD and FBD bodies), "ERROR (3:7): ...".
-var errorPositions = []*regexp.Regexp{
-	regexp.MustCompile(`at row (\d+), column (\d+)`),
-	regexp.MustCompile(`line (\d+), column (\d+)`),
-	regexp.MustCompile(`\((\d+):(\d+)\)`),
-	regexp.MustCompile(`(?:at row|line) (\d+)()`),
+// errorPositions compiles them on first use, so a program that never reads
+// a diagnostic (firmware) does not carry the regexp package.
+func errorPositions() []*regexp.Regexp {
+	errorPositionsOnce.Do(func() {
+		errorPositionsRE = []*regexp.Regexp{
+			regexp.MustCompile(`at row (\d+), column (\d+)`),
+			regexp.MustCompile(`line (\d+), column (\d+)`),
+			regexp.MustCompile(`\((\d+):(\d+)\)`),
+			regexp.MustCompile(`(?:at row|line) (\d+)()`),
+		}
+	})
+	return errorPositionsRE
 }
+
+var (
+	errorPositionsOnce sync.Once
+	errorPositionsRE   []*regexp.Regexp
+)
 
 // Diagnostics are Errors with their positions.
 func (p *Parser) Diagnostics() []Diagnostic {
@@ -43,7 +56,7 @@ func (p *Parser) Diagnostics() []Diagnostic {
 // ErrorDiagnostic finds the position in an error message of beedance's.
 func ErrorDiagnostic(msg string) Diagnostic {
 	d := Diagnostic{Message: msg}
-	for _, re := range errorPositions {
+	for _, re := range errorPositions() {
 		if m := re.FindStringSubmatch(msg); m != nil {
 			d.Row, _ = strconv.Atoi(m[1])
 			d.Column, _ = strconv.Atoi(m[2])

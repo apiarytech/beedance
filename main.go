@@ -12,6 +12,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -64,6 +65,8 @@ func main() {
 	depth := flag.Int("depth", 2, "With -test: levels of instance and structure members to record below a variable")
 	goTimeout := flag.Duration("go-timeout", time.Minute, "With -test on the go engine: time one test may take")
 	goReplace := flag.String("go-replace", "", "With -test on the go engine: MODULE=DIR,... builds with local modules, e.g. github.com/apiarytech/royaljelly=../royaljelly")
+	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT: hardware in the loop; implies -realtime")
+	realTime := flag.Bool("realtime", false, "With -test: run scans -interval apart on the wall clock instead of a simulated clock")
 	flag.Parse()
 
 	if *testFlag {
@@ -74,6 +77,8 @@ func main() {
 		}
 		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter,
 			Watch: watch.Options{Depth: *depth}, GoTimeout: *goTimeout, GoReplace: map[string]string{}}
+		// Real I/O runs on the wall clock unless -realtime=false says not.
+		opts.RealTime = *realTime || (*ioFlag != "" && !flagSet("realtime"))
 		for _, r := range strings.Split(*goReplace, ",") {
 			if r = strings.TrimSpace(r); r == "" {
 				continue
@@ -92,6 +97,17 @@ func main() {
 		default:
 			fmt.Fprintf(os.Stderr, "-members %q: want outputs or all\n", *membersFlag)
 			os.Exit(2)
+		}
+		if *ioFlag != "" {
+			rig, err := sil.DialRig(context.Background(), *ioFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			opts.IO = rig
+			status := runTests(flag.Args(), opts, *csvDir, os.Stdout, os.Stderr)
+			rig.Close()
+			os.Exit(status)
 		}
 		os.Exit(runTests(flag.Args(), opts, *csvDir, os.Stdout, os.Stderr))
 	}

@@ -210,6 +210,12 @@ func (b *Boolean) Inspect() string { return fmt.Sprintf("%t", b.Value) }
 // Null objects represent the absence of a value.
 type Null struct{}
 
+// NULL is the null value every package returns, so a null can be
+// recognised by identity. Pointers to distinct zero-size values may or may
+// not be equal: Go's compiler happens to give them one address, TinyGo does
+// not.
+var NULL = &Null{}
+
 // Type returns the object's type.
 func (n *Null) Type() ObjectType { return NULL_OBJ }
 

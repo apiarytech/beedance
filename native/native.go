@@ -220,7 +220,7 @@ func (r *Registry) setFn(args ...object.Object) object.Object {
 	if err := toGo(args[2], f); err != nil {
 		return object.NewBuiltinError("__NATIVE_SET %s: %v", name.Value, err)
 	}
-	return &object.Null{}
+	return object.NULL
 }
 
 // __NATIVE_RUN(handle) runs an instance at the registry's clock.
@@ -233,7 +233,7 @@ func (r *Registry) runFn(args ...object.Object) object.Object {
 		return object.NewBuiltinError("__NATIVE_RUN: %v", err)
 	}
 	inst.Execute(r.clock())
-	return &object.Null{}
+	return object.NULL
 }
 
 // __NATIVE_GET(handle, field) reads an output of an instance.

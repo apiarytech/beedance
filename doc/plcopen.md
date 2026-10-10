@@ -24,6 +24,17 @@ beedance's lowering adds (edge detectors). Data types become `<dataType>`
 entries. Rung names (`RUNG sealin`) are not kept: TC6 has no place
 for them.
 
+**SFC bodies** are exported as graphical charts (`diagram.SFCXML`), laid
+out as beedance draws them: steps, transitions with their conditions as
+inline ST (as written in the source), selection and simultaneous
+divergences and convergences, a loop back as a jump, and action blocks.
+`ACTION`s become the POU's `<actions>`, in ST. A selection's transitions
+get priorities in the order the text lists them, so an import (below)
+gives the first precedence, as IEC 61131-3 does; the text form fires every
+transition whose condition holds. A chart the graphical form cannot hold (a
+step with statements of its own, more than one initial step) is exported
+in the text form, as ST.
+
 ## Import
 
 ```go
@@ -65,9 +76,30 @@ Statements run in `executionOrderId` order when every element has one;
 otherwise networks run top to bottom, each in dataflow order (a loop is
 cut at its topmost statement, with a warning).
 
+**SFC bodies** are written in the text form of SFC (`INITIAL_STEP`,
+`STEP`, `ACTION`, `TRANSITION FROM ... TO ...`), which every engine runs
+(`ReadSFC` returns the chart, a `diagram.Chart`):
+
+- a transition's source steps are found through selection divergences and
+  simultaneous convergences, its target steps through selection
+  convergences, simultaneous divergences and jumps;
+- a condition may be inline ST, a named transition of the POU (ST, as
+  `expr`, `:= expr;` or `Name := expr;`, or an LD or FBD body assigning the
+  transition's name), or a network of the chart wired into the
+  transition; `negated` conditions become `NOT (...)`;
+- transitions leaving the same steps are a selection: the first by
+  `priority`, then left to right, wins, so a later one's condition is
+  ANDed with `NOT` of those before it;
+- an action block's actions become associations (`Name(Q);`,
+  `Name(L, T#2s);`); the POU's named actions (ST, or LD and FBD lowered to
+  ST) become `ACTION`s, and an inline action an `ACTION` named after its
+  step (`_Fill_1`).
+
 Not converted yet, and the import fails naming the POU: jumps, labels and
-returns; graphical SFC; a function with `EN` whose result feeds a block
-under a different enable.
+returns in LD and FBD; a function with `EN` whose result feeds a block
+under a different enable; macro steps; IL actions and conditions; a chart
+with more than one initial step, or a condition that needs statements
+(an edge contact, say) rather than one expression.
 
 ## Validation
 

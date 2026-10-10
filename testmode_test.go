@@ -12,11 +12,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sil"
 )
 
@@ -59,5 +63,61 @@ func TestRunTestsExitStatus(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "csv", "TEST_Twice.vm.csv")); err != nil {
 		t.Errorf("CSV not written: %v", err)
+	}
+}
+
+// echoRig is a rig that wires output %QX0.0 back to input %IX0.0.
+type echoRig struct{ q bool }
+
+func (r *echoRig) Begin(context.Context, string, sil.Engine, []sil.Point) error {
+	r.q = false
+	return nil
+}
+
+func (r *echoRig) Read(context.Context, time.Duration) (map[string]object.Object, error) {
+	return map[string]object.Object{"%IX0.0": &object.Boolean{Value: r.q}}, nil
+}
+
+func (r *echoRig) Write(_ context.Context, _ time.Duration, out map[string]object.Object) error {
+	if b, ok := out["%QX0.0"].(*object.Boolean); ok {
+		r.q = b.Value
+	}
+	return nil
+}
+
+func (r *echoRig) End(context.Context) error { return nil }
+
+func TestRunTestsWithRig(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		sil.ServeRig(context.Background(), conn, &echoRig{})
+	}()
+	p := filepath.Join(t.TempDir(), "loop.st")
+	src := "PROGRAM TEST_Loopback\nVAR_OUTPUT failures : INT; done : BOOL; END_VAR\n" +
+		"VAR i AT %IX0.0 : BOOL; q AT %QX0.0 : BOOL; END_VAR\nq := TRUE;\ndone := i;\nEND_PROGRAM\n"
+	if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rig, err := sil.DialRig(context.Background(), ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rig.Close()
+	var out, errOut bytes.Buffer
+	opts := sil.Options{IO: rig, RealTime: true, Interval: time.Millisecond}
+	if code := runTests([]string{p}, opts, "", &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "PASS (2 scans)") || !strings.Contains(out.String(), "not compared") {
+		t.Errorf("output:\n%s", out.String())
 	}
 }

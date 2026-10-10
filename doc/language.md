@@ -12,7 +12,11 @@
 - **Sequential Function Chart (SFC)**: `INITIAL_STEP`, `STEP`,
   `TRANSITION`, action blocks with the qualifiers `N`, `S`, `R`, `P`, and
   the timed `D`, `L`, `SD`, `DS`, `SL`; simultaneous divergence and
-  convergence.
+  convergence. A graphical PLCopen SFC body is imported into this text
+  form ([PLCopen XML](plcopen.md)), and package `diagram` draws a chart as
+  SVG (`diagram.ChartOf`, `diagram.SFCSVG`): loops back are drawn as
+  jumps, selections with single bars, simultaneous branches with double
+  ones.
 - **Ladder Diagram (LD)** and **Function Block Diagram (FBD)**, in
   beedance's text form below or as graphical PLCopen XML
   ([PLCopen XML](plcopen.md)). Both are lowered to ST statements by
@@ -185,8 +189,8 @@ not read as variables.
 
 ## Not supported yet
 
-- SFC in its graphical PLCopen form; jumps, labels and returns in LD and
-  FBD (see [PLCopen XML](plcopen.md)).
+- Jumps, labels and returns in LD and FBD; macro steps and IL actions or
+  conditions in graphical SFC (see [PLCopen XML](plcopen.md)).
 - `T`, `D`, `DT` and `TOD` are keywords (the short names of the time
   types), so a variable may not have one of these names.
 - A binary file format for compiled bytecode.

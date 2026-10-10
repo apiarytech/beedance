@@ -11,15 +11,39 @@
 package ast
 
 import (
-	"regexp"
 	"strings"
 )
 
-// directAddress is a directly represented variable (IEC 61131-3, 6.5.5):
-// a location (I input, Q output, M memory), an optional size (X bit, B
-// byte, W word, D double word, L long word; none means a bit) and a
-// hierarchical address of numbers separated by dots.
-var directAddress = regexp.MustCompile(`^%([IQM])([XBWDL]?)(\d+(?:\.\d+)*)$`)
+// directSize matches a directly represented variable (IEC 61131-3, 6.5.5),
+// upper case, %([IQM])([XBWDL]?)(\d+(\.\d+)*): a location (I input, Q
+// output, M memory), an optional size (X bit, B byte, W word, D double
+// word, L long word; none means a bit) and a hierarchical address of
+// numbers separated by dots. It returns the size, 0 for none. (Not a
+// regexp: a microcontroller build would carry the regexp package and its
+// Unicode tables in RAM.)
+func directSize(a string) (size byte, ok bool) {
+	if len(a) < 3 || a[0] != '%' || strings.IndexByte("IQM", a[1]) < 0 {
+		return 0, false
+	}
+	rest := a[2:]
+	if strings.IndexByte("XBWDL", rest[0]) >= 0 {
+		size, rest = rest[0], rest[1:]
+	}
+	if rest == "" {
+		return 0, false
+	}
+	for _, part := range strings.Split(rest, ".") {
+		if part == "" {
+			return 0, false
+		}
+		for i := 0; i < len(part); i++ {
+			if part[i] < '0' || part[i] > '9' {
+				return 0, false
+			}
+		}
+	}
+	return size, true
+}
 
 // FullAddress returns the variable's address with its '%', upper-cased:
 // "%IW0", "%QX0.1".
@@ -36,18 +60,18 @@ func DirectType(address string) (typ string, ok bool) {
 	if !strings.HasPrefix(a, "%") {
 		a = "%" + a
 	}
-	m := directAddress.FindStringSubmatch(a)
-	if m == nil {
+	size, ok := directSize(a)
+	if !ok {
 		return "", false
 	}
-	switch m[2] {
-	case "B":
+	switch size {
+	case 'B':
 		return "BYTE", true
-	case "W":
+	case 'W':
 		return "WORD", true
-	case "D":
+	case 'D':
 		return "DWORD", true
-	case "L":
+	case 'L':
 		return "LWORD", true
 	}
 	return "BOOL", true

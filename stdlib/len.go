@@ -81,7 +81,7 @@ var popFn = func(args ...object.Object) object.Object {
 	}
 	length := len(arr.Elements)
 	if length == 0 {
-		return &object.Null{} // Consistent with FIRST/LAST on empty array
+		return object.NULL // Consistent with FIRST/LAST on empty array
 	}
 	// Returns a new array containing all but the last element.
 	newElements := make([]object.Object, length-1)
@@ -136,7 +136,7 @@ var firstFn = func(args ...object.Object) object.Object {
 	if len(arr.Elements) > 0 {
 		return arr.Elements[0]
 	}
-	return &object.Null{}
+	return object.NULL
 }
 
 var lastFn = func(args ...object.Object) object.Object {
@@ -151,7 +151,7 @@ var lastFn = func(args ...object.Object) object.Object {
 	if length > 0 {
 		return arr.Elements[length-1]
 	}
-	return &object.Null{}
+	return object.NULL
 }
 
 var restFn = func(args ...object.Object) object.Object {
@@ -168,7 +168,7 @@ var restFn = func(args ...object.Object) object.Object {
 		copy(newElements, arr.Elements[1:length])
 		return &object.Array{Elements: newElements}
 	}
-	return &object.Null{}
+	return object.NULL
 }
 
 var insertFn = func(args ...object.Object) object.Object {

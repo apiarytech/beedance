@@ -18,6 +18,8 @@ import (
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/vm"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +43,9 @@ import (
 var generatedInstructions = %s
 
 var generatedConstants []object.Object
+
+// time is used only by TIME, DATE, TOD and DT constants.
+var _ = time.Duration(0)
 
 func init() {
 %s
@@ -118,12 +123,58 @@ func objectToGoLiteral(obj object.Object) (string, error) {
 	}
 
 	switch o := obj.(type) {
+	case *object.SInt:
+		return fmt.Sprintf("&object.SInt{Value: %d}", o.Value), nil
+	case *object.Int:
+		return fmt.Sprintf("&object.Int{Value: %d}", o.Value), nil
+	case *object.DInt:
+		return fmt.Sprintf("&object.DInt{Value: %d}", o.Value), nil
 	case *object.LInt:
 		return fmt.Sprintf("&object.LInt{Value: %d}", o.Value), nil
+	case *object.USInt:
+		return fmt.Sprintf("&object.USInt{Value: %d}", o.Value), nil
+	case *object.UInt:
+		return fmt.Sprintf("&object.UInt{Value: %d}", o.Value), nil
+	case *object.UDInt:
+		return fmt.Sprintf("&object.UDInt{Value: %d}", o.Value), nil
+	case *object.ULInt:
+		return fmt.Sprintf("&object.ULInt{Value: %d}", o.Value), nil
+	case *object.Byte:
+		return fmt.Sprintf("&object.Byte{Value: %d}", o.Value), nil
+	case *object.Word:
+		return fmt.Sprintf("&object.Word{Value: %d}", o.Value), nil
+	case *object.DWord:
+		return fmt.Sprintf("&object.DWord{Value: %d}", o.Value), nil
+	case *object.LWord:
+		return fmt.Sprintf("&object.LWord{Value: %d}", o.Value), nil
+	case *object.BitString:
+		return fmt.Sprintf("&object.BitString{Value: %d, Width: %d}", o.Value, o.Width), nil
+	case *object.Real:
+		f, err := floatLiteral(o.Value)
+		return fmt.Sprintf("&object.Real{Value: %s}", f), err
 	case *object.LReal:
-		return fmt.Sprintf("&object.LReal{Value: %f}", o.Value), nil
+		f, err := floatLiteral(o.Value)
+		return fmt.Sprintf("&object.LReal{Value: %s}", f), err
 	case *object.String:
 		return fmt.Sprintf("&object.String{Value: %q}", o.Value), nil
+	case *object.WString:
+		return fmt.Sprintf("&object.WString{Value: %q}", o.Value), nil
+	case *object.Null:
+		return "vm.Null", nil
+	case *object.TimeOfDay:
+		return fmt.Sprintf("&object.TimeOfDay{Value: time.Unix(0, %d).UTC()}", o.Value.UnixNano()), nil
+	case *object.DateAndTime:
+		return fmt.Sprintf("&object.DateAndTime{Value: time.Unix(0, %d).UTC()}", o.Value.UnixNano()), nil
+	case *object.Array:
+		var elems strings.Builder
+		for i, e := range o.Elements {
+			lit, err := objectToGoLiteral(e)
+			if err != nil {
+				return "", fmt.Errorf("array element %d: %w", i, err)
+			}
+			elems.WriteString("\n\t\t" + lit + ",")
+		}
+		return fmt.Sprintf("&object.Array{LowerBound: %d, Elements: []object.Object{%s\n\t}}", o.LowerBound, elems.String()), nil
 	case *object.Boolean:
 		if o.Value {
 			return "vm.True", nil
@@ -175,4 +226,16 @@ func objectToGoLiteral(obj object.Object) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported object type for Go literal generation: %s", obj.Type())
 	}
+}
+
+// floatLiteral is v as a Go literal that reads back exactly.
+func floatLiteral(v float64) (string, error) {
+	if math.IsInf(v, 0) || math.IsNaN(v) {
+		return "", fmt.Errorf("constant %v is not finite", v)
+	}
+	s := strconv.FormatFloat(v, 'g', -1, 64)
+	if !strings.ContainsAny(s, ".eEn") {
+		s += ".0"
+	}
+	return s, nil
 }

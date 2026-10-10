@@ -43,8 +43,8 @@ type ImportOptions struct {
 }
 
 // ImportToIECText converts PLCopen XML into IEC 61131-3 source, graphical
-// LD and FBD bodies lowered to Structured Text. Graphical SFC bodies cannot
-// be converted yet.
+// LD and FBD bodies lowered to Structured Text and graphical SFC bodies
+// written in the text form of SFC.
 func ImportToIECText(xmlData []byte) (string, error) {
 	return ImportToIECTextOptions(xmlData, ImportOptions{})
 }
@@ -143,7 +143,23 @@ func ImportToIECTextOptions(xmlData []byte, opt ImportOptions) (string, error) {
 				}
 			}
 		case pou.Body.SFC != nil:
-			return "", fmt.Errorf("pou '%s': graphical SFC bodies cannot be converted to text yet", pou.Name)
+			// Graphical SFC is written in the text form of SFC (sfc.go).
+			sc, err := ReadSFC(pou, projectFunctionBlocks(proj))
+			if err != nil {
+				return "", err
+			}
+			text, err := sc.Chart.Text("\t")
+			if err != nil {
+				return "", fmt.Errorf("pou '%s': SFC body: %w", pou.Name, err)
+			}
+			if len(sc.Decls) > 0 {
+				buf.WriteString("\tVAR\n")
+				for _, d := range sc.Decls {
+					buf.WriteString("\t\t" + d + "\n")
+				}
+				buf.WriteString("\tEND_VAR\n\n")
+			}
+			buf.WriteString(text)
 		}
 		if body != nil {
 			text, err := FormattedTextContent(body.Text)

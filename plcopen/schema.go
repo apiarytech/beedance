@@ -93,13 +93,34 @@ type Pous struct {
 }
 
 type POU struct {
-	Name      string         `xml:"name,attr"`
-	PouType   string         `xml:"pouType,attr"` // "program", "functionBlock", "function"
-	GlobalID  string         `xml:"globalId,attr,omitempty"`
-	Interface *POUInterface  `xml:"interface,omitempty"`
-	Body      POUBody        `xml:"body"`
-	AddData   *AddData       `xml:"addData,omitempty"`
-	Doc       *FormattedText `xml:"documentation,omitempty"`
+	Name      string        `xml:"name,attr"`
+	PouType   string        `xml:"pouType,attr"` // "program", "functionBlock", "function"
+	GlobalID  string        `xml:"globalId,attr,omitempty"`
+	Interface *POUInterface `xml:"interface,omitempty"`
+	// Actions and Transitions are the named action and transition bodies
+	// an SFC body refers to.
+	Actions     *POUActions     `xml:"actions,omitempty"`
+	Transitions *POUTransitions `xml:"transitions,omitempty"`
+	Body        POUBody         `xml:"body"`
+	AddData     *AddData        `xml:"addData,omitempty"`
+	Doc         *FormattedText  `xml:"documentation,omitempty"`
+}
+
+type POUActions struct {
+	Actions []NamedBody `xml:"action"`
+}
+
+type POUTransitions struct {
+	Transitions []NamedBody `xml:"transition"`
+}
+
+// NamedBody is a POU's action or transition: a name and a body.
+type NamedBody struct {
+	Name     string         `xml:"name,attr"`
+	GlobalID string         `xml:"globalId,attr,omitempty"`
+	Body     POUBody        `xml:"body"`
+	AddData  *AddData       `xml:"addData,omitempty"`
+	Doc      *FormattedText `xml:"documentation,omitempty"`
 }
 
 type POUInterface struct {

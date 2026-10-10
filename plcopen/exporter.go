@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/diagram"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/parser"
 )
@@ -112,6 +113,7 @@ func export(program *ast.Program, projectName string, bodies map[int]string) (*P
 				},
 				Body: pouBody(s.Token.Pos, s.Body, bodies),
 			}
+			sfcBody(&pou, s.Body, bodies)
 			proj.Types.Pous.Pous = append(proj.Types.Pous.Pous, pou)
 
 		case *ast.FunctionBlockDeclaration:
@@ -128,6 +130,7 @@ func export(program *ast.Program, projectName string, bodies map[int]string) (*P
 				},
 				Body: pouBody(s.Token.Pos, s.Body, bodies),
 			}
+			sfcBody(&pou, s.Body, bodies)
 			proj.Types.Pous.Pous = append(proj.Types.Pous.Pous, pou)
 
 		case *ast.FunctionDeclaration:
@@ -147,6 +150,7 @@ func export(program *ast.Program, projectName string, bodies map[int]string) (*P
 				},
 				Body: pouBody(s.Token.Pos, s.Body, bodies),
 			}
+			sfcBody(&pou, s.Body, bodies)
 			proj.Types.Pous.Pous = append(proj.Types.Pous.Pous, pou)
 
 		case *ast.ConfigurationDeclaration:
@@ -446,4 +450,56 @@ func arrayValueElementFromAST(expr ast.Expression) ArrayValueElement {
 
 	val := valueFromAST(expr)
 	return ArrayValueElement{SimpleValue: val.SimpleValue, ArrayValue: val.ArrayValue, StructValue: val.StructValue}
+}
+
+// sfcBody writes an SFC body as a graphical chart (diagram.SFCXML), its
+// actions as the POU's <actions>, conditions and action bodies as written
+// in the source when there is one. A body that is not SFC, or a chart the
+// graphical form cannot hold (a step with statements of its own, two
+// initial steps), keeps the text form, as ST.
+func sfcBody(pou *POU, body ast.Statement, bodies map[int]string) {
+	sfc, ok := body.(*ast.SFCProgram)
+	if !ok || sfc == nil {
+		return
+	}
+	c := diagram.ChartOf(sfc)
+	t, a := 0, 0
+	for _, el := range sfc.Elements {
+		switch e := el.(type) {
+		case *ast.StepStatement:
+			if e != nil && e.Body != nil && len(e.Body.Statements) > 0 {
+				return
+			}
+		case *ast.TransitionStatement:
+			if e == nil {
+				continue
+			}
+			if text, ok := bodies[e.Token.Pos]; ok && text != "" {
+				c.Transitions[t].Condition = text
+			}
+			t++
+		case *ast.ActionStatement:
+			if e == nil || e.Name == nil {
+				continue
+			}
+			text, ok := bodies[e.Token.Pos]
+			if !ok {
+				text = formatBodyST(e.Body)
+			}
+			c.Actions[a].Body = text
+			a++
+		}
+	}
+	inner, err := diagram.SFCXML(c)
+	if err != nil {
+		return
+	}
+	pou.Body = POUBody{SFC: &RawXML{Inner: inner}}
+	pou.Actions = nil
+	if len(c.Actions) > 0 {
+		pou.Actions = &POUActions{}
+		for _, act := range c.Actions {
+			pou.Actions.Actions = append(pou.Actions.Actions, NamedBody{Name: act.Name, Body: POUBody{ST: &FormattedText{Text: xhtmlText(act.Body)}}})
+		}
+	}
 }

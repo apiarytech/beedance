@@ -23,7 +23,7 @@ import (
 
 var (
 	// NULL is a singleton object representing the null value.
-	NULL = &object.Null{}
+	NULL = object.NULL
 	// TRUE is a singleton object representing the boolean true value.
 	TRUE = &object.Boolean{Value: true}
 	// FALSE is a singleton object representing the boolean false value.

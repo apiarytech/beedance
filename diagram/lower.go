@@ -39,6 +39,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // Lowered is a graphical body as Structured Text.
@@ -387,12 +388,25 @@ func (l *lowering) wires(conns []Conn) (*expr, error) {
 	return out, nil
 }
 
-var simpleOperand = regexp.MustCompile(`^(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])*|[+-]?[0-9][0-9A-Za-z_.#:+-]*|[A-Za-z_]+#[0-9A-Za-z_.:+-]+)$`)
+var simpleOperand = &lazyRegexp{src: `^(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])*|[+-]?[0-9][0-9A-Za-z_.#:+-]*|[A-Za-z_]+#[0-9A-Za-z_.:+-]+)$`}
+
+// lazyRegexp compiles on first use, so a program that never draws
+// (firmware) does not carry the regexp package.
+type lazyRegexp struct {
+	once sync.Once
+	src  string
+	re   *regexp.Regexp
+}
+
+func (l *lazyRegexp) get() *regexp.Regexp {
+	l.once.Do(func() { l.re = regexp.MustCompile(l.src) })
+	return l.re
+}
 
 // operand returns text as it can stand inside an expression.
 func operand(text string) string {
 	text = strings.TrimSpace(text)
-	if simpleOperand.MatchString(text) {
+	if simpleOperand.get().MatchString(text) {
 		return text
 	}
 	return "(" + text + ")"

@@ -1,6 +1,6 @@
 # beedance
 
-`beedance` is an interpreter and toolkit for the IEC 61131-3 industrial automation programming languages. It provides a robust, standards-compliant parser and an evaluator capable of executing Structured Text (ST), Instruction List (IL), and Sequential Function Chart (SFC). It serves as a powerful foundation for building compilers, analysis tools, and virtual controllers for PLCs.
+`beedance` is an interpreter and toolkit for the IEC 61131-3 industrial automation programming languages. It reads and runs all five: Structured Text (ST), Instruction List (IL), Sequential Function Chart (SFC), Ladder Diagram (LD) and Function Block Diagram (FBD). It serves as a powerful foundation for building compilers, analysis tools, and virtual controllers for PLCs.
 
 ## Implemented Features
 
@@ -14,6 +14,10 @@
         *   Action blocks with standard qualifiers (`N`, `S`, `R`, `P`).
         *   Timed action qualifiers (`D`, `L`, `SD`, `DS`, `SL`).
         *   Simultaneous divergence (fork) and convergence (join).
+        *   Graphical SFC in PLCopen XML, imported into the text form and exported from it, and charts drawn as SVG.
+    *   **Ladder Diagram (LD) and Function Block Diagram (FBD):** written in beedance's text form (`LD ... END_LD`, `FBD ... END_FBD`) or as graphical PLCopen XML, lowered to ST so they run alike in the evaluator, the VM and the transpiler, and drawn as SVG. See [doc/language.md](doc/language.md).
+
+*   **PLCopen XML:** import and export of PLCopen TC6 XML v2.01 projects, the exchange format of most IEC 61131-3 tools, with LD, FBD and SFC bodies as graphical diagrams. See [doc/plcopen.md](doc/plcopen.md).
 
 *   **Program Organization Units (POUs):**
     *   `PROGRAM`, `FUNCTION`, and `FUNCTION_BLOCK` declarations.
@@ -59,6 +63,10 @@ A core principle of `beedance` is a clean, modular architecture with a clear sep
 *   **`evaluator`:** A tree-walking interpreter that directly executes the AST. It is responsible for managing stateful logic, such as variable environments and the execution of standard function blocks (`TON`, `CTU`, etc.).
 
 *   **`compiler` & `vm`:** A bytecode compiler and virtual machine that provide a faster alternative to the evaluator. These components are fully decoupled from the evaluator and can be used independently.
+
+*   **`diagram`:** The model of the graphical languages: LD and FBD in their text form and in PLCopen XML, lowered to ST, and SFC charts; it lays out and draws all three as SVG.
+
+*   **`plcopen`:** Import and export of PLCopen TC6 XML.
 
 *   **`transpiler`:** A source-to-source compiler that translates the iec61131 AST into human-readable and efficient Go code. This enables integration with Go-native runtimes and compilation to native binaries or WebAssembly.
 

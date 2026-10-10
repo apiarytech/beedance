@@ -150,11 +150,12 @@ jobs:
         with:
           tinygo-version: '0.42.0' # Specify the TinyGo version you want to use
 
-      # compiler, vm and evaluator do not pass under TinyGo yet: a nil pointer
-      # dereference in compiler and vm, and FIRST, LAST and REST of an empty
-      # array in evaluator. Add them here once they do.
+      # Each test runs in a goroutine, whose stack TinyGo does not grow: the
+      # parser and compiler recurse deeply, and compiling the OSCAT library
+      # needs more than 256 KB. A program compiled ahead of time runs on the
+      # VM in 8 KB (see doc/embedded.md).
       - name: Test with TinyGo
-        run: tinygo test -v ./token ./lexer ./ast ./code ./object ./parser ./stdlib
+        run: tinygo test -v -stack-size=1MB ./token ./lexer ./ast ./code ./object ./parser ./stdlib ./compiler ./vm ./evaluator
 
   raspberry-pi-pico:
     name: Raspberry Pi Pico (${{ matrix.target }})

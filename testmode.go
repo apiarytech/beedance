@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -28,7 +29,7 @@ import (
 // not be read or parsed or hold no tests.
 func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Writer) int {
 	if len(files) == 0 {
-		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] FILE.st...")
+		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] [-io tcp://HOST:PORT] [-realtime] FILE.st...")
 		return 2
 	}
 	var b strings.Builder
@@ -81,6 +82,8 @@ func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Wr
 				errored = errored || r.Err != ""
 			}
 			switch {
+			case opts.IO != nil && !opts.Deterministic:
+				line += " - (real I/O: not compared)"
 			case res.Mismatch != "":
 				line += " DIFFER: " + res.Mismatch
 			case errored:
@@ -137,4 +140,12 @@ func writeTestCSV(dir string, res sil.Result, r sil.EngineResult) error {
 		return err
 	}
 	return f.Close()
+}
+
+// flagSet reports whether the flag called name was given on the command
+// line.
+func flagSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) { set = set || f.Name == name })
+	return set
 }

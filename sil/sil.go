@@ -132,6 +132,19 @@ type Options struct {
 	// GoReplace points modules the transpiled tests build with at local
 	// directories, by module path, e.g. a royaljelly checkout.
 	GoReplace map[string]string
+	// IO, when set, connects the located variables (%I, %Q) of each run to
+	// a plant model or to real I/O: hardware in the loop (see IO). The go
+	// engine does not run with IO yet.
+	IO IO
+	// RealTime paces scans Interval apart on the wall clock, and timers
+	// read it, instead of running them at once on a simulated clock. A run
+	// against real I/O needs it; MaxScans × Interval then bounds a test.
+	RealTime bool
+	// Deterministic reports that IO gives every engine the same inputs for
+	// the same outputs (a plant model in Go), so engines are compared as
+	// they are without IO. With IO and without it, each engine's run is
+	// judged on its own, as real inputs differ between runs.
+	Deterministic bool
 }
 
 func (o Options) withDefaults() Options {
@@ -259,7 +272,7 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 	var nat *native
 	var natErr error
 	for _, e := range opts.Engines {
-		if e == Go && nat == nil && natErr == nil {
+		if e == Go && opts.IO == nil && nat == nil && natErr == nil {
 			nat, natErr = buildNative(ctx, source, infos, opts)
 			if nat != nil {
 				defer nat.close()
@@ -321,6 +334,8 @@ func runTest(ctx context.Context, source string, program *ast.Program, t *testIn
 			r = runEvaluator(ctx, source, t.decl, t.vars, t.limit, opts)
 		case e == VM:
 			r = runVM(ctx, program, t.decl, t.vars, t.limit, opts)
+		case opts.IO != nil:
+			r = EngineResult{Err: "the go engine does not run with IO yet"}
 		case natErr != nil:
 			r = EngineResult{Err: natErr.Error()}
 		default:
@@ -334,8 +349,13 @@ func runTest(ctx context.Context, source string, program *ast.Program, t *testIn
 	for _, r := range res.Engines {
 		res.Passed = res.Passed && r.Passed
 	}
-	// Each engine is compared with the first.
-	for _, r := range res.Engines[1:] {
+	// Each engine is compared with the first, unless real inputs make the
+	// runs differ.
+	compared := res.Engines[1:]
+	if opts.IO != nil && !opts.Deterministic {
+		compared = nil
+	}
+	for _, r := range compared {
 		if res.Mismatch = compare(res.Engines[0], r, t.vars, opts.Tolerance); res.Mismatch != "" {
 			break
 		}
@@ -402,12 +422,27 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 		return r
 	}
 	call, _ := parse(decl.Name.Value + "();")
+	io, err := beginIO(ctx, opts.IO, decl.Name.Value, Evaluator, evaluator.IO(), evaluator.IOTypes())
+	if err != nil {
+		r.Err = err.Error()
+		return r
+	}
+	defer io.end(ctx, &r)
+	clk := newClock(opts)
 	for n := 0; n < limit; n++ {
 		if err := ctx.Err(); err != nil {
 			r.Err = err.Error()
 			break
 		}
-		elapsed = time.Duration(n) * opts.Interval
+		t, err := clk.at(ctx, n)
+		if err == nil {
+			err = io.read(ctx, t)
+		}
+		if err != nil {
+			r.Err = fmt.Sprintf("scan %d: %v", n+1, err)
+			break
+		}
+		elapsed = t
 		evaluator.SetBudget(opts.ScanBudget)
 		if out := evaluator.Eval(call, env); isError(out) {
 			r.Err = fmt.Sprintf("scan %d: %s", n+1, out.Inspect())
@@ -415,11 +450,21 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 		}
 		values := Scan{}
 		for _, v := range vars {
-			if o, ok := watch.Evaluator(prog.Env, v); ok {
+			o, ok := watch.Evaluator(prog.Env, v)
+			// A located variable points into the I/O image.
+			if p, isPtr := o.(*object.Pointer); ok && isPtr && p.Env == nil {
+				o, ok = evaluator.IO()[p.Name]
+			}
+			if ok && o != nil {
 				values[v.Name] = o.Inspect()
 			}
 		}
+		io.record(values)
 		r.Scans = append(r.Scans, values)
+		if err := io.write(ctx, t); err != nil {
+			r.Err = fmt.Sprintf("scan %d: %v", n+1, err)
+			break
+		}
 		if isDone(values) {
 			break
 		}
@@ -458,15 +503,36 @@ func runVM(ctx context.Context, program *ast.Program, decl *ast.ProgramDeclarati
 		scanVM.IO()[addr] = v
 	}
 	slot := map[string]int{}
+	types := map[string]string{}
+	located := map[string]string{} // address by upper-case name
 	for _, v := range compiled.Variables {
 		slot[strings.ToUpper(v.Name)] = v.Global
+		if v.Address != "" {
+			types[v.Address] = v.Type
+			located[strings.ToUpper(v.Name)] = v.Address
+		}
 	}
+	io, err := beginIO(ctx, opts.IO, decl.Name.Value, VM, scanVM.IO(), types)
+	if err != nil {
+		r.Err = err.Error()
+		return r
+	}
+	defer io.end(ctx, &r)
+	clk := newClock(opts)
 	for n := 0; n < limit; n++ {
 		if err := ctx.Err(); err != nil {
 			r.Err = err.Error()
 			break
 		}
-		elapsed = time.Duration(n) * opts.Interval
+		t, err := clk.at(ctx, n)
+		if err == nil {
+			err = io.read(ctx, t)
+		}
+		if err != nil {
+			r.Err = fmt.Sprintf("scan %d: %v", n+1, err)
+			break
+		}
+		elapsed = t
 		scanVM.Reset()
 		if err := scanVM.Run(); err != nil {
 			r.Err = fmt.Sprintf("scan %d: %v", n+1, err)
@@ -474,11 +540,20 @@ func runVM(ctx context.Context, program *ast.Program, decl *ast.ProgramDeclarati
 		}
 		values := Scan{}
 		for _, v := range vars {
-			if o, ok := watch.VM(globals, slot, v); ok {
+			o, ok := watch.VM(globals, slot, v)
+			if addr := located[strings.ToUpper(v.Name)]; !ok && addr != "" {
+				o, ok = scanVM.IO()[addr] // a located variable has no slot
+			}
+			if ok && o != nil {
 				values[v.Name] = o.Inspect()
 			}
 		}
+		io.record(values)
 		r.Scans = append(r.Scans, values)
+		if err := io.write(ctx, t); err != nil {
+			r.Err = fmt.Sprintf("scan %d: %v", n+1, err)
+			break
+		}
 		if isDone(values) {
 			break
 		}

@@ -150,6 +150,10 @@ and a per-scan budget (for Go, a time limit per test: `GoTimeout`), so a
 runaway loop fails its test. The go engine needs the Go toolchain; it
 builds with royaljelly `sil.RoyaljellyVersion`, or `GoReplace` directories. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
 
+With `Options.IO`, the tests' located variables are connected to a plant
+model or to real I/O. With `Options.RealTime`, they run on the wall clock.
+See [Hardware in the loop](hil.md).
+
 ## Watching function block outputs
 
 Package `watch` names what a host can watch of a program, the same way on

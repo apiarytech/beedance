@@ -171,7 +171,7 @@ func TestMalformedBytecodeErrors(t *testing.T) {
 		{
 			name:         "pop from an empty stack is reported, not a crash",
 			instructions: [][]byte{code.Make(code.OpAdd)},
-			want:         "vm runtime error: runtime error: index out of range [-1]",
+			want:         "vm runtime error: stack underflow",
 		},
 	}
 	for _, tt := range tests {

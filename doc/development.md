@@ -44,7 +44,7 @@ tinygo test ./token ./lexer ./ast ./code ./object ./parser ./stdlib
 | test | Build, vet and test on Linux, macOS and Windows, with Go 1.27 and stable |
 | lint-race | gofmt, and the tests with the race detector |
 | raspberry-pi | ARMv6, ARMv7 and arm64 under QEMU; uploads a `beedance` binary per target |
-| tinygo-test | The packages that pass under TinyGo |
+| tinygo-test | The core packages, compiler, vm and evaluator under TinyGo, with 1 MB goroutine stacks |
 | raspberry-pi-pico | Firmware for `pico`, `pico-w`, `pico2`, `pico2-w`, uploaded as artifacts |
 
 ## Releases
@@ -64,8 +64,10 @@ Tags are `vX.Y.Z` (`-betaN` for pre-releases). The `version` constant in
 
 - **`-uvm` does nothing.** The flag selects an engine that is not
   implemented.
-- **TinyGo**: `compiler`, `vm` and `evaluator` do not pass their tests
-  under TinyGo (see [Microcontrollers](embedded.md)).
+- **TinyGo stacks**: under TinyGo the `compiler`, `vm` and `evaluator`
+  tests need `-stack-size=1MB` (512 KB is enough today). TinyGo does not
+  grow goroutine stacks, and the parser and compiler recurse deeply (see
+  [Microcontrollers](embedded.md)).
 - **VM speed**: values are boxed; typed fast paths would close part of the
   gap to native code.
 - **README gaps**: the README does not list `-to-xml`, `-from-xml`,

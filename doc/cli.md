@@ -27,7 +27,7 @@ A worked example, with every flag and its output, is in
 [examples/unit_tests](../examples/unit_tests/README.md).
 
 ```bash
-beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] FILE.st...
+beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] [-io tcp://HOST:PORT] [-realtime] FILE.st...
 ```
 
 The files are joined into one source, so tests can sit in their own files
@@ -106,6 +106,11 @@ Exit status: 0 when all tests pass, 1 when a test fails or the engines
 disagree, 2 when a file cannot be read or parsed or holds no tests. The
 same runner is a Go API, package `sil` (see
 [Embedding](embedding.md#unit-tests-software-in-the-loop)).
+
+`-io tcp://HOST:PORT` connects the tests' located variables to a rig: their
+`%I` inputs are read from it before each scan, and their `%Q` outputs are
+written to it after. `-realtime` runs scans on the wall clock, which `-io`
+implies. See [Hardware in the loop](hil.md).
 
 ## REPL
 

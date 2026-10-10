@@ -32,7 +32,6 @@ package diagram
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -100,8 +99,8 @@ func LowerText(pou, lang, src string, line int, opt Options) (*Lowered, error) {
 	low, err := Lower(pou, t.Elems, opt)
 	if err != nil {
 		// Elements have no number in the text: say where they are.
-		msg := elementRef.ReplaceAllStringFunc(err.Error(), func(m string) string {
-			id, _ := strconv.Atoi(elementRef.FindStringSubmatch(m)[1])
+		msg := elementRef.get().ReplaceAllStringFunc(err.Error(), func(m string) string {
+			id, _ := strconv.Atoi(elementRef.get().FindStringSubmatch(m)[1])
 			if r, ok := t.Rows[id]; ok {
 				return fmt.Sprintf("line %d", r)
 			}
@@ -116,7 +115,7 @@ func LowerText(pou, lang, src string, line int, opt Options) (*Lowered, error) {
 	return low, nil
 }
 
-var elementRef = regexp.MustCompile(`element (\d+)`)
+var elementRef = &lazyRegexp{src: `element (\d+)`}
 
 // ---- scanning ----
 

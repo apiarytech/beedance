@@ -20,6 +20,6 @@ func init() {
 		for _, arg := range args {
 			fmt.Println(arg.Inspect())
 		}
-		return &object.Null{}
+		return object.NULL
 	})
 }

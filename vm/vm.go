@@ -40,7 +40,7 @@ var True = &object.Boolean{Value: true}
 var False = &object.Boolean{Value: false}
 
 // Null is a singleton object representing the null value.
-var Null = &object.Null{}
+var Null = object.NULL
 
 // VM represents the virtual machine that executes beedance bytecode.
 type VM struct {
@@ -610,7 +610,14 @@ func (vm *VM) push(o object.Object) error {
 }
 
 // pop removes and returns the object from the top of the stack.
+// errStackUnderflow is what malformed bytecode that pops an empty stack
+// fails with, the same on every compiler (not a runtime index panic).
+var errStackUnderflow = errors.New("stack underflow")
+
 func (vm *VM) pop() object.Object {
+	if vm.sp <= 0 {
+		panic(errStackUnderflow)
+	}
 	o := vm.stack[vm.sp-1]
 	vm.sp--
 	return o

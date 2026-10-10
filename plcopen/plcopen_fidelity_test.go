@@ -219,8 +219,9 @@ IF i &gt; 10 THEN i := 0; END_IF</xhtml></ST></body>
  </configurations></instances>
 </project>`
 
-// Other tools' XHTML and durations are read; graphical SFC bodies and
-// unsupported LD elements are refused (FBD and LD are lowered: graphical.go).
+// Other tools' XHTML and durations are read; SFC charts beedance cannot run
+// and unsupported LD elements are refused (FBD and LD are lowered:
+// graphical.go; SFC is written as text: sfc.go).
 func TestImportOtherTools(t *testing.T) {
 	st, err := ImportToIECText([]byte(strings.Replace(codesysProject, "%s", "", 1)))
 	if err != nil {
@@ -233,7 +234,7 @@ func TestImportOtherTools(t *testing.T) {
 	}
 	for _, tt := range []struct{ pou, want string }{
 		{`<pou name="Ladder" pouType="program"><body><LD><leftPowerRail localId="1"/><jump localId="2" label="L"/></LD></body></pou>`, "jump is not supported yet"},
-		{`<pou name="Chart" pouType="program"><body><SFC><step localId="1" name="S"/></SFC></body></pou>`, "graphical SFC"},
+		{`<pou name="Chart" pouType="program"><body><SFC><step localId="1" name="S"/></SFC></body></pou>`, "SFC body: the chart has no initial step"},
 		{`<pou name="F" pouType="function"><body><ST><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">F := 1;</xhtml:p></ST></body></pou>`, "function 'F' has no return type"},
 		{`<pou name="X" pouType="class"><body/></pou>`, "unknown pouType 'class'"},
 	} {

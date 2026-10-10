@@ -15,6 +15,7 @@ The [README](../README.md) is the quick tour. These pages are the reference.
 | [Backends](backends.md) | The evaluator, the VM and the transpiler: how each runs a program, and which to choose |
 | [Embedding beedance](embedding.md) | Running programs inside a host: scans, clocks, budgets, binding variables, engineering sessions |
 | [Command line](cli.md) | The `beedance` command, its REPL, and running ST unit tests (`-test`) |
+| [Hardware in the loop](hil.md) | Running the unit tests against a plant model or real I/O: the `sil.IO` interface, the rig protocol, beehive |
 | [PLCopen XML](plcopen.md) | Importing and exporting TC6 XML projects |
 | [Microcontrollers](embedded.md) | TinyGo, Raspberry Pi Pico, and generating a standalone VM program |
 | [Development](development.md) | Building, testing, CI, conventions and known issues |

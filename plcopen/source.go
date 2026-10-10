@@ -47,6 +47,34 @@ func sourceBodies(source string) map[int]string {
 	}
 
 	bodies := map[int]string{}
+	// SFC: an action's body, by its ACTION keyword, and a transition's
+	// condition, by its TRANSITION keyword.
+	for i, tok := range tokens {
+		var open, end token.TokenType
+		switch tok.Type {
+		case token.ACTION:
+			open, end = token.COLON, token.END_ACTION
+		case token.TRANSITION:
+			open, end = token.ASSIGN, token.END_TRANSITION
+		default:
+			continue
+		}
+		start, stop := -1, -1
+		j := i + 1
+		for ; j < len(tokens) && tokens[j].Type != end; j++ {
+			if start < 0 && tokens[j].Type == open {
+				start = tokens[j].Pos + len(tokens[j].Literal)
+			} else if start >= 0 && tokens[j].Type == token.SEMICOLON {
+				stop = tokens[j].Pos // a condition ends at its last semicolon
+			}
+		}
+		if end == token.END_ACTION && j < len(tokens) {
+			stop = tokens[j].Pos // an action's body runs to END_ACTION
+		}
+		if start >= 0 && stop >= start {
+			bodies[tok.Pos] = strings.TrimSpace(dedent(source[start:stop]))
+		}
+	}
 	for i, tok := range tokens {
 		end, isPOU := pouEnds[tok.Type]
 		if !isPOU {
