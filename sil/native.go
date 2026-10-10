@@ -63,7 +63,10 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 	if err != nil {
 		return nil, err
 	}
-	n := &native{dir: dir, bin: filepath.Join(dir, "siltests")}
+	// Not named like the package directory: go build -o onto an existing
+	// directory writes into it, so without .exe (Linux, macOS) the
+	// executable would not be where it is run from.
+	n := &native{dir: dir, bin: filepath.Join(dir, "silrun")}
 	if runtime.GOOS == "windows" {
 		n.bin += ".exe"
 	}
@@ -91,6 +94,10 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 			n.close()
 			return nil, fmt.Errorf("go %s: %v\n%s", args[0], err, strings.TrimSpace(string(out)))
 		}
+	}
+	if fi, err := os.Stat(n.bin); err != nil || !fi.Mode().IsRegular() {
+		n.close()
+		return nil, fmt.Errorf("go build: no executable at %s", n.bin)
 	}
 	return n, nil
 }
