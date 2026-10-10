@@ -229,3 +229,21 @@ END_PROGRAM`
 		t.Errorf("second name: errors = %q", errs)
 	}
 }
+
+// Keywords of one position only (task settings, access and OOP specifiers,
+// EN/ENO, IL operators) name variables, declared and used, as they did
+// before reserved keywords were reported.
+func TestPositionKeywordsAsVariableNames(t *testing.T) {
+	input := `FUNCTION_BLOCK Fb
+VAR internal, interval, priority, single, task, resource, method, property : INT;
+    read_only, read_write, en, eno : BOOL; cal, jmp, ret : INT; END_VAR
+internal := interval + priority + single + task + resource + method + property;
+en := read_only AND read_write OR eno;
+cal := jmp + ret;
+END_FUNCTION_BLOCK`
+	p := New(lexer.New(input))
+	p.ParseProgram()
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Errorf("parser errors: %q", errs)
+	}
+}

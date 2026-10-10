@@ -3396,6 +3396,14 @@ var contextualKeywords = map[token.TokenType]bool{
 	token.R_EDGE: true, token.F_EDGE: true,
 	// The standard function blocks SR and RS, and their inputs S and R.
 	token.SR: true, token.RS: true, token.S: true, token.R: true,
+	// Keywords of one position only, and natural variable names: task
+	// settings, access and OOP specifiers, EN/ENO, IL operators.
+	token.INTERVAL: true, token.PRIORITY: true, token.SINGLE: true,
+	token.TASK: true, token.RESOURCE: true,
+	token.INTERNAL: true, token.METHOD: true, token.PROPERTY: true,
+	token.READ_ONLY: true, token.READ_WRITE: true,
+	token.EN: true, token.ENO: true,
+	token.CAL: true, token.JMP: true, token.RET: true,
 }
 
 // nameInContext makes the current token an identifier when it is a
