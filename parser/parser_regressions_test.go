@@ -203,3 +203,29 @@ func TestStandardBistableNames(t *testing.T) {
 		t.Fatalf("IL S and R: %v", p.Errors())
 	}
 }
+
+// A reserved keyword declared as a variable name is one error, at the
+// declaration, not one per use (issue #4). Keywords that read as variables
+// where they are used, like CTD's input LD, still name variables.
+func TestReservedKeywordAsVariableName(t *testing.T) {
+	input := `PROGRAM P
+VAR
+    at : BOOL;
+    x, ld, step : BOOL;
+END_VAR
+x := at;
+IF at AND x THEN at := ld OR step; END_IF;
+END_PROGRAM`
+	p := New(lexer.New(input))
+	p.ParseProgram()
+	want := "AT is a reserved keyword and cannot be used as a variable name at row 3, column 5"
+	if errs := p.Errors(); len(errs) != 1 || errs[0] != want {
+		t.Errorf("errors = %q, want [%q]", errs, want)
+	}
+
+	p = New(lexer.New("PROGRAM P\nVAR\n    x, then : BOOL;\nEND_VAR\nEND_PROGRAM"))
+	p.ParseProgram()
+	if errs := p.Errors(); len(errs) == 0 || !strings.HasPrefix(errs[0], "THEN is a reserved keyword and cannot be used as a variable name at row 3, column 8") {
+		t.Errorf("second name: errors = %q", errs)
+	}
+}

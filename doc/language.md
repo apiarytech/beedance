@@ -169,6 +169,15 @@ add2(1 + 1, 2 + 2);   (* expands to (2 + 4) *)
 Macros are expanded for the evaluator, the compiler and the transpiler alike.
 A macro variable has no runtime value: hosts do not see it as a variable.
 
+## Keywords as names
+
+A reserved keyword such as `AT` or `THEN` cannot name a variable. The
+declaration is one error that names the keyword, e.g. `AT is a reserved
+keyword and cannot be used as a variable name at row 3, column 5`, and its
+uses are not reported again. Keywords that read as names where they are
+used may name variables: the IL operators (`LD`, the input of `CTD`) and
+`STEP`, `SET`, `GET`, `ON`, `S` and `R`.
+
 ## Not supported yet
 
 - SFC in its graphical PLCopen form; jumps, labels and returns in LD and

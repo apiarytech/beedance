@@ -104,6 +104,11 @@ type Parser struct {
 
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
+
+	// misusedKeywords are reserved keywords declared as variable names. The
+	// declaration is reported; a use reads as the variable, so the mistake
+	// gives one error, not one per use.
+	misusedKeywords map[token.TokenType]bool
 }
 
 // parseError is a custom error type used for panicking during parsing errors.
@@ -1188,6 +1193,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		// Each iteration parses one or more variables of the same type.
 		// e.g., Var1, Var2 : INT;
 		names := p.parseIdentifierList()
+		p.checkVariableNames(names)
 
 		// The AT clause can appear before or after the data type.
 		// We'll check for it in both places.
@@ -1827,6 +1833,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		prefix = p.parseFunctionLiteral
 	} else {
 		prefix = p.prefixParseFns[p.curToken.Type]
+	}
+	if prefix == nil && p.misusedKeywords[p.curToken.Type] {
+		prefix = p.parseIdentifier // reported at its declaration
 	}
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -3400,6 +3409,25 @@ func (p *Parser) nameInContext(followers ...token.TokenType) {
 			p.curToken.Type = token.IDENT
 			return
 		}
+	}
+}
+
+// checkVariableNames reports a reserved keyword declared as a variable
+// name, e.g. `at : BOOL`, at the name. A keyword that reads as a variable
+// where it is used may name one: contextual keywords and IL operators, e.g.
+// CTD's input LD.
+func (p *Parser) checkVariableNames(names []*ast.Identifier) {
+	for _, n := range names {
+		t := n.Token.Type
+		if t == token.IDENT || p.prefixParseFns[t] != nil || token.LookupIdent(n.Token.Literal) != t {
+			continue
+		}
+		p.errors = append(p.errors, fmt.Sprintf("%s is a reserved keyword and cannot be used as a variable name at row %d, column %d",
+			strings.ToUpper(n.Token.Literal), n.Token.Row, n.Token.Column))
+		if p.misusedKeywords == nil {
+			p.misusedKeywords = map[token.TokenType]bool{}
+		}
+		p.misusedKeywords[t] = true
 	}
 }
 
