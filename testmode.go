@@ -28,7 +28,7 @@ import (
 // not be read or parsed or hold no tests.
 func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Writer) int {
 	if len(files) == 0 {
-		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-csv DIR] FILE.st...")
+		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] FILE.st...")
 		return 2
 	}
 	var b strings.Builder

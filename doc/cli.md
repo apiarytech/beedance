@@ -24,7 +24,7 @@ go install github.com/apiarytech/beedance@latest
 ## Unit tests
 
 ```bash
-beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-csv DIR] FILE.st...
+beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] FILE.st...
 ```
 
 The files are joined into one source, so tests can sit in their own files
@@ -51,8 +51,13 @@ after `-max-scans` fails. Timers run on the simulated clock, so the test
 above takes 7,201 scans and well under a second.
 
 By default each test runs on the evaluator and the VM, and the two must
-agree on every elementary variable of the test program after every scan
-(REAL and LREAL within the relative `-tol`). A difference is a beedance
+agree on every watched value of the test program after every scan (REAL
+and LREAL within the relative `-tol`). The watched values are its
+variables of elementary types and, under dotted names, the outputs of its
+function block instances and the members of its structures: `b.Q`,
+`pid.MV`, `pt.x`, two levels deep. With `-members all` an instance's
+inputs and internal variables are watched too, e.g. `pid.tSample.ET`
+(but not a standard block's internal state). A difference is a beedance
 bug: please report it (see [Backends](backends.md)). `-engines eval` or
 `-engines vm` runs on one engine only.
 
@@ -66,7 +71,9 @@ runaway loop fails its test with "execution budget exceeded".
 | `-engines` | `eval,vm` | engines to run on |
 | `-tol` | `1e-3` | relative tolerance for REAL values between engines |
 | `-run` | | run only tests whose name contains this text (any case) |
-| `-csv` | | write `TEST_NAME.ENGINE.csv` per test and engine: the variables after each scan |
+| `-members` | `outputs` | members of function block instances to watch: `outputs`, or `all` (inputs and internal variables too) |
+| `-depth` | `2` | levels of instance and structure members watched below a variable |
+| `-csv` | | write `TEST_NAME.ENGINE.csv` per test and engine: the watched values after each scan |
 
 ```text
 beedance: 2 tests

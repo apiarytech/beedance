@@ -116,6 +116,15 @@ func TestRun(t *testing.T) {
 		}
 	}
 
+	// A function block instance's outputs are recorded under dotted names
+	// (issue #5) and compared between engines.
+	timer := byName["test_Timer"]
+	for _, r := range timer.Engines {
+		if last := r.Scans[len(r.Scans)-1]; last["b.q"] != "true" {
+			t.Errorf("test_Timer on %s: last scan b.q = %q, want true; scan %v", r.Engine, last["b.q"], last)
+		}
+	}
+
 	fails := byName["TEST_Fails"].Engines[1]
 	if fails.Failures != 1 || fails.Message != "expected failure" {
 		t.Errorf("TEST_Fails: failures %d, message %q", fails.Failures, fails.Message)
@@ -155,7 +164,7 @@ func TestRunErrors(t *testing.T) {
 }
 
 func TestCompare(t *testing.T) {
-	vars := []Variable{{"r", "REAL"}, {"s", "STRING"}, {"b", "BOOL"}}
+	vars := []Variable{{Name: "r", Type: "REAL"}, {Name: "s", Type: "STRING"}, {Name: "b", Type: "BOOL"}}
 	a := EngineResult{Engine: Evaluator, Scans: []Scan{{"r": "1.0000", "s": "'x'", "b": "TRUE"}, {"r": "2", "b": "true"}}}
 	b := EngineResult{Engine: VM, Scans: []Scan{{"r": "1.0004", "s": "x", "b": "true"}, {"r": "2", "b": "false"}}}
 	if got, want := compare(a, b, vars, 1e-3), "scan 2 b: eval true, vm false"; got != want {

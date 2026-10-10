@@ -196,6 +196,14 @@ func standardFBs() map[string]*ast.FunctionBlockDeclaration {
 	return standardFBDecls
 }
 
+// StandardFunctionBlock returns the declaration of the standard function
+// block called name (TON, CTU, R_TRIG, ...; case does not matter), or nil,
+// for a host that lists an instance's inputs and outputs. The declaration is
+// shared: do not modify it.
+func StandardFunctionBlock(name string) *ast.FunctionBlockDeclaration {
+	return standardFBs()[strings.ToUpper(name)]
+}
+
 // withStandardFBs returns a program's statements preceded by the standard
 // function blocks it uses and does not declare itself. Each program gets its
 // own copy of their declarations, parsed afresh, since compiling may record

@@ -148,6 +148,31 @@ Each engine gets its own simulated clock (an evaluator `Session`; for the
 VM, `stdlib.ClockBuiltins`) and a per-scan budget, so a runaway loop fails
 its test. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
 
+## Watching function block outputs
+
+Package `watch` names what a host can watch of a program, the same way on
+both engines: its variables of elementary types and, under dotted names,
+the outputs of its function block instances (inherited ones too) and the
+members of its structures, e.g. `pid.MV` or `pt.x`. `sil` records these;
+a simulator or trace view can do the same:
+
+```go
+vars := watch.Variables(program, decl, watch.Options{
+    Members: watch.Outputs, // or watch.All: inputs and internal variables too
+    Depth:   2,             // pid.MV is 1 level, pid.tSample.ET 2
+})
+for _, v := range vars {
+    val, ok := watch.Evaluator(prog.Env, v)   // tree-walking evaluator
+    val, ok = watch.VM(globals, slots, v)     // VM: slots by upper-case name
+    _, _ = val, ok
+}
+```
+
+`v.Type` is the declared elementary type, to convert the value by (see
+Binding variables). Arrays are not listed. A standard function block lists
+its inputs and outputs only, not the internal state the engines keep
+differently; `compiler.StandardFunctionBlock(name)` returns its declaration.
+
 ## A complete host
 
 beehive's `logic` service is a full example: it compiles downloaded ST on

@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
@@ -33,6 +34,7 @@ import (
 	_ "github.com/apiarytech/beedance/stdlib" // Import for side-effect of registering built-ins
 	"github.com/apiarytech/beedance/transpiler"
 	"github.com/apiarytech/beedance/vm"
+	"github.com/apiarytech/beedance/watch"
 )
 
 const version = "0.1.0"
@@ -58,6 +60,8 @@ func main() {
 	tol := flag.Float64("tol", 1e-3, "With -test: relative tolerance when comparing REAL values between engines")
 	runFilter := flag.String("run", "", "With -test: run only tests whose name contains this text")
 	csvDir := flag.String("csv", "", "With -test: write each test's per-scan values per engine as CSV into this directory")
+	membersFlag := flag.String("members", "outputs", "With -test: members of function block instances to record and compare: outputs or all")
+	depth := flag.Int("depth", 2, "With -test: levels of instance and structure members to record below a variable")
 	flag.Parse()
 
 	if *testFlag {
@@ -66,7 +70,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter}
+		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter,
+			Watch: watch.Options{Depth: *depth}}
+		switch strings.ToLower(*membersFlag) {
+		case "outputs":
+		case "all":
+			opts.Watch.Members = watch.All
+		default:
+			fmt.Fprintf(os.Stderr, "-members %q: want outputs or all\n", *membersFlag)
+			os.Exit(2)
+		}
 		os.Exit(runTests(flag.Args(), opts, *csvDir, os.Stdout, os.Stderr))
 	}
 

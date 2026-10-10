@@ -25,8 +25,11 @@
 // Interval of simulated time apart, until done is TRUE, so timers that take
 // hours run in milliseconds. A test passes when, on every engine, it runs
 // without error, is done and has failures = 0, and, when it runs on both
-// engines, they agree on every elementary variable of the test program after
-// every scan (REAL and LREAL within a relative tolerance).
+// engines, they agree on every watched value of the test program after every
+// scan (REAL and LREAL within a relative tolerance): its variables of
+// elementary types and, under dotted names (b.Q), the outputs of its
+// function block instances and the members of its structures (see package
+// watch).
 package sil
 
 import (
@@ -47,6 +50,7 @@ import (
 	"github.com/apiarytech/beedance/parser"
 	"github.com/apiarytech/beedance/stdlib"
 	"github.com/apiarytech/beedance/vm"
+	"github.com/apiarytech/beedance/watch"
 )
 
 // Engine names a beedance backend a test runs on.
@@ -105,6 +109,9 @@ type Options struct {
 	// each engine, so a runaway loop fails its test instead of hanging the
 	// run; default 10,000,000.
 	ScanBudget int64
+	// Watch chooses the members of function block instances recorded and
+	// compared; by default their outputs, two levels deep.
+	Watch watch.Options
 }
 
 func (o Options) withDefaults() Options {
@@ -126,12 +133,10 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Variable is an elementary variable of a test program, compared between
-// engines and recorded after each scan.
-type Variable struct {
-	Name string
-	Type string // upper case, e.g. "INT"
-}
+// Variable is a watched value of a test program, compared between engines
+// and recorded after each scan: a variable of elementary type, or a member
+// of an instance or structure under a dotted name, e.g. "b.Q".
+type Variable = watch.Variable
 
 // Scan is the value of each Variable after one scan, by name, as the
 // engine prints it.
@@ -239,7 +244,7 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 type outputs struct{ failures, message, done string }
 
 func runTest(ctx context.Context, source string, program *ast.Program, decl *ast.ProgramDeclaration, opts Options) Result {
-	res := Result{Name: decl.Name.Value, Variables: elementary(decl)}
+	res := Result{Name: decl.Name.Value, Variables: watch.Variables(program, decl, opts.Watch)}
 	var out outputs
 	for _, d := range decl.VarOutputs {
 		if d.Name == nil {
@@ -286,25 +291,6 @@ func parse(source string) (*ast.Program, []string) {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	return program, p.Errors()
-}
-
-// elementary lists the test program's variables of elementary types.
-func elementary(decl *ast.ProgramDeclaration) []Variable {
-	var out []Variable
-	for _, group := range [][]*ast.VarDeclStatement{decl.VarInputs, decl.VarOutputs, decl.VarInOuts, decl.Vars} {
-		for _, d := range group {
-			if d.Name == nil || d.DataType == nil {
-				continue
-			}
-			t := strings.ToUpper(d.DataType.String())
-			switch t {
-			case "BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT",
-				"REAL", "LREAL", "BYTE", "WORD", "DWORD", "LWORD", "STRING", "TIME":
-				out = append(out, Variable{d.Name.Value, t})
-			}
-		}
-	}
-	return out
 }
 
 // outcome fills Failures, Message, Done and Passed from the last scan.
@@ -372,7 +358,7 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 		}
 		values := Scan{}
 		for _, v := range vars {
-			if o, ok := prog.Env.Get(v.Name); ok && o != nil {
+			if o, ok := watch.Evaluator(prog.Env, v); ok {
 				values[v.Name] = o.Inspect()
 			}
 		}
@@ -431,8 +417,8 @@ func runVM(ctx context.Context, program *ast.Program, decl *ast.ProgramDeclarati
 		}
 		values := Scan{}
 		for _, v := range vars {
-			if g, ok := slot[strings.ToUpper(v.Name)]; ok && g >= 0 && globals[g] != nil {
-				values[v.Name] = globals[g].Inspect()
+			if o, ok := watch.VM(globals, slot, v); ok {
+				values[v.Name] = o.Inspect()
 			}
 		}
 		r.Scans = append(r.Scans, values)
