@@ -218,8 +218,7 @@ func TestIOGoEngine(t *testing.T) {
 	}
 	k := &tank{}
 	results, err := Run(context.Background(), tankSource, Options{IO: k, Deterministic: true,
-		Engines: []Engine{Evaluator, VM, Go}, GoTimeout: 10 * time.Second,
-		GoReplace: map[string]string{"github.com/apiarytech/royaljelly": "../../royaljelly"}})
+		Engines: []Engine{Evaluator, VM, Go}, GoTimeout: 10 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,8 +408,7 @@ WHILE NOT x DO i := i + 1; END_WHILE;
 END_PROGRAM
 `
 	k := &tank{}
-	results, err := Run(context.Background(), src, Options{IO: k, Engines: []Engine{Go}, GoTimeout: time.Second,
-		GoReplace: map[string]string{"github.com/apiarytech/royaljelly": "../../royaljelly"}})
+	results, err := Run(context.Background(), src, Options{IO: k, Engines: []Engine{Go}, GoTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
