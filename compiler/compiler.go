@@ -37,7 +37,7 @@ type CompiledProgram struct {
 // VM's I/O image under its address (VM.IO).
 type Variable struct {
 	Name string
-	// Block is the declaration block: VAR_GLOBAL, VAR_INPUT, VAR_OUTPUT,
+	// Block is the declaration block: VAR_GLOBAL, VAR_EXTERNAL, VAR_INPUT, VAR_OUTPUT,
 	// VAR_IN_OUT or VAR.
 	Block string
 	// Type is the declared type as written, e.g. "INT" or "TON".
@@ -119,6 +119,13 @@ func (c *Compiler) variables(node *ast.ProgramDeclaration) []Variable {
 	}{{"VAR_INPUT", node.VarInputs}, {"VAR_OUTPUT", node.VarOutputs}, {"VAR_IN_OUT", node.VarInOuts}, {"VAR", node.Vars}} {
 		for _, d := range b.decls {
 			add(b.name, d)
+		}
+	}
+	// A VAR_EXTERNAL refers to a global the host supplies (beehive: a shared
+	// global tag), so the host binds it as any variable.
+	for _, e := range node.VarExternal {
+		for _, d := range e.Vars {
+			add("VAR_EXTERNAL", d)
 		}
 	}
 	return out

@@ -82,3 +82,28 @@ func TestDirectType(t *testing.T) {
 		}
 	}
 }
+
+// A VAR_EXTERNAL is listed with the program's variables, in a global slot
+// a host binds to the shared global it supplies.
+func TestExternalVariablesListed(t *testing.T) {
+	object.FinalizeBuiltins()
+	src := `
+PROGRAM Main
+VAR_EXTERNAL tank_level : REAL; END_VAR
+VAR_OUTPUT high : BOOL; END_VAR
+high := tank_level > 2.5;
+END_PROGRAM`
+	cp, err := NewCompilerWithBuiltins(object.Builtins).CompileProgramUnit(parse(t, src), "Main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range cp.Variables {
+		if v.Name == "tank_level" {
+			if v.Block != "VAR_EXTERNAL" || v.Type != "REAL" || v.Global < 0 {
+				t.Fatalf("tank_level = %+v", v)
+			}
+			return
+		}
+	}
+	t.Fatalf("tank_level not listed: %+v", cp.Variables)
+}
