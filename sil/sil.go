@@ -61,22 +61,36 @@ const (
 	Evaluator Engine = "eval"
 	// VM is the bytecode compiler and virtual machine.
 	VM Engine = "vm"
+	// Go is the transpiler: the source as Go on royaljelly, built with the
+	// Go toolchain.
+	Go Engine = "go"
 )
 
-// ParseEngines parses a comma-separated list of engines, e.g. "eval,vm".
+// ParseEngines parses a comma-separated list of engines, e.g. "eval,vm";
+// "all" is eval,vm,go.
 func ParseEngines(s string) ([]Engine, error) {
 	var out []Engine
 	seen := map[Engine]bool{}
+	var fields []string
 	for _, f := range strings.Split(s, ",") {
+		if strings.EqualFold(strings.TrimSpace(f), "all") {
+			fields = append(fields, string(Evaluator), string(VM), string(Go))
+		} else {
+			fields = append(fields, f)
+		}
+	}
+	for _, f := range fields {
 		e := Engine(strings.ToLower(strings.TrimSpace(f)))
 		switch e {
 		case "":
 			continue
-		case Evaluator, VM:
+		case Evaluator, VM, Go:
 		case "evaluator":
 			e = Evaluator
+		case "transpiler":
+			e = Go
 		default:
-			return nil, fmt.Errorf("unknown engine %q: want eval or vm", f)
+			return nil, fmt.Errorf("unknown engine %q: want eval, vm, go or all", f)
 		}
 		if !seen[e] {
 			seen[e] = true
@@ -112,6 +126,12 @@ type Options struct {
 	// Watch chooses the members of function block instances recorded and
 	// compared; by default their outputs, two levels deep.
 	Watch watch.Options
+	// GoTimeout bounds one test on the go engine, which has no statement
+	// budget; default one minute.
+	GoTimeout time.Duration
+	// GoReplace points modules the transpiled tests build with at local
+	// directories, by module path, e.g. a royaljelly checkout.
+	GoReplace map[string]string
 }
 
 func (o Options) withDefaults() Options {
@@ -129,6 +149,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.ScanBudget <= 0 {
 		o.ScanBudget = 10_000_000
+	}
+	if o.GoTimeout <= 0 {
+		o.GoTimeout = defaultGoTimeout
 	}
 	return o
 }
@@ -229,12 +252,27 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 		return nil, ErrNoTests
 	}
 
+	infos := make([]*testInfo, len(tests))
+	for i, decl := range tests {
+		infos[i] = newTestInfo(program, decl, opts)
+	}
+	var nat *native
+	var natErr error
+	for _, e := range opts.Engines {
+		if e == Go && nat == nil && natErr == nil {
+			nat, natErr = buildNative(ctx, source, infos, opts)
+			if nat != nil {
+				defer nat.close()
+			}
+		}
+	}
+
 	var results []Result
-	for _, decl := range tests {
+	for _, t := range infos {
 		if err := ctx.Err(); err != nil {
 			return results, err
 		}
-		results = append(results, runTest(ctx, source, program, decl, opts))
+		results = append(results, runTest(ctx, source, program, t, nat, natErr, opts))
 	}
 	return results, ctx.Err()
 }
@@ -243,47 +281,66 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 // when not declared.
 type outputs struct{ failures, message, done string }
 
-func runTest(ctx context.Context, source string, program *ast.Program, decl *ast.ProgramDeclaration, opts Options) Result {
-	res := Result{Name: decl.Name.Value, Variables: watch.Variables(program, decl, opts.Watch)}
-	var out outputs
+// testInfo is what a run knows of a test before running it.
+type testInfo struct {
+	decl  *ast.ProgramDeclaration
+	vars  []Variable
+	out   outputs
+	limit int // scans: 1, or MaxScans for a test with done
+}
+
+func newTestInfo(program *ast.Program, decl *ast.ProgramDeclaration, opts Options) *testInfo {
+	t := &testInfo{decl: decl, vars: watch.Variables(program, decl, opts.Watch), limit: 1}
 	for _, d := range decl.VarOutputs {
 		if d.Name == nil {
 			continue
 		}
 		switch strings.ToLower(d.Name.Value) {
 		case "failures":
-			out.failures = d.Name.Value
+			t.out.failures = d.Name.Value
 		case "message":
-			out.message = d.Name.Value
+			t.out.message = d.Name.Value
 		case "done":
-			out.done = d.Name.Value
+			t.out.done = d.Name.Value
 		}
 	}
-	limit := 1
-	if out.done != "" {
-		limit = opts.MaxScans
+	if t.out.done != "" {
+		t.limit = opts.MaxScans
 	}
+	return t
+}
+
+func runTest(ctx context.Context, source string, program *ast.Program, t *testInfo, nat *native, natErr error, opts Options) Result {
+	res := Result{Name: t.decl.Name.Value, Variables: t.vars}
 	for _, e := range opts.Engines {
 		var r EngineResult
-		if out.failures == "" {
+		switch {
+		case t.out.failures == "":
 			r = EngineResult{Err: "a test program needs VAR_OUTPUT failures : INT"}
-		} else if e == Evaluator {
-			r = runEvaluator(ctx, source, decl, res.Variables, limit, opts)
-		} else {
-			r = runVM(ctx, program, decl, res.Variables, limit, opts)
+		case e == Evaluator:
+			r = runEvaluator(ctx, source, t.decl, t.vars, t.limit, opts)
+		case e == VM:
+			r = runVM(ctx, program, t.decl, t.vars, t.limit, opts)
+		case natErr != nil:
+			r = EngineResult{Err: natErr.Error()}
+		default:
+			r = nat.run(ctx, t, opts)
 		}
 		r.Engine = e
-		r.outcome(out)
+		r.outcome(t.out)
 		res.Engines = append(res.Engines, r)
 	}
 	res.Passed = true
 	for _, r := range res.Engines {
 		res.Passed = res.Passed && r.Passed
 	}
-	if len(res.Engines) == 2 {
-		res.Mismatch = compare(res.Engines[0], res.Engines[1], res.Variables, opts.Tolerance)
-		res.Passed = res.Passed && res.Mismatch == ""
+	// Each engine is compared with the first.
+	for _, r := range res.Engines[1:] {
+		if res.Mismatch = compare(res.Engines[0], r, t.vars, opts.Tolerance); res.Mismatch != "" {
+			break
+		}
 	}
+	res.Passed = res.Passed && res.Mismatch == ""
 	return res
 }
 
@@ -464,6 +521,22 @@ func same(x, y, typ string, tol float64) bool {
 		return math.Abs(fx-fy) <= tol*math.Max(1, math.Max(math.Abs(fx), math.Abs(fy)))
 	case "STRING":
 		return strings.Trim(x, `'"`) == strings.Trim(y, `'"`)
+	case "BYTE", "WORD", "DWORD", "LWORD":
+		bx, e1 := bits(x)
+		by, e2 := bits(y)
+		return e1 == nil && e2 == nil && bx == by
 	}
 	return strings.EqualFold(x, y)
+}
+
+// bits parses a bit string as an engine prints it: WORD#16#FF, 16#FF or
+// 255.
+func bits(s string) (uint64, error) {
+	if i := strings.Index(s, "#"); i >= 0 && !strings.HasPrefix(s, "16#") {
+		s = s[i+1:] // the type prefix
+	}
+	if strings.HasPrefix(s, "16#") {
+		return strconv.ParseUint(strings.ReplaceAll(s[3:], "_", ""), 16, 64)
+	}
+	return strconv.ParseUint(s, 10, 64)
 }

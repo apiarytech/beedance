@@ -56,12 +56,14 @@ func main() {
 	testFlag := flag.Bool("test", false, "Run the PROGRAM TEST_... unit tests of the FILE.st arguments on a simulated clock")
 	interval := flag.Duration("interval", 10*time.Millisecond, "With -test: simulated time between scans")
 	maxScans := flag.Int("max-scans", 50000, "With -test: a test with done that is not done by then fails")
-	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on, compared when both")
+	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on: eval, vm, go (the transpiler) or all; compared with the first")
 	tol := flag.Float64("tol", 1e-3, "With -test: relative tolerance when comparing REAL values between engines")
 	runFilter := flag.String("run", "", "With -test: run only tests whose name contains this text")
 	csvDir := flag.String("csv", "", "With -test: write each test's per-scan values per engine as CSV into this directory")
 	membersFlag := flag.String("members", "outputs", "With -test: members of function block instances to record and compare: outputs or all")
 	depth := flag.Int("depth", 2, "With -test: levels of instance and structure members to record below a variable")
+	goTimeout := flag.Duration("go-timeout", time.Minute, "With -test on the go engine: time one test may take")
+	goReplace := flag.String("go-replace", "", "With -test on the go engine: MODULE=DIR,... builds with local modules, e.g. github.com/apiarytech/royaljelly=../royaljelly")
 	flag.Parse()
 
 	if *testFlag {
@@ -71,7 +73,18 @@ func main() {
 			os.Exit(2)
 		}
 		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter,
-			Watch: watch.Options{Depth: *depth}}
+			Watch: watch.Options{Depth: *depth}, GoTimeout: *goTimeout, GoReplace: map[string]string{}}
+		for _, r := range strings.Split(*goReplace, ",") {
+			if r = strings.TrimSpace(r); r == "" {
+				continue
+			}
+			mod, dir, ok := strings.Cut(r, "=")
+			if !ok {
+				fmt.Fprintf(os.Stderr, "-go-replace %q: want MODULE=DIR\n", r)
+				os.Exit(2)
+			}
+			opts.GoReplace[strings.TrimSpace(mod)] = strings.TrimSpace(dir)
+		}
 		switch strings.ToLower(*membersFlag) {
 		case "outputs":
 		case "all":

@@ -30,6 +30,15 @@ const plcTimeHelper = `
 // plcStarted is when the program started, for TIME().
 var plcStarted = time.Now()
 
+// plcClock, when set, is the clock TIME() reads instead: a host's
+// simulated clock, as a test runner sets.
+var plcClock func() time.Duration
+
 // plcTime returns the time since the program started, as TIME() does.
-func plcTime() iec.TIME { return iec.TIME(time.Since(plcStarted)) }
+func plcTime() iec.TIME {
+	if plcClock != nil {
+		return iec.TIME(plcClock())
+	}
+	return iec.TIME(time.Since(plcStarted))
+}
 `

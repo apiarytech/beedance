@@ -124,7 +124,7 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     ```sh
     go run main.go -iec /path/to/your/program.st -go /path/to/output.go
     ```
-*   **`-test FILE.st...`:** Runs the `PROGRAM TEST_...` unit tests in the files on a simulated clock, on both the evaluator and the VM, and compares the engines scan by scan. Exits 0 if all pass, 1 if a test fails or the engines disagree, 2 if parsing fails. See [doc/cli.md](doc/cli.md#unit-tests).
+*   **`-test FILE.st...`:** Runs the `PROGRAM TEST_...` unit tests in the files on a simulated clock, on both the evaluator and the VM (with `-engines all`, also transpiled to Go), and compares the engines scan by scan. Exits 0 if all pass, 1 if a test fails or the engines disagree, 2 if parsing fails. See [doc/cli.md](doc/cli.md#unit-tests).
     ```sh
     go run . -test -interval 10ms lib.st tests.st
     ```

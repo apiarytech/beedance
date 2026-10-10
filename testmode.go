@@ -28,7 +28,7 @@ import (
 // not be read or parsed or hold no tests.
 func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Writer) int {
 	if len(files) == 0 {
-		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] FILE.st...")
+		fmt.Fprintln(errOut, "usage: beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] FILE.st...")
 		return 2
 	}
 	var b strings.Builder
@@ -61,7 +61,7 @@ func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Wr
 	for _, e := range engines {
 		header += fmt.Sprintf(" %-22s", strings.ToUpper(string(e)))
 	}
-	if len(engines) == 2 {
+	if len(engines) > 1 {
 		header += " ENGINES"
 	}
 	fmt.Fprintf(out, "beedance: %d tests\n\n%s\n", len(results), strings.TrimRight(header, " "))
@@ -75,14 +75,18 @@ func runTests(files []string, opts sil.Options, csvDir string, out, errOut io.Wr
 		for _, r := range res.Engines {
 			line += fmt.Sprintf(" %-22s", status(r))
 		}
-		if len(res.Engines) == 2 {
+		if len(res.Engines) > 1 {
+			errored := false
+			for _, r := range res.Engines {
+				errored = errored || r.Err != ""
+			}
 			switch {
-			case res.Engines[0].Err != "" || res.Engines[1].Err != "":
-				line += " -" // not compared
-			case res.Mismatch == "":
-				line += " agree"
-			default:
+			case res.Mismatch != "":
 				line += " DIFFER: " + res.Mismatch
+			case errored:
+				line += " -" // not all compared
+			default:
+				line += " agree"
 			}
 		}
 		fmt.Fprintln(out, strings.TrimRight(line, " "))

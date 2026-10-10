@@ -41,7 +41,18 @@ var reservedGoNames = map[string]bool{
 	"triggers": true, "numerical": true, "iecstrings": true, "selection": true, "bitwise": true,
 	"arithmetic": true, "comparison": true, "conversion": true, "iectime": true, "iecmath": true,
 	"fmt": true, "time": true, "strings": true, "context": true, "os": true, "signal": true, "log": true,
-	"stdValue": true, "stringCut": true, "plcTime": true, "plcStarted": true, "processImage": true, "main": true, "init": true,
+	"stdValue": true, "stringCut": true, "plcTime": true, "plcStarted": true, "plcClock": true, "processImage": true, "main": true, "init": true,
+}
+
+// GoName returns the Go name of a declared variable, structure member or
+// function block member as the transpiler generates it: name itself, or
+// name_ when Go cannot use it (a Go keyword, or a name the generated code
+// uses). A host addressing a transpiled program's fields uses it.
+func GoName(name string) string {
+	if reservedGoNames[name] {
+		return goSafeName(name)
+	}
+	return name
 }
 
 // goSafeName returns the name an identifier takes in Go.

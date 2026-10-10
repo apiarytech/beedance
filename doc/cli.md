@@ -24,7 +24,7 @@ go install github.com/apiarytech/beedance@latest
 ## Unit tests
 
 ```bash
-beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] FILE.st...
+beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] FILE.st...
 ```
 
 The files are joined into one source, so tests can sit in their own files
@@ -61,19 +61,31 @@ inputs and internal variables are watched too, e.g. `pid.tSample.ET`
 bug: please report it (see [Backends](backends.md)). `-engines eval` or
 `-engines vm` runs on one engine only.
 
+`-engines all` (or `eval,vm,go`) adds the transpiler: the source is
+transpiled to Go on royaljelly, a harness runs each test on the same
+simulated clock, and it is built with the Go toolchain in a temporary
+module (royaljelly v0.3.1, beebread v0.1.0 for OSCAT; downloaded the first
+time). Every engine is compared with the first one listed.
+`-go-replace github.com/apiarytech/royaljelly=../royaljelly` builds with a
+local checkout instead.
+
 Each scan has a budget of 10 million statements and loop iterations, so a
-runaway loop fails its test with "execution budget exceeded".
+runaway loop fails its test with "execution budget exceeded". Native Go
+has no such count: on the go engine each test runs in its own process,
+stopped after `-go-timeout`.
 
 | Flag | Default | |
 |---|---|---|
 | `-interval` | `10ms` | simulated time between scans |
 | `-max-scans` | `50000` | scans a test with `done` may take |
-| `-engines` | `eval,vm` | engines to run on |
+| `-engines` | `eval,vm` | engines to run on: `eval`, `vm`, `go` (the transpiler), or `all` |
 | `-tol` | `1e-3` | relative tolerance for REAL values between engines |
 | `-run` | | run only tests whose name contains this text (any case) |
 | `-members` | `outputs` | members of function block instances to watch: `outputs`, or `all` (inputs and internal variables too) |
 | `-depth` | `2` | levels of instance and structure members watched below a variable |
 | `-csv` | | write `TEST_NAME.ENGINE.csv` per test and engine: the watched values after each scan |
+| `-go-timeout` | `1m` | time one test may take on the go engine |
+| `-go-replace` | | `MODULE=DIR,...`: build the go engine with local modules |
 
 ```text
 beedance: 2 tests

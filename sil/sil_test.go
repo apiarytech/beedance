@@ -13,6 +13,7 @@ package sil
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -181,11 +182,61 @@ func TestCompare(t *testing.T) {
 }
 
 func TestParseEngines(t *testing.T) {
+	if got, err := ParseEngines("all"); err != nil || len(got) != 3 || got[2] != Go {
+		t.Errorf("ParseEngines(all) = %v, %v", got, err)
+	}
+	if got, err := ParseEngines("transpiler"); err != nil || got[0] != Go {
+		t.Errorf("ParseEngines(transpiler) = %v, %v", got, err)
+	}
 	got, err := ParseEngines(" VM, eval ,vm")
 	if err != nil || len(got) != 2 || got[0] != VM || got[1] != Evaluator {
 		t.Errorf("ParseEngines = %v, %v", got, err)
 	}
 	if _, err := ParseEngines("jit"); err == nil {
 		t.Error("ParseEngines(jit): no error")
+	}
+}
+
+// The go engine runs the same tests transpiled, on a simulated clock, and
+// agrees with the evaluator and the VM scan by scan.
+func TestRunGoEngine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds Go code; downloads royaljelly the first time")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no Go toolchain")
+	}
+	results, err := Run(context.Background(), suite, Options{
+		Engines: []Engine{Evaluator, VM, Go}, Interval: time.Second, MaxScans: 10000,
+		ScanBudget: 100000, GoTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, res := range results {
+		g := res.Engines[2]
+		if g.Engine != Go {
+			t.Fatalf("%s: engines %+v", res.Name, res.Engines)
+		}
+		if strings.HasPrefix(g.Err, "go mod") || strings.HasPrefix(g.Err, "go build") {
+			t.Fatalf("%s: building the transpiled tests: %s", res.Name, g.Err)
+		}
+		if res.Mismatch != "" {
+			t.Errorf("%s: engines differ: %s", res.Name, res.Mismatch)
+		}
+		if g.Passed != res.Engines[0].Passed || len(g.Scans) != len(res.Engines[0].Scans) {
+			t.Errorf("%s: go passed=%v after %d scans, eval passed=%v after %d: %s",
+				res.Name, g.Passed, len(g.Scans), res.Engines[0].Passed, len(res.Engines[0].Scans), g.Err)
+		}
+		switch res.Name {
+		case "TEST_Runaway":
+			if !strings.Contains(g.Err, "no result after 5s") {
+				t.Errorf("TEST_Runaway on go: Err = %q", g.Err)
+			}
+		case "test_Timer":
+			if last := g.Scans[len(g.Scans)-1]; last["b.q"] != "true" {
+				t.Errorf("test_Timer on go: last scan %v", last)
+			}
+		}
 	}
 }

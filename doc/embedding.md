@@ -131,7 +131,7 @@ thin report over it; a Go test or a CI tool can call it directly:
 ```go
 results, err := sil.Run(ctx, source, sil.Options{
     Interval: 10 * time.Millisecond, // simulated time between scans
-    Engines:  []sil.Engine{sil.Evaluator, sil.VM}, // the default: both, compared
+    Engines:  []sil.Engine{sil.Evaluator, sil.VM}, // the default: both, compared; add sil.Go for the transpiler
 })
 // err: a *sil.ParseError, sil.ErrNoTests, or ctx's error
 for _, r := range results {
@@ -145,8 +145,10 @@ for _, r := range results {
 ```
 
 Each engine gets its own simulated clock (an evaluator `Session`; for the
-VM, `stdlib.ClockBuiltins`) and a per-scan budget, so a runaway loop fails
-its test. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
+VM, `stdlib.ClockBuiltins`; for Go, the `now` of each scan and `TIME()`)
+and a per-scan budget (for Go, a time limit per test: `GoTimeout`), so a
+runaway loop fails its test. The go engine needs the Go toolchain; it
+builds with royaljelly `sil.RoyaljellyVersion`, or `GoReplace` directories. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
 
 ## Watching function block outputs
 
