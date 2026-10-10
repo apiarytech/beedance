@@ -236,8 +236,9 @@ END_PROGRAM`
 func TestPositionKeywordsAsVariableNames(t *testing.T) {
 	input := `FUNCTION_BLOCK Fb
 VAR internal, interval, priority, single, task, resource, method, property : INT;
-    read_only, read_write, en, eno : BOOL; cal, jmp, ret : INT; END_VAR
+    read_only, read_write, en, eno : BOOL; cal, jmp, ret, range, from, with : INT; END_VAR
 internal := interval + priority + single + task + resource + method + property;
+range := from + with;
 en := read_only AND read_write OR eno;
 cal := jmp + ret;
 END_FUNCTION_BLOCK`

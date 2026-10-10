@@ -3404,6 +3404,14 @@ var contextualKeywords = map[token.TokenType]bool{
 	token.READ_ONLY: true, token.READ_WRITE: true,
 	token.EN: true, token.ENO: true,
 	token.CAL: true, token.JMP: true, token.RET: true,
+	token.RANGE: true, token.FROM: true, token.WITH: true,
+}
+
+// unreportedKeywords are keywords a declaration may name a variable with,
+// unreported, as before reserved keywords were reported: operator words
+// (ASSIGN, PLUS, ...) and NIL. They are not read as variables where used.
+var unreportedKeywords = map[token.TokenType]bool{
+	token.ASSIGN: true, token.PLUS: true, token.ASTERISK: true, token.SLASH: true, token.NIL: true,
 }
 
 // nameInContext makes the current token an identifier when it is a
@@ -3427,7 +3435,7 @@ func (p *Parser) nameInContext(followers ...token.TokenType) {
 func (p *Parser) checkVariableNames(names []*ast.Identifier) {
 	for _, n := range names {
 		t := n.Token.Type
-		if t == token.IDENT || p.prefixParseFns[t] != nil || token.LookupIdent(n.Token.Literal) != t {
+		if t == token.IDENT || p.prefixParseFns[t] != nil || unreportedKeywords[t] || token.LookupIdent(n.Token.Literal) != t {
 			continue
 		}
 		p.errors = append(p.errors, fmt.Sprintf("%s is a reserved keyword and cannot be used as a variable name at row %d, column %d",

@@ -178,8 +178,10 @@ uses are not reported again. Keywords that read as names where they are
 used may name variables: the IL operators (`LD`, the input of `CTD`;
 `CAL`, `JMP`, `RET`), `EN` and `ENO`, the task settings (`INTERVAL`,
 `PRIORITY`, `SINGLE`, `TASK`, `RESOURCE`), `INTERNAL`, `METHOD`,
-`PROPERTY`, `READ_ONLY`, `READ_WRITE`, and `STEP`, `SET`, `GET`, `ON`, `S`
-and `R`.
+`PROPERTY`, `READ_ONLY`, `READ_WRITE`, `RANGE`, `FROM`, `WITH`, and `STEP`,
+`SET`, `GET`, `ON`, `S` and `R`. The operator words `ASSIGN`, `PLUS`,
+`ASTERISK`, `SLASH` and `NIL` are accepted in a declaration, as before, but
+not read as variables.
 
 ## Not supported yet
 
