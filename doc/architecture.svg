@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="700" viewBox="0 0 1300 700" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="800" viewBox="0 0 1300 800" font-family="Segoe UI, Helvetica, Arial, sans-serif">
   <title>beedance architecture</title>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -10,22 +10,26 @@
       .h  { font-size: 14px; font-weight: 700; fill: #1f1f1f; }
       .hs { font-size: 12px; font-weight: 400; fill: #555; }
       .g  { font-size: 11.5px; font-weight: 600; fill: #3d6fb3; }
+      .gt { font-size: 11.5px; font-weight: 600; fill: #3c8a46; }
       .l  { font-size: 10.5px; fill: #333; }
+      .lg { font-size: 10.5px; fill: #3c8a46; }
       .bh { fill: #eaf1fb; stroke: #3d6fb3; stroke-width: 1.5; }
       .bi { fill: #ffffff; stroke: #3d6fb3; stroke-width: 1.2; }
+      .bt { fill: #eef7ee; stroke: #3c8a46; stroke-width: 1.5; }
       .dh { fill: #fff3e0; stroke: #c47a14; stroke-width: 1.5; }
       .ex { fill: #ffffff; stroke: #555; stroke-width: 1.3; }
       .ln { stroke: #333; stroke-width: 1.4; fill: none; }
+      .lt { stroke: #3c8a46; stroke-width: 1.4; fill: none; }
     </style>
   </defs>
 
-  <rect width="1300" height="700" fill="#ffffff"/>
+  <rect width="1300" height="800" fill="#ffffff"/>
 
   <text x="20" y="32" style="font-size:20px;font-weight:700;fill:#1f1f1f">beedance · architecture</text>
-  <text x="20" y="52" style="font-size:12.5px;fill:#555">IEC 61131-3 in Go: one parser for ST, IL, SFC, LD and FBD, and three backends that run it alike: an evaluator, a bytecode compiler with its VM, and a Go transpiler.</text>
+  <text x="20" y="52" style="font-size:12.5px;fill:#555">IEC 61131-3 in Go: one parser for ST, IL, SFC, LD and FBD, three backends that run it alike, and unit tests that run on all three, in the loop with a plant.</text>
 
   <!-- Module -->
-  <rect x="230" y="64" width="860" height="550" rx="10" fill="#fbfbfb" stroke="#333" stroke-width="1.6"/>
+  <rect x="230" y="64" width="860" height="656" rx="10" fill="#fbfbfb" stroke="#333" stroke-width="1.6"/>
   <text x="246" y="84" class="h">github.com/apiarytech/beedance <tspan class="hs">(standard library only)</tspan></text>
 
   <!-- Front end -->
@@ -47,17 +51,17 @@
 
   <rect x="250" y="200" width="130" height="70" rx="5" class="bi"/>
   <text x="315" y="222" class="t">plcopen</text>
-  <text x="315" y="240" class="s">TC6 XML import,</text>
-  <text x="315" y="255" class="s">export, validation</text>
+  <text x="315" y="240" class="s">TC6 XML import, export</text>
+  <text x="315" y="255" class="s">LD · FBD · SFC graphical</text>
 
   <rect x="400" y="200" width="150" height="70" rx="5" class="bi"/>
   <text x="475" y="222" class="t">diagram</text>
   <text x="475" y="240" class="s">LD and FBD → ST statements</text>
-  <text x="475" y="255" class="s">SVG drawings for previews</text>
+  <text x="475" y="255" class="s">SVG of LD · FBD · SFC</text>
 
   <path d="M380,137 H398" class="ln" marker-end="url(#a)"/>
   <path d="M550,137 H568" class="ln" marker-end="url(#a)"/>
-  <path d="M380,235 H398" class="ln" marker-end="url(#a)"/>
+  <path d="M380,235 H398" class="ln" marker-start="url(#a)" marker-end="url(#a)"/>
   <path d="M475,172 V198" class="ln" marker-start="url(#a)" marker-end="url(#a)"/>
   <text x="481" y="190" class="l">text-form bodies</text>
   <path d="M315,200 V188 H360 V172" class="ln" marker-end="url(#a)"/>
@@ -66,11 +70,11 @@
   <text x="740" y="98" class="g">backends</text>
   <rect x="740" y="104" width="160" height="56" rx="5" class="bh"/>
   <text x="820" y="125" class="t">evaluator</text>
-  <text x="820" y="143" class="s">tree-walking · sessions</text>
+  <text x="820" y="143" class="s">simulator, debugger</text>
 
   <rect x="740" y="182" width="160" height="56" rx="5" class="bh"/>
   <text x="820" y="203" class="t">compiler · code</text>
-  <text x="820" y="221" class="s">bytecode · error positions</text>
+  <text x="820" y="221" class="s">bytecode · variables to bind</text>
 
   <rect x="920" y="182" width="150" height="56" rx="5" class="bh"/>
   <text x="995" y="203" class="t">vm</text>
@@ -108,15 +112,40 @@
   <text x="995" y="463" class="t">connectors/honeycomb</text>
   <text x="995" y="481" class="s">variables ↔ tags</text>
 
-  <!-- Tools -->
-  <text x="250" y="532" class="g">tools</text>
-  <rect x="250" y="538" width="160" height="56" rx="5" class="bi"/>
-  <text x="330" y="559" class="t">repl</text>
-  <text x="330" y="577" class="s">interactive evaluator</text>
+  <!-- Testing in the loop -->
+  <text x="250" y="532" class="gt">testing in the loop (PROGRAM TEST_...)</text>
+  <rect x="250" y="538" width="240" height="56" rx="5" class="bt"/>
+  <text x="370" y="559" class="t">sil</text>
+  <text x="370" y="577" class="s">eval · vm · go, compared scan by scan</text>
 
-  <rect x="430" y="538" width="280" height="56" rx="5" class="bi"/>
-  <text x="570" y="559" class="t">beedance command</text>
-  <text x="570" y="577" class="s">-iec · -to-xml · -from-xml · -go · -trace</text>
+  <rect x="510" y="538" width="150" height="56" rx="5" class="bi"/>
+  <text x="585" y="559" class="t">watch</text>
+  <text x="585" y="577" class="s">values by dotted name</text>
+
+  <rect x="680" y="538" width="170" height="56" rx="5" class="bi"/>
+  <text x="765" y="559" class="t">embedded/picosim</text>
+  <text x="765" y="577" class="s">emulated Pico in Docker</text>
+
+  <rect x="870" y="538" width="200" height="56" rx="5" class="bt"/>
+  <text x="970" y="559" class="t">embedded/rig/pico</text>
+  <text x="970" y="577" class="s">HIL rig, TinyGo firmware</text>
+
+  <path d="M820,398 V418 H480 V536" class="lt" marker-end="url(#a)"/>
+  <text x="560" y="413" class="lg">tests run on each engine</text>
+  <path d="M490,566 H508" class="ln" marker-end="url(#a)"/>
+  <path d="M850,566 H868" class="ln" marker-end="url(#a)"/>
+  <path d="M370,596 V610 H970 V596" class="lt" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="530" y="625" class="lg">sil.IO · the rig protocol, JSON lines over TCP or serial</text>
+
+  <!-- Tools -->
+  <text x="250" y="646" class="g">tools</text>
+  <rect x="250" y="652" width="160" height="56" rx="5" class="bi"/>
+  <text x="330" y="673" class="t">repl</text>
+  <text x="330" y="691" class="s">interactive evaluator</text>
+
+  <rect x="430" y="652" width="380" height="56" rx="5" class="bi"/>
+  <text x="620" y="673" class="t">beedance command</text>
+  <text x="620" y="691" class="s">-iec · -to-xml · -from-xml · -go · -test -engines -io · -trace</text>
 
   <!-- External, left -->
   <rect x="20" y="104" width="190" height="66" rx="6" class="ex"/>
@@ -134,13 +163,13 @@
   <!-- External, right -->
   <rect x="1110" y="100" width="180" height="64" rx="6" class="dh"/>
   <text x="1200" y="122" class="t">beehive engineering</text>
-  <text x="1200" y="139" class="s">check, simulate, test</text>
+  <text x="1200" y="139" class="s">check, simulate, SIL tests</text>
   <text x="1200" y="154" class="s">beehive-lsp · previews</text>
   <path d="M900,132 H1108" class="ln" marker-end="url(#a)"/>
 
   <rect x="1110" y="180" width="180" height="60" rx="6" class="dh"/>
   <text x="1200" y="203" class="t">beehive logic</text>
-  <text x="1200" y="221" class="s">programs on the edge</text>
+  <text x="1200" y="221" class="s">programs · HIL tests on tags</text>
   <path d="M1070,210 H1108" class="ln" marker-end="url(#a)"/>
 
   <rect x="1110" y="260" width="180" height="60" rx="6" class="ex"/>
@@ -158,18 +187,26 @@
   <text x="1200" y="481" class="s">tag database</text>
   <path d="M1070,470 H1108" class="ln" marker-start="url(#a)" marker-end="url(#a)"/>
 
+  <rect x="1110" y="532" width="180" height="68" rx="6" class="ex"/>
+  <text x="1200" y="554" class="t">The plant</text>
+  <text x="1200" y="571" class="s">a Pico on the bench, a rig</text>
+  <text x="1200" y="586" class="s">in any language, a model in Go</text>
+  <path d="M1070,566 H1108" class="lt" marker-start="url(#a)" marker-end="url(#a)"/>
+
   <!-- Legend -->
-  <g transform="translate(230,638)">
+  <g transform="translate(230,742)">
     <rect x="0" y="0" width="16" height="12" class="bh"/>
     <text x="22" y="11" style="font-size:11.5px;fill:#333">beedance, the pipeline</text>
-    <rect x="170" y="0" width="16" height="12" class="bi"/>
-    <text x="192" y="11" style="font-size:11.5px;fill:#333">beedance, around it</text>
-    <rect x="330" y="0" width="16" height="12" class="dh"/>
-    <text x="352" y="11" style="font-size:11.5px;fill:#333">other apiarytech projects</text>
-    <rect x="510" y="0" width="16" height="12" class="ex"/>
-    <text x="532" y="11" style="font-size:11.5px;fill:#333">outside</text>
-    <path d="M600,6 H640" class="ln" marker-end="url(#a)"/>
-    <text x="648" y="11" style="font-size:11.5px;fill:#333">source, tree, code</text>
-    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator. Details: language.md, backends.md, plcopen.md, embedding.md, embedded.md in this folder.</text>
+    <rect x="160" y="0" width="16" height="12" class="bt"/>
+    <text x="182" y="11" style="font-size:11.5px;fill:#333">beedance, testing</text>
+    <rect x="290" y="0" width="16" height="12" class="bi"/>
+    <text x="312" y="11" style="font-size:11.5px;fill:#333">beedance, around it</text>
+    <rect x="440" y="0" width="16" height="12" class="dh"/>
+    <text x="462" y="11" style="font-size:11.5px;fill:#333">other apiarytech projects</text>
+    <rect x="620" y="0" width="16" height="12" class="ex"/>
+    <text x="642" y="11" style="font-size:11.5px;fill:#333">outside</text>
+    <path d="M706,6 H746" class="ln" marker-end="url(#a)"/>
+    <text x="754" y="11" style="font-size:11.5px;fill:#333">source, tree, code</text>
+    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator. Details: language.md, backends.md, plcopen.md, embedding.md, embedded.md, hil.md in this folder.</text>
   </g>
 </svg>
