@@ -19,11 +19,13 @@
 //   GDB_PORT      TCP port for the GDB remote stub (default 3333, 0 disables)
 //   LOG_LEVEL     emulator log level: debug, info, warn or error (default error;
 //                 warn shows firmware access to peripherals rp2040js lacks)
+//   WIRES         jumper wires, OUT:IN,...: e.g. 2:10 drives GP10 from GP2
+//   ADC           analog inputs, CHANNEL:VALUE,...: e.g. 0:2048 (12-bit)
 
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { ConsoleLogger, LogLevel, Simulator } from 'rp2040js';
+import { ConsoleLogger, GPIOPinState, LogLevel, Simulator } from 'rp2040js';
 import { GDBTCPServer } from 'rp2040js/gdb-tcp-server';
 import { bootromB1 } from './bootrom.mjs';
 
@@ -137,6 +139,29 @@ switch (path.extname(image).toLowerCase()) {
     fail(`unsupported image type ${image}: want .hex, .uf2 or .bin`);
 }
 console.error(`picosim: loaded ${image}`);
+
+// Jumper wires: an output pin drives an input pin, as on a bench rig.
+for (const w of pairs('WIRES')) {
+  const [from, to] = w;
+  if (from > 29 || to > 29) fail(`WIRES: GP${from}:GP${to} is not a pin`);
+  mcu.gpio[from].addListener((state) => mcu.gpio[to].setInputValue(state === GPIOPinState.High));
+}
+// Analog inputs: fixed readings, as from a potentiometer.
+for (const [ch, value] of pairs('ADC')) {
+  if (ch > 4 || value > 4095) fail(`ADC: channel ${ch} value ${value} out of range`);
+  mcu.adc.channelValues[ch] = value;
+}
+
+// pairs reads an environment variable of A:B,... pairs of integers.
+function pairs(name) {
+  const v = (process.env[name] || '').trim();
+  if (v === '') return [];
+  return v.split(',').map((p) => {
+    const m = /^\s*(\d+):(\d+)\s*$/.exec(p);
+    if (!m) fail(`${name}: want A:B,..., got ${p}`);
+    return [Number(m[1]), Number(m[2])];
+  });
+}
 
 // UART0: output goes to stdout, to every connected client, and to a backlog
 // that is replayed on connect so a client attaching after boot misses nothing.

@@ -133,8 +133,9 @@ type Options struct {
 	// directories, by module path, e.g. a royaljelly checkout.
 	GoReplace map[string]string
 	// IO, when set, connects the located variables (%I, %Q) of each run to
-	// a plant model or to real I/O: hardware in the loop (see IO). The go
-	// engine does not run with IO yet.
+	// a plant model or to real I/O: hardware in the loop (see IO). On the go
+	// engine they are those the test program declares, and GoTimeout bounds
+	// each scan rather than the test.
 	IO IO
 	// RealTime paces scans Interval apart on the wall clock, and timers
 	// read it, instead of running them at once on a simulated clock. A run
@@ -272,7 +273,7 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 	var nat *native
 	var natErr error
 	for _, e := range opts.Engines {
-		if e == Go && opts.IO == nil && nat == nil && natErr == nil {
+		if e == Go && nat == nil && natErr == nil {
 			nat, natErr = buildNative(ctx, source, infos, opts)
 			if nat != nil {
 				defer nat.close()
@@ -334,10 +335,10 @@ func runTest(ctx context.Context, source string, program *ast.Program, t *testIn
 			r = runEvaluator(ctx, source, t.decl, t.vars, t.limit, opts)
 		case e == VM:
 			r = runVM(ctx, program, t.decl, t.vars, t.limit, opts)
-		case opts.IO != nil:
-			r = EngineResult{Err: "the go engine does not run with IO yet"}
 		case natErr != nil:
 			r = EngineResult{Err: natErr.Error()}
+		case opts.IO != nil:
+			r = nat.runIO(ctx, t, opts)
 		default:
 			r = nat.run(ctx, t, opts)
 		}

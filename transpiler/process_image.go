@@ -184,3 +184,13 @@ func (t *Transpiler) transpileLinkAccess(prog *ast.ProgramDeclaration) error {
 	t.write("\treturn nil\n}\n\n")
 	return nil
 }
+
+// ProcessImageSlot returns where a variable of the elementary type typ
+// (e.g. "INT"), located at address (e.g. "%IW0"), lives in the process
+// image of a transpiled file: its area (I, Q or M), the Go expression of
+// its entry in an image img, such as `img.I.W[0]`, and the entry's Go type,
+// such as `iec.WORD`. A host that drives a transpiled program's I/O (the
+// sil package's go engine) writes and reads the entries.
+func ProcessImageSlot(address, typ string) (area, slot, slotType string, err error) {
+	return processImageSlot(strings.TrimPrefix(address, "%"), "iec."+strings.ToUpper(typ))
+}

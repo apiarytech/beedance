@@ -70,11 +70,22 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 	if runtime.GOOS == "windows" {
 		n.bin += ".exe"
 	}
+	hasClock := bytes.Contains(code, []byte("var plcClock"))
+	harness, main := harnessSource(tests, hasClock), mainSource
+	if opts.IO != nil {
+		ioSrc, err := harnessIOSource(tests, hasClock)
+		if err != nil {
+			n.close()
+			return nil, err
+		}
+		harness = strings.Replace(harness, "\t\"time\"\n)", "\t\"time\"\n"+harnessIOImports+")", 1) + ioSrc
+		main = mainIOSource
+	}
 	files := map[string]string{ // by path in the module
 		"go.mod":  goMod(string(code), opts.GoReplace),
-		"main.go": mainSource,
+		"main.go": main,
 		filepath.Join(harnessPackage, "tests.go"): string(code),
-		filepath.Join(harnessPackage, "sil.go"):   harnessSource(tests, bytes.Contains(code, []byte("var plcClock"))),
+		filepath.Join(harnessPackage, "sil.go"):   harness,
 	}
 	if err := os.MkdirAll(filepath.Join(dir, harnessPackage), 0o755); err != nil {
 		n.close()
@@ -180,6 +191,29 @@ import (
 )
 
 func main() {
+	limit, _ := strconv.Atoi(os.Args[2])
+	interval, _ := time.ParseDuration(os.Args[3])
+	siltests.Run(os.Args[1], limit, interval, os.Stdout)
+}
+`
+
+// mainIOSource is main for a run with Options.IO: a fourth argument "io"
+// runs the test on request (RunIO).
+const mainIOSource = `package main
+
+import (
+	"os"
+	"strconv"
+	"time"
+
+	"beedance.sil/run/siltests"
+)
+
+func main() {
+	if len(os.Args) > 4 && os.Args[4] == "io" {
+		siltests.RunIO(os.Args[1], os.Stdin, os.Stdout)
+		return
+	}
 	limit, _ := strconv.Atoi(os.Args[2])
 	interval, _ := time.ParseDuration(os.Args[3])
 	siltests.Run(os.Args[1], limit, interval, os.Stdout)

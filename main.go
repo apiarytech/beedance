@@ -65,7 +65,7 @@ func main() {
 	depth := flag.Int("depth", 2, "With -test: levels of instance and structure members to record below a variable")
 	goTimeout := flag.Duration("go-timeout", time.Minute, "With -test on the go engine: time one test may take")
 	goReplace := flag.String("go-replace", "", "With -test on the go engine: MODULE=DIR,... builds with local modules, e.g. github.com/apiarytech/royaljelly=../royaljelly")
-	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT: hardware in the loop; implies -realtime")
+	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT or serial:PORT[?baud=N] (/dev/ttyACM0, COM3): hardware in the loop; implies -realtime")
 	realTime := flag.Bool("realtime", false, "With -test: run scans -interval apart on the wall clock instead of a simulated clock")
 	flag.Parse()
 
@@ -99,7 +99,7 @@ func main() {
 			os.Exit(2)
 		}
 		if *ioFlag != "" {
-			rig, err := sil.DialRig(context.Background(), *ioFlag)
+			rig, err := sil.OpenRig(context.Background(), *ioFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)

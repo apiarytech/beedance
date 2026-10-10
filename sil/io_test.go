@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -208,12 +209,31 @@ func TestIONotCompared(t *testing.T) {
 }
 
 func TestIOGoEngine(t *testing.T) {
-	results, err := Run(context.Background(), tankSource, Options{IO: &tank{}, Engines: []Engine{Go}})
+	if testing.Short() {
+		t.Skip("builds Go code")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no Go toolchain")
+	}
+	k := &tank{}
+	results, err := Run(context.Background(), tankSource, Options{IO: k, Deterministic: true,
+		Engines: []Engine{Evaluator, VM, Go}, GoTimeout: 10 * time.Second,
+		GoReplace: map[string]string{"github.com/apiarytech/royaljelly": "../../royaljelly"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e := results[0].Engines[0]; !strings.Contains(e.Err, "does not run with IO") {
-		t.Errorf("err %q", e.Err)
+	r := results[0]
+	if !r.Passed {
+		for _, e := range r.Engines {
+			t.Logf("%s: passed %v, %d scans, err %s", e.Engine, e.Passed, len(e.Scans), e.Err)
+		}
+		t.Fatalf("not passed, mismatch %q", r.Mismatch)
+	}
+	if got := strings.Join(k.begins, ","); got != "TEST_Fill/eval,TEST_Fill/vm,TEST_Fill/go" {
+		t.Errorf("begins %s", got)
+	}
+	if g := r.Engines[2]; len(g.Scans) != 81 || !strings.EqualFold(g.Scans[80]["%QX0.0"], "false") {
+		t.Errorf("go: %d scans, last %v", len(g.Scans), g.Scans[len(g.Scans)-1])
 	}
 }
 
@@ -370,4 +390,52 @@ func TestToObject(t *testing.T) {
 			t.Errorf("%s %v: %v, want an error", c.typ, c.v, o)
 		}
 	}
+}
+
+// On the go engine with IO, GoTimeout bounds each scan.
+func TestIOGoEngineRunaway(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds Go code")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no Go toolchain")
+	}
+	src := `
+PROGRAM TEST_Spin
+VAR_OUTPUT failures : INT; done : BOOL; END_VAR
+VAR x AT %IX0.0 : BOOL; i : DINT; END_VAR
+WHILE NOT x DO i := i + 1; END_WHILE;
+END_PROGRAM
+`
+	k := &tank{}
+	results, err := Run(context.Background(), src, Options{IO: k, Engines: []Engine{Go}, GoTimeout: time.Second,
+		GoReplace: map[string]string{"github.com/apiarytech/royaljelly": "../../royaljelly"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := results[0].Engines[0]; !strings.Contains(e.Err, "scan 1: no reply after 1s") {
+		t.Errorf("err %q", e.Err)
+	}
+	if k.ends != 1 {
+		t.Errorf("ends %d, want 1", k.ends)
+	}
+}
+
+func TestOpenRigAddresses(t *testing.T) {
+	ctx := context.Background()
+	for _, addr := range []string{"serial:", "serial:/dev/x?speed=9600", "serial:/dev/x?baud=0"} {
+		if _, err := OpenRig(ctx, addr); err == nil {
+			t.Errorf("%q accepted", addr)
+		}
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	rig, err := OpenRig(ctx, "tcp://"+ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig.Close()
 }
