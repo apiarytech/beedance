@@ -239,3 +239,29 @@ jobs:
       - name: Rig log
         if: always()
         run: docker logs picosim-rig
+
+  esp32-emulator:
+    name: ESP32 (emulated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # TinyGo firmware on Espressif's QEMU (ESP32, Xtensa); see
+      # embedded/esp32sim/README.md.
+      - name: Build the emulator image
+        run: docker build -f embedded/esp32sim/Dockerfile -t beedance-esp32sim .
+
+      - name: Start the emulator
+        run: docker run -d --name esp32sim -p 4000:4000 beedance-esp32sim
+
+      - name: Test the firmware
+        run: go test -count=1 -v -tags esp32sim ./embedded/esp32sim/
+
+      - name: Emulator log
+        if: always()
+        run: docker logs esp32sim

@@ -46,6 +46,8 @@ tinygo test ./token ./lexer ./ast ./code ./object ./parser ./stdlib
 | raspberry-pi | ARMv6, ARMv7 and arm64 under QEMU; uploads a `beedance` binary per target |
 | tinygo-test | The core packages, compiler, vm and evaluator under TinyGo, with 1 MB goroutine stacks |
 | raspberry-pi-pico | Firmware for `pico`, `pico-w`, `pico2`, `pico2-w`, uploaded as artifacts |
+| pico-emulator | The Pico firmware and the rig on an emulated RP2040 (`embedded/picosim`) |
+| esp32-emulator | The VM firmware on an emulated ESP32 (`embedded/esp32sim`) |
 
 ## Releases
 

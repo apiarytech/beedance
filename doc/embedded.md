@@ -45,6 +45,24 @@ docker run -d --rm -p 4000:4000 beedance-picosim
 go test -tags picosim ./embedded/picosim/
 ```
 
+## ESP32
+
+TinyGo builds the same VM firmware for the ESP32 family: `esp32-coreboard-v2`
+(ESP32), `esp32c3-generic`, `esp32s3-generic`, `xiao-esp32c6` and others
+(`tinygo targets | grep esp`). The example takes about 180 KB of flash and
+16 to 32 KB of RAM, of the chips' 400 to 520 KB.
+
+`embedded/esp32sim` runs it on an emulated ESP32 (Xtensa) in Docker, under
+Espressif's QEMU, with UART0 on TCP; CI runs it. The ESP32-C3 and S3 are
+not emulated yet. See
+[embedded/esp32sim/README.md](../embedded/esp32sim/README.md).
+
+```bash
+docker build -f embedded/esp32sim/Dockerfile -t beedance-esp32sim .
+docker run -d --rm -p 4000:4000 beedance-esp32sim
+go test -tags esp32sim ./embedded/esp32sim/
+```
+
 On a Raspberry Pi running Linux, the regular Go toolchain builds the whole
 of beedance (ARMv6, ARMv7 and arm64 are tested in CI under QEMU).
 
