@@ -10,10 +10,10 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package esp32sim_test checks firmware running on an emulated ESP32. It
-// talks to the esp32sim container's UART0 over TCP:
+// Package esp32sim_test checks firmware running on an emulated ESP32,
+// ESP32-C3 or ESP32-S3. It talks to the esp32sim container's UART0 over TCP:
 //
-//	docker build -f embedded/esp32sim/Dockerfile -t beedance-esp32sim .
+//	docker build -f embedded/esp32sim/Dockerfile [--build-arg CHIP=esp32c3] -t beedance-esp32sim .
 //	docker run -d --rm -p 4000:4000 beedance-esp32sim
 //	go test -tags esp32sim ./embedded/esp32sim/
 //
@@ -66,7 +66,8 @@ func expectLines(t *testing.T, conn net.Conn, timeout time.Duration, want ...str
 		line := strings.TrimRight(sc.Text(), "\r")
 		seen = append(seen, line)
 		if strings.HasPrefix(line, "panic:") || strings.HasPrefix(line, "fatal error:") ||
-			strings.HasPrefix(line, "Guru Meditation Error") || strings.HasPrefix(line, "invalid header") {
+			strings.HasPrefix(line, "*** Exception:") || strings.HasPrefix(line, "Guru Meditation Error") ||
+			strings.HasPrefix(line, "invalid header") || strings.Contains(line, "No bootable app partitions") {
 			t.Fatalf("firmware crashed: %s\nUART output:\n%s", line, strings.Join(seen, "\n"))
 		}
 		if line == want[0] {

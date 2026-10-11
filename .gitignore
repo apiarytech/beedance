@@ -11,6 +11,8 @@ embedded/example/raspberrypi/myapp
 *.uf2
 *.hex
 *.bin
+# ESP-IDF bootloaders and partition tables the ESP32 emulator boots from
+!embedded/esp32sim/boot/*/*.bin
 
 # Test binaries, coverage and profiles
 *.test

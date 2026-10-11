@@ -52,13 +52,15 @@ TinyGo builds the same VM firmware for the ESP32 family: `esp32-coreboard-v2`
 (`tinygo targets | grep esp`). The example takes about 180 KB of flash and
 16 to 32 KB of RAM, of the chips' 400 to 520 KB.
 
-`embedded/esp32sim` runs it on an emulated ESP32 (Xtensa) in Docker, under
-Espressif's QEMU, with UART0 on TCP; CI runs it. The ESP32-C3 and S3 are
-not emulated yet. See
-[embedded/esp32sim/README.md](../embedded/esp32sim/README.md).
+`embedded/esp32sim` runs it on an emulated ESP32, ESP32-C3 or ESP32-S3 in
+Docker, under Espressif's QEMU, with UART0 on TCP; CI runs all three. The
+C3 and S3 boot it through ESP-IDF's second-stage bootloader, with TinyGo
+targets that add the app description the bootloader requires and map
+flash from the app partition. The C6, S2, H2, C2 and P4 are not emulated.
+See [embedded/esp32sim/README.md](../embedded/esp32sim/README.md).
 
 ```bash
-docker build -f embedded/esp32sim/Dockerfile -t beedance-esp32sim .
+docker build -f embedded/esp32sim/Dockerfile --build-arg CHIP=esp32c3 -t beedance-esp32sim .
 docker run -d --rm -p 4000:4000 beedance-esp32sim
 go test -tags esp32sim ./embedded/esp32sim/
 ```

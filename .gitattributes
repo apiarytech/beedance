@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Prebuilt ESP-IDF bootloaders and partition tables (embedded/esp32sim/boot)
+embedded/esp32sim/boot/*/*.bin binary
