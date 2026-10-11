@@ -1,4 +1,4 @@
-# esp32sim: an emulated ESP32, ESP32-C3 or ESP32-S3 in Docker
+# esp32sim: an emulated ESP32, ESP32-C3, ESP32-S3 or ESP32-C6 in Docker
 
 esp32sim builds a TinyGo package as firmware and runs it on an emulated
 ESP32 chip, so tests can check firmware without a board. It uses
@@ -14,7 +14,7 @@ It is the ESP32 counterpart of [picosim](../picosim/README.md).
 ## Run
 
 From the beedance module root, for one chip (`CHIP`: `esp32`, the default,
-`esp32c3` or `esp32s3`):
+`esp32c3`, `esp32s3` or `esp32c6`):
 
 ```bash
 docker build -f embedded/esp32sim/Dockerfile --build-arg CHIP=esp32c3 -t beedance-esp32sim .
@@ -44,22 +44,32 @@ Result: 30
 | `esp32` | Xtensa | TinyGo's `esp32-qemu` target, from the ROM | `qemu-system-xtensa -machine esp32` |
 | `esp32c3` | RISC-V | ESP-IDF's bootloader, then the app built with `tinygo/esp32c3-idf.json` | `qemu-system-riscv32 -machine esp32c3 -icount 3` |
 | `esp32s3` | Xtensa | ESP-IDF's bootloader, then the app built with `tinygo/esp32s3-idf.json` | `qemu-system-xtensa -machine esp32s3` |
+| `esp32c6` | RISC-V | ESP-IDF's bootloader, then the app built with `tinygo/esp32c6-idf.json` | `qemu-system-riscv32 -machine esp32c6 -icount 3`, built from source |
 
 - **ESP32**: TinyGo writes a `.img`, a whole 4 MB flash image with the
   program at `0x1000`, where the ESP32's ROM loads it.
-- **ESP32-C3 and ESP32-S3**: the ROM cannot load a TinyGo image: its first
-  segment is mapped from flash, which only a bootloader sets up (the ROM
-  faults at `0x3c000020`). So the flash image is ESP-IDF's: its
-  second-stage bootloader at `0x0`, the partition table at `0x8000`
-  (both in [boot](boot/README.md), built by ESP-IDF v5.4) and the app at
-  `0x10000`. Two changes to TinyGo's target make the app bootable there
-  ([tinygo](tinygo/), copies of TinyGo 0.42.0's files):
-  - the linker script starts the first segment with an `esp_app_desc_t`,
-    the app description ESP-IDF's bootloader requires (without it the
-    bootloader reads TinyGo's data as one and refuses the app:
-    `Image requires efuse blk rev >= v596.79`);
+- **ESP32-C3, ESP32-S3 and ESP32-C6**: the ROM cannot load a TinyGo image:
+  it has segments mapped from flash, which only a bootloader sets up (the
+  ROM faults copying one, at `0x3c000020` on the C3). So the flash image is
+  ESP-IDF's: its second-stage bootloader at `0x0`, the partition table at
+  `0x8000` (both in [boot](boot/README.md), built by ESP-IDF v5.4) and the
+  app at `0x10000`. Two changes to TinyGo's target make the app bootable
+  there ([tinygo](tinygo/), copies of TinyGo 0.42.0's files):
+  - the linker script starts segment 0 (`.rodata`; `.data` on the C6) with
+    an `esp_app_desc_t`, the app description ESP-IDF's bootloader requires
+    (without it the bootloader reads TinyGo's data as one and refuses the
+    app: `Image requires efuse blk rev >= v596.79`);
   - the startup code maps flash from the app partition at `0x10000`,
-    instead of from 0 as when the ROM starts the program.
+    instead of from 0 as when the ROM starts the program. On the C6, code
+    (`0x42000000`) and read-only data (`0x42800000`) are mapped separately:
+    TinyGo maps one 16 MB window, which puts the data 8 MB into flash and
+    relies on the flash chip wrapping addresses, which QEMU does not.
+
+  The C6 needs two more things. Its QEMU machine is in Espressif's source
+  (`esp-develop`) but in no release yet, so the image builds QEMU from a
+  pinned commit (`QEMU_COMMIT`, a few minutes). And its bootloader is built
+  for 4 MB of flash: the C6's MMU page size follows the flash size, and
+  the app is built for 64 KB pages.
 
   The same targets build firmware for real boards booted by ESP-IDF's
   bootloader (`esptool.py write_flash 0x0 bootloader.bin 0x8000
@@ -67,16 +77,17 @@ Result: 30
 
 ## Known issues
 
-- **ESP32-C3: sleeping.** After the example's result, its idle loop's first
-  `time.Sleep` raises an exception (`*** Exception: code: 0`). A three-line
-  TinyGo program that sleeps does the same, so it is TinyGo's timer on the
-  emulated C3, not beedance; it has not been tried on a board. The test
-  passes because the VM has finished by then.
-- **Not emulated**: ESP32-C6, S2, H2, C2 and P4 (Espressif's QEMU has no
-  machine for them), and on every chip Wi-Fi, Bluetooth and most
-  peripherals. TinyGo still builds the firmware for the C6
-  (`xiao-esp32c6`) and for many ESP32, C3 and S3 boards
-  (`tinygo targets | grep esp`).
+- **ESP32-C3 and ESP32-C6: sleeping.** After the example's result, its idle
+  loop's first `time.Sleep` raises an exception (`*** Exception: code: 0`).
+  A three-line TinyGo program that sleeps does the same on the C3, so it is
+  TinyGo's timer on these emulated RISC-V chips, not beedance; it has not
+  been tried on a board. The test passes because the VM has finished by
+  then.
+- **Not emulated**: the ESP32-S2, H2, C2 and P4. Espressif's QEMU has no
+  machine for them, and TinyGo 0.42 has no target that builds firmware for
+  them either (only their register definitions). On every chip, Wi-Fi,
+  Bluetooth and most peripherals are not emulated. TinyGo builds firmware
+  for many more ESP32, C3, S3 and C6 boards (`tinygo targets | grep esp`).
 
 ## Other firmware
 
@@ -84,10 +95,11 @@ Build arguments pick what is built:
 
 | Argument | Default | |
 |---|---|---|
-| `CHIP` | `esp32` | `esp32`, `esp32c3` or `esp32s3` |
+| `CHIP` | `esp32` | `esp32`, `esp32c3`, `esp32s3` or `esp32c6` |
 | `PKG` | `./embedded/example/raspberrypi` | Go package to build |
 | `TINYGO_VERSION` | `0.42.0` | The `tinygo/` files are TinyGo 0.42.0's: check them against a new version |
-| `QEMU_TAG`, `QEMU_VERSION` | `esp-develop-9.2.2-20260417` | Espressif QEMU release |
+| `QEMU_TAG`, `QEMU_VERSION` | `esp-develop-9.2.2-20260417` | Espressif QEMU release (ESP32, C3, S3) |
+| `QEMU_COMMIT` | `febae182e132e4055529be423a818225ebddaa3a` | Espressif QEMU source the C6's is built from |
 
 ```bash
 docker build -f embedded/esp32sim/Dockerfile --build-arg CHIP=esp32s3 --build-arg PKG=./path/to/firmware -t my-esp32sim .

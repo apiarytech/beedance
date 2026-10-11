@@ -246,7 +246,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chip: [esp32, esp32c3, esp32s3]
+        chip: [esp32, esp32c3, esp32s3, esp32c6]
     steps:
       - uses: actions/checkout@v4
 
@@ -255,7 +255,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # TinyGo firmware on Espressif's QEMU; the C3 and S3 boot through
+      # TinyGo firmware on Espressif's QEMU; the C3, S3 and C6 boot through
       # ESP-IDF's bootloader. See embedded/esp32sim/README.md.
       - name: Build the emulator image
         run: docker build -f embedded/esp32sim/Dockerfile --build-arg CHIP=${{ matrix.chip }} -t beedance-esp32sim .

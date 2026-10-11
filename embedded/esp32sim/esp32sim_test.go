@@ -11,7 +11,8 @@
  */
 
 // Package esp32sim_test checks firmware running on an emulated ESP32,
-// ESP32-C3 or ESP32-S3. It talks to the esp32sim container's UART0 over TCP:
+// ESP32-C3, ESP32-S3 or ESP32-C6. It talks to the esp32sim container's UART0
+// over TCP:
 //
 //	docker build -f embedded/esp32sim/Dockerfile [--build-arg CHIP=esp32c3] -t beedance-esp32sim .
 //	docker run -d --rm -p 4000:4000 beedance-esp32sim
