@@ -1,6 +1,7 @@
 /* From TinyGo 0.42.0, targets/esp32c6.ld (BSD 3-Clause, see LICENSE.tinygo),
  * changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
- * an esp_app_desc_t at the start of .data, segment 0 on the C6, which the bootloader checks. */
+ * an esp_app_desc_t at the start of .data, segment 0 on the C6, which the bootloader checks,
+ * and .text padded so .rodata lines up with its flash offset. */
 
 /* Linker script for the ESP32-C6
  *
@@ -138,6 +139,15 @@ SECTIONS
     .text : ALIGN(4)
     {
         *(.text .text.*)
+        /* (embedded/esp32sim) .rodata is aligned to its largest input
+         * section (8 for a float64), which can move it past the end of
+         * .rodata_dummy, while the image puts its segment straight after
+         * .text: the bootloader then refuses the app ("Segment 3 load
+         * address ... doesn't match data"). .rodata_dummy ends at
+         * DROM + (end of .text - IROM) + 8, the rodata segment header, so
+         * ending .text 8 bytes before a 16-byte boundary makes it end on
+         * one. */
+        . += (24 - (ABSOLUTE(.) & 15)) & 15;
     } > IROM
 
     /* === DROM sections (flash-mapped read-only data) === */
