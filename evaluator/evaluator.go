@@ -926,6 +926,8 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 	default:
 		// All other qualifiers are non-stored (N, P, D, L, R). They become inactive.
 		action.IsActive = false
+		// A P action pulses again the next time its step becomes active.
+		action.ActivationCount = 0
 	}
 
 	// Reset timers for non-stored timed actions when their step deactivates.

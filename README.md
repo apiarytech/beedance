@@ -95,6 +95,7 @@ Beyond its tree-walking evaluator, `beedance` is designed with a flexible backen
 
 *   **Go Compiler:** A compiler that translates IEC 61131-3 source code directly into Go source code. This enables further compilation to highly-optimized native binaries or WebAssembly (WASM) modules using tools like TinyGo.
 *   **VM Compiler:** A compiler that generates bytecode for a custom, high-performance virtual machine, offering a significant speed advantage over direct evaluation.
+*   **WebAssembly toolchain:** The parser, evaluator, compiler, VM and test runner themselves as a WebAssembly module, for a browser playground and for software-in-the-loop tests under a WASI runtime (see [wasm](wasm/README.md)).
 
 A primary goal of `beedance` is to adhere as closely as possible to the IEC 61131-3 standard. The flexible parser architecture is key to achieving this.
 

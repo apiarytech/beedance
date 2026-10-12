@@ -12,8 +12,10 @@ flowchart LR
     mac --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
     mac --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
     bc --> emb[embedded<br/>standalone VM program]
-    ev & vm & go --> sil[sil<br/>unit tests, compared]
+    go -->|GOOS=wasip1| wmod[WASI module<br/>on a WASI runtime]
+    ev & vm & go & wmod --> sil[sil<br/>unit tests, compared]
     sil <-->|sil.IO| io[plant model, rig,<br/>or beehive I/O]
+    sil & vm & tr --> wasm[wasm<br/>the toolchain as WebAssembly:<br/>browser playground, WASI SIL]
 ```
 
 1. The **lexer** turns source into tokens. It does not reserve IL operators
@@ -26,6 +28,9 @@ flowchart LR
 5. **Tests** (`PROGRAM TEST_...`) run on any of the backends through `sil`,
    scan by scan, and the engines are compared: see
    [Testing in the loop](#testing-in-the-loop).
+6. **`wasm`** puts the pipeline itself behind one JSON call and builds it as
+   a WebAssembly module, so it runs in a browser or a WASI runtime with no
+   Go toolchain: see [wasm](../wasm/README.md).
 
 ## Packages
 
@@ -46,10 +51,12 @@ flowchart LR
 | `diagram` | The model of the graphical languages: LD and FBD lowered to ST, their text form, PLCopen graphical XML both ways, and SVG drawings of LD, FBD and SFC bodies for previews |
 | `native` | Function blocks implemented in Go, given to a program by its host (for example the TCP/IP blocks OSCAT NETWORK needs) |
 | `watch` | What a host can watch of a running program, on either engine, under dotted names (`p.tSample.ET`) |
-| `sil` | Unit tests (`PROGRAM TEST_...`) on the evaluator, the VM and the transpiled Go, compared scan by scan; I/O from a plant model, a rig over the rig protocol (TCP or serial), or a host such as beehive (`sil.IO`) |
+| `sil` | Unit tests (`PROGRAM TEST_...`) on the evaluator, the VM and the transpiled Go, natively (`go`) or as a WASI module (`wasm`), compared scan by scan; I/O from a plant model, a rig over the rig protocol (TCP or serial), or a host such as beehive (`sil.IO`) |
 | `embedded` | Generates a standalone Go program that embeds the VM and bytecode |
 | `embedded/rig/pico` | A hardware-in-the-loop rig on a Raspberry Pi Pico, built with TinyGo: the rig protocol on its serial port, 8 digital inputs, 8 outputs, 3 analog inputs |
 | `embedded/picosim` | Tests of Pico firmware, the rig among it, on an emulated RP2040 in Docker (build tag `picosim`) |
+| `wasm` | The toolchain behind one JSON call, for a WebAssembly host: check, transpile, run the `TEST_` programs on the evaluator and the VM (`sil`), and sessions that run a PROGRAM on the VM scan by scan on a simulated clock, inputs set by name or address |
+| `wasm/cmd/beedance-wasm` | `wasm` as a module: `GOOS=js` gives a page `beedance.handle` (the playground in `wasm/web`); `GOOS=wasip1` answers JSON lines on stdin and runs `test` with CI exit codes. `wasm/Dockerfile` runs it under Node.js (SIL) and serves the playground; its tests check the native, WASI and web builds agree (build tag `wasmsil`) |
 | `connectors/honeycomb` | A module of its own: program variables to and from honeycomb tags, by address |
 | `repl` | The interactive read-eval-print loop |
 | `main` (root) | The `beedance` command |
@@ -89,7 +96,8 @@ the first once and the second every scan, on the same globals. See
 - **Standards first.** Context-aware parsing keeps IEC identifiers free
   (a variable may be called `LD` or `R`).
 - **No runtime dependencies.** The core uses only the standard library, so
-  it builds for microcontrollers with TinyGo as far as each package allows.
+  it builds for microcontrollers with TinyGo as far as each package allows,
+  and, whole, for WebAssembly (`js/wasm` and `wasip1/wasm`).
 - **The host owns time.** The evaluator and the VM read time through
   built-ins a host can replace, so timers follow the host's task clock.
 
@@ -106,7 +114,7 @@ The same `PROGRAM TEST_...` unit tests run three ways (details in
 
 - The **evaluator** is the simulator and debugger; the **VM** and the
   **transpiled Go** are what run on a target. `sil` runs a test on each
-  engine it is given (`-engines eval,vm,go`) and, without real I/O, fails it
+  engine it is given (`-engines eval,vm,go,wasm`) and, without real I/O, fails it
   when they disagree on any watched value after any scan.
 - **I/O** is `sil.IO` (`Begin`, `Read`, `Write`, `End`): the test's located
   variables are the points. `%I` inputs are read before each scan, `%Q`
@@ -116,3 +124,7 @@ The same `PROGRAM TEST_...` unit tests run three ways (details in
   the emulated Pico (`embedded/picosim`).
 - **beehive** runs the same tests on an edge node's tags
   (`LogicService.Test`), with `sil` and its own `sil.IO`.
+- **WebAssembly** runs them with no Go toolchain, on the evaluator and the
+  VM: `beedance-wasm test` under a WASI runtime (the `beedance-wasm` Docker
+  image, for CI) or the playground in a browser. The `go` engine needs the
+  toolchain, so it is not offered there.

@@ -16,6 +16,7 @@ package vm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,5 +225,97 @@ func TestBudget(t *testing.T) {
 	scan.Reset()
 	if err := scan.Run(); !errors.Is(err, ErrBudget) {
 		t.Fatalf("an endless loop: err = %v, want ErrBudget", err)
+	}
+}
+
+// A return in a program's body (IL RET, ST RETURN) ends that scan, as the
+// end of the body does; the next scan starts at the top. It popped the
+// main frame and failed with "index out of range [-1]".
+func TestReturnEndsTheScan(t *testing.T) {
+	for _, src := range []string{
+		"PROGRAM P\nVAR n, after : DINT; END_VAR\n  LD n\n  ADD 1\n  ST n\n  RET\n  LD 1\n  ST after\nEND_PROGRAM",
+		"PROGRAM P\nVAR n, after : DINT; END_VAR\nn := n + 1;\nRETURN;\nafter := 1;\nEND_PROGRAM",
+	} {
+		p := compileProgram(t, src)
+		globals := make([]object.Object, GlobalsSize)
+		if err := NewWithGlobalsStore(p.InitBytecode, globals).Run(); err != nil {
+			t.Fatal(err)
+		}
+		scan := NewWithGlobalsStore(p.CyclicBytecode, globals)
+		for i := 0; i < 3; i++ {
+			scan.Reset()
+			if err := scan.Run(); err != nil {
+				t.Fatalf("scan %d: %v\n%s", i+1, err, src)
+			}
+		}
+		n, after := variable(t, p, "n"), variable(t, p, "after")
+		if v, _, _ := object.GetIntegerObjectValue(globals[n.Global]); v != 3 {
+			t.Errorf("n = %v after three scans, want 3\n%s", globals[n.Global], src)
+		}
+		if v, _, _ := object.GetIntegerObjectValue(globals[after.Global]); v != 0 {
+			t.Errorf("after = %v: the code after the return ran\n%s", globals[after.Global], src)
+		}
+	}
+}
+
+// IEC 61131-3 names are not case-sensitive: an FB body reads its input RST
+// as rst, and a program reads the output Q as b.q (OSCAT's SRAMP faulted
+// on `IF rst OR NOT init`). DWORD_TO_REAL converts the number (OSCAT's
+// TC_S).
+func TestNamesIgnoreCase(t *testing.T) {
+	src := "FUNCTION_BLOCK B\nVAR_INPUT RST : BOOL; END_VAR\nVAR_OUTPUT Q : BOOL; N : DINT; END_VAR\nq := rst OR FALSE;\nn := n + 1;\nEND_FUNCTION_BLOCK\n" +
+		"PROGRAM P\nVAR b : B; on : BOOL; count : DINT; r : REAL; w : DWORD := 16#10; END_VAR\nb(RST := TRUE);\non := b.q AND TRUE;\ncount := b.n;\nr := DWORD_TO_REAL(w) * 0.5;\nEND_PROGRAM"
+	p := compileProgram(t, src)
+	globals := make([]object.Object, GlobalsSize)
+	if err := NewWithGlobalsStore(p.InitBytecode, globals).Run(); err != nil {
+		t.Fatal(err)
+	}
+	scan := NewWithGlobalsStore(p.CyclicBytecode, globals)
+	for i := 0; i < 2; i++ {
+		scan.Reset()
+		if err := scan.Run(); err != nil {
+			t.Fatalf("scan %d: %v", i+1, err)
+		}
+	}
+	if on := globals[variable(t, p, "on").Global]; !strings.EqualFold(on.Inspect(), "TRUE") {
+		t.Errorf("on = %v, want TRUE", on.Inspect())
+	}
+	if v, _, _ := object.GetIntegerObjectValue(globals[variable(t, p, "count").Global]); v != 2 {
+		t.Errorf("count = %v, want 2", globals[variable(t, p, "count").Global])
+	}
+	if f, _ := object.GetFloat64Value(globals[variable(t, p, "r").Global]); f != 8 {
+		t.Errorf("r = %v, want 8", globals[variable(t, p, "r").Global])
+	}
+}
+
+// An integer given to a DWORD is a DWORD (OSCAT's ONTIME sets ms := 0 and
+// then reads DWORD_TO_ULINT(ms)): LibDemo faulted with "ULINT ERROR" the
+// first time its pump ran.
+func TestIntegerToBitString(t *testing.T) {
+	src := "FUNCTION_BLOCK M\nVAR_INPUT IN : BOOL; END_VAR\nVAR_OUTPUT S : UDINT; END_VAR\nVAR ms, tx, last : DWORD; init : BOOL; END_VAR\n" +
+		"tx := DWORD#16#FFFFFF00;\nIF NOT init THEN init := TRUE; last := tx; ms := 0; END_IF;\n" +
+		"IF IN THEN ms := ULINT_TO_DWORD((DWORD_TO_ULINT(tx) + 4294967296 - DWORD_TO_ULINT(last) + DWORD_TO_ULINT(ms) + 1000) MOD 4294967296);\n" +
+		"IF ms >= 1000 THEN S := S + 1; ms := ULINT_TO_DWORD(DWORD_TO_ULINT(ms) - 1000); END_IF; END_IF;\nlast := tx;\nEND_FUNCTION_BLOCK\n" +
+		"PROGRAM P\nVAR m : M; s : UDINT; d : DWORD; u : ULINT; END_VAR\nm(IN := TRUE);\ns := m.S;\nd := 5;\nu := DWORD_TO_ULINT(d) + 1;\nEND_PROGRAM"
+	p := compileProgram(t, src)
+	globals := make([]object.Object, GlobalsSize)
+	if err := NewWithGlobalsStore(p.InitBytecode, globals).Run(); err != nil {
+		t.Fatal(err)
+	}
+	scan := NewWithGlobalsStore(p.CyclicBytecode, globals)
+	for i := 0; i < 3; i++ {
+		scan.Reset()
+		if err := scan.Run(); err != nil {
+			t.Fatalf("scan %d: %v", i+1, err)
+		}
+	}
+	if d := globals[variable(t, p, "d").Global]; d.Type() != object.BITSTRING_OBJ {
+		t.Errorf("d := 5 holds %s", d.Type())
+	}
+	if v, _, _ := object.GetIntegerObjectValue(globals[variable(t, p, "s").Global]); v != 3 {
+		t.Errorf("s = %v, want 3", globals[variable(t, p, "s").Global])
+	}
+	if v, _, _ := object.GetIntegerObjectValue(globals[variable(t, p, "u").Global]); v != 6 {
+		t.Errorf("u = %v, want 6", globals[variable(t, p, "u").Global])
 	}
 }

@@ -148,7 +148,9 @@ Each engine gets its own simulated clock (an evaluator `Session`; for the
 VM, `stdlib.ClockBuiltins`; for Go, the `now` of each scan and `TIME()`)
 and a per-scan budget (for Go, a time limit per test: `GoTimeout`), so a
 runaway loop fails its test. The go engine needs the Go toolchain; it
-builds with royaljelly `sil.RoyaljellyVersion`, or `GoReplace` directories. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
+builds with royaljelly `sil.RoyaljellyVersion`, or `GoReplace` directories.
+The wasm engine (`sil.Wasm`) builds the same Go for WASI and needs a WASI
+runtime too: `WasmRuntime`, or wasmtime, wazero or Node.js 24+ in `PATH`. `sil.WriteCSV` writes an engine's scans for plotting or diffing.
 
 With `Options.IO`, the tests' located variables are connected to a plant
 model or to real I/O. With `Options.RealTime`, they run on the wall clock.

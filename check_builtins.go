@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/apiarytech/beedance/object"
 )
 
 // camelToSnake converts a camelCase string to snake_case.
@@ -97,10 +99,10 @@ func checkBuiltins() {
 		expectedMapKeys[key] = true
 	}
 
-	// A built-in no program may name starts with "__" (__CLOCK), which the
-	// constant (BuiltinClock) leaves out.
+	// A built-in no program may name starts with "__" (__CLOCK) or "$"
+	// ($CONVERT), which the constant (BuiltinClock, BuiltinConvert) leaves out.
 	for key := range expectedMapKeys {
-		if _, ok := mapKeys[key]; !ok && !mapKeys["__"+key] {
+		if _, ok := mapKeys[key]; !ok && !mapKeys["__"+key] && !mapKeys["$"+key] {
 			fmt.Printf("ERROR: Constant 'Builtin%s' exists in indices.go, but key '%s' is missing from BuiltinNameToIndex map.\n", key, key)
 			errorsFound = true
 		}
@@ -108,7 +110,7 @@ func checkBuiltins() {
 
 	for key := range mapKeys {
 		// Convert snake_case key to PascalCase to match iota constant naming
-		pascalKey := snakeToPascal(strings.TrimLeft(key, "_"))
+		pascalKey := snakeToPascal(strings.TrimLeft(key, "_$"))
 		constName := "Builtin" + pascalKey
 		if _, ok := iotaConsts[constName]; !ok {
 			fmt.Printf("ERROR: Key '%s' exists in BuiltinNameToIndex map, but constant '%s' is missing from indices.go.\n", key, constName)
@@ -213,16 +215,6 @@ func parseRegisteredFunctions(dirPath string) (map[string]bool, error) {
 
 	registered := make(map[string]bool)
 
-	// Pre-populate with the dynamically generated type conversion functions.
-	types := []string{"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT", "REAL", "LREAL", "TIME", "DATE", "TOD", "DT", "STRING", "WSTRING", "BYTE", "WORD", "DWORD", "LWORD", "ANY_INT", "ANY_REAL", "BCD"}
-	for _, from := range types {
-		for _, to := range types {
-			if from != to {
-				registered[fmt.Sprintf("%s_TO_%s", from, to)] = true
-			}
-		}
-	}
-
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
 			ast.Inspect(file, func(n ast.Node) bool {
@@ -240,6 +232,10 @@ func parseRegisteredFunctions(dirPath string) (map[string]bool, error) {
 					if len(call.Args) >= 2 {
 						if nameLit, ok := call.Args[1].(*ast.BasicLit); ok && nameLit.Kind == token.STRING {
 							registered[strings.Trim(nameLit.Value, `"`)] = true
+						}
+						// The one conversion built-in, $CONVERT, by its constant.
+						if sel, ok := call.Args[1].(*ast.SelectorExpr); ok && sel.Sel.Name == "ConvertBuiltinName" {
+							registered[object.ConvertBuiltinName] = true
 						}
 					}
 				}

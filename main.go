@@ -57,14 +57,15 @@ func main() {
 	testFlag := flag.Bool("test", false, "Run the PROGRAM TEST_... unit tests of the FILE.st arguments on a simulated clock")
 	interval := flag.Duration("interval", 10*time.Millisecond, "With -test: simulated time between scans")
 	maxScans := flag.Int("max-scans", 50000, "With -test: a test with done that is not done by then fails")
-	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on: eval, vm, go (the transpiler) or all; compared with the first")
+	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on: eval, vm, go (the transpiler), wasm (the transpiler to WebAssembly, on a WASI runtime) or all (eval,vm,go); compared with the first")
 	tol := flag.Float64("tol", 1e-3, "With -test: relative tolerance when comparing REAL values between engines")
 	runFilter := flag.String("run", "", "With -test: run only tests whose name contains this text")
 	csvDir := flag.String("csv", "", "With -test: write each test's per-scan values per engine as CSV into this directory")
 	membersFlag := flag.String("members", "outputs", "With -test: members of function block instances to record and compare: outputs or all")
 	depth := flag.Int("depth", 2, "With -test: levels of instance and structure members to record below a variable")
-	goTimeout := flag.Duration("go-timeout", time.Minute, "With -test on the go engine: time one test may take")
-	goReplace := flag.String("go-replace", "", "With -test on the go engine: MODULE=DIR,... builds with local modules, e.g. github.com/apiarytech/royaljelly=../royaljelly")
+	goTimeout := flag.Duration("go-timeout", time.Minute, "With -test on the go and wasm engines: time one test may take")
+	goReplace := flag.String("go-replace", "", "With -test on the go and wasm engines: MODULE=DIR,... builds with local modules, e.g. github.com/apiarytech/royaljelly=../royaljelly")
+	wasmRuntime := flag.String("wasm-runtime", "", "With -test on the wasm engine: the command that runs a WASI module, e.g. \"wasmtime run\" (default: wasmtime, wazero or Node.js 24+, the first in PATH)")
 	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT or serial:PORT[?baud=N] (/dev/ttyACM0, COM3): hardware in the loop; implies -realtime")
 	realTime := flag.Bool("realtime", false, "With -test: run scans -interval apart on the wall clock instead of a simulated clock")
 	flag.Parse()
@@ -76,7 +77,7 @@ func main() {
 			os.Exit(2)
 		}
 		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter,
-			Watch: watch.Options{Depth: *depth}, GoTimeout: *goTimeout, GoReplace: map[string]string{}}
+			Watch: watch.Options{Depth: *depth}, GoTimeout: *goTimeout, GoReplace: map[string]string{}, WasmRuntime: strings.Fields(*wasmRuntime)}
 		// Real I/O runs on the wall clock unless -realtime=false says not.
 		opts.RealTime = *realTime || (*ioFlag != "" && !flagSet("realtime"))
 		for _, r := range strings.Split(*goReplace, ",") {

@@ -30,6 +30,13 @@ type ProgramOptions struct {
 	Interval time.Duration
 	// Scans bounds the scans main runs; 0 runs for ever.
 	Scans int
+	// StackSize and MaxFrames size the VM's operand stack and call depth
+	// (vm.WithStackSize, vm.WithMaxFrames); 0 keeps the VM's defaults, which
+	// take about 20 KB on a 32-bit chip. On a microcontroller with a small
+	// heap (a classic ESP32's, once stdlib is in), 256 and 32 do for most
+	// programs.
+	StackSize int
+	MaxFrames int
 }
 
 // GenerateEmbeddedProgram writes Go that runs a compiled PROGRAM
@@ -61,13 +68,20 @@ func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o Prog
 		return fmt.Errorf("cyclic constants: %w", err)
 	}
 	globals := max(vm.GlobalsNeeded(prog.InitBytecode), vm.GlobalsNeeded(prog.CyclicBytecode))
+	var vmOpts []string
+	if o.StackSize > 0 {
+		vmOpts = append(vmOpts, fmt.Sprintf("vm.WithStackSize(%d)", o.StackSize))
+	}
+	if o.MaxFrames > 0 {
+		vmOpts = append(vmOpts, fmt.Sprintf("vm.WithMaxFrames(%d)", o.MaxFrames))
+	}
 	main := ""
 	if o.Package == "main" {
 		main = fmt.Sprintf(programMain, o.Scans)
 	}
 	_, err = fmt.Fprintf(w, programTemplate, o.Package,
 		instructionsToGoLiteral(prog.InitBytecode.Instructions), instructionsToGoLiteral(prog.CyclicBytecode.Instructions),
-		initConsts, scanConsts, int64(o.Interval), globals, main)
+		initConsts, scanConsts, int64(o.Interval), strings.Join(vmOpts, ", "), globals, main)
 	return err
 }
 
@@ -104,6 +118,13 @@ func init() {
 // Interval is the time between the starts of scans.
 const Interval = time.Duration(%d)
 
+// vmOptions size the VMs' stacks (ProgramOptions.StackSize, MaxFrames).
+var vmOptions = []vm.Option{%s}
+
+// LastScan is how long the last scan took to run, onScan aside: on a
+// device, the program's scan time.
+var LastScan time.Duration
+
 // Run runs the program: its initialization, then scans Interval apart,
 // scans of them (0: for ever). onScan, if not nil, is called after each
 // scan with the VM, whose IO() holds the located variables by address.
@@ -113,22 +134,32 @@ func Run(scans int, onScan func(machine *vm.VM)) error {
 	start := time.Now()
 	clock := func() time.Duration { return time.Since(start) }
 	globals := make([]object.Object, %d)
-	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals)
-	scanVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: scanInstructions, Constants: scanConstants}, globals)
-	for idx, b := range stdlib.ClockBuiltins(clock) {
+	clockBuiltins := stdlib.ClockBuiltins(clock)
+	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals, vmOptions...)
+	for idx, b := range clockBuiltins {
 		initVM.SetBuiltin(idx, b)
-		scanVM.SetBuiltin(idx, b)
 	}
 	if err := initVM.Run(); err != nil {
 		return err
 	}
-	for addr, v := range initVM.IO() {
+	// The initialization's VM is dropped before the scans' is made, so a
+	// microcontroller's heap holds one VM's stack and frames, not two.
+	io := initVM.IO()
+	initVM = nil
+	scanVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: scanInstructions, Constants: scanConstants}, globals, vmOptions...)
+	for idx, b := range clockBuiltins {
+		scanVM.SetBuiltin(idx, b)
+	}
+	for addr, v := range io {
 		scanVM.IO()[addr] = v
 	}
 	next := time.Now()
 	for n := 0; scans == 0 || n < scans; n++ {
 		scanVM.Reset()
-		if err := scanVM.Run(); err != nil {
+		began := time.Now()
+		err := scanVM.Run()
+		LastScan = time.Since(began)
+		if err != nil {
 			return err
 		}
 		if onScan != nil {

@@ -64,10 +64,14 @@ const (
 	// Go is the transpiler: the source as Go on royaljelly, built with the
 	// Go toolchain.
 	Go Engine = "go"
+	// Wasm is the transpiler too, the Go built for WebAssembly (GOOS=wasip1)
+	// and run by a WASI runtime: the program as a WebAssembly target runs it.
+	Wasm Engine = "wasm"
 )
 
 // ParseEngines parses a comma-separated list of engines, e.g. "eval,vm";
-// "all" is eval,vm,go.
+// "all" is eval,vm,go; wasm, which needs a WASI runtime, is named on its
+// own.
 func ParseEngines(s string) ([]Engine, error) {
 	var out []Engine
 	seen := map[Engine]bool{}
@@ -84,13 +88,15 @@ func ParseEngines(s string) ([]Engine, error) {
 		switch e {
 		case "":
 			continue
-		case Evaluator, VM, Go:
+		case Evaluator, VM, Go, Wasm:
 		case "evaluator":
 			e = Evaluator
 		case "transpiler":
 			e = Go
+		case "webassembly":
+			e = Wasm
 		default:
-			return nil, fmt.Errorf("unknown engine %q: want eval, vm, go or all", f)
+			return nil, fmt.Errorf("unknown engine %q: want eval, vm, go, wasm or all", f)
 		}
 		if !seen[e] {
 			seen[e] = true
@@ -126,12 +132,18 @@ type Options struct {
 	// Watch chooses the members of function block instances recorded and
 	// compared; by default their outputs, two levels deep.
 	Watch watch.Options
-	// GoTimeout bounds one test on the go engine, which has no statement
-	// budget; default one minute.
+	// GoTimeout bounds one test on the go and wasm engines, which have no
+	// statement budget; default one minute.
 	GoTimeout time.Duration
-	// GoReplace points modules the transpiled tests build with at local
-	// directories, by module path, e.g. a royaljelly checkout.
+	// GoReplace points modules the transpiled tests build with, on the go
+	// and wasm engines, at local directories, by module path, e.g. a
+	// royaljelly checkout.
 	GoReplace map[string]string
+	// WasmRuntime is the command, with its arguments, that runs a WASI
+	// module on the wasm engine: the module and its arguments follow them,
+	// e.g. {"wasmtime", "run"}. By default wasmtime, wazero or Node.js 24 or
+	// later, the first in PATH.
+	WasmRuntime []string
 	// IO, when set, connects the located variables (%I, %Q) of each run to
 	// a plant model or to real I/O: hardware in the loop (see IO). On the go
 	// engine they are those the test program declares, and GoTimeout bounds
@@ -272,12 +284,16 @@ func Run(ctx context.Context, source string, opts Options) ([]Result, error) {
 	}
 	var nat *native
 	var natErr error
+	var built []Engine // the engines that run the transpiled Go
 	for _, e := range opts.Engines {
-		if e == Go && nat == nil && natErr == nil {
-			nat, natErr = buildNative(ctx, source, infos, opts)
-			if nat != nil {
-				defer nat.close()
-			}
+		if e == Go || e == Wasm {
+			built = append(built, e)
+		}
+	}
+	if len(built) > 0 {
+		nat, natErr = buildNative(ctx, source, infos, opts, built)
+		if nat != nil {
+			defer nat.close()
 		}
 	}
 
@@ -337,10 +353,12 @@ func runTest(ctx context.Context, source string, program *ast.Program, t *testIn
 			r = runVM(ctx, program, t.decl, t.vars, t.limit, opts)
 		case natErr != nil:
 			r = EngineResult{Err: natErr.Error()}
+		case nat.errs[e] != nil:
+			r = EngineResult{Err: nat.errs[e].Error()}
 		case opts.IO != nil:
-			r = nat.runIO(ctx, t, opts)
+			r = nat.runIO(ctx, e, t, opts)
 		default:
-			r = nat.run(ctx, t, opts)
+			r = nat.run(ctx, e, t, opts)
 		}
 		r.Engine = e
 		r.outcome(t.out)

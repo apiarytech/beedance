@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,19 +37,24 @@ const (
 // harnessPackage is the package of the transpiled source and its harness.
 const harnessPackage = "siltests"
 
-// native is the transpiled tests, built once for a run.
+// native is the transpiled tests, built once for a run: as an executable
+// for the go engine, as a WASI module for the wasm engine, or both.
 type native struct {
-	dir string // the temporary module
-	bin string // its executable
+	dir     string // the temporary module
+	bin     string // its executable
+	wasm    string // its WebAssembly module
+	runtime []string
+	// errs holds why an engine cannot run, its build having failed.
+	errs map[Engine]error
 }
 
 // buildNative transpiles source to Go, adds a harness that runs each test
 // of tests scan by scan on a simulated clock, and builds it with the Go
-// toolchain in a temporary module.
-func buildNative(ctx context.Context, source string, tests []*testInfo, opts Options) (*native, error) {
+// toolchain in a temporary module, for each of engines (Go, Wasm).
+func buildNative(ctx context.Context, source string, tests []*testInfo, opts Options, engines []Engine) (*native, error) {
 	goTool, err := exec.LookPath("go")
 	if err != nil {
-		return nil, errors.New("the go engine needs the Go toolchain: go not found in PATH")
+		return nil, fmt.Errorf("the %s engine needs the Go toolchain: go not found in PATH", engines[0])
 	}
 	// A fresh AST: the transpiler rewrites the one it is given, which the
 	// VM must not compile.
@@ -66,7 +70,7 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 	// Not named like the package directory: go build -o onto an existing
 	// directory writes into it, so without .exe (Linux, macOS) the
 	// executable would not be where it is run from.
-	n := &native{dir: dir, bin: filepath.Join(dir, "silrun")}
+	n := &native{dir: dir, bin: filepath.Join(dir, "silrun"), wasm: filepath.Join(dir, "silrun.wasm"), errs: map[Engine]error{}}
 	if runtime.GOOS == "windows" {
 		n.bin += ".exe"
 	}
@@ -97,20 +101,46 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 			return nil, err
 		}
 	}
-	for _, args := range [][]string{{"mod", "tidy"}, {"build", "-o", n.bin, "."}} {
+	goCmd := func(env []string, args ...string) error {
 		cmd := exec.CommandContext(ctx, goTool, args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOWORK=off")
+		cmd.Env = append(append(os.Environ(), "GOFLAGS=-mod=mod", "GOWORK=off"), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			n.close()
-			return nil, fmt.Errorf("go %s: %v\n%s", args[0], err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("go %s: %v\n%s", args[0], err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err := goCmd(nil, "mod", "tidy"); err != nil {
+		n.close()
+		return nil, err
+	}
+	// A failed build fails only its engine's runs.
+	for _, e := range engines {
+		out, env := n.bin, []string(nil)
+		if e == Wasm {
+			if n.runtime, err = wasmRuntime(ctx, opts, dir); err != nil {
+				n.errs[e] = err
+				continue
+			}
+			out, env = n.wasm, []string{"GOOS=wasip1", "GOARCH=wasm"}
+		}
+		if err := goCmd(env, "build", "-o", out, "."); err != nil {
+			n.errs[e] = err
+		} else if fi, err := os.Stat(out); err != nil || !fi.Mode().IsRegular() {
+			n.errs[e] = fmt.Errorf("go build: nothing built at %s", out)
 		}
 	}
-	if fi, err := os.Stat(n.bin); err != nil || !fi.Mode().IsRegular() {
-		n.close()
-		return nil, fmt.Errorf("go build: no executable at %s", n.bin)
-	}
 	return n, nil
+}
+
+// command runs the transpiled tests with args on engine e: the executable,
+// or the module under the WASI runtime.
+func (n *native) command(ctx context.Context, e Engine, args ...string) *exec.Cmd {
+	if e == Wasm {
+		argv := append(append(append([]string{}, n.runtime[1:]...), n.wasm), args...)
+		return exec.CommandContext(ctx, n.runtime[0], argv...)
+	}
+	return exec.CommandContext(ctx, n.bin, args...)
 }
 
 func (n *native) close() { os.RemoveAll(n.dir) }
@@ -123,10 +153,10 @@ type nativeResult struct {
 
 // run runs one test in its own process, so a runaway loop is stopped by
 // the timeout instead of holding the run.
-func (n *native) run(ctx context.Context, t *testInfo, opts Options) (r EngineResult) {
+func (n *native) run(ctx context.Context, e Engine, t *testInfo, opts Options) (r EngineResult) {
 	ctx, cancel := context.WithTimeout(ctx, opts.GoTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, n.bin, t.decl.Name.Value, strconv.Itoa(t.limit), opts.Interval.String())
+	cmd := n.command(ctx, e, t.decl.Name.Value, strconv.Itoa(t.limit), opts.Interval.String())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -140,7 +170,7 @@ func (n *native) run(ctx context.Context, t *testInfo, opts Options) (r EngineRe
 		if msg == "" && err != nil {
 			msg = err.Error()
 		}
-		r.Err = "go: " + msg
+		r.Err = string(e) + ": " + msg
 		return r
 	}
 	for _, row := range res.Scans {
@@ -183,8 +213,10 @@ func goMod(code string, replace map[string]string) string {
 const mainSource = `package main
 
 import (
+	"errors"
 	"os"
 	"strconv"
+	"syscall"
 	"time"
 
 	"beedance.sil/run/siltests"
@@ -193,17 +225,19 @@ import (
 func main() {
 	limit, _ := strconv.Atoi(os.Args[2])
 	interval, _ := time.ParseDuration(os.Args[3])
-	siltests.Run(os.Args[1], limit, interval, os.Stdout)
+	siltests.Run(os.Args[1], limit, interval, stdio{os.Stdout})
 }
-`
+` + stdioSource
 
 // mainIOSource is main for a run with Options.IO: a fourth argument "io"
 // runs the test on request (RunIO).
 const mainIOSource = `package main
 
 import (
+	"errors"
 	"os"
 	"strconv"
+	"syscall"
 	"time"
 
 	"beedance.sil/run/siltests"
@@ -211,12 +245,47 @@ import (
 
 func main() {
 	if len(os.Args) > 4 && os.Args[4] == "io" {
-		siltests.RunIO(os.Args[1], os.Stdin, os.Stdout)
+		siltests.RunIO(os.Args[1], stdio{os.Stdin}, stdio{os.Stdout})
 		return
 	}
 	limit, _ := strconv.Atoi(os.Args[2])
 	interval, _ := time.ParseDuration(os.Args[3])
-	siltests.Run(os.Args[1], limit, interval, os.Stdout)
+	siltests.Run(os.Args[1], limit, interval, stdio{os.Stdout})
+}
+` + stdioSource
+
+// stdioSource is the harness's stdin and stdout. A WASI runtime may give the
+// module non-blocking pipes (Node.js does), on which a read or a write fails
+// with EAGAIN until the pipe is ready: output past the 64 KB a pipe holds
+// would be lost.
+const stdioSource = `
+type stdio struct{ f *os.File }
+
+func (s stdio) Read(p []byte) (int, error) {
+	for {
+		n, err := s.f.Read(p)
+		if n > 0 || !errors.Is(err, syscall.EAGAIN) {
+			return n, err
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (s stdio) Write(p []byte) (int, error) {
+	written := 0
+	for len(p) > 0 {
+		n, err := s.f.Write(p)
+		written += n
+		p = p[n:]
+		if errors.Is(err, syscall.EAGAIN) {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if err != nil {
+			return written, err
+		}
+	}
+	return written, nil
 }
 `
 

@@ -66,8 +66,11 @@ func FinalizeBuiltins() {
 	Builtins = builtinsList
 }
 
-// GetBuiltinByName is used by the evaluator to look up built-in functions by name.
+// GetBuiltinByName is used by the evaluator to look up built-in functions by
+// name. A type conversion X_TO_Y is made on first use (see ParseConversion).
 func GetBuiltinByName(name string) (*Builtin, bool) {
-	b, ok := builtinsByName[name]
-	return b, ok
+	if b, ok := builtinsByName[name]; ok {
+		return b, ok
+	}
+	return conversionBuiltin(name)
 }

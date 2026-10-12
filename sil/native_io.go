@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -278,10 +277,10 @@ type nativeReply struct {
 // runIO runs one test with opts.IO, scan by scan. GoTimeout bounds each
 // scan, so a runaway loop fails the test while a long real-time run does
 // not.
-func (n *native) runIO(ctx context.Context, t *testInfo, opts Options) (r EngineResult) {
+func (n *native) runIO(ctx context.Context, e Engine, t *testInfo, opts Options) (r EngineResult) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, n.bin, t.decl.Name.Value, strconv.Itoa(t.limit), opts.Interval.String(), "io")
+	cmd := n.command(ctx, e, t.decl.Name.Value, strconv.Itoa(t.limit), opts.Interval.String(), "io")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		r.Err = err.Error()
@@ -295,7 +294,7 @@ func (n *native) runIO(ctx context.Context, t *testInfo, opts Options) (r Engine
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		r.Err = "go: " + err.Error()
+		r.Err = string(e) + ": " + err.Error()
 		return r
 	}
 	defer func() {
@@ -326,7 +325,7 @@ func (n *native) runIO(ctx context.Context, t *testInfo, opts Options) (r Engine
 		select {
 		case rep, ok := <-replies:
 			if !ok {
-				return rep, fmt.Errorf("go: the test stopped: %s", strings.TrimSpace(stderr.String()))
+				return rep, fmt.Errorf("%s: the test stopped: %s", e, strings.TrimSpace(stderr.String()))
 			}
 			if rep.Err != "" {
 				return rep, fmt.Errorf("%s", rep.Err)
@@ -348,7 +347,7 @@ func (n *native) runIO(ctx context.Context, t *testInfo, opts Options) (r Engine
 	for _, p := range first.Points {
 		types[p.Address] = p.Type
 	}
-	if err := opts.IO.Begin(ctx, t.decl.Name.Value, Go, first.Points); err != nil {
+	if err := opts.IO.Begin(ctx, t.decl.Name.Value, e, first.Points); err != nil {
 		r.Err = "io begin: " + err.Error()
 		return r
 	}
@@ -389,7 +388,7 @@ func (n *native) runIO(ctx context.Context, t *testInfo, opts Options) (r Engine
 			inputs[addr] = v
 		}
 		if err := enc.Encode(map[string]any{"t_ms": float64(at) / float64(time.Millisecond), "inputs": inputs}); err != nil {
-			r.Err = fmt.Sprintf("scan %d: go: %v", n+1, err)
+			r.Err = fmt.Sprintf("scan %d: %s: %v", n+1, e, err)
 			break
 		}
 		rep, err := next()

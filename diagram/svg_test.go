@@ -104,3 +104,25 @@ func TestSVGFromXML(t *testing.T) {
 		t.Errorf("texts %q", got)
 	}
 }
+
+// Contacts, coils and variables name their variable, so a page can show
+// them live (drone L-4); a negated one says so.
+func TestSVGNamesLiveVariables(t *testing.T) {
+	body, err := ParseText("LD", "RUNG r\n [ Start | Run ] /Stop ( Run )\n", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svg := SVG(body.Elems)
+	for _, want := range []string{
+		`<g class="el contact" data-var="Start" data-neg="false">`,
+		`<g class="el contact" data-var="Stop" data-neg="true">`,
+		`<g class="el coil" data-var="Run" data-neg="false">`,
+	} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("no %s in\n%s", want, svg)
+		}
+	}
+	if strings.Count(svg, "<g ") != strings.Count(svg, "</g>") {
+		t.Error("groups not closed")
+	}
+}

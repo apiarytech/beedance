@@ -16,6 +16,7 @@ import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/sfc"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,11 @@ type Variable struct {
 // variables; the program's body is the cyclic bytecode, as in
 // CompileProgram. Other programs in the file are left out.
 func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*CompiledProgram, error) {
+	// Charts (SFC) run as the ST they lower to, as LD and FBD bodies do.
+	program, err := sfc.Program(program)
+	if err != nil {
+		return nil, err
+	}
 	c.buildPouInfo(program)
 	c.rootProgram = program
 	var target *ast.ProgramDeclaration
@@ -75,6 +81,7 @@ func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*Compi
 	if target == nil {
 		return nil, fmt.Errorf("no PROGRAM %s in the source", name)
 	}
+	pous = reachable(target, pous) // only what the program uses, of a library
 	c.predefineGlobals(pous)
 	c.predefineFunctionBlocks(pous)
 	for _, s := range c.orderByInheritance(pous) {
@@ -418,6 +425,9 @@ func (c *Compiler) currentLoop() *loopContext {
 // the execution model of a PLC, where initialization runs once and the main logic
 // runs repeatedly in a scan cycle. It is renamed to match the call in main.go.
 func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
+	if err := checkDuplicates(node.Name.Value, node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars, externalVars(node.VarExternal), tempVars(node.VarTemp)); err != nil {
+		return nil, err
+	}
 	// --- Initialization Phase ---
 	// Compile all variable declaration blocks (VAR, VAR_GLOBAL, etc.).
 	// This populates the symbol table and generates bytecode to set initial values.
@@ -700,6 +710,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			}
 		}
 		mainBody := &ast.BlockStatement{Statements: mainLogicStmts}
+		if err := checkDuplicates(node.Name.Value, node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars, externalVars(node.VarExternal), tempVars(node.VarTemp)); err != nil {
+			return err
+		}
 
 		// --- FINAL Method Override Check ---
 		if parentFB != nil {
@@ -972,6 +985,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		// A VAR_IN_OUT is passed by copy-in/copy-out: it is a parameter after
 		// the VAR_INPUTs, and is returned with the outputs so the caller can
 		// copy its final value back into the argument.
+		if err := checkDuplicates(node.Name.Value, node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars); err != nil {
+			return err
+		}
 		// First, define the function name in the current scope so it can be captured in a closure.
 		symbol := c.definePredefined(node, node.Name.Value, false)
 
@@ -1128,6 +1144,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			if err := c.checkReferenceValue(target.Value, c.declaredTypeOf(target), node.Value); err != nil {
 				return err
 			}
+			// An integer literal given to a bit string (ms := 0, ms a DWORD)
+			// is that bit string, so the variable keeps its type.
+			node.Value = c.bitStringLiteral(c.assignedTypeName(target), node.Value)
 			// An assignment to the current function's name sets its result. It
 			// does not return: the rest of the body still runs, and the function
 			// returns the result when it ends or at RETURN.
@@ -1166,7 +1185,7 @@ func (c *Compiler) compileNode(node ast.Node) error {
 						// outputs are also instance fields rather than locals.
 						thisSymbol, _ := c.symbolTable.Resolve("THIS")
 						c.loadSymbol(thisSymbol)
-						c.emitConstant(c.addConstant(&object.String{Value: target.Value}))
+						c.emitConstant(c.addConstant(&object.String{Value: varDecl.Name.Value}))
 						if err := c.Compile(node.Value); err != nil {
 							return err
 						}
@@ -1864,8 +1883,9 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			// Any variable of the FB that is not a local symbol here (e.g. an
 			// FB input read inside a method) is a field of the instance.
 			if varDecl, _ := c.findVarDeclOnFBChain(c.currentFB, node.Value); varDecl != nil {
+				// The field goes by its declared name: `rst` reads `RST`.
 				thisExpr := &ast.ThisExpression{Token: node.Token}
-				memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: node}
+				memberAccess := &ast.MemberAccessExpression{Struct: thisExpr, Member: &ast.Identifier{Token: node.Token, Value: varDecl.Name.Value}}
 				return c.Compile(memberAccess)
 			}
 
@@ -2119,6 +2139,10 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		// REF(x) and ADR(x); see references.go.
 		if c.isReferenceCall(node) {
 			return c.compileReference(node)
+		}
+		// X_TO_Y(v) is $CONVERT(v, 'X', 'Y'); see conversions.go.
+		if from, to, ok := c.conversionCall(node); ok {
+			return c.compileConversion(node, from, to)
 		}
 		// Calling a function block instance runs its body; see compileFunctionBlockCall.
 		if fbDef := c.calleeFunctionBlock(node.Function); fbDef != nil {
@@ -3847,6 +3871,9 @@ type EmittedInstruction struct {
 // compileMethod compiles a method implementation into a CompiledFunction.
 // It's a helper for compiling FUNCTION_BLOCKs.
 func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.CompiledFunction, error) {
+	if err := checkDuplicates(method.Name.Value, method.VarInputs, method.VarOutputs, method.VarInOuts, method.Vars); err != nil {
+		return nil, err
+	}
 	c.enterScope()
 	// A method is a function within the context of a function block.
 	// We need to push a function context so that return value assignments

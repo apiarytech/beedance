@@ -481,6 +481,13 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 	e := n.e
 	w := n.w
 	cx := x + w/2
+	// A contact, coil or variable names its variable, so a page can show
+	// it live (drone L-4: what is on drawn green): data-var, and data-neg
+	// for a negated one.
+	if v, kind := liveVar(e); v != "" {
+		p.f(`<g class="el %s" data-var="%s" data-neg="%t">`, kind, esc(v), e.Negated || e.NegatedIn || e.NegatedOut)
+		defer p.f(`</g>`)
+	}
 	switch e.Kind() {
 	case "contact":
 		p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, my, cx-6, my)
@@ -628,4 +635,33 @@ func forDrawing(elems []*Elem) []*Elem {
 		}
 	}
 	return out
+}
+
+// liveVar returns the variable a contact, coil or variable element shows,
+// and its kind; "" for an expression that is not one variable.
+func liveVar(e *Elem) (string, string) {
+	switch e.Kind() {
+	case "contact", "coil":
+		return e.Variable, e.Kind()
+	case "block", "connector", "continuation":
+		return "", ""
+	}
+	if isName(e.Expression) {
+		return e.Expression, "var"
+	}
+	return "", ""
+}
+
+// isName says whether s is a variable, possibly dotted (Tank.Level).
+func isName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		letter := r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+		if !(letter || (i > 0 && (r == '.' || (r >= '0' && r <= '9')))) {
+			return false
+		}
+	}
+	return true
 }

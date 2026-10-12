@@ -11,8 +11,10 @@ its exit status suits CI.
 | Evaluator | `eval` | the tree-walking interpreter |
 | Compiler + VM | `vm` | the bytecode compiler and virtual machine |
 | Transpiler | `go` | the source transpiled to Go on royaljelly, built with the Go toolchain |
+| Transpiler to WebAssembly | `wasm` | the same Go built for WASI and run by a WASI runtime (`-wasm-runtime`, or wasmtime, wazero or Node.js 24+ in `PATH`) |
 
-The default is `-engines eval,vm`. `-engines all` runs all three.
+The default is `-engines eval,vm`. `-engines all` runs the first three;
+`wasm`, which needs a runtime, is named on its own: `-engines eval,vm,wasm`.
 
 ## The files
 
@@ -211,7 +213,7 @@ FAILED: 4 of 4 tests
   or a program that is not a test by the convention.
 - The evaluator and the VM stop a runaway loop with a budget of 10 million
   statements and loop iterations per scan. Native Go has no such count:
-  on `go` each test runs in its own process, stopped after `-go-timeout`
+  on `go` and `wasm` each test runs in its own process, stopped after `-go-timeout`
   (one minute by default).
 - `-` in ENGINES: an engine did not finish, so not every engine could be
   compared.
@@ -360,7 +362,7 @@ $ go test -v ./examples/unit_tests
 | Flag | Default | |
 |---|---|---|
 | `-test` | | run the `PROGRAM TEST_...` tests of the files |
-| `-engines` | `eval,vm` | `eval`, `vm`, `go`, comma-separated, or `all`; compared with the first |
+| `-engines` | `eval,vm` | `eval`, `vm`, `go`, `wasm`, comma-separated, or `all` (`eval,vm,go`); compared with the first |
 | `-interval` | `10ms` | simulated time between scans |
 | `-max-scans` | `50000` | scans a test with `done` may take |
 | `-run` | | only tests whose name contains this text |
@@ -368,8 +370,9 @@ $ go test -v ./examples/unit_tests
 | `-members` | `outputs` | members of function block instances watched: `outputs` or `all` |
 | `-depth` | `2` | levels of members watched below a variable |
 | `-csv` | | write each test's scans per engine as CSV into this directory |
-| `-go-timeout` | `1m` | time one test may take on the `go` engine |
-| `-go-replace` | | `MODULE=DIR,...`: build the `go` engine with local modules |
+| `-go-timeout` | `1m` | time one test may take on the `go` and `wasm` engines |
+| `-go-replace` | | `MODULE=DIR,...`: build the `go` and `wasm` engines with local modules |
+| `-wasm-runtime` | | the command that runs a WASI module on `wasm`, e.g. `"wazero run"`; default: wasmtime, wazero or Node.js 24+ in `PATH` |
 
 See also [doc/cli.md](../../doc/cli.md#unit-tests) and, for the Go API,
 [doc/embedding.md](../../doc/embedding.md#unit-tests-software-in-the-loop).

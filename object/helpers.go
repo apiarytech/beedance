@@ -223,6 +223,13 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			fromType = string(input.Type())
 		}
 	}
+	// An integer given where a bit string is expected (DWORD_TO_ULINT(ms)
+	// after `ms := 0`) is that bit string, as in CODESYS: OSCAT relies on it.
+	if width, ok := GetBitStringWidth(fromType); ok && IsBitStringType(fromType) {
+		if i, _, isInt := GetIntegerObjectValue(input); isInt && i >= 0 && (width == 64 || uint64(i) < 1<<uint(width)) {
+			input = &BitString{Value: uint64(i), Width: width}
+		}
+	}
 	actualType := string(input.Type())
 	isValidFromType := false
 	if (IsIntegerType(fromType) && IsIntegerType(actualType)) ||
@@ -302,6 +309,9 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		switch val := input.(type) {
 		case *Real:
 			return &Real{Value: val.Value}
+		case *BitString:
+			// DWORD_TO_REAL(16#10) is 16.0, as in CODESYS (OSCAT's TC_S).
+			return &Real{Value: float64(val.Value)}
 		case *String:
 			f, err := strconv.ParseFloat(val.Value, 64)
 			if err != nil {

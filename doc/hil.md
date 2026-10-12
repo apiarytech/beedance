@@ -50,11 +50,13 @@ otherwise). It implies `-realtime`: scans run `-interval` apart on the
 wall clock, and timers read it. `-realtime` on its own runs the tests on
 the wall clock without I/O.
 
-Every engine runs against the rig. On the go engine, the I/O points are the
-located variables the test program declares, exchanged through the
-transpiled program's process image. `-go-timeout` bounds each scan, not the
-whole test. A rig that does not answer a request within 10 seconds
-(`Rig.Timeout`) fails the run instead of hanging it.
+Every engine runs against the rig. On the go and wasm engines, the I/O
+points are the located variables the test program declares, exchanged
+through the transpiled program's process image, which the process (or, on
+wasm, the WASI module) exchanges with beedance over its stdin and stdout.
+`-go-timeout` bounds each scan, not the whole test. A rig that does not
+answer a request within 10 seconds (`Rig.Timeout`) fails the run instead of
+hanging it.
 
 ## The Pico rig
 

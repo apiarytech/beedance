@@ -16,7 +16,11 @@
   form ([PLCopen XML](plcopen.md)), and package `diagram` draws a chart as
   SVG (`diagram.ChartOf`, `diagram.SFCSVG`): loops back are drawn as
   jumps, selections with single bars, simultaneous branches with double
-  ones.
+  ones. The bytecode compiler runs a chart as the Structured Text package
+  `sfc` lowers it to (a flag per step, each action's control with its
+  timers), as LD and FBD bodies are lowered; the evaluator runs the chart
+  itself, and the two agree scan by scan (package `sfc`'s tests, software in
+  the loop).
 - **Ladder Diagram (LD)** and **Function Block Diagram (FBD)**, in
   beedance's text form below or as graphical PLCopen XML
   ([PLCopen XML](plcopen.md)). Both are lowered to ST statements by

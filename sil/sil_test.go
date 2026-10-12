@@ -192,6 +192,9 @@ func TestParseEngines(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != VM || got[1] != Evaluator {
 		t.Errorf("ParseEngines = %v, %v", got, err)
 	}
+	if got, err := ParseEngines("eval,WebAssembly,wasm"); err != nil || len(got) != 2 || got[1] != Wasm {
+		t.Errorf("ParseEngines(eval,WebAssembly,wasm) = %v, %v", got, err)
+	}
 	if _, err := ParseEngines("jit"); err == nil {
 		t.Error("ParseEngines(jit): no error")
 	}

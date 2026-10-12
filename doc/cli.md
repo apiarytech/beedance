@@ -27,7 +27,7 @@ A worked example, with every flag and its output, is in
 [examples/unit_tests](../examples/unit_tests/README.md).
 
 ```bash
-beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] [-io tcp://HOST:PORT] [-realtime] FILE.st...
+beedance -test [-interval 10ms] [-max-scans 50000] [-engines eval,vm,go,wasm|all] [-tol 1e-3] [-run NAME] [-members outputs|all] [-depth 2] [-csv DIR] [-go-timeout 1m] [-go-replace MOD=DIR] [-wasm-runtime CMD] [-io tcp://HOST:PORT] [-realtime] FILE.st...
 ```
 
 The files are joined into one source, so tests can sit in their own files
@@ -72,23 +72,31 @@ time). Every engine is compared with the first one listed.
 `-go-replace github.com/apiarytech/royaljelly=../royaljelly` builds with a
 local checkout instead.
 
+`-engines eval,vm,wasm` runs the transpiled tests as WebAssembly: the same
+Go, built for WASI (`GOOS=wasip1`) and run by a WASI runtime, as the
+program would run as a WebAssembly target. The runtime is `-wasm-runtime`
+(for example `"wasmtime run"`), or else the first of wasmtime, wazero and
+Node.js in `PATH`. Node.js must be 24 or later: 20 and 22 at times crash
+running a Go WASI module. `all` leaves `wasm` out, as it needs a runtime.
+
 Each scan has a budget of 10 million statements and loop iterations, so a
 runaway loop fails its test with "execution budget exceeded". Native Go
-has no such count: on the go engine each test runs in its own process,
-stopped after `-go-timeout`.
+has no such count: on the go and wasm engines each test runs in its own
+process, stopped after `-go-timeout`.
 
 | Flag | Default | |
 |---|---|---|
 | `-interval` | `10ms` | simulated time between scans |
 | `-max-scans` | `50000` | scans a test with `done` may take |
-| `-engines` | `eval,vm` | engines to run on: `eval`, `vm`, `go` (the transpiler), or `all` |
+| `-engines` | `eval,vm` | engines to run on: `eval`, `vm`, `go` (the transpiler), `wasm` (the transpiler to WebAssembly), or `all` (`eval,vm,go`) |
 | `-tol` | `1e-3` | relative tolerance for REAL values between engines |
 | `-run` | | run only tests whose name contains this text (any case) |
 | `-members` | `outputs` | members of function block instances to watch: `outputs`, or `all` (inputs and internal variables too) |
 | `-depth` | `2` | levels of instance and structure members watched below a variable |
 | `-csv` | | write `TEST_NAME.ENGINE.csv` per test and engine: the watched values after each scan |
-| `-go-timeout` | `1m` | time one test may take on the go engine |
-| `-go-replace` | | `MODULE=DIR,...`: build the go engine with local modules |
+| `-go-timeout` | `1m` | time one test may take on the go and wasm engines |
+| `-go-replace` | | `MODULE=DIR,...`: build the go and wasm engines with local modules |
+| `-wasm-runtime` | wasmtime, wazero or Node.js 24+ in `PATH` | the command that runs a WASI module on the wasm engine, e.g. `"wazero run"` |
 
 ```text
 beedance: 2 tests

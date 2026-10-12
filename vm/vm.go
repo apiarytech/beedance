@@ -77,11 +77,29 @@ var ErrBudget = errors.New("vm: execution budget exceeded")
 // sets one, so a scan that loops for ever fails instead of stalling it.
 func (vm *VM) SetBudget(n int64) { vm.budget = n }
 
-// Option configures a VM made by New or NewWithBuiltins.
+// Option configures a VM made by New, NewWithBuiltins or
+// NewWithGlobalsStore.
 type Option func(*options)
 
 type options struct {
 	globalsSize int
+	stackSize   int
+	maxFrames   int
+}
+
+// WithStackSize sets the VM's operand stack to n slots instead of
+// StackSize; a run that needs more fails with "stack overflow". On a
+// microcontroller a few hundred slots do for most programs, and save most
+// of the 8 or 16 KB the default takes. n must be positive.
+func WithStackSize(n int) Option {
+	return func(o *options) { o.stackSize = n }
+}
+
+// WithMaxFrames sets the VM's call depth to n frames instead of MaxFrames;
+// a run that calls deeper fails with "call stack overflow". n must be
+// positive.
+func WithMaxFrames(n int) Option {
+	return func(o *options) { o.maxFrames = n }
 }
 
 // WithGlobalsSize sets the number of global variable slots to n instead of
@@ -137,18 +155,19 @@ func globalsNeeded(ins code.Instructions) int {
 	return n
 }
 
-// globalsFor returns the globals slice opts ask for.
-func globalsFor(opts []Option) []object.Object {
-	o := options{globalsSize: GlobalsSize}
+// optionsFor applies opts to the defaults.
+func optionsFor(opts []Option) options {
+	o := options{globalsSize: GlobalsSize, stackSize: StackSize, maxFrames: MaxFrames}
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return make([]object.Object, o.globalsSize)
+	return o
 }
 
 // New creates a new VM instance with the given bytecode.
 func New(bytecode *compiler.Bytecode, opts ...Option) *VM {
-	return newVM(bytecode, defaultBuiltins(), globalsFor(opts))
+	o := optionsFor(opts)
+	return newVM(bytecode, defaultBuiltins(), make([]object.Object, o.globalsSize), o)
 }
 
 // defaultBuiltins returns a VM's own copy of the registered built-ins, indexed
@@ -170,26 +189,28 @@ func defaultBuiltins() []*object.Builtin {
 // NewWithBuiltins creates a new VM with a specific set of built-in functions.
 // This is useful for testing to avoid dependency on global state.
 func NewWithBuiltins(bytecode *compiler.Bytecode, builtins []*object.Builtin, opts ...Option) *VM {
-	return newVM(bytecode, builtins, globalsFor(opts))
+	o := optionsFor(opts)
+	return newVM(bytecode, builtins, make([]object.Object, o.globalsSize), o)
 }
 
 // NewWithGlobalsStore creates a new VM with a pre-populated global variable
-// store, which the VM uses (and changes) in place.
-func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object) *VM {
-	return newVM(bytecode, defaultBuiltins(), s)
+// store, which the VM uses (and changes) in place. WithGlobalsSize does not
+// apply: s is the store.
+func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object, opts ...Option) *VM {
+	return newVM(bytecode, defaultBuiltins(), s, optionsFor(opts))
 }
 
-func newVM(bytecode *compiler.Bytecode, builtins []*object.Builtin, globals []object.Object) *VM {
+func newVM(bytecode *compiler.Bytecode, builtins []*object.Builtin, globals []object.Object, o options) *VM {
 	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
 	mainClosure := &object.Closure{Fn: mainFn}
 	mainFrame := NewFrame(mainClosure, 0)
 
-	frames := make([]*Frame, MaxFrames)
+	frames := make([]*Frame, max(o.maxFrames, 1))
 	frames[0] = mainFrame
 
 	return &VM{
 		constants:   bytecode.Constants,
-		stack:       make([]object.Object, StackSize),
+		stack:       make([]object.Object, max(o.stackSize, 1)),
 		sp:          0,
 		globals:     globals,
 		frames:      frames,
@@ -439,7 +460,12 @@ func (vm *VM) Run() (runErr error) {
 			err = vm.executeCall(int(numArgs))
 
 		case code.OpReturnValue:
-			// OpReturnValue returns a value from a function.
+			// OpReturnValue returns a value from a function. In the main
+			// frame (a RETURN in a program's body) it ends the run, as the
+			// end of the body does, with the value on the stack.
+			if vm.framesIndex == 1 {
+				return nil
+			}
 			returnValue := vm.pop()
 
 			frame := vm.popFrame()
@@ -448,7 +474,12 @@ func (vm *VM) Run() (runErr error) {
 			err = vm.push(returnValue)
 
 		case code.OpReturn:
-			// OpReturn returns Null from a function.
+			// OpReturn returns Null from a function. In the main frame (IL
+			// RET in a program's body) it ends the run, as the end of the
+			// body does.
+			if vm.framesIndex == 1 {
+				return vm.push(Null)
+			}
 			frame := vm.popFrame()
 			vm.sp = frame.basePointer - 1
 
@@ -599,7 +630,7 @@ func (vm *VM) Run() (runErr error) {
 
 // push adds an object to the top of the stack.
 func (vm *VM) push(o object.Object) error {
-	if vm.sp >= StackSize {
+	if vm.sp >= len(vm.stack) {
 		return fmt.Errorf("stack overflow")
 	}
 
@@ -1114,6 +1145,11 @@ func (vm *VM) executeHashIndex(hash, index object.Object) error {
 
 	pair, ok := hashObject.Pairs[key.HashKey()]
 	if !ok {
+		if name, isString := index.(*object.String); isString {
+			if k, found := foldKey(hashObject, name); found {
+				return vm.push(hashObject.Pairs[k].Value)
+			}
+		}
 		// A name missing from an FB instance may be a method or property
 		// accessor, which live on the instance's class hierarchy.
 		if name, isString := index.(*object.String); isString {
@@ -1195,6 +1231,14 @@ func (vm *VM) executeHashSetIndex(hash, index, val object.Object) error {
 	if !ok {
 		return fmt.Errorf("unusable as hash key: %s", index.Type())
 	}
+	if _, exact := hashObject.Pairs[key.HashKey()]; !exact {
+		if name, isString := index.(*object.String); isString {
+			if k, found := foldKey(hashObject, name); found {
+				hashObject.Pairs[k] = object.HashPair{Key: hashObject.Pairs[k].Key, Value: val}
+				return nil
+			}
+		}
+	}
 	hashObject.Pairs[key.HashKey()] = object.HashPair{Key: index, Value: val}
 	return nil
 }
@@ -1230,7 +1274,7 @@ func (vm *VM) executeCall(numArgs int) error {
 		// Insert the receiver as the first argument (THIS): shift the
 		// arguments up one slot and replace the callee with the closure.
 		calleePos := vm.sp - 1 - numArgs
-		if vm.sp >= StackSize {
+		if vm.sp >= len(vm.stack) {
 			return fmt.Errorf("stack overflow")
 		}
 		copy(vm.stack[calleePos+2:vm.sp+1], vm.stack[calleePos+1:vm.sp])
@@ -1261,6 +1305,12 @@ func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
 	// This effectively removes the closure object itself, leaving only the arguments.
 	vm.sp = basePointer
 
+	if vm.framesIndex >= len(vm.frames) {
+		return fmt.Errorf("call stack overflow")
+	}
+	if basePointer+cl.Fn.NumLocals > len(vm.stack) {
+		return fmt.Errorf("stack overflow")
+	}
 	frame := NewFrame(cl, basePointer)
 	vm.pushFrame(frame)
 
@@ -1517,4 +1567,16 @@ func (vm *VM) bitTypeName(operand uint16) string {
 		return name.Value
 	}
 	return ""
+}
+
+// foldKey finds the key of a hash's string-keyed pair whose name matches
+// name in any case: IEC 61131-3 names are not case-sensitive, so `b.q`
+// reaches an instance's `Q`. It is used only when the exact key misses.
+func foldKey(hash *object.Hash, name *object.String) (object.HashKey, bool) {
+	for k, pair := range hash.Pairs {
+		if s, ok := pair.Key.(*object.String); ok && strings.EqualFold(s.Value, name.Value) {
+			return k, true
+		}
+	}
+	return object.HashKey{}, false
 }

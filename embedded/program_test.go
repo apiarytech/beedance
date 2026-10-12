@@ -188,3 +188,19 @@ func posInf() float64 {
 	f, _ := strconv.ParseFloat("+Inf", 64)
 	return f
 }
+
+// StackSize and MaxFrames reach the generated program's VMs, which run the
+// program in them.
+func TestGenerateEmbeddedProgramStackSize(t *testing.T) {
+	cp := compileUnit(t, deviceProgram, "Main")
+	var out bytes.Buffer
+	if err := GenerateEmbeddedProgram(&out, cp, ProgramOptions{Interval: time.Millisecond, Scans: 5, StackSize: 128, MaxFrames: 16}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "vm.WithStackSize(128), vm.WithMaxFrames(16)") {
+		t.Errorf("generated VM options missing")
+	}
+	if got := goRun(t, out.Bytes()); !strings.Contains(got, "program done") {
+		t.Fatalf("output %q", got)
+	}
+}

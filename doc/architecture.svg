@@ -26,7 +26,7 @@
   <rect width="1300" height="800" fill="#ffffff"/>
 
   <text x="20" y="32" style="font-size:20px;font-weight:700;fill:#1f1f1f">beedance · architecture</text>
-  <text x="20" y="52" style="font-size:12.5px;fill:#555">IEC 61131-3 in Go: one parser for ST, IL, SFC, LD and FBD, three backends that run it alike, and unit tests that run on all three, in the loop with a plant.</text>
+  <text x="20" y="52" style="font-size:12.5px;fill:#555">IEC 61131-3 in Go: one parser for ST, IL, SFC, LD and FBD, three backends that run it alike, and unit tests that run on all three, in the loop with a plant; natively or as WebAssembly.</text>
 
   <!-- Module -->
   <rect x="230" y="64" width="860" height="656" rx="10" fill="#fbfbfb" stroke="#333" stroke-width="1.6"/>
@@ -116,7 +116,7 @@
   <text x="250" y="532" class="gt">testing in the loop (PROGRAM TEST_...)</text>
   <rect x="250" y="538" width="240" height="56" rx="5" class="bt"/>
   <text x="370" y="559" class="t">sil</text>
-  <text x="370" y="577" class="s">eval · vm · go, compared scan by scan</text>
+  <text x="370" y="577" class="s">eval · vm · go · wasm, compared per scan</text>
 
   <rect x="510" y="538" width="150" height="56" rx="5" class="bi"/>
   <text x="585" y="559" class="t">watch</text>
@@ -146,6 +146,10 @@
   <rect x="430" y="652" width="380" height="56" rx="5" class="bi"/>
   <text x="620" y="673" class="t">beedance command</text>
   <text x="620" y="691" class="s">-iec · -to-xml · -from-xml · -go · -test -engines -io · -trace</text>
+
+  <rect x="830" y="652" width="240" height="56" rx="5" class="bi"/>
+  <text x="950" y="673" class="t">wasm · cmd/beedance-wasm</text>
+  <text x="950" y="691" class="s">the toolchain as WebAssembly: js · wasip1</text>
 
   <!-- External, left -->
   <rect x="20" y="104" width="190" height="66" rx="6" class="ex"/>
@@ -193,6 +197,12 @@
   <text x="1200" y="586" class="s">in any language, a model in Go</text>
   <path d="M1070,566 H1108" class="lt" marker-start="url(#a)" marker-end="url(#a)"/>
 
+  <rect x="1110" y="644" width="180" height="72" rx="6" class="ex"/>
+  <text x="1200" y="666" class="t">Browser · WASI runtime</text>
+  <text x="1200" y="683" class="s">the playground page</text>
+  <text x="1200" y="698" class="s">SIL tests in Docker, for CI</text>
+  <path d="M1070,680 H1108" class="ln" marker-end="url(#a)"/>
+
   <!-- Legend -->
   <g transform="translate(230,742)">
     <rect x="0" y="0" width="16" height="12" class="bh"/>
@@ -207,6 +217,6 @@
     <text x="642" y="11" style="font-size:11.5px;fill:#333">outside</text>
     <path d="M706,6 H746" class="ln" marker-end="url(#a)"/>
     <text x="754" y="11" style="font-size:11.5px;fill:#333">source, tree, code</text>
-    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator. Details: language.md, backends.md, plcopen.md, embedding.md, embedded.md, hil.md in this folder.</text>
+    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator. Details: language.md, backends.md, plcopen.md, embedding.md, embedded.md, hil.md in this folder; wasm/README.md.</text>
   </g>
 </svg>

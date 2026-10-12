@@ -451,11 +451,15 @@ func (l *sfcLayout) draw() string {
 		case sfcStepNode:
 			s := l.c.Steps[nd.index]
 			w := l.stepW(nd.index)
+			// The step names its flag, as package sfc lowers it (_sfc_<step>_X),
+			// so a page can show the active steps live (drone L-4).
+			p.f(`<g class="el var" data-var="_sfc_%s_X" data-neg="false">`, esc(s.Name))
 			p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%d"/>`, cx-w/2, y, w, sfcStepH)
 			if s.Initial {
 				p.f(`<rect class="w" x="%.1f" y="%.1f" width="%.1f" height="%d"/>`, cx-w/2+3, y+3, w-6, sfcStepH-6)
 			}
 			p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, y+sfcStepH/2+4, esc(s.Name))
+			p.f(`</g>`)
 			if len(s.Actions) == 0 {
 				continue
 			}

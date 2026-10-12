@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>beedance playground</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --panel: #ffffff; --ink: #1d1b16; --muted: #6b665c; --line: #e3dfd5;
+    --accent: #b7791f; --accent-ink: #ffffff; --pass: #2f7d4f; --fail: #b3261e; --code: #f4f1ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16150f; --panel: #1f1d17; --ink: #ece8de; --muted: #a39d90; --line: #36332a;
+      --accent: #e0a43a; --accent-ink: #16150f; --pass: #6cc28f; --fail: #f2867e; --code: #26241d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 17px; }
+  header span { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  textarea { width: 100%; min-height: 460px; resize: vertical; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--code); color: var(--ink); padding: 10px; font: 13px/1.5 ui-monospace, Consolas, monospace; tab-size: 4; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 0; }
+  button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px;
+    padding: 6px 12px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  select, input[type=text], input[type=number] { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  label { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: var(--code); border-radius: 6px;
+    padding: 10px; font: 12.5px/1.5 ui-monospace, Consolas, monospace; max-height: 360px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.v { font-family: ui-monospace, Consolas, monospace; }
+  td input[type=text] { width: 100%; max-width: 160px; }
+  .pass { color: var(--pass); font-weight: 600; }
+  .fail { color: var(--fail); font-weight: 600; }
+  .muted { color: var(--muted); }
+  #status { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .stack { display: grid; gap: 16px; align-content: start; min-width: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>beedance playground</h1>
+  <span>IEC 61131-3 Structured Text compiled and run in your browser (WebAssembly)</span>
+  <span id="status">loading…</span>
+</header>
+<main>
+  <section>
+    <h2>Source</h2>
+    <textarea id="source" spellcheck="false"></textarea>
+    <div class="bar">
+      <button id="check">Check</button>
+      <button id="test" class="primary">Run tests</button>
+      <button id="transpile">Transpile to Go</button>
+      <label>engines
+        <select id="engines">
+          <option value="eval,vm">eval + vm</option>
+          <option value="eval">eval</option>
+          <option value="vm">vm</option>
+        </select>
+      </label>
+      <label>interval ms <input id="interval" type="number" value="10" min="1" style="width:80px"></label>
+    </div>
+  </section>
+  <div class="stack">
+    <section>
+      <h2>Run on the VM</h2>
+      <div class="bar" style="margin:0 0 10px">
+        <select id="program"></select>
+        <button id="load">Load</button>
+        <button id="scan1" disabled>Scan</button>
+        <button id="scan10" disabled>×10</button>
+        <button id="run" disabled>Run</button>
+        <span id="clock" class="muted"></span>
+      </div>
+      <table>
+        <thead><tr><th>Variable</th><th>Type</th><th>Value</th><th>Set</th></tr></thead>
+        <tbody id="vars"><tr><td colspan="4" class="muted">Load a PROGRAM to run it scan by scan.</td></tr></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Output</h2>
+      <div id="results"></div>
+      <pre id="output" class="muted">Ready when the module has loaded.</pre>
+    </section>
+  </div>
+</main>
+<script src="wasm_exec.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
