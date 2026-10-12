@@ -126,3 +126,21 @@ func TestSVGNamesLiveVariables(t *testing.T) {
 		t.Error("groups not closed")
 	}
 }
+
+// A block's pins show their values at run time (drone L-38): an instance's
+// inputs and outputs, and a variable written inside a block.
+func TestSVGValueSlots(t *testing.T) {
+	body, err := ParseText("LD", "\n  RUNG high_delay\n    GT(WellLevel, 85.0) t1:TON(PT := T#5S) ( HighAlarm )\n", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svg := SVG(body.Elems)
+	for _, want := range []string{`data-vals="=WellLevel"`, `data-vals="=t1.IN"`, `data-vals="=t1.Q"`} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("no %s in %s", want, svg)
+		}
+	}
+	if strings.Contains(svg, `data-vals="=t1.EN`) || strings.Contains(svg, `data-vals="=85.0"`) {
+		t.Error("a slot for power flow or a literal")
+	}
+}

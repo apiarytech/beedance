@@ -12,10 +12,13 @@ package sfc_test
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/diagram"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/parser"
 	"github.com/apiarytech/beedance/sfc"
@@ -153,5 +156,50 @@ func TestProgramLeavesTheSourceAlone(t *testing.T) {
 	}
 	if _, ok := low.Statements[0].(*ast.ProgramDeclaration).Body.(*ast.BlockStatement); !ok {
 		t.Error("the chart was not lowered")
+	}
+}
+
+// The drawing numbers each action as the lowering does (diagram's
+// Chart.ActionIndex: _sfc_a<n>_Q), so a page shows the right action's state
+// (drone L-35): by first mention, an ACTION or a step's.
+func TestDrawingNumbersActionsAsLowered(t *testing.T) {
+	src := `PROGRAM P
+VAR Fill, Pump, Alarm, Rest : BOOL; c : INT; END_VAR
+ACTION Count: c := c + 1; END_ACTION
+INITIAL_STEP A: Fill(N); Count(P); END_STEP
+STEP B: Pump(N); Alarm(D, T#1s); END_STEP
+STEP C: Rest(S); Fill(R); END_STEP
+TRANSITION FROM A TO B := c > 2; END_TRANSITION
+TRANSITION FROM B TO C := TRUE; END_TRANSITION
+TRANSITION FROM C TO A := TRUE; END_TRANSITION
+END_PROGRAM`
+	p := parser.New(lexer.New(src))
+	prog := p.ParseProgram()
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	var chart *ast.SFCProgram
+	for _, st := range prog.Statements {
+		if d, ok := st.(*ast.ProgramDeclaration); ok {
+			chart, _ = d.Body.(*ast.SFCProgram)
+		}
+	}
+	low, err := sfc.Program(prog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lowered := map[string]int{}
+	for _, m := range regexp.MustCompile(`(?i)(Fill|Pump|Alarm|Rest) := _sfc_a(\d+)_Q`).FindAllStringSubmatch(low.String(), -1) {
+		n, _ := strconv.Atoi(m[2])
+		lowered[strings.ToUpper(m[1])] = n
+	}
+	if len(lowered) != 4 {
+		t.Fatalf("lowered outputs %v", lowered)
+	}
+	drawn := diagram.ChartOf(chart).ActionIndex
+	for name, n := range lowered {
+		if drawn[name] != n {
+			t.Errorf("%s: drawn as a%d, lowered as a%d (drawn %v)", name, drawn[name], n, drawn)
+		}
 	}
 }

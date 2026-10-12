@@ -29,6 +29,8 @@ package diagram
 //     single lines, a simultaneous branch's double ones.
 
 import (
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -344,12 +346,18 @@ func (l *sfcLayout) geometry() sfcGeo {
 			if len(l.c.Steps[nd.index].Actions) > 0 {
 				qw, nw := l.actionCols(nd.index)
 				r += 16 + qw + nw
+				r += 72 // room for the values beside the actions (L-34)
 			}
 			right[nd.col] = max(right[nd.col], r)
 			g.rowH[nd.rank] = max(g.rowH[nd.rank], max(sfcStepH, float64(len(l.c.Steps[nd.index].Actions))*sfcActH))
 		case sfcTransNode:
 			t := l.c.Transitions[nd.index]
 			r := sfcBar + 8 + textW(l.condText(nd.index))
+			vals := 0.0 // the values line under the condition: "name = value" each
+			for _, n := range condVars(t.Condition) {
+				vals += float64(len(n)+12) * charW * 10 / 12
+			}
+			r = max(r, sfcBar+8+vals)
 			if t.Name != "" {
 				r += textW(t.Name) + 8
 			}
@@ -383,7 +391,7 @@ func (l *sfcLayout) draw() string {
 	g := l.geometry()
 	p.f(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" font-family="ui-monospace, Consolas, monospace" font-size="12">`, g.width, g.height, g.width, g.height)
 	p.f(`<style>.w{stroke:var(--vscode-editor-foreground,#333);fill:none;stroke-width:1.2}.t{fill:var(--vscode-editor-foreground,#333)}` +
-		`.d{fill:var(--vscode-descriptionForeground,#777)}.j{fill:var(--vscode-editor-foreground,#333)}.b{fill:var(--vscode-editor-background,#fff);stroke:var(--vscode-editor-foreground,#333);stroke-width:1.2}</style>`)
+		`.d{fill:var(--vscode-descriptionForeground,#777)}.lv{fill:var(--vscode-charts-blue,#0b5c73);font-weight:600}.j{fill:var(--vscode-editor-foreground,#333)}.b{fill:var(--vscode-editor-background,#fff);stroke:var(--vscode-editor-foreground,#333);stroke-width:1.2}</style>`)
 
 	x := func(n int) float64 { return l.xOf(g, n) }
 	top := func(n int) float64 { return l.top(g, n) }
@@ -468,6 +476,12 @@ func (l *sfcLayout) draw() string {
 			p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, cx+w/2, y+sfcActH/2, ax, y+sfcActH/2)
 			for k, a := range s.Actions {
 				ay := y + float64(k)*sfcActH
+				// The action's state, live: its row green while it is active (its
+				// _sfc_a<n>_Q, drone L-35).
+				n, known := l.c.ActionIndex[strings.ToUpper(a.Action)]
+				if known {
+					p.f(`<g class="el var" data-var="_sfc_a%d_Q" data-neg="false">`, n)
+				}
 				p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%d"/><rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%d"/>`,
 					ax, ay, qw, sfcActH, ax+qw, ay, nw, sfcActH)
 				q := a.Qualifier
@@ -480,6 +494,21 @@ func (l *sfcLayout) draw() string {
 					p.f(`<text class="t" x="%.1f" y="%.1f">%s</text>`, ax+6, ay+14, esc(q))
 				}
 				p.f(`<text class="t" x="%.1f" y="%.1f">%s</text>`, ax+qw+8, ay+14, esc(a.Action))
+				if known {
+					p.f(`</g>`)
+				}
+				// Beside it, live: a timed qualifier's time run (D, L, SD, DS, SL),
+				// and the action's variable's value if it is one (a BOOL set by N...).
+				var vals []string
+				if known && timedQualifier(q) {
+					vals = append(vals, fmt.Sprintf("elapsed=_sfc_a%d_t.ET", n))
+				}
+				if isName(a.Action) {
+					vals = append(vals, a.Action)
+				}
+				if len(vals) > 0 {
+					p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" data-vals="%s"></text>`, ax+qw+nw+6, ay+14, esc(strings.Join(vals, " ")))
+				}
 			}
 		case sfcTransNode:
 			t := l.c.Transitions[nd.index]
@@ -491,6 +520,10 @@ func (l *sfcLayout) draw() string {
 				tx += textW(t.Name) + 8
 			}
 			p.f(`<text class="t" x="%.1f" y="%.1f">%s</text>`, tx, ty+4, esc(l.condText(nd.index)))
+			// Its variables' values, which a page fills in live (drone L-34).
+			if names := condVars(t.Condition); len(names) > 0 {
+				p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" data-vals="%s"></text>`, cx+sfcBar+8, ty+16, esc(strings.Join(names, " ")))
+			}
 		case sfcJumpNode:
 			ay := y + sfcJumpH - 10
 			p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, cx, y, cx, ay)
@@ -532,3 +565,38 @@ func (l *sfcLayout) divideY(g sfcGeo, n int) float64 {
 }
 
 func (l *sfcLayout) joinY(g sfcGeo, n int) float64 { return g.rowTop[l.nodes[n].rank] - sfcGap/3 }
+
+// condVars are the variables a transition's condition reads, in order,
+// each once: names and members (rest.Q), not keywords, literals or calls.
+func condVars(cond string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range condName.FindAllStringSubmatchIndex(cond, -1) {
+		name := cond[m[2]:m[3]]
+		rest := strings.TrimLeft(cond[m[1]:], " ")
+		up := strings.ToUpper(name)
+		if condWords[up] || strings.HasPrefix(rest, "(") || (m[2] > 0 && cond[m[2]-1] == '#') || seen[up] {
+			continue // a keyword, a call, a typed literal's value
+		}
+		if strings.HasPrefix(rest, "#") {
+			continue // T#5s, INT#3: a literal's type
+		}
+		seen[up] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+var condName = regexp.MustCompile(`(?:^|[^A-Za-z0-9_#.])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+
+var condWords = map[string]bool{"AND": true, "OR": true, "XOR": true, "NOT": true, "MOD": true, "TRUE": true, "FALSE": true, "AND_THEN": true, "OR_ELSE": true}
+
+// timedQualifier reports whether an action qualifier times its action: D,
+// L, SD, DS and SL.
+func timedQualifier(q string) bool {
+	switch strings.ToUpper(q) {
+	case "D", "L", "SD", "DS", "SL":
+		return true
+	}
+	return false
+}

@@ -31,6 +31,11 @@ type Chart struct {
 	// A step may also drive an action that has no body here: a BOOL
 	// variable of the POU, TRUE while the action is active.
 	Actions []Action
+	// ActionIndex is each action's number as package sfc lowers the chart
+	// (_sfc_a<n>_Q...), by upper-case name: the order actions are first
+	// named, by an ACTION or a step. A page shows an action's state from it
+	// (drone L-35). Nil when not known.
+	ActionIndex map[string]int
 }
 
 // Step is a step and the actions it drives.
@@ -195,12 +200,18 @@ func isIdent(s string) bool {
 // Action bodies are left out: a drawing names actions, it does not list
 // their statements.
 func ChartOf(sfc *ast.SFCProgram) *Chart {
-	c := &Chart{}
+	c := &Chart{ActionIndex: map[string]int{}}
+	number := func(name string) { // as package sfc numbers them
+		if _, ok := c.ActionIndex[strings.ToUpper(name)]; !ok {
+			c.ActionIndex[strings.ToUpper(name)] = len(c.ActionIndex)
+		}
+	}
 	for _, el := range sfc.Elements {
 		switch e := el.(type) {
 		case *ast.ActionStatement:
 			if e != nil && e.Name != nil {
 				c.Actions = append(c.Actions, Action{Name: e.Name.Value})
+				number(e.Name.Value)
 			}
 		case *ast.StepStatement:
 			if e == nil || e.Name == nil {
@@ -211,6 +222,7 @@ func ChartOf(sfc *ast.SFCProgram) *Chart {
 				if a == nil || a.ActionName == nil {
 					continue
 				}
+				number(a.ActionName.Value)
 				as := Association{Action: a.ActionName.Value}
 				if a.Qualifier != nil {
 					as.Qualifier = a.Qualifier.Value

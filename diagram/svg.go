@@ -337,11 +337,21 @@ func (l *layout) width(n *node) float64 {
 			w := text(p)
 			if v := l.inline[n.e.ID][strings.ToUpper(p)]; v != nil {
 				w += 6 + text(valueOf(v)) // the value inside, beside the pin
+				if name, _ := liveVar(v); name != "" {
+					w += liveW // and its value at run time
+				}
+			}
+			if n.e.InstanceName != "" && !isPower(p) {
+				w += liveW // the pin's value at run time
 			}
 			in = max(in, w)
 		}
 		for _, p := range n.outs {
-			out = max(out, text(p))
+			w := text(p)
+			if n.e.InstanceName != "" && p != "" && !isPower(p) {
+				w += liveW
+			}
+			out = max(out, w)
 		}
 		return max(64, in+out+text(n.e.TypeName)+28, text(n.e.InstanceName)+8)
 	case "connector", "continuation":
@@ -539,14 +549,19 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 			}
 			// Its value inside, beside the pin (foldValues), live where it is a
 			// variable (data-var, as the variable's own element would be).
+			cursor := x + 4 + float64(len(label))*charW*10/12 + 6
 			if v := l.inline[e.ID][strings.ToUpper(in)]; v != nil {
-				vx := x + 4 + float64(len(label))*charW*10/12 + 6
+				vx := cursor
+				cursor += float64(len(valueOf(v)))*charW + 6
 				if name, kind := liveVar(v); name != "" {
 					p.f(`<g class="el %s" data-var="%s" data-neg="%t">`, kind, esc(name), v.Negated || v.NegatedIn || v.NegatedOut)
 					p.f(`<text class="t iv" x="%.1f" y="%.1f">%s</text></g>`, vx, py+4, esc(valueOf(v)))
+					slot(p, cursor, py+4, "start", name) // its value at run time (L-38)
 				} else {
 					p.f(`<text class="t iv" x="%.1f" y="%.1f">%s</text>`, vx, py+4, esc(valueOf(v)))
 				}
+			} else if e.InstanceName != "" && !isPower(in) {
+				slot(p, cursor, py+4, "start", e.InstanceName+"."+in) // the pin's value at run time
 			}
 		}
 		for i, out := range n.outs {
@@ -556,6 +571,9 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 			}
 			if out != "" && !(out == "OUT" && e.InstanceName == "") {
 				p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text>`, pinClass(out), x+w-4, py+4, esc(out))
+				if e.InstanceName != "" && !isPower(out) {
+					slot(p, x+w-4-float64(len(out))*charW*10/12-6, py+4, "end", e.InstanceName+"."+out) // its value at run time (L-38)
+				}
 			}
 		}
 	case "connector", "continuation":
@@ -757,4 +775,14 @@ func valueOf(e *Elem) string {
 		return "NOT " + e.Expression
 	}
 	return e.Expression
+}
+
+// liveW is the room a pin's value at run time takes inside a block: about
+// nine characters at the pins' size ("T#1m30s", "-123.456").
+const liveW = 6 + 9*charW*10/12
+
+// slot is an empty text a page fills with a value at run time (drone
+// L-38): data-vals "=<name>" asks for the value alone.
+func slot(p *pen, x, y float64, anchor, name string) {
+	p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" text-anchor="%s" data-vals="=%s"></text>`, x, y, anchor, esc(name))
 }
