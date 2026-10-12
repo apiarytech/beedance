@@ -41,7 +41,7 @@ const (
 // document. Colours follow the editor's theme where the page sets VS
 // Code's CSS variables, with plain fallbacks elsewhere.
 func SVG(elems []*Elem) string {
-	l := newLayout(forDrawing(elems))
+	l := drawingLayout(elems)
 	return l.draw()
 }
 
@@ -56,7 +56,10 @@ type node struct {
 }
 
 type layout struct {
-	elems   map[int]*Elem
+	elems map[int]*Elem
+	// inline are the values drawn inside a block, by block and upper-case
+	// pin: a variable or literal read by that pin alone (forDrawing).
+	inline  map[int]map[string]*Elem
 	order   []*Elem
 	nodes   map[int]*node
 	srcs    map[int][]Conn // element -> wires into it (all inputs)
@@ -197,6 +200,11 @@ func (l *layout) place(net int, nodes []*node) {
 		}
 		n.ins, n.outs = l.pins(n.e)
 		n.label = n.e.Kind() == "block" && n.e.InstanceName != ""
+		// A block without EN and ENO has a title row, its name alone, above its
+		// pins, so a value written inside beside IN1 never meets the name.
+		if n.e.Kind() == "block" && !(len(n.ins) > 0 && isPower(n.ins[0])) && len(n.ins)+len(n.outs) > 0 {
+			n.head = 1
+		}
 		n.rows = n.head + max(1, len(n.ins), len(n.outs))
 		n.w = l.width(n)
 	}
@@ -246,7 +254,11 @@ func (l *layout) place(net int, nodes []*node) {
 			row++
 		}
 		n.row = row
-		for r := row - above(); r < row+n.rows; r++ {
+		below := 0
+		if n.e.Kind() == "block" {
+			below = 1 // the row under a block kept free: a contact there names its variable above it
+		}
+		for r := row - above(); r < row+n.rows+below; r++ {
 			taken[[2]int{n.layer, r}] = true
 		}
 	}
@@ -322,7 +334,11 @@ func (l *layout) width(n *node) float64 {
 	case "block":
 		in, out := 0.0, 0.0
 		for _, p := range n.ins {
-			in = max(in, text(p))
+			w := text(p)
+			if v := l.inline[n.e.ID][strings.ToUpper(p)]; v != nil {
+				w += 6 + text(valueOf(v)) // the value inside, beside the pin
+			}
+			in = max(in, w)
 		}
 		for _, p := range n.outs {
 			out = max(out, text(p))
@@ -408,7 +424,7 @@ func (l *layout) draw() string {
 
 	p.f(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" font-family="ui-monospace, Consolas, monospace" font-size="12">`, width+margin, height, width+margin, height)
 	p.f(`<style>.w{stroke:var(--vscode-editor-foreground,#333);fill:none;stroke-width:1.2}.t{fill:var(--vscode-editor-foreground,#333)}` +
-		`.d{fill:var(--vscode-descriptionForeground,#777)}.j{fill:var(--vscode-editor-foreground,#333)}.b{fill:var(--vscode-editor-background,#fff);stroke:var(--vscode-editor-foreground,#333);stroke-width:1.2}</style>`)
+		`.d{fill:var(--vscode-descriptionForeground,#777)}.pw{fill:var(--vscode-charts-blue,#1a6fb5);font-weight:bold}.sep{stroke:var(--vscode-descriptionForeground,#999);stroke-dasharray:3 3}.j{fill:var(--vscode-editor-foreground,#333)}.b{fill:var(--vscode-editor-background,#fff);stroke:var(--vscode-editor-foreground,#333);stroke-width:1.2}</style>`)
 	for _, r := range rails {
 		p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke-width="3"/>`, r.x, r.y1, r.x, r.y2)
 		if r.name != "" {
@@ -416,59 +432,29 @@ func (l *layout) draw() string {
 		}
 	}
 
+	rt := l.newRouter(at)
 	mid := func(id int) float64 { return at[id].y + rowH/2 - 4 }
-	// The point a wire leaves an element from, and where it enters one.
-	outPoint := func(c Conn) (float64, float64, bool) {
-		src, ok := l.elems[c.Ref]
-		if !ok {
-			return 0, 0, false
-		}
-		if src.Kind() == "leftPowerRail" {
-			return float64(margin), 0, true // y is the reader's
-		}
-		n := l.nodes[c.Ref]
-		g := at[c.Ref]
-		y := mid(c.Ref) + float64(n.head+max(0, outIndex(n, c.Param)))*rowH
-		return g.x + n.w, y, true
-	}
 	for _, e := range l.order {
 		n := l.nodes[e.ID]
 		if n == nil {
 			continue
 		}
 		g := at[e.ID]
-		// Wires into it.
-		inY := func(param string) float64 {
-			i := slices.IndexFunc(n.ins, func(s string) bool { return strings.EqualFold(s, param) })
-			return mid(e.ID) + float64(n.head+max(0, i))*rowH
-		}
-		wiresIn := func(conns []Conn, y float64) {
-			for _, c := range conns {
-				x1, y1, ok := outPoint(c)
-				if !ok {
-					continue
+		// Wires into it, around the elements in their way (route.go).
+		for _, w := range l.wiresInto(e, at, rt) {
+			p.f(`<polyline class="w" points="`)
+			for i, q := range w.ps {
+				if i > 0 {
+					p.f(" ")
 				}
-				if l.elems[c.Ref].Kind() == "leftPowerRail" {
-					y1 = y
-				}
-				xm := g.x - gapX/3
-				p.f(`<polyline class="w" points="%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f"/>`, x1, y1, xm, y1, xm, y, g.x, y)
-				if y1 != y && len(l.readers[c.Ref]) > 1 { // a split
-					p.f(`<circle class="j" cx="%.1f" cy="%.1f" r="2.5"/>`, xm, y1)
-				}
-				if y1 != y && len(conns) > 1 { // a join
-					p.f(`<circle class="j" cx="%.1f" cy="%.1f" r="2.5"/>`, xm, y)
-				}
+				p.f("%.1f,%.1f", q.x, q.y)
 			}
-		}
-		for _, in := range e.Ins {
-			wiresIn(in.Conns, mid(e.ID))
-		}
-		for _, pins := range [][]Pin{e.Inputs, e.InOuts} {
-			for _, pin := range pins {
-				if pin.In != nil {
-					wiresIn(pin.In.Conns, inY(pin.Param))
-				}
+			p.f(`"/>`)
+			if w.split != nil {
+				p.f(`<circle class="j" cx="%.1f" cy="%.1f" r="2.5"/>`, w.split.x, w.split.y)
+			}
+			if w.join != nil {
+				p.f(`<circle class="j" cx="%.1f" cy="%.1f" r="2.5"/>`, w.join.x, w.join.y)
 			}
 		}
 		l.drawElem(&p, n, g.x, g.y, mid(e.ID))
@@ -525,24 +511,42 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 		}
 		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, my-12, esc(e.Variable))
 	case "block":
-		head := float64(n.head) * rowH
-		my += head
-		p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="2"/>`, x, y+head+4, w, float64(n.rows-n.head)*rowH-8)
-		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle" font-weight="bold">%s</text>`, cx, y+head+17, esc(e.TypeName))
+		// The box holds its title row (head) and its pins; the name is in the
+		// first row, its instance above the box.
+		my += float64(n.head) * rowH
+		p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="2"/>`, x, y+4, w, float64(n.rows)*rowH-8)
+		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle" font-weight="bold">%s</text>`, cx, y+17, esc(e.TypeName))
+		if n.head > 0 {
+			p.f(`<line class="sep" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, y+rowH-4, x+w, y+rowH-4)
+		}
 		if e.InstanceName != "" {
-			p.f(`<text class="d" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, y+head-1, esc(e.InstanceName))
+			p.f(`<text class="d" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, y-1, esc(e.InstanceName))
+		}
+		// EN and ENO are the block's power flow, not its data (IEC 61131-3
+		// 6.6.1.2): their row is set apart by a dashed line, and they are
+		// labelled in the power's colour.
+		if n.rows-n.head > 1 && ((len(n.ins) > 0 && isPower(n.ins[0])) || (len(n.outs) > 0 && isPower(n.outs[0]))) {
+			p.f(`<line class="sep" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, my+rowH/2, x+w, my+rowH/2)
 		}
 		for i, in := range n.ins {
 			py := my + float64(i)*rowH
-			label := in
-			if strings.HasPrefix(strings.ToUpper(in), "IN") && len(in) > 2 && in[2] >= '0' && in[2] <= '9' && e.InstanceName == "" {
-				label = "" // a function's positional inputs need no names
-			}
+			label := in // every input named, a function's IN1 and IN2 too
 			if pin := pinOf(e, in); pin != nil && pin.Negated {
 				p.f(`<circle class="b" cx="%.1f" cy="%.1f" r="3"/>`, x-3, py)
 			}
 			if label != "" {
-				p.f(`<text class="d" x="%.1f" y="%.1f" font-size="10">%s</text>`, x+4, py+4, esc(label))
+				p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10">%s</text>`, pinClass(in), x+4, py+4, esc(label))
+			}
+			// Its value inside, beside the pin (foldValues), live where it is a
+			// variable (data-var, as the variable's own element would be).
+			if v := l.inline[e.ID][strings.ToUpper(in)]; v != nil {
+				vx := x + 4 + float64(len(label))*charW*10/12 + 6
+				if name, kind := liveVar(v); name != "" {
+					p.f(`<g class="el %s" data-var="%s" data-neg="%t">`, kind, esc(name), v.Negated || v.NegatedIn || v.NegatedOut)
+					p.f(`<text class="t iv" x="%.1f" y="%.1f">%s</text></g>`, vx, py+4, esc(valueOf(v)))
+				} else {
+					p.f(`<text class="t iv" x="%.1f" y="%.1f">%s</text>`, vx, py+4, esc(valueOf(v)))
+				}
 			}
 		}
 		for i, out := range n.outs {
@@ -551,7 +555,7 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 				p.f(`<circle class="b" cx="%.1f" cy="%.1f" r="3"/>`, x+w+3, py)
 			}
 			if out != "" && !(out == "OUT" && e.InstanceName == "") {
-				p.f(`<text class="d" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text>`, x+w-4, py+4, esc(out))
+				p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text>`, pinClass(out), x+w-4, py+4, esc(out))
 			}
 		}
 	case "connector", "continuation":
@@ -581,7 +585,7 @@ func pinOf(e *Elem, param string) *Pin {
 // forDrawing returns the elements as a drawing shows them: a function
 // contact stands in its rung, powered through EN and continuing from ENO,
 // without the AND lowering puts after it.
-func forDrawing(elems []*Elem) []*Elem {
+func forDrawing(elems []*Elem) ([]*Elem, map[int]map[string]*Elem) {
 	redirect := map[int]int{} // lowering's AND -> its function
 	for _, e := range elems {
 		if e.Kind() == "block" && e.Name == contactAnd && len(e.Inputs) == 2 && e.Inputs[1].In != nil && len(e.Inputs[1].In.Conns) == 1 {
@@ -634,7 +638,62 @@ func forDrawing(elems []*Elem) []*Elem {
 			*pins = ps
 		}
 	}
-	return out
+	return foldValues(out)
+}
+
+// foldValues takes a block's input values into the block (drone review: a
+// block lists all its inputs inside it): a variable or literal read by one
+// pin of a block, and by nothing else, is drawn beside the pin's name, not
+// as an element of its own wired to it. The rest are as they were.
+func foldValues(elems []*Elem) ([]*Elem, map[int]map[string]*Elem) {
+	byID := map[int]*Elem{}
+	readers := map[int]int{}
+	for _, e := range elems {
+		byID[e.ID] = e
+		for _, in := range e.Ins {
+			for _, c := range in.Conns {
+				readers[c.Ref]++
+			}
+		}
+		for _, pins := range [][]Pin{e.Inputs, e.InOuts} {
+			for _, p := range pins {
+				if p.In != nil {
+					for _, c := range p.In.Conns {
+						readers[c.Ref]++
+					}
+				}
+			}
+		}
+	}
+	inline := map[int]map[string]*Elem{}
+	folded := map[int]bool{}
+	for _, e := range elems {
+		if e.Kind() != "block" {
+			continue
+		}
+		for i, p := range e.Inputs {
+			if p.In == nil || len(p.In.Conns) != 1 || isPower(p.Param) {
+				continue
+			}
+			src := byID[p.In.Conns[0].Ref]
+			if src == nil || src.Kind() != "inVariable" || readers[src.ID] != 1 || strings.TrimSpace(src.Expression) == "" {
+				continue
+			}
+			if inline[e.ID] == nil {
+				inline[e.ID] = map[string]*Elem{}
+			}
+			inline[e.ID][strings.ToUpper(p.Param)] = src
+			folded[src.ID] = true
+			e.Inputs[i].In = nil // no wire: the value is inside
+		}
+	}
+	out := elems[:0:0]
+	for _, e := range elems {
+		if !folded[e.ID] {
+			out = append(out, e)
+		}
+	}
+	return out, inline
 }
 
 // liveVar returns the variable a contact, coil or variable element shows,
@@ -664,4 +723,38 @@ func isName(s string) bool {
 		}
 	}
 	return true
+}
+
+// isPower reports whether a pin is EN or ENO, a block's power flow.
+func isPower(pin string) bool { return strings.EqualFold(pin, "EN") || strings.EqualFold(pin, "ENO") }
+
+// pinClass is a pin label's class: pw for EN and ENO, d for data.
+func pinClass(pin string) string {
+	if isPower(pin) {
+		return "pw"
+	}
+	return "d"
+}
+
+// drawingLayout lays out a body's elements as drawn: with forDrawing's
+// changes, and each block wide enough for the values inside it.
+func drawingLayout(elems []*Elem) *layout {
+	drawn, inline := forDrawing(elems)
+	l := newLayout(drawn)
+	l.inline = inline
+	for _, net := range l.nets {
+		for _, n := range net {
+			n.w = l.width(n)
+		}
+	}
+	return l
+}
+
+// valueOf is a variable or literal element's text, as its own element
+// would show it.
+func valueOf(e *Elem) string {
+	if e.Negated || e.NegatedIn || e.NegatedOut {
+		return "NOT " + e.Expression
+	}
+	return e.Expression
 }
