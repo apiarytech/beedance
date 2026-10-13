@@ -105,7 +105,8 @@ func (r *router) clearPath(ps []pt, src, dst int) bool {
 // split (where it leaves a value read elsewhere too) and of a join (where
 // it meets the other wires into the same input).
 type routedWire struct {
-	src, dst    int // src -1: a power rail
+	src, dst    int  // src -1: a power rail
+	conn        Conn // the wire's source, as the lowering keys it
 	ps          []pt
 	split, join *pt
 }
@@ -160,7 +161,7 @@ func (l *layout) wiresInto(e *Elem, at map[int]geo, rt *router) []routedWire {
 				src = -1
 			}
 			ps, split := rt.route(src, e.ID, x1, y1, g.x, y, xm)
-			w := routedWire{src: src, dst: e.ID, ps: ps}
+			w := routedWire{src: src, dst: e.ID, ps: ps, conn: c}
 			if y1 != y && len(l.readers[c.Ref]) > 1 {
 				w.split = &split
 			}

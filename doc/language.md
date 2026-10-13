@@ -10,9 +10,14 @@
   `JMP`/`JMPC`/`JMPCN`, `CAL`/`CALC`/`CALCN`, `RET`, parenthesized
   expressions.
 - **Sequential Function Chart (SFC)**: `INITIAL_STEP`, `STEP`,
-  `TRANSITION`, action blocks with the qualifiers `N`, `S`, `R`, `P`, and
-  the timed `D`, `L`, `SD`, `DS`, `SL`; simultaneous divergence and
-  convergence. A graphical PLCopen SFC body is imported into this text
+  `TRANSITION`, action blocks with the qualifiers `N`, `S`, `R`, `P`, the
+  pulses `P1` (as `P`, on the step becoming active) and `P0` (on the step
+  becoming inactive) of the 3rd edition, and the timed `D`, `L`, `SD`, `DS`,
+  `SL` (`DS` stored only if the step is still active when its time is up,
+  `SD` whether it is or not); simultaneous divergence and convergence. The
+  evaluator, the VM and the transpiled Go agree on them scan by scan
+  (`sfc/qualifiers_test.go`): the VM and the transpiler run a chart as the
+  Structured Text package `sfc` lowers it to. A graphical PLCopen SFC body is imported into this text
   form ([PLCopen XML](plcopen.md)), and package `diagram` draws a chart as
   SVG (`diagram.ChartOf`, `diagram.SFCSVG`): loops back are drawn as
   jumps, selections with single bars, simultaneous branches with double

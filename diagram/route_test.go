@@ -53,7 +53,7 @@ func TestWiresAvoidElements(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		l := drawingLayout(body.Elems)
+		l := drawingLayout(body.Elems, nil)
 		at, _, _, _ := l.geometry()
 		rt := l.newRouter(at)
 		wires, rerouted := 0, false

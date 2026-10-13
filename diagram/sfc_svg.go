@@ -346,7 +346,7 @@ func (l *sfcLayout) geometry() sfcGeo {
 			if len(l.c.Steps[nd.index].Actions) > 0 {
 				qw, nw := l.actionCols(nd.index)
 				r += 16 + qw + nw
-				r += 72 // room for the values beside the actions (L-34)
+				r += l.actionValuesW(nd.index) // the values beside the actions, in full (L-34, L-43)
 			}
 			right[nd.col] = max(right[nd.col], r)
 			g.rowH[nd.rank] = max(g.rowH[nd.rank], max(sfcStepH, float64(len(l.c.Steps[nd.index].Actions))*sfcActH))
@@ -356,6 +356,9 @@ func (l *sfcLayout) geometry() sfcGeo {
 			vals := 0.0 // the values line under the condition: "name = value" each
 			for _, n := range condVars(t.Condition) {
 				vals += float64(len(n)+12) * charW * 10 / 12
+			}
+			for _, x := range condExprs(t.Condition) { // "expr = value" each (L-39)
+				vals += float64(len(x)+14) * charW * 10 / 12
 			}
 			r = max(r, sfcBar+8+vals)
 			if t.Name != "" {
@@ -371,9 +374,15 @@ func (l *sfcLayout) geometry() sfcGeo {
 	for c := range right {
 		right[c] = max(right[c], g.colStep[c]/2)
 	}
+	// Left of the spine: half the step, or a step's time under it, right
+	// aligned to the link, in full (longestTime, L-44).
+	left := make([]float64, l.cols)
+	for c := range left {
+		left[c] = max(g.colStep[c]/2, stepTimeW)
+	}
 	x := float64(margin)
 	for c := range g.spine {
-		g.spine[c] = x + g.colStep[c]/2
+		g.spine[c] = x + left[c]
 		x = g.spine[c] + right[c] + sfcColGap
 	}
 	g.width = x - sfcColGap + margin
@@ -468,6 +477,9 @@ func (l *sfcLayout) draw() string {
 			}
 			p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, y+sfcStepH/2+4, esc(s.Name))
 			p.f(`</g>`)
+			// How long it has been active (IEC <step>.T, package sfc's
+			// _sfc_<step>_E), under it beside the link (L-40).
+			slot(&p, cx-6, y+sfcStepH+11, "end", "_sfc_"+s.Name+"_E.ET")
 			if len(s.Actions) == 0 {
 				continue
 			}
@@ -480,7 +492,10 @@ func (l *sfcLayout) draw() string {
 				// _sfc_a<n>_Q, drone L-35).
 				n, known := l.c.ActionIndex[strings.ToUpper(a.Action)]
 				if known {
-					p.f(`<g class="el var" data-var="_sfc_a%d_Q" data-neg="false">`, n)
+					// Its step and qualifier too: a P action is active for one
+					// scan only, so a page holds it green a moment when its step
+					// becomes active (drone L-42).
+					p.f(`<g class="el var" data-var="_sfc_a%d_Q" data-neg="false" data-step="%s" data-qual="%s">`, n, esc(s.Name), esc(strings.ToUpper(a.Qualifier)))
 				}
 				p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%d"/><rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%d"/>`,
 					ax, ay, qw, sfcActH, ax+qw, ay, nw, sfcActH)
@@ -497,13 +512,14 @@ func (l *sfcLayout) draw() string {
 				if known {
 					p.f(`</g>`)
 				}
-				// Beside it, live: a timed qualifier's time run (D, L, SD, DS, SL),
-				// and the action's variable's value if it is one (a BOOL set by N...).
+				// Beside it, live: a stored timed qualifier's time run (SD, DS, SL;
+				// a D or L action's is its step's time, under the step, L-43), and
+				// the action's variable's value if it is one (a BOOL set by N...).
 				var vals []string
-				if known && timedQualifier(q) {
+				if known && storedTimed(q) {
 					vals = append(vals, fmt.Sprintf("elapsed=_sfc_a%d_t.ET", n))
 				}
-				if isName(a.Action) {
+				if l.isVariable(a.Action) {
 					vals = append(vals, a.Action)
 				}
 				if len(vals) > 0 {
@@ -513,7 +529,9 @@ func (l *sfcLayout) draw() string {
 		case sfcTransNode:
 			t := l.c.Transitions[nd.index]
 			ty := y + sfcTransH/2
-			p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke-width="2.4"/>`, cx-sfcBar, ty, cx+sfcBar, ty)
+			// The bar names its condition, so a page draws it green while it
+			// is TRUE (L-40).
+			p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke-width="2.4" data-expr="%s"/>`, cx-sfcBar, ty, cx+sfcBar, ty, esc(t.Condition))
 			tx := cx + sfcBar + 8
 			if t.Name != "" {
 				p.f(`<text class="d" x="%.1f" y="%.1f">%s</text>`, tx, ty+4, esc(t.Name))
@@ -521,7 +539,13 @@ func (l *sfcLayout) draw() string {
 			}
 			p.f(`<text class="t" x="%.1f" y="%.1f">%s</text>`, tx, ty+4, esc(l.condText(nd.index)))
 			// Its variables' values, which a page fills in live (drone L-34).
-			if names := condVars(t.Condition); len(names) > 0 {
+			// Its computed parts (WellLevel + 5.0) after them, as expressions the
+			// page works out (data-val-exprs, "|" between them; L-39).
+			names, exprs := condVars(t.Condition), condExprs(t.Condition)
+			switch {
+			case len(exprs) > 0:
+				p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" data-vals="%s" data-val-exprs="%s"></text>`, cx+sfcBar+8, ty+16, esc(strings.Join(names, " ")), esc(strings.Join(exprs, "|")))
+			case len(names) > 0:
 				p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" data-vals="%s"></text>`, cx+sfcBar+8, ty+16, esc(strings.Join(names, " ")))
 			}
 		case sfcJumpNode:
@@ -591,12 +615,306 @@ var condName = regexp.MustCompile(`(?:^|[^A-Za-z0-9_#.])([A-Za-z_][A-Za-z0-9_]*(
 
 var condWords = map[string]bool{"AND": true, "OR": true, "XOR": true, "NOT": true, "MOD": true, "TRUE": true, "FALSE": true, "AND_THEN": true, "OR_ELSE": true}
 
-// timedQualifier reports whether an action qualifier times its action: D,
-// L, SD, DS and SL.
-func timedQualifier(q string) bool {
+// storedTimed reports whether a qualifier times an action that outlives its
+// step: SD, DS and SL. D and L time it while the step is active, so their
+// time is the step's own (L-43).
+func storedTimed(q string) bool {
 	switch strings.ToUpper(q) {
-	case "D", "L", "SD", "DS", "SL":
+	case "SD", "DS", "SL":
 		return true
 	}
 	return false
 }
+
+// actionValuesW is the room the values beside a step's actions take: the
+// widest of "elapsed = T#1h23m45s678ms" and "Name = -12345.678", in the
+// values' smaller font; 8 for a step whose actions show none.
+func (l *sfcLayout) actionValuesW(step int) float64 {
+	w := 0.0
+	for _, a := range l.c.Steps[step].Actions {
+		n := 0
+		if _, known := l.c.ActionIndex[strings.ToUpper(a.Action)]; known && storedTimed(a.Qualifier) {
+			n += len("elapsed = "+longestTime) + 3
+		}
+		if l.isVariable(a.Action) {
+			n += len(a.Action) + len(" = -12345.678") + 3
+		}
+		w = max(w, float64(n)*charW*10/12)
+	}
+	return w + 8
+}
+
+// maxCondExprs bounds the computed parts shown under one condition.
+const maxCondExprs = 6
+
+// condExprs are the computed parts of a transition's condition, which no
+// variable holds at run time: each side of a comparison, and each input of
+// a comparison function, that is not a plain name or literal
+// (WellLevel + 5.0, ADD(a, b)); at most maxCondExprs, in order, each once.
+// A page shows their values beside the variables' (drone L-39).
+func condExprs(cond string) []string {
+	var out []string
+	seen := map[string]bool{}
+	// add takes a computed part, then the computed inputs it has: a
+	// function's arguments, an operator's operands (L-41).
+	var add func(s string, depth int)
+	add = func(s string, depth int) {
+		s = strings.TrimSpace(s)
+		if s == "" || depth > 8 || simpleOperand.get().MatchString(s) || len(out) >= maxCondExprs {
+			return
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+		inner := stripParens(s)
+		if _, args, ok := callOf(inner); ok {
+			for _, a := range args {
+				add(a, depth+1)
+			}
+			return
+		}
+		for _, ops := range [][]string{{"+", "-"}, {"*", "/", "MOD"}} {
+			if parts := splitArith(inner, ops); len(parts) > 1 {
+				for _, p := range parts {
+					add(p, depth+1)
+				}
+				return
+			}
+		}
+	}
+	var walk func(s string, depth int)
+	walk = func(s string, depth int) {
+		s = stripParens(strings.TrimSpace(s))
+		if s == "" || depth > 8 {
+			return
+		}
+		if parts := splitTop(s, isBoolWord); len(parts) > 1 {
+			for _, p := range parts {
+				walk(p, depth+1)
+			}
+			return
+		}
+		if rest, ok := cutWord(s, "NOT"); ok {
+			walk(rest, depth+1)
+			return
+		}
+		if a, b, ok := cutCompare(s); ok {
+			add(a, depth)
+			add(b, depth)
+			return
+		}
+		if name, args, ok := callOf(s); ok {
+			switch strings.ToUpper(name) {
+			case "AND", "OR", "XOR", "NOT":
+				for _, a := range args {
+					walk(a, depth+1)
+				}
+			default: // a comparison, or a function of the program's: its inputs
+				for _, a := range args {
+					add(a, depth+1)
+				}
+			}
+		}
+	}
+	walk(cond, 0)
+	return out
+}
+
+// scanTop calls at for each index of s outside parentheses and quotes.
+func scanTop(s string, at func(i int) bool) {
+	depth, quote := 0, byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case depth == 0:
+			if at(i) {
+				return
+			}
+		}
+	}
+}
+
+func isWordByte(c byte) bool {
+	return c == '_' || c == '.' || c == '#' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+// wordAt is the word starting at s[i] when one starts there.
+func wordAt(s string, i int) string {
+	if i > 0 && isWordByte(s[i-1]) {
+		return ""
+	}
+	j := i
+	for j < len(s) && isWordByte(s[j]) {
+		j++
+	}
+	return s[i:j]
+}
+
+func isBoolWord(w string) bool {
+	switch strings.ToUpper(w) {
+	case "AND", "OR", "XOR", "AND_THEN", "OR_ELSE":
+		return true
+	}
+	return false
+}
+
+// splitTop splits s at its top-level words that sep accepts, and at "&".
+func splitTop(s string, sep func(string) bool) []string {
+	var parts []string
+	from := 0
+	scanTop(s, func(i int) bool {
+		if s[i] == '&' {
+			parts = append(parts, s[from:i])
+			from = i + 1
+			return false
+		}
+		if w := wordAt(s, i); w != "" && sep(w) {
+			parts = append(parts, s[from:i])
+			from = i + len(w)
+		}
+		return false
+	})
+	return append(parts, s[from:])
+}
+
+// cutWord cuts a leading keyword: "NOT x" is x.
+func cutWord(s, word string) (string, bool) {
+	if w := wordAt(s, 0); strings.EqualFold(w, word) {
+		return s[len(w):], true
+	}
+	return "", false
+}
+
+// cutCompare splits s at its first top-level comparison.
+func cutCompare(s string) (a, b string, ok bool) {
+	scanTop(s, func(i int) bool {
+		for _, op := range []string{"<>", "<=", ">=", "=", "<", ">"} {
+			if strings.HasPrefix(s[i:], op) {
+				a, b, ok = s[:i], s[i+len(op):], true
+				return true
+			}
+		}
+		return false
+	})
+	return a, b, ok
+}
+
+// stripParens removes parentheses around the whole of s.
+func stripParens(s string) string {
+	for len(s) > 1 && s[0] == '(' {
+		closes := -1
+		depth := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] == '(' {
+				depth++
+			} else if s[i] == ')' {
+				depth--
+				if depth == 0 {
+					closes = i
+					break
+				}
+			}
+		}
+		if closes != len(s)-1 {
+			return s
+		}
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	return s
+}
+
+// callOf reads s as one call, NAME(args), with its top-level arguments.
+func callOf(s string) (name string, args []string, ok bool) {
+	name = wordAt(s, 0)
+	rest := strings.TrimSpace(s[len(name):])
+	if name == "" || !strings.HasPrefix(rest, "(") || stripParens(rest) == rest {
+		return "", nil, false // not one call over the whole of s
+	}
+	inner := rest[1 : len(rest)-1]
+	from := 0
+	arg := func(a string) {
+		if _, v, formal := strings.Cut(a, ":="); formal {
+			a = v // IN1 := x is x
+		}
+		args = append(args, a)
+	}
+	scanTop(inner, func(i int) bool {
+		if inner[i] == ',' {
+			arg(inner[from:i])
+			from = i + 1
+		}
+		return false
+	})
+	arg(inner[from:])
+	return name, args, true
+}
+
+// splitArith splits s at its top-level binary operators ops ("+", "-";
+// "*", "/", "MOD"): a "+" or "-" that starts s or follows an operator or
+// "(" is a sign, and an exponent's (1.5E-3) is part of its number.
+func splitArith(s string, ops []string) []string {
+	var parts []string
+	from := 0
+	scanTop(s, func(i int) bool {
+		c := s[i]
+		if c == ' ' || c == '\t' {
+			return false
+		}
+		for _, op := range ops {
+			word := op == "MOD"
+			if word && strings.EqualFold(wordAt(s, i), "MOD") || !word && strings.HasPrefix(s[i:], op) {
+				exponent := (op == "+" || op == "-") && i > 1 && (s[i-1] == 'e' || s[i-1] == 'E') && s[i-2] >= '0' && s[i-2] <= '9'
+				if endsOperand(s, i) && !exponent && !(op == "*" && strings.HasPrefix(s[i:], "**")) {
+					parts = append(parts, s[from:i])
+					from = i + len(op)
+					return false
+				}
+			}
+		}
+		return false
+	})
+	return append(parts, s[from:])
+}
+
+// endsOperand says whether what comes before s[i] ends an operand (a name,
+// a number, a literal, a closing parenthesis), so an operator at i is
+// binary, not a sign.
+func endsOperand(s string, i int) bool {
+	j := i - 1
+	for j >= 0 && (s[j] == ' ' || s[j] == '\t') {
+		j--
+	}
+	return j >= 0 && (isWordByte(s[j]) || s[j] == ')' || s[j] == '\'' || s[j] == '"')
+}
+
+// isVariable says whether an action may be a variable of the POU (a BOOL
+// that is TRUE while it is active): a name the chart has no ACTION body for.
+func (l *sfcLayout) isVariable(action string) bool {
+	if !isName(action) {
+		return false
+	}
+	for _, a := range l.c.Actions {
+		if strings.EqualFold(a.Name, action) {
+			return false
+		}
+	}
+	return true
+}
+
+// stepTimeW is the room a step's time takes left of its link, with the gap
+// to it: as long as T#1h23m45s678ms in the values' smaller font.
+var stepTimeW = 6 + float64(len(longestTime))*charW*10/12 + 2
+
+// longestTime is the longest time a step or action shows.
+const longestTime = "T#99d23h59m59s999ms"

@@ -148,7 +148,7 @@ jobs:
       - name: Set up TinyGo
         uses: acifani/setup-tinygo@v3
         with:
-          tinygo-version: '0.42.0' # Specify the TinyGo version you want to use
+          tinygo-version: '0.43.0' # Specify the TinyGo version you want to use
 
       # Each test runs in a goroutine, whose stack TinyGo does not grow: the
       # parser and compiler recurse deeply, and compiling the OSCAT library
@@ -182,7 +182,7 @@ jobs:
       - name: Set up TinyGo
         uses: acifani/setup-tinygo@v3
         with:
-          tinygo-version: '0.42.0'
+          tinygo-version: '0.43.0'
 
       - name: Build the embedded VM example
         run: tinygo build -target=${{ matrix.target }} -size short -o beedance-${{ matrix.target }}.uf2 ./embedded/example/raspberrypi/

@@ -1,7 +1,6 @@
-/* From TinyGo 0.42.0, targets/esp32c6.ld (BSD 3-Clause, see LICENSE.tinygo),
+/* From TinyGo 0.43.0, targets/esp32c6.ld (BSD 3-Clause, see LICENSE.tinygo),
  * changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
- * an esp_app_desc_t at the start of .data, segment 0 on the C6, which the bootloader checks,
- * and .text padded so .rodata lines up with its flash offset. */
+ * an esp_app_desc_t at the start of .data, segment 0 on the C6, which the bootloader checks. */
 
 /* Linker script for the ESP32-C6
  *
@@ -113,8 +112,9 @@ SECTIONS
         . = ALIGN(4);
     } > SRAM
 
-    /* Heap starts after IRAM. */
-    . = ALIGN(4);
+    /* Heap starts after IRAM. Goroutine stacks come from the heap and need
+     * 16 byte alignment (RISC-V ELF psABI, integer calling convention). */
+    . = ALIGN(16);
     _heap_start = ABSOLUTE(.);
     _heap_end = ORIGIN(SRAM) + LENGTH(SRAM);
 
@@ -139,15 +139,8 @@ SECTIONS
     .text : ALIGN(4)
     {
         *(.text .text.*)
-        /* (embedded/esp32sim) .rodata is aligned to its largest input
-         * section (8 for a float64), which can move it past the end of
-         * .rodata_dummy, while the image puts its segment straight after
-         * .text: the bootloader then refuses the app ("Segment 3 load
-         * address ... doesn't match data"). .rodata_dummy ends at
-         * DROM + (end of .text - IROM) + 8, the rodata segment header, so
-         * ending .text 8 bytes before a 16-byte boundary makes it end on
-         * one. */
-        . += (24 - (ABSOLUTE(.) & 15)) & 15;
+        /* Put the .rodata data at a 16-byte aligned flash offset, the same as its address. */
+        . = ALIGN(. + 0x8, 16) - 0x8;
     } > IROM
 
     /* === DROM sections (flash-mapped read-only data) === */
@@ -173,6 +166,9 @@ SECTIONS
         *(.rodata*)
         . = ALIGN (4);
     } >DROM
+
+    ASSERT(ADDR(.text) == ADDR(.irom_dummy) + SIZEOF(.irom_dummy), ".text address does not match its flash offset")
+    ASSERT(ADDR(.rodata) == ADDR(.rodata_dummy) + SIZEOF(.rodata_dummy), ".rodata address does not match its flash offset")
 
     /DISCARD/ :
     {

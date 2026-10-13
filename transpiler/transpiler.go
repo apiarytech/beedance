@@ -6,6 +6,7 @@ import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/evaluator"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/sfc"
 	"github.com/apiarytech/beedance/token"
 	"io"
 	"log" // Added for time.Time and time.Duration
@@ -186,6 +187,13 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		macroEnv := object.NewEnvironment()
 		evaluator.DefineMacros(node, macroEnv)
 		expandedAST := evaluator.ExpandMacros(node, macroEnv).(*ast.Program)
+		// A chart runs as the Structured Text package sfc lowers it to, as on
+		// the VM: one meaning of every qualifier on every target.
+		lowered, err := sfc.Program(expandedAST)
+		if err != nil {
+			return err
+		}
+		expandedAST = lowered
 		// Go has no namespaces within a package; see namespaces.go.
 		expandedAST = flattenNamespaces(expandedAST)
 		// Uses of a name spelled as it is declared; see name_case.go.
@@ -1081,7 +1089,7 @@ func (t *Transpiler) transpileSFCProgram(sfc *ast.SFCProgram) error {
 	t.write("\n")
 
 	t.write("\t// --- SFC Phase 1: Evaluate Transitions and collect fired transitions ---\n")
-	t.write("\tfiredTransitions := make(map[string]bool)\n\n")
+	t.write("\tfiredTransitions := make(map[string]bool)\n\t_ = firedTransitions // a chart without transitions\n\n")
 	for i, element := range sfc.Elements {
 		if trans, ok := element.(*ast.TransitionStatement); ok {
 			transKey := fmt.Sprintf("t%d", i)

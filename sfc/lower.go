@@ -16,7 +16,8 @@
 //
 //  1. Each action's control: the qualifier of highest precedence among its
 //     active steps (R, then S, then the last other one), with the timers
-//     and counters of N, S, R, P, D, L, SD, DS and SL.
+//     and counters of N, S, R, P (and P1), D, L, SD, DS and SL; then P0, a
+//     pulse when its step has just become inactive.
 //  2. Each action's output (a BOOL of the action's name, when the POU has
 //     one) and, when active, its body.
 //  3. Each transition whose steps are all active, its condition.
@@ -24,7 +25,8 @@
 //  5. The actions of the steps that moved are evaluated again, so a new
 //     step acts in the scan it became active.
 //
-// Each step is a BOOL _sfc_<step>_X, TRUE for the initial step; each action
+// Each step is a BOOL _sfc_<step>_X, TRUE for the initial step, and a TON
+// _sfc_<step>_E whose ET is its elapsed time; each action
 // keeps its state in _sfc_a<n>_Q, _qual, _cnt, _active, _t and _d (IEC names
 // are case-insensitive, so no two differ by case alone); a timed qualifier measures
 // time with a TON. Actions run in the order they are first named, steps
@@ -52,9 +54,14 @@ const (
 	qSL
 	qS
 	qR
+	// qP0 pulses when its step becomes inactive: outside the precedence,
+	// worked out apart (control).
+	qP0
 )
 
-var qualifiers = map[string]int{"N": qN, "P": qP, "D": qD, "L": qL, "SD": qSD, "DS": qDS, "SL": qSL, "S": qS, "R": qR}
+// qualifiers by name; P1 (IEC 61131-3 3rd edition) is P, a pulse when the
+// step becomes active.
+var qualifiers = map[string]int{"N": qN, "P": qP, "P1": qP, "P0": qP0, "D": qD, "L": qL, "SD": qSD, "DS": qDS, "SL": qSL, "S": qS, "R": qR}
 
 // forever is the preset of the TON that measures an action's time: longer
 // than any qualifier's duration.
@@ -232,11 +239,15 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 	var decls []string
 	for _, s := range steps {
 		decls = append(decls, fmt.Sprintf("%s : BOOL := %s;", stepVar(s), map[bool]string{true: "TRUE", false: "FALSE"}[strings.EqualFold(s, initial)]))
+		decls = append(decls, stepTimer(s)+" : TON;")
 	}
 	decls = append(decls, "_sfc_any : BOOL;", "_sfc_qq : INT;")
 	for _, a := range actions {
 		p := a.prefix()
 		decls = append(decls, p+"Q : BOOL;", p+"qual : INT;", p+"cnt : INT;", p+"active : BOOL;", p+"t : TON;", p+"d : TIME;")
+		if a.hasP0() {
+			decls = append(decls, p+"w0 : BOOL;", p+"p0 : BOOL;")
+		}
 	}
 	for i := range trans {
 		decls = append(decls, fmt.Sprintf("_sfc_f%d : BOOL;", i))
@@ -284,6 +295,12 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 		g.line("END_IF;")
 	}
 
+	// 6: each step's elapsed time (IEC 61131-3's <step>.T), counted while
+	// it is active and back to zero when it is not, for pages to show.
+	for _, s := range steps {
+		g.line("%s(IN := %s, PT := %s);", stepTimer(s), stepVar(s), forever)
+	}
+
 	src := "PROGRAM _sfc VAR " + strings.Join(decls, " ") + " END_VAR\n" + g.b.String() + "END_PROGRAM\n"
 	p := parser.New(lexer.New(src))
 	prog := p.ParseProgram()
@@ -305,6 +322,9 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 }
 
 func stepVar(step string) string { return "_sfc_" + step + "_X" }
+
+// stepTimer is the TON whose ET is a step's elapsed time.
+func stepTimer(step string) string { return "_sfc_" + step + "_E" }
 
 func (a *action) prefix() string { return fmt.Sprintf("_sfc_a%d_", a.index) }
 
@@ -353,6 +373,9 @@ func (g *gen) control(a *action) {
 	reset := fmt.Sprintf("%sactive := FALSE; %st(IN := FALSE);", p, p)
 	g.line("_sfc_any := FALSE; _sfc_qq := %d;", qNone)
 	for _, as := range a.assocs {
+		if as.code == qP0 {
+			continue // worked out below, on its step going inactive
+		}
 		g.line("IF %s THEN", stepVar(as.step))
 		g.line("_sfc_any := TRUE;")
 		if as.duration != nil {
@@ -388,8 +411,10 @@ func (g *gen) control(a *action) {
 	g.line("ELSE") // no active step: what the stored qualifiers keep
 	g.line("IF %squal = %d THEN", p, qS)
 	g.line("%sQ := %sQ;", p, p)
-	g.line("ELSIF %squal = %d OR %squal = %d THEN", p, qSD, p, qDS)
+	g.line("ELSIF %squal = %d THEN", p, qSD) // stored at once: comes on when the time is up
 	g.line("IF NOT %sQ AND %sactive THEN %s IF %st.ET >= %sd THEN %sQ := TRUE; END_IF; END_IF;", p, p, start, p, p, p)
+	g.line("ELSIF %squal = %d THEN", p, qDS) // stored only once the time was up: cancelled if not yet
+	g.line("IF NOT %sQ THEN %s END_IF;", p, reset)
 	g.line("ELSIF %squal = %d THEN", p, qSL)
 	g.line("IF %sQ AND %sactive THEN %s IF %st.ET >= %sd THEN %sQ := FALSE; END_IF; END_IF;", p, p, start, p, p, p)
 	g.line("ELSE")
@@ -398,6 +423,29 @@ func (g *gen) control(a *action) {
 	g.line("IF %squal = %d OR %squal = %d THEN %s END_IF;", p, qD, p, qL, reset)
 	g.line("END_IF;")
 	g.line("END_IF;")
+	// P0: active for one scan when its step has just become inactive (the
+	// steps it is P0 on were active when last seen, and none is now).
+	if a.hasP0() {
+		var now []string
+		for _, as := range a.assocs {
+			if as.code == qP0 {
+				now = append(now, stepVar(as.step))
+			}
+		}
+		g.line("_sfc_any := %s;", strings.Join(now, " OR "))
+		g.line("%sp0 := %sw0 AND NOT _sfc_any; %sw0 := _sfc_any;", p, p, p)
+		g.line("IF %sp0 THEN %sQ := TRUE; END_IF;", p, p)
+	}
+}
+
+// hasP0 says whether a is P0 on any step.
+func (a *action) hasP0() bool {
+	for _, as := range a.assocs {
+		if as.code == qP0 {
+			return true
+		}
+	}
+	return false
 }
 
 // effect writes an action's output and, while it is active, its body.

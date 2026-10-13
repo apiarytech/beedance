@@ -11,7 +11,7 @@
     *   **Instruction List (IL):** A functional IL interpreter that supports operators like `LD`, `ST`, `JMP`, `CAL`, `RET`, and arithmetic/logic instructions.
     *   **Sequential Function Chart (SFC):** A comprehensive implementation including:
         *   Steps (`INITIAL_STEP`, `STEP`) and `TRANSITION`s.
-        *   Action blocks with standard qualifiers (`N`, `S`, `R`, `P`).
+        *   Action blocks with standard qualifiers (`N`, `S`, `R`, `P`, `P1`, `P0`).
         *   Timed action qualifiers (`D`, `L`, `SD`, `DS`, `SL`).
         *   Simultaneous divergence (fork) and convergence (join).
         *   Graphical SFC in PLCopen XML, imported into the text form and exported from it, and charts drawn as SVG.
@@ -104,6 +104,16 @@ For example, the parser is designed to be context-aware. This allows it to corre
 ## Getting Started
 
 The primary way to use `beedance` is through its command-line interface, which supports evaluation (REPL, file execution) and compilation.
+
+### Toolchain
+
+Go 1.27.2 or later; TinyGo 0.43.0 for the microcontroller builds ([doc/development.md](doc/development.md)). TinyGo 0.43.0 fixes three problems beedance's embedded targets had with 0.42.0:
+
+*   **VM runtime errors on Xtensa.** `VM.Run` recovers a panic in a program (an index out of range, a division by zero) and returns it as an error. TinyGo 0.42.0 could not recover a panic on Xtensa, so on the ESP32 and ESP32-S3 such a program stopped the firmware instead. 0.43.0 adds panic recovery on Xtensa.
+*   **Goroutine stack alignment on the ESP32 family.** Goroutine stacks come from the heap, and the heap was not 16-byte aligned as the RISC-V and Xtensa calling conventions require. 0.43.0 aligns it; the linker scripts in [embedded/esp32sim/tinygo](embedded/esp32sim/tinygo/) carry the same change.
+*   **ESP32-C6 `.rodata` placement.** `.rodata` could end up at an address that did not match its flash offset, and ESP-IDF's bootloader then refused the app. Our C6 linker script padded `.text` to work around it. 0.43.0 aligns `.rodata` to its flash offset upstream, so the workaround is gone and the script asserts both segments line up.
+
+TinyGo 0.43.0 also adds an ESP32-H2 target (`esp32h2-devkitm-1`), not yet tried on a board ([embedded/esp32sim](embedded/esp32sim/README.md)).
 
 ### Command-Line Flags
 

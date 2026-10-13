@@ -1,4 +1,4 @@
-// From TinyGo 0.42.0, src/device/esp/esp32c3.S (BSD 3-Clause, see LICENSE.tinygo),
+// From TinyGo 0.43.0, src/device/esp/esp32c3.S (BSD 3-Clause, see LICENSE.tinygo),
 // changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
 // flash is mapped from 0x10000, the app partition, instead of 0.
 

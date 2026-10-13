@@ -841,10 +841,42 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	return NULL // A single cycle completes successfully
 }
 
-// evaluateAction determines the active state (`.IsActive`) of a single action
+// evaluateAction determines an action's active state for this scan: its
+// qualifiers' control (controlAction), then P0, a pulse when a step it is
+// P0 on has just become inactive.
+func evaluateAction(action *object.Action, env *object.Environment) {
+	controlAction(action, env)
+	if now, ok := p0StepsActive(action); ok {
+		pulse := action.P0WasActive && !now
+		action.P0WasActive = now
+		if pulse {
+			action.IsActive = true
+		}
+	}
+}
+
+// p0StepsActive says whether any step the action is P0 on is active, and
+// whether it is P0 on any.
+func p0StepsActive(action *object.Action) (active, any bool) {
+	for _, step := range action.AssociatedSteps {
+		if step.Body == nil {
+			continue
+		}
+		for _, stmt := range step.Body.Statements {
+			assoc, ok := stmt.(*ast.ActionBlockStatement)
+			if ok && assoc.ActionName.Value == action.Name.Value && assoc.Qualifier != nil && strings.EqualFold(assoc.Qualifier.Value, "P0") {
+				any = true
+				active = active || step.IsActive
+			}
+		}
+	}
+	return active, any
+}
+
+// controlAction determines the active state (`.IsActive`) of a single action
 // based on its highest-priority qualifier among all currently active associated
 // steps. It handles the logic for all standard qualifiers (N, S, R, P, D, L, etc.).
-func evaluateAction(action *object.Action, env *object.Environment) {
+func controlAction(action *object.Action, env *object.Environment) {
 	qualifier, isStepActive := getHighestPriorityActiveQualifier(action, env)
 
 	// --- Case 1: The controlling step is ACTIVE ---
@@ -906,8 +938,16 @@ func evaluateAction(action *object.Action, env *object.Environment) {
 	case "S":
 		// Stored, remains active.
 		return
-	case "SD", "DS":
-		// Stored delayed. If it became active, it stays active.
+	case "DS":
+		// Delayed and stored: stored only if its time was up while the step
+		// was active. Left before, it is cancelled; stored, it stays active
+		// until R.
+		if !action.IsActive {
+			action.TimerStart = time.Time{}
+		}
+		return
+	case "SD":
+		// Stored and delayed. If it became active, it stays active.
 		// If it was not yet active, the timer continues.
 		if !action.IsActive && !action.TimerStart.IsZero() {
 			if nowFunc().Sub(action.TimerStart) >= action.Duration {
@@ -948,7 +988,6 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 
 	for _, step := range action.AssociatedSteps {
 		if step.IsActive {
-			anyStepActive = true
 			if step.Body == nil {
 				continue
 			}
@@ -963,6 +1002,13 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 					if actionAssoc.Qualifier != nil {
 						q = actionAssoc.Qualifier.Value
 					}
+					switch strings.ToUpper(q) {
+					case "P0":
+						continue // a pulse on the step leaving: evaluateAction
+					case "P1":
+						q = "P" // a pulse on the step becoming active, as P
+					}
+					anyStepActive = true
 					// If it's a timed qualifier, parse the duration.
 					switch q {
 					case "D", "L", "SD", "DS", "SL":

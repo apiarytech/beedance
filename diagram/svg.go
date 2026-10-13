@@ -24,6 +24,7 @@ package diagram
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -41,8 +42,39 @@ const (
 // document. Colours follow the editor's theme where the page sets VS
 // Code's CSS variables, with plain fallbacks elsewhere.
 func SVG(elems []*Elem) string {
-	l := drawingLayout(elems)
+	l := drawingLayout(elems, nil)
 	return l.draw()
+}
+
+// SVGWires draws as SVG does, and names on each wire the value it
+// carries (Lowered.Wires) as data-expr, so a page can draw the power flow
+// from the program's live variables: a wire from the left rail carries
+// TRUE.
+func SVGWires(elems []*Elem, wires map[Conn]string) string {
+	return drawingLayout(elems, drawnWires(elems, wires)).draw()
+}
+
+// drawnWires keys the lowering's wires as forDrawing draws them: a
+// function in a rung is drawn with EN and ENO, and the AND the lowering
+// joins it to the rung with is not drawn, so its value is the ENO's.
+func drawnWires(elems []*Elem, wires map[Conn]string) map[Conn]string {
+	out := maps.Clone(wires)
+	for _, e := range elems {
+		if e.Kind() == "block" && e.Name == contactAnd && len(e.Inputs) == 2 && e.Inputs[1].In != nil && len(e.Inputs[1].In.Conns) == 1 {
+			if x, ok := wires[Conn{Ref: e.ID}]; ok {
+				out[Conn{Ref: e.Inputs[1].In.Conns[0].Ref, Param: "ENO"}] = x
+			}
+		}
+	}
+	for _, e := range elems {
+		eno := Conn{Ref: e.ID, Param: "ENO"}
+		if _, set := out[eno]; !set && e.Kind() == "block" && e.Name == contactFunction {
+			if x, ok := wires[Conn{Ref: e.ID}]; ok {
+				out[eno] = x
+			}
+		}
+	}
+	return out
 }
 
 type node struct {
@@ -65,7 +97,8 @@ type layout struct {
 	srcs    map[int][]Conn // element -> wires into it (all inputs)
 	readers map[int][]Conn // element -> params read from it (Ref = reader)
 	nets    [][]*node
-	netRail map[int]*Elem // network index -> its rail, if any
+	netRail map[int]*Elem   // network index -> its rail, if any
+	wires   map[Conn]string // what each wire carries (SVGWires)
 }
 
 func newLayout(elems []*Elem) *layout {
@@ -343,6 +376,8 @@ func (l *layout) width(n *node) float64 {
 			}
 			if n.e.InstanceName != "" && !isPower(p) {
 				w += liveW // the pin's value at run time
+			} else if l.dataWire(n.e, p) != "" {
+				w += liveW // the value wired in (L-39)
 			}
 			in = max(in, w)
 		}
@@ -350,6 +385,8 @@ func (l *layout) width(n *node) float64 {
 			w := text(p)
 			if n.e.InstanceName != "" && p != "" && !isPower(p) {
 				w += liveW
+			} else if n.e.InstanceName == "" && l.wires != nil && p != "" && !isPower(p) {
+				w += liveW // a function's result (L-40)
 			}
 			out = max(out, w)
 		}
@@ -452,7 +489,11 @@ func (l *layout) draw() string {
 		g := at[e.ID]
 		// Wires into it, around the elements in their way (route.go).
 		for _, w := range l.wiresInto(e, at, rt) {
-			p.f(`<polyline class="w" points="`)
+			if x, ok := l.wires[w.conn]; ok {
+				p.f(`<polyline class="w" data-expr="%s" points="`, esc(x))
+			} else {
+				p.f(`<polyline class="w" points="`)
+			}
 			for i, q := range w.ps {
 				if i > 0 {
 					p.f(" ")
@@ -525,6 +566,13 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 		// first row, its instance above the box.
 		my += float64(n.head) * rowH
 		p.f(`<rect class="b" x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="2"/>`, x, y+4, w, float64(n.rows)*rowH-8)
+		// A timer's or counter's progress along its bottom edge: ET of PT,
+		// CV of PV, which the page fills in (L-40).
+		if cur, limit := progressOf(e); cur != "" {
+			by := y + 4 + float64(n.rows)*rowH - 8 - 5
+			p.f(`<g class="prog" data-prog="%s %s"><rect class="pbg" x="%.1f" y="%.1f" width="%.1f" height="3"/><rect class="pf" x="%.1f" y="%.1f" width="0" height="3" data-w="%.1f"/></g>`,
+				esc(cur), esc(limit), x+3, by, w-6, x+3, by, w-6)
+		}
 		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle" font-weight="bold">%s</text>`, cx, y+17, esc(e.TypeName))
 		if n.head > 0 {
 			p.f(`<line class="sep" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, y+rowH-4, x+w, y+rowH-4)
@@ -562,6 +610,8 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 				}
 			} else if e.InstanceName != "" && !isPower(in) {
 				slot(p, cursor, py+4, "start", e.InstanceName+"."+in) // the pin's value at run time
+			} else if x := l.dataWire(e, in); x != "" {
+				exprSlot(p, cursor, py+4, "start", x) // the value wired in from another block (L-39)
 			}
 		}
 		for i, out := range n.outs {
@@ -569,10 +619,22 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 			if i < len(e.Outputs) && e.Outputs[i].Negated {
 				p.f(`<circle class="b" cx="%.1f" cy="%.1f" r="3"/>`, x+w+3, py)
 			}
-			if out != "" && !(out == "OUT" && e.InstanceName == "") {
-				p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text>`, pinClass(out), x+w-4, py+4, esc(out))
+			switch {
+			case out != "" && !(out == "OUT" && e.InstanceName == ""):
 				if e.InstanceName != "" && !isPower(out) {
-					slot(p, x+w-4-float64(len(out))*charW*10/12-6, py+4, "end", e.InstanceName+"."+out) // its value at run time (L-38)
+					// An instance's output: green while a BOOL one is TRUE, its
+					// value beside it (L-38, L-40).
+					p.f(`<g class="el pin" data-var="%s" data-neg="false">`, esc(e.InstanceName+"."+out))
+					p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text></g>`, pinClass(out), x+w-4, py+4, esc(out))
+					slot(p, x+w-4-float64(len(out))*charW*10/12-6, py+4, "end", e.InstanceName+"."+out)
+				} else {
+					p.f(`<text class="%s" x="%.1f" y="%.1f" font-size="10" text-anchor="end">%s</text>`, pinClass(out), x+w-4, py+4, esc(out))
+				}
+			case out != "":
+				// A function's result, held by no variable: worked out by the
+				// page from the expression it is (L-40).
+				if v := l.resultOf(e, i); v != "" {
+					exprSlot(p, x+w-4, py+4, "end", v)
 				}
 			}
 		}
@@ -586,6 +648,10 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 			text = "NOT " + text
 		}
 		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, my+4, esc(text))
+		// An output variable: its value beside the box (L-40).
+		if (e.Kind() == "outVariable" || e.Kind() == "inOutVariable") && simpleOperand.get().MatchString(strings.TrimSpace(e.Expression)) {
+			slot(p, x+w+4, my+4, "start", strings.TrimSpace(e.Expression))
+		}
 	}
 }
 
@@ -756,10 +822,13 @@ func pinClass(pin string) string {
 
 // drawingLayout lays out a body's elements as drawn: with forDrawing's
 // changes, and each block wide enough for the values inside it.
-func drawingLayout(elems []*Elem) *layout {
+// drawingLayout lays out a body to draw; wires (SVGWires) also leave room
+// for the values the page shows on data inputs (dataWire).
+func drawingLayout(elems []*Elem, wires map[Conn]string) *layout {
 	drawn, inline := forDrawing(elems)
 	l := newLayout(drawn)
 	l.inline = inline
+	l.wires = wires
 	for _, net := range l.nets {
 		for _, n := range net {
 			n.w = l.width(n)
@@ -785,4 +854,83 @@ const liveW = 6 + 9*charW*10/12
 // L-38): data-vals "=<name>" asks for the value alone.
 func slot(p *pen, x, y float64, anchor, name string) {
 	p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" text-anchor="%s" data-vals="=%s"></text>`, x, y, anchor, esc(name))
+}
+
+// exprSlot is a value the page works out from an expression over the
+// program's variables (data-val-expr): a block's result, which no variable
+// holds at run time (drone L-39).
+func exprSlot(p *pen, x, y float64, anchor, expr string) {
+	p.f(`<text class="lv" x="%.1f" y="%.1f" font-size="10" text-anchor="%s" data-val-expr="%s"></text>`, x, y, anchor, esc(expr))
+}
+
+// dataWire is the value wired into a function's data input, as the
+// expression the wires carry: ADD's result into MUL's IN1, a comparison's
+// BOOL into AND, a timer's Q, a variable read by several pins, wires
+// joined at the pin (their OR). "" where the page has nothing to add: no
+// wires named, an instance's input (its own value shows), EN, a pin not
+// wired (a value inside the block shows itself) (L-39, L-41).
+func (l *layout) dataWire(e *Elem, in string) string {
+	if l.wires == nil || e.InstanceName != "" || isPower(in) || l.inline[e.ID][strings.ToUpper(in)] != nil {
+		return ""
+	}
+	pin := pinOf(e, in)
+	if pin == nil || pin.In == nil || len(pin.In.Conns) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range pin.In.Conns {
+		x, ok := l.wires[c]
+		if !ok {
+			return ""
+		}
+		parts = append(parts, x)
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, " OR ") + ")"
+}
+
+// resultOf is a function's i-th drawn output as the expression the
+// lowering made of it, from a wire that carries it; "" when no wire does.
+func (l *layout) resultOf(e *Elem, i int) string {
+	if l.wires == nil {
+		return ""
+	}
+	n := l.nodes[e.ID]
+	if n == nil || i >= len(n.outs) {
+		return ""
+	}
+	for _, c := range []Conn{{Ref: e.ID, Param: n.outs[i]}, {Ref: e.ID}} {
+		if x, ok := l.wires[c]; ok && (c.Param != "" || i == firstData(n.outs)) {
+			return x
+		}
+	}
+	return ""
+}
+
+// firstData is the index of the first output that is not ENO.
+func firstData(outs []string) int {
+	for i, o := range outs {
+		if !isPower(o) {
+			return i
+		}
+	}
+	return -1
+}
+
+// progressOf names what a standard timer's or counter's progress is: its
+// elapsed time of its preset (ET, PT), or its count of its preset (CV,
+// PV); "" for other blocks.
+func progressOf(e *Elem) (cur, limit string) {
+	if e.InstanceName == "" {
+		return "", ""
+	}
+	switch strings.ToUpper(e.TypeName) {
+	case "TON", "TOF", "TP":
+		return e.InstanceName + ".ET", e.InstanceName + ".PT"
+	case "CTU", "CTD", "CTUD":
+		return e.InstanceName + ".CV", e.InstanceName + ".PV"
+	}
+	return "", ""
 }

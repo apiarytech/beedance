@@ -54,7 +54,7 @@ Result: 30
   ESP-IDF's: its second-stage bootloader at `0x0`, the partition table at
   `0x8000` (both in [boot](boot/README.md), built by ESP-IDF v5.4) and the
   app at `0x10000`. Two changes to TinyGo's target make the app bootable
-  there ([tinygo](tinygo/), copies of TinyGo 0.42.0's files):
+  there ([tinygo](tinygo/), copies of TinyGo 0.43.0's files):
   - the linker script starts segment 0 (`.rodata`; `.data` on the C6) with
     an `esp_app_desc_t`, the app description ESP-IDF's bootloader requires
     (without it the bootloader reads TinyGo's data as one and refuses the
@@ -84,8 +84,9 @@ Result: 30
   been tried on a board. The test passes because the VM has finished by
   then.
 - **Not emulated**: the ESP32-S2, H2, C2 and P4. Espressif's QEMU has no
-  machine for them, and TinyGo 0.42 has no target that builds firmware for
-  them either (only their register definitions). On every chip, Wi-Fi,
+  machine for them. TinyGo 0.43 builds firmware for the H2
+  (`esp32h2-devkitm-1`), to be tried on a board, but has no target for the
+  S2, C2 and P4 (only their register definitions). On every chip, Wi-Fi,
   Bluetooth and most peripherals are not emulated. TinyGo builds firmware
   for many more ESP32, C3, S3 and C6 boards (`tinygo targets | grep esp`).
 
@@ -97,7 +98,7 @@ Build arguments pick what is built:
 |---|---|---|
 | `CHIP` | `esp32` | `esp32`, `esp32c3`, `esp32s3` or `esp32c6` |
 | `PKG` | `./embedded/example/raspberrypi` | Go package to build |
-| `TINYGO_VERSION` | `0.42.0` | The `tinygo/` files are TinyGo 0.42.0's: check them against a new version |
+| `TINYGO_VERSION` | `0.43.0` | The `tinygo/` files are TinyGo 0.43.0's: check them against a new version |
 | `QEMU_TAG`, `QEMU_VERSION` | `esp-develop-9.2.2-20260417` | Espressif QEMU release (ESP32, C3, S3) |
 | `QEMU_COMMIT` | `febae182e132e4055529be423a818225ebddaa3a` | Espressif QEMU source the C6's is built from |
 

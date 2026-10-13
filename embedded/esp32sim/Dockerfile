@@ -12,7 +12,7 @@
 #
 # The CPU starts when a client connects to :4000, so no output is missed.
 
-ARG TINYGO_VERSION=0.42.0
+ARG TINYGO_VERSION=0.43.0
 # esp32, esp32c3, esp32s3 or esp32c6.
 ARG CHIP=esp32
 
@@ -20,7 +20,7 @@ FROM tinygo/tinygo:${TINYGO_VERSION} AS firmware
 ARG CHIP
 ARG PKG=./embedded/example/raspberrypi
 USER root
-# Build with the Go that ships in the image (TinyGo 0.42.0 has Go 1.27.0)
+# Build with the Go that ships in the image (TinyGo 0.43.0 has Go 1.27.2)
 # rather than downloading the newer patch release go.mod may ask for. Only the
 # container's copy of go.mod is lowered, and only when it is newer.
 ENV GOTOOLCHAIN=local

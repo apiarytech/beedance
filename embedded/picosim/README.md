@@ -31,7 +31,7 @@ Build arguments pick what is built:
 |---|---|---|
 | `PKG` | `./embedded/example/raspberrypi` | Go package to build |
 | `TARGET` | `pico` | TinyGo target: `pico` or `pico-w` |
-| `TINYGO_VERSION` | `0.42.0` | |
+| `TINYGO_VERSION` | `0.43.0` | |
 | `RP2040JS_VERSION` | `1.4.0` | |
 
 ```bash

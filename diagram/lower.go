@@ -58,6 +58,11 @@ type Lowered struct {
 	// Warnings say what was resolved by a rule the file did not settle,
 	// such as a feedback loop.
 	Warnings []string
+	// Wires gives the value each wire carries, as a Structured Text
+	// expression over the POU's variables and Decls: by the element the
+	// wire starts at and its output. A page shows power flow from it, the
+	// rung's state at each point (drone L-4).
+	Wires map[Conn]string
 }
 
 // StandardFunctionBlocks are the IEC 61131-3 function blocks: a block of
@@ -152,6 +157,7 @@ type lowering struct {
 	visiting   map[int]bool
 	warnings   []string
 	oneNetwork bool
+	wireText   map[Conn]string // what each wire carries, for Lowered.Wires
 }
 
 // Options are what lowering needs to know about the POU.
@@ -182,7 +188,7 @@ func ParseXML(innerXML string) ([]*Elem, error) {
 // Lower lowers the elements of an FBD or LD body to Structured Text.
 func Lower(pou string, elems []*Elem, opt Options) (*Lowered, error) {
 	l := &lowering{pou: pou, elems: map[int]*Elem{}, connectors: map[string]*Elem{}, fbTypes: map[string]bool{},
-		declared: map[string]bool{}, instance: map[int]string{}, enoFlag: map[int]string{}, visiting: map[int]bool{}, edgeOf: map[int]*expr{},
+		declared: map[string]bool{}, instance: map[int]string{}, enoFlag: map[int]string{}, visiting: map[int]bool{}, edgeOf: map[int]*expr{}, wireText: map[Conn]string{},
 		oneNetwork: opt.OneNetwork}
 	for _, t := range append(slices.Clone(StandardFunctionBlocks), opt.FunctionBlocks...) {
 		l.fbTypes[strings.ToUpper(t)] = true
@@ -239,7 +245,7 @@ func Lower(pou string, elems []*Elem, opt Options) (*Lowered, error) {
 	}
 	ordered := l.order(stmts)
 
-	out := &Lowered{Decls: l.decls, Warnings: l.warnings}
+	out := &Lowered{Decls: l.decls, Warnings: l.warnings, Wires: l.wireText}
 	var b strings.Builder
 	for _, s := range ordered {
 		for _, line := range s.lines {
@@ -359,6 +365,9 @@ func (l *lowering) wires(conns []Conn) (*expr, error) {
 		x, err := l.source(c)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := l.wireText[c]; !ok {
+			l.wireText[c] = x.text
 		}
 		if len(conns) > 1 {
 			if err := plain(x, "a wire joined with others"); err != nil {

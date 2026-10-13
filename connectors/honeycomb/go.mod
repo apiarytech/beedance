@@ -1,6 +1,6 @@
 module github.com/apiarytech/beedance/connectors/honeycomb
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/apiarytech/beedance v0.0.0

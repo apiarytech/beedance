@@ -2,8 +2,8 @@
 
 ## Requirements
 
-Go 1.27.1 or later. No C compiler is needed except for the race detector.
-TinyGo 0.42 for the microcontroller builds.
+Go 1.27.2 or later. No C compiler is needed except for the race detector.
+TinyGo 0.43 for the microcontroller builds.
 
 ## Build and test
 

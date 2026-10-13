@@ -190,7 +190,7 @@ func (n *native) run(ctx context.Context, e Engine, t *testInfo, opts Options) (
 // transpiled code uses OSCAT, at the versions above or replaced.
 func goMod(code string, replace map[string]string) string {
 	var b strings.Builder
-	b.WriteString("module beedance.sil/run\n\ngo 1.27.1\n\n")
+	b.WriteString("module beedance.sil/run\n\ngo 1.27.2\n\n")
 	b.WriteString("require github.com/apiarytech/royaljelly " + RoyaljellyVersion + "\n")
 	if strings.Contains(code, "github.com/apiarytech/beebread") {
 		b.WriteString("require github.com/apiarytech/beebread " + BeebreadVersion + "\n")

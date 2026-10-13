@@ -1,4 +1,4 @@
-/* From TinyGo 0.42.0, targets/esp32c3.ld (BSD 3-Clause, see LICENSE.tinygo),
+/* From TinyGo 0.43.0, targets/esp32c3.ld (BSD 3-Clause, see LICENSE.tinygo),
  * changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
  * an esp_app_desc_t at the start of .rodata, which the bootloader checks. */
 
@@ -204,7 +204,9 @@ SECTIONS
  */
 _globals_start = _sbss;
 _globals_end = _edata;
-_heap_start = _edata + SIZEOF(.iram) - (__init_end - __init_start);
+/* Goroutine stacks come from the heap and need 16 byte alignment
+ * (RISC-V ELF psABI, integer calling convention). */
+_heap_start = ALIGN(_edata + SIZEOF(.iram) - (__init_end - __init_start), 16);
 _heap_end = ORIGIN(DRAM) + LENGTH(DRAM);
 
 _stack_size = 4K;

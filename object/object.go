@@ -746,6 +746,9 @@ type Action struct {
 	Qualifier       string // This will now be determined dynamically per cycle
 	Duration        time.Duration
 	TimerStart      time.Time // When the timer for D, L, etc. started
+	// P0WasActive: a step the action is P0 on was active when last seen,
+	// so the action pulses once none is (P0 pulses on its step leaving).
+	P0WasActive bool
 }
 
 // Type returns the object's type.
