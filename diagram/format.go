@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // Format returns elems, a body of language lang ("LD" or "FBD"), in the text
@@ -181,7 +183,7 @@ func (f *formatter) value(c Conn) (string, error) {
 			}
 			s = f.instance(e) + "." + out
 		} else {
-			if out != "" && !strings.EqualFold(out, "OUT") {
+			if out != "" && !token.SameIdent(out, "OUT") {
 				return "", fmt.Errorf("function %s: output %s cannot be read in the text form (only its result)", e.TypeName, out)
 			}
 			call, err := f.function(e)
@@ -211,7 +213,7 @@ func (f *formatter) value(c Conn) (string, error) {
 
 func pinOf2(ps []Pin, param string) *Pin {
 	for i := range ps {
-		if strings.EqualFold(ps[i].Param, param) {
+		if token.SameIdent(ps[i].Param, param) {
 			return &ps[i]
 		}
 	}
@@ -248,7 +250,7 @@ func (f *formatter) function(e *Elem) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if strings.EqualFold(p.Param, "EN") {
+		if token.SameIdent(p.Param, "EN") {
 			if len(args) > 0 {
 				return "", fmt.Errorf("function %s: EN after other inputs", e.TypeName)
 			}
@@ -270,7 +272,7 @@ func (f *formatter) function(e *Elem) (string, error) {
 func (f *formatter) call(e *Elem, skip string, outs map[string]string) (string, error) {
 	var args []string
 	for _, p := range e.Inputs {
-		if skip != "" && strings.EqualFold(p.Param, skip) {
+		if skip != "" && token.SameIdent(p.Param, skip) {
 			continue
 		}
 		s, err := f.input(p, "block "+f.instance(e))
@@ -528,7 +530,7 @@ func (f *formatter) powered(e *Elem, pin string) bool {
 		switch src.Kind() {
 		case "leftPowerRail", "contact", "coil":
 		case "block":
-			if f.andContact(src) == nil && !(f.isFB(src) && strings.EqualFold(c.Param, f.powerPins(src)[1])) {
+			if f.andContact(src) == nil && !(f.isFB(src) && token.SameIdent(c.Param, f.powerPins(src)[1])) {
 				return false
 			}
 		default:
@@ -542,7 +544,7 @@ func (f *formatter) powered(e *Elem, pin string) bool {
 // (IN1) and a function's result (IN2), as ParseText and XML write it. It
 // returns the function, or nil.
 func (f *formatter) andContact(e *Elem) *Elem {
-	if e.Kind() != "block" || !strings.EqualFold(e.TypeName, "AND") || e.InstanceName != "" || len(e.Inputs) != 2 {
+	if e.Kind() != "block" || !token.SameIdent(e.TypeName, "AND") || e.InstanceName != "" || len(e.Inputs) != 2 {
 		return nil
 	}
 	in1, in2 := e.Inputs[0], e.Inputs[1]
@@ -575,7 +577,7 @@ func (f *formatter) andContact(e *Elem) *Elem {
 // the one the rung continues from: a value, not power.
 func (f *formatter) blockOutput(c Conn) bool {
 	e := f.elems[c.Ref]
-	return e != nil && f.isFB(e) && !strings.EqualFold(c.Param, f.powerPins(e)[1])
+	return e != nil && f.isFB(e) && !token.SameIdent(c.Param, f.powerPins(e)[1])
 }
 
 // coilPower is the power into a coil: a coil passes its power on, so a
@@ -797,14 +799,14 @@ func (f *formatter) element(e *Elem) (string, error) {
 		outs := map[string]string{}
 		for _, r := range f.readers[e.ID] {
 			reader := f.elems[r.Ref]
-			if reader.Kind() == "outVariable" && !reader.Negated && len(insOf(reader)) == 1 && !strings.EqualFold(r.Param, pins[1]) {
+			if reader.Kind() == "outVariable" && !reader.Negated && len(insOf(reader)) == 1 && !token.SameIdent(r.Param, pins[1]) {
 				outs[strings.ToUpper(r.Param)] = strings.TrimSpace(reader.Expression)
 			}
 		}
 		for p := range outs {
 			for _, r := range f.readers[e.ID] {
 				reader := f.elems[r.Ref]
-				if strings.EqualFold(r.Param, p) && reader.Kind() != "outVariable" {
+				if token.SameIdent(r.Param, p) && reader.Kind() != "outVariable" {
 					delete(outs, p) // read elsewhere too: by its instance name
 				}
 			}

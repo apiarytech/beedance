@@ -391,3 +391,30 @@ func LookupIdent(ident string) TokenType {
 	}
 	return IDENT // Return the canonical (uppercase) version
 }
+
+// SameIdent reports whether two names are equal ignoring ASCII case, as
+// IEC 61131-3 compares identifiers. Identifiers are ASCII (the lexer reads no
+// other letters), so unlike strings.EqualFold it needs no Unicode case
+// tables: using both EqualFold and ToUpper puts unicode.CaseRanges (6.7 KB)
+// in RAM on TinyGo targets.
+func SameIdent(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if x == y {
+			continue
+		}
+		if 'a' <= x && x <= 'z' {
+			x -= 'a' - 'A'
+		}
+		if 'a' <= y && y <= 'z' {
+			y -= 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
+}

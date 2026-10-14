@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 )
 
 // REFERENCE_OBJ is the type of a reference made by REF() or ADR().
@@ -245,7 +246,7 @@ func sameVariable(a, b *Reference) bool {
 	case a.IO != nil || b.IO != nil:
 		return a.Name == b.Name && b.IO != nil && a.IO != nil
 	}
-	return a.Env == b.Env && strings.EqualFold(a.Name, b.Name)
+	return a.Env == b.Env && token.SameIdent(a.Name, b.Name)
 }
 
 // isNullReference reports whether v is NULL or a NULL reference.

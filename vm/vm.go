@@ -17,6 +17,7 @@ import (
 	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 	"math"
 	"strings"
 )
@@ -298,22 +299,29 @@ func (vm *VM) Run() (runErr error) {
 	var ins code.Instructions
 	var err error
 
-	for vm.currentFrame().ip < len(vm.currentFrame().Instructions())-1 {
+	// cur is the frame the instruction runs in, read once per instruction:
+	// an instruction that pushes or pops a frame does so after its last use
+	// of cur, and the next instruction reads the new frame.
+	for {
+		cur := vm.frames[vm.framesIndex-1]
+		ins = cur.cl.Fn.Instructions
+		if cur.ip >= len(ins)-1 {
+			break
+		}
 		if vm.budget > 0 {
 			if vm.used++; vm.used > vm.budget {
 				return ErrBudget
 			}
 		}
-		vm.currentFrame().ip++ // Advance instruction pointer to the next opcode
-		ip := vm.currentFrame().ip
-		ins = vm.currentFrame().Instructions()
+		cur.ip++ // Advance instruction pointer to the next opcode
+		ip := cur.ip
 		op := code.Opcode(ins[ip])
 
 		switch op {
 		// OpConstant pushes a constant from the constant pool onto the stack.
 		case code.OpConstant:
 			constIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2 // Advance past operand
+			cur.ip += 2 // Advance past operand
 			err = vm.push(vm.constants[constIndex])
 
 		// OpPop removes the top element from the stack.
@@ -346,15 +354,15 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpJump:
 			// OpJump unconditionally sets the instruction pointer to a new location.
 			pos := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
+			cur.ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
 
 		case code.OpJumpNotTruthy:
 			// OpJumpNotTruthy pops a value from the stack and jumps if it's not truthy.
 			pos := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2 // Advance past operand
+			cur.ip += 2 // Advance past operand
 			condition := vm.pop()
 			if !object.IsTruthy(condition) {
-				vm.currentFrame().ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
+				cur.ip = pos - 1 // Set IP to the instruction *before* the target, so next loop iteration increments to target
 			}
 
 		case code.OpNull:
@@ -364,7 +372,7 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpSetGlobal:
 			// OpSetGlobal pops a value from the stack and stores it in the globals slice.
 			globalIndex := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2 // Advance past operand
+			cur.ip += 2 // Advance past operand
 			if err = vm.checkGlobal(globalIndex); err == nil {
 				vm.globals[globalIndex] = vm.pop()
 			}
@@ -372,7 +380,7 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpGetGlobal:
 			// OpGetGlobal retrieves a value from the globals slice and pushes it onto the stack.
 			globalIndex := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2 // Advance past operand
+			cur.ip += 2 // Advance past operand
 			if err = vm.checkGlobal(globalIndex); err != nil {
 				break
 			}
@@ -388,7 +396,7 @@ func (vm *VM) Run() (runErr error) {
 		// OpArray creates an array object from a number of elements on the stack.
 		case code.OpArray:
 			numElements := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2
+			cur.ip += 2
 			array := vm.buildArray(vm.sp-numElements, vm.sp)
 			vm.sp = vm.sp - numElements
 			err = vm.push(array)
@@ -396,7 +404,7 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpArrayBounds:
 			// Sets the declared lower bounds of the array on top of the stack.
 			boundsIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2
+			cur.ip += 2
 			bounds, ok := vm.constants[boundsIndex].(*object.Array)
 			if !ok {
 				return fmt.Errorf("internal VM error: array bounds constant is %T", vm.constants[boundsIndex])
@@ -411,7 +419,7 @@ func (vm *VM) Run() (runErr error) {
 			// A bit of an integer or bit string, e.g. flags.3.
 			n := int64(code.ReadUint8(ins[ip+1:]))
 			typeName := vm.bitTypeName(code.ReadUint16(ins[ip+2:]))
-			vm.currentFrame().ip += 3
+			cur.ip += 3
 			bit, bitErr := object.GetBitAs(vm.stack[vm.sp-1], n, typeName)
 			if bitErr != nil {
 				return bitErr
@@ -422,7 +430,7 @@ func (vm *VM) Run() (runErr error) {
 			// The integer or bit string with one bit set: flags.3 := value.
 			n := int64(code.ReadUint8(ins[ip+1:]))
 			typeName := vm.bitTypeName(code.ReadUint16(ins[ip+2:]))
-			vm.currentFrame().ip += 3
+			cur.ip += 3
 			value := vm.pop()
 			updated, bitErr := object.SetBitAs(vm.stack[vm.sp-1], n, object.IsTruthy(value), typeName)
 			if bitErr != nil {
@@ -433,7 +441,7 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpHash:
 			// OpHash creates a hash object from key-value pairs on the stack.
 			numElements := int(code.ReadUint16(ins[ip+1:]))
-			vm.currentFrame().ip += 2
+			cur.ip += 2
 			var hash object.Object
 			hash, err = vm.buildHash(vm.sp-numElements, vm.sp)
 			vm.sp = vm.sp - numElements
@@ -456,7 +464,7 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpCall:
 			// OpCall executes a function or closure call.
 			numArgs := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1 // Advance past operand
+			cur.ip += 1 // Advance past operand
 			err = vm.executeCall(int(numArgs))
 
 		case code.OpReturnValue:
@@ -488,22 +496,22 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpSetLocal:
 			// OpSetLocal pops a value and sets it as a local variable in the current frame.
 			localIndex := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
-			frame := vm.currentFrame()
+			cur.ip += 1
+			frame := cur
 			vm.stack[frame.basePointer+int(localIndex)] = vm.pop()
 
 		case code.OpGetLocal:
 			// OpGetLocal retrieves a local variable from the current frame and pushes it onto the stack.
 			localIndex := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
-			frame := vm.currentFrame()
+			cur.ip += 1
+			frame := cur
 			err = vm.push(vm.stack[frame.basePointer+int(localIndex)])
 
 		case code.OpGetBuiltin:
 			// OpGetBuiltin retrieves a built-in function and pushes it onto the stack.
 			// The operand is a 16-bit index to support more than 256 built-ins.
 			builtinIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2 // Advance past the 2-byte operand
+			cur.ip += 2 // Advance past the 2-byte operand
 
 			if int(builtinIndex) >= len(vm.builtins) {
 				return fmt.Errorf("invalid builtin index: %d", builtinIndex)
@@ -515,24 +523,24 @@ func (vm *VM) Run() (runErr error) {
 			// OpClosure creates a closure from a compiled function and free variables.
 			constIndex := code.ReadUint16(ins[ip+1:])
 			numFree := code.ReadUint8(ins[ip+3:])
-			vm.currentFrame().ip += 3 // Advance past operands
+			cur.ip += 3 // Advance past operands
 			err = vm.pushClosure(int(constIndex), int(numFree))
 
 		case code.OpGetFree:
 			// OpGetFree retrieves a free variable from the current closure.
 			freeIndex := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
-			currentClosure := vm.currentFrame().cl
+			cur.ip += 1
+			currentClosure := cur.cl
 			err = vm.push(currentClosure.Free[freeIndex])
 
 		case code.OpCurrentClosure:
 			// OpCurrentClosure pushes the current closure onto the stack, for recursion.
-			currentClosure := vm.currentFrame().cl
+			currentClosure := cur.cl
 			err = vm.push(currentClosure)
 
 		case code.OpMakeNamedArg:
 			nameIndex := code.ReadUint16(ins[ip+1:])
-			vm.currentFrame().ip += 2
+			cur.ip += 2
 
 			nameObj, ok := vm.constants[nameIndex].(*object.String)
 			if !ok {
@@ -612,8 +620,8 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpSetFree:
 			// Assigns to a variable captured by the current closure.
 			freeIndex := code.ReadUint8(ins[ip+1:])
-			vm.currentFrame().ip += 1
-			vm.currentFrame().cl.Free[freeIndex] = vm.pop()
+			cur.ip += 1
+			cur.cl.Free[freeIndex] = vm.pop()
 
 		default:
 			// Skipping an unknown opcode would run its operand bytes as
@@ -684,13 +692,13 @@ func (vm *VM) executeBinaryBooleanOperation(
 func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+	if done, err := vm.fastBinary(op, left, right); done {
+		return err
+	}
 	right, left = asBitString(right), asBitString(left)
 
-	leftType := left.Type()
-	rightType := right.Type()
-
 	switch {
-	case leftType == object.BOOLEAN_OBJ && rightType == object.BOOLEAN_OBJ:
+	case isBoolean(left) && isBoolean(right):
 		return vm.executeBinaryBooleanOperation(op, left, right)
 	case isInteger(left) && isInteger(right):
 		return vm.executeBinaryIntegerOperation(op, left, right)
@@ -702,7 +710,7 @@ func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 		return vm.executeSharedOperation(op, left, right)
 	default:
 		return fmt.Errorf("unsupported types for binary operation: %s %s",
-			leftType, rightType)
+			left.Type(), right.Type())
 	}
 }
 
@@ -719,7 +727,12 @@ func (vm *VM) executeBinaryIntegerOperation(
 	if !ok {
 		return fmt.Errorf("right operand is not an integer: %s", right.Type())
 	}
+	return vm.integerOperation(op, leftValue, rightValue)
+}
 
+// integerOperation performs a binary operation on two integer values and
+// pushes the result as a LINT.
+func (vm *VM) integerOperation(op code.Opcode, leftValue, rightValue int64) error {
 	var result int64 // Keep as int64 for now, or change to int32 if object.Integer.Value is changed
 
 	switch op {
@@ -755,7 +768,7 @@ func (vm *VM) executeBinaryIntegerOperation(
 		return fmt.Errorf("unknown integer operator: %s", opcodeName(op))
 	}
 
-	return vm.push(&object.LInt{Value: result})
+	return vm.push(newLInt(result))
 }
 
 // executeBinaryRealOperation performs a binary operation on two real-number objects.
@@ -780,7 +793,12 @@ func (vm *VM) executeBinaryRealOperation(
 	} else {
 		return fmt.Errorf("right operand is not a real: %s", right.Type())
 	}
+	return vm.realOperation(op, leftValue, rightValue)
+}
 
+// realOperation performs a binary operation on two real values and pushes
+// the result as an LREAL.
+func (vm *VM) realOperation(op code.Opcode, leftValue, rightValue float64) error {
 	var result float64
 
 	switch op {
@@ -808,11 +826,17 @@ func (vm *VM) executeBinaryRealOperation(
 func (vm *VM) executeComparison(op code.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+	if done, err := vm.fastComparison(op, left, right); done {
+		return err
+	}
 	right, left = asBitString(right), asBitString(left)
 
 	// r = NULL, r1 <> r2: references compare by what they refer to.
 	if op == code.OpEqual || op == code.OpNotEqual {
-		operator := map[code.Opcode]string{code.OpEqual: "=", code.OpNotEqual: "<>"}[op]
+		operator := "="
+		if op == code.OpNotEqual {
+			operator = "<>"
+		}
 		if equal, ok, err := object.CompareReferences(left, operator, right); ok {
 			if err != nil {
 				return err
@@ -844,7 +868,7 @@ func (vm *VM) executeComparison(op code.Opcode) error {
 	leftEnum, leftIsEnum := left.(*object.EnumeratedValue)
 	rightEnum, rightIsEnum := right.(*object.EnumeratedValue)
 	if leftIsEnum && rightIsEnum && (op == code.OpEqual || op == code.OpNotEqual) {
-		same := strings.EqualFold(leftEnum.TypeName, rightEnum.TypeName) && strings.EqualFold(leftEnum.Value, rightEnum.Value)
+		same := token.SameIdent(leftEnum.TypeName, rightEnum.TypeName) && token.SameIdent(leftEnum.Value, rightEnum.Value)
 		return vm.push(nativeBoolToBooleanObject(same == (op == code.OpEqual)))
 	}
 
@@ -892,8 +916,8 @@ var sharedOperators = map[code.Opcode]string{
 // Operations on these use the object package's implementation, which the
 // evaluator also uses, so both engines follow the same IEC 61131-3 rules.
 func usesSharedOperations(obj object.Object) bool {
-	switch obj.Type() {
-	case object.TIME_OBJ, object.DATE_OBJ, object.TIME_OF_DAY_OBJ, object.DATE_AND_TIME_OBJ, object.BITSTRING_OBJ:
+	switch obj.(type) {
+	case *object.Time, *object.Date, *object.TimeOfDay, *object.DateAndTime, *object.BitString:
 		return true
 	}
 	return false
@@ -934,7 +958,11 @@ func (vm *VM) executeIntegerComparison(
 	if !ok {
 		return fmt.Errorf("right operand is not an integer: %s", right.Type())
 	}
+	return vm.integerComparison(op, leftValue, rightValue)
+}
 
+// integerComparison compares two integer values and pushes the BOOL result.
+func (vm *VM) integerComparison(op code.Opcode, leftValue, rightValue int64) error {
 	switch op {
 	case code.OpEqual:
 		return vm.push(nativeBoolToBooleanObject(leftValue == rightValue))
@@ -974,7 +1002,11 @@ func (vm *VM) executeRealComparison(
 	} else {
 		return fmt.Errorf("right operand is not a real: %s", right.Type())
 	}
+	return vm.realComparison(op, leftValue, rightValue)
+}
 
+// realComparison compares two real values and pushes the BOOL result.
+func (vm *VM) realComparison(op code.Opcode, leftValue, rightValue float64) error {
 	switch op {
 	case code.OpEqual:
 		return vm.push(nativeBoolToBooleanObject(leftValue == rightValue))
@@ -1051,7 +1083,7 @@ func (vm *VM) executeBinaryStringOperation(
 
 	joined := stringValue(left) + stringValue(right)
 	// Joining with a WSTRING gives a WSTRING, matching the compiler's typing.
-	if left.Type() == object.WSTRING_OBJ || right.Type() == object.WSTRING_OBJ {
+	if isWString(left) || isWString(right) {
 		return vm.push(&object.WString{Value: joined})
 	}
 	return vm.push(&object.String{Value: joined})
@@ -1059,7 +1091,11 @@ func (vm *VM) executeBinaryStringOperation(
 
 // isString reports whether obj is a STRING or WSTRING.
 func isString(obj object.Object) bool {
-	return obj.Type() == object.STRING_OBJ || obj.Type() == object.WSTRING_OBJ
+	switch obj.(type) {
+	case *object.String, *object.WString:
+		return true
+	}
+	return false
 }
 
 // stringValue returns the text of a STRING or WSTRING object.
@@ -1108,9 +1144,9 @@ func (vm *VM) buildHash(startIndex, endIndex int) (object.Object, error) {
 // executeIndexExpression executes an index operation on an array or hash.
 func (vm *VM) executeIndexExpression(left, index object.Object) error {
 	switch {
-	case left.Type() == object.ARRAY_OBJ && isInteger(index):
+	case isArray(left) && isInteger(index):
 		return vm.executeArrayIndex(left, index)
-	case left.Type() == object.HASH_OBJ:
+	case isHash(left):
 		return vm.executeHashIndex(left, index)
 	default:
 		return fmt.Errorf("index operator not supported: %s", left.Type())
@@ -1138,12 +1174,12 @@ func (vm *VM) executeArrayIndex(array, index object.Object) error {
 func (vm *VM) executeHashIndex(hash, index object.Object) error {
 	hashObject := hash.(*object.Hash)
 
-	key, ok := index.(object.Hashable) // cspell:disable-line
+	key, ok := hashKeyOf(index)
 	if !ok {
 		return fmt.Errorf("unusable as hash key: %s", index.Type())
 	}
 
-	pair, ok := hashObject.Pairs[key.HashKey()]
+	pair, ok := hashObject.Pairs[key]
 	if !ok {
 		if name, isString := index.(*object.String); isString {
 			if k, found := foldKey(hashObject, name); found {
@@ -1185,7 +1221,7 @@ func (b *BoundMethod) Inspect() string { return "bound method" }
 // instanceClass returns the class hash of an FB instance, which is stored
 // under the "__class__" key. It reports false if hash is not an instance.
 func instanceClass(hash *object.Hash) (*object.Hash, bool) {
-	pair, ok := hash.Pairs[(&object.String{Value: "__class__"}).HashKey()]
+	pair, ok := hash.Pairs[classKey]
 	if !ok {
 		return nil, false
 	}
@@ -1196,9 +1232,9 @@ func instanceClass(hash *object.Hash) (*object.Hash, bool) {
 // executeSetIndex executes a set index operation on an array or hash.
 func (vm *VM) executeSetIndex(left, index, val object.Object) error {
 	switch {
-	case left.Type() == object.ARRAY_OBJ && isInteger(index):
+	case isArray(left) && isInteger(index):
 		return vm.executeArraySetIndex(left, index, val)
-	case left.Type() == object.HASH_OBJ:
+	case isHash(left):
 		return vm.executeHashSetIndex(left, index, val)
 	default:
 		return fmt.Errorf("index operator not supported for setting on: %s", left.Type())
@@ -1227,11 +1263,11 @@ func (vm *VM) executeArraySetIndex(array, index, val object.Object) error {
 // executeHashSetIndex executes a set index operation on a hash.
 func (vm *VM) executeHashSetIndex(hash, index, val object.Object) error {
 	hashObject := hash.(*object.Hash)
-	key, ok := index.(object.Hashable)
+	key, ok := hashKeyOf(index)
 	if !ok {
 		return fmt.Errorf("unusable as hash key: %s", index.Type())
 	}
-	if _, exact := hashObject.Pairs[key.HashKey()]; !exact {
+	if _, exact := hashObject.Pairs[key]; !exact {
 		if name, isString := index.(*object.String); isString {
 			if k, found := foldKey(hashObject, name); found {
 				hashObject.Pairs[k] = object.HashPair{Key: hashObject.Pairs[k].Key, Value: val}
@@ -1239,7 +1275,7 @@ func (vm *VM) executeHashSetIndex(hash, index, val object.Object) error {
 			}
 		}
 	}
-	hashObject.Pairs[key.HashKey()] = object.HashPair{Key: index, Value: val}
+	hashObject.Pairs[key] = object.HashPair{Key: index, Value: val}
 	return nil
 }
 
@@ -1422,11 +1458,16 @@ func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	return False
 }
 
+// The type tests on the hot path switch on the concrete type rather than
+// calling obj.Type(): TinyGo compiles an interface method call to a search
+// over every Object type, which made each instruction many times slower on
+// a microcontroller. Each ObjectType belongs to exactly one concrete type.
+
 // isInteger checks if an object is one of the integer types.
 func isInteger(obj object.Object) bool {
-	switch obj.Type() {
-	case object.SINT_OBJ, object.INT_OBJ, object.DINT_OBJ, object.LINT_OBJ,
-		object.USINT_OBJ, object.UINT_OBJ, object.UDINT_OBJ, object.ULINT_OBJ:
+	switch obj.(type) {
+	case *object.SInt, *object.Int, *object.DInt, *object.LInt,
+		*object.USInt, *object.UInt, *object.UDInt, *object.ULInt:
 		return true
 	default:
 		return false
@@ -1435,12 +1476,24 @@ func isInteger(obj object.Object) bool {
 
 // isReal checks if an object is one of the real-number types.
 func isReal(obj object.Object) bool {
-	switch obj.Type() {
-	case object.REAL_OBJ, object.LREAL_OBJ:
+	switch obj.(type) {
+	case *object.Real, *object.LReal:
 		return true
 	default:
 		return false
 	}
+}
+
+// isBoolean checks if an object is a BOOL.
+func isBoolean(obj object.Object) bool {
+	_, ok := obj.(*object.Boolean)
+	return ok
+}
+
+// isWString checks if an object is a WSTRING.
+func isWString(obj object.Object) bool {
+	_, ok := obj.(*object.WString)
+	return ok
 }
 
 // executeSuperIndex finds a method on a parent class and pushes the corresponding closure onto the stack.
@@ -1463,7 +1516,7 @@ func (vm *VM) executeSuperIndex(instance, methodName object.Object) error {
 	var classHash *object.Hash
 	// An instance must have a `__class__` field pointing to its class hash.
 	// This is a design assumption for the VM's OOP model.
-	classHashKey := (&object.String{Value: "__class__"}).HashKey()
+	classHashKey := classKey
 	classPair, ok := instanceHash.Pairs[classHashKey]
 	if !ok {
 		// Fallback for tests where an instance might be the class hash itself.
@@ -1482,7 +1535,7 @@ func (vm *VM) executeSuperIndex(instance, methodName object.Object) error {
 	}
 
 	// Get the parent of that owner class.
-	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	parentHashKey := parentKey
 	parentPair, ok := ownerClass.Pairs[parentHashKey]
 	if !ok {
 		return fmt.Errorf("super call on a class with no parent")
@@ -1514,7 +1567,7 @@ func (vm *VM) findClosureOwner(class *object.Hash, cl *object.Closure) (*object.
 		}
 	}
 
-	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	parentHashKey := parentKey
 	if parentPair, ok := class.Pairs[parentHashKey]; ok {
 		if parentHash, ok := parentPair.Value.(*object.Hash); ok {
 			return vm.findClosureOwner(parentHash, cl)
@@ -1531,7 +1584,7 @@ func (vm *VM) findMethodInHierarchy(class *object.Hash, methodName *object.Strin
 		return methodPair.Value, nil
 	}
 
-	parentHashKey := (&object.String{Value: "__parent__"}).HashKey()
+	parentHashKey := parentKey
 	if parentPair, ok := class.Pairs[parentHashKey]; ok {
 		if parentHash, ok := parentPair.Value.(*object.Hash); ok {
 			return vm.findMethodInHierarchy(parentHash, methodName)
@@ -1574,9 +1627,95 @@ func (vm *VM) bitTypeName(operand uint16) string {
 // reaches an instance's `Q`. It is used only when the exact key misses.
 func foldKey(hash *object.Hash, name *object.String) (object.HashKey, bool) {
 	for k, pair := range hash.Pairs {
-		if s, ok := pair.Key.(*object.String); ok && strings.EqualFold(s.Value, name.Value) {
+		if s, ok := pair.Key.(*object.String); ok && token.SameIdent(s.Value, name.Value) {
 			return k, true
 		}
 	}
 	return object.HashKey{}, false
 }
+
+// isArray checks if an object is an ARRAY.
+func isArray(obj object.Object) bool {
+	_, ok := obj.(*object.Array)
+	return ok
+}
+
+// isHash checks if an object is a structure or other hash.
+func isHash(obj object.Object) bool {
+	_, ok := obj.(*object.Hash)
+	return ok
+}
+
+// fastBinary computes an arithmetic operation on two LINTs or two LREALs,
+// the types the VM computes in, without the general dispatch, and reports
+// whether it did. The result is the one executeBinaryOperation gives: these
+// types are neither bit strings nor BOOLs, so its first matching case is the
+// integer or real one.
+func (vm *VM) fastBinary(op code.Opcode, left, right object.Object) (bool, error) {
+	switch l := left.(type) {
+	case *object.LInt:
+		if r, ok := right.(*object.LInt); ok {
+			return true, vm.integerOperation(op, l.Value, r.Value)
+		}
+	case *object.LReal:
+		if r, ok := right.(*object.LReal); ok {
+			return true, vm.realOperation(op, l.Value, r.Value)
+		}
+	}
+	return false, nil
+}
+
+// fastComparison is fastBinary for comparisons. Neither type is a reference,
+// so executeComparison's reference rule does not apply.
+func (vm *VM) fastComparison(op code.Opcode, left, right object.Object) (bool, error) {
+	switch l := left.(type) {
+	case *object.LInt:
+		if r, ok := right.(*object.LInt); ok {
+			return true, vm.integerComparison(op, l.Value, r.Value)
+		}
+	case *object.LReal:
+		if r, ok := right.(*object.LReal); ok {
+			return true, vm.realComparison(op, l.Value, r.Value)
+		}
+	}
+	return false, nil
+}
+
+// smallInts are the LINTs 0 to 255. Most integer results in a PLC program
+// (counters, indexes, small sums) are small, and sharing these saves an
+// allocation for each, which on a microcontroller is much of an
+// instruction's cost. Objects are never changed in place, so sharing is safe.
+var smallInts = func() (a [256]object.LInt) {
+	for i := range a {
+		a[i].Value = int64(i)
+	}
+	return a
+}()
+
+// newLInt returns a LINT of value v, shared if it is small.
+func newLInt(v int64) *object.LInt {
+	if uint64(v) < uint64(len(smallInts)) {
+		return &smallInts[v]
+	}
+	return &object.LInt{Value: v}
+}
+
+// hashKeyOf returns index's hash key, and false if it cannot be one. A
+// member name, a STRING, is the usual key, and is hashed without an
+// interface call (see isInteger).
+func hashKeyOf(index object.Object) (object.HashKey, bool) {
+	if s, ok := index.(*object.String); ok {
+		return s.HashKey(), true
+	}
+	h, ok := index.(object.Hashable)
+	if !ok {
+		return object.HashKey{}, false
+	}
+	return h.HashKey(), true
+}
+
+// The hash keys of an instance's class and a class's parent, hashed once.
+var (
+	classKey  = (&object.String{Value: "__class__"}).HashKey()
+	parentKey = (&object.String{Value: "__parent__"}).HashKey()
+)

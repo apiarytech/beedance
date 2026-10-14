@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // XML returns elems as the inner XML of a TC6 <LD> or <FBD> body: every
@@ -103,7 +105,7 @@ func XML(elems []*Elem) (string, error) {
 					continue
 				}
 				attrs := ""
-				if i := slices.IndexFunc(e.Outputs, func(p Pin) bool { return strings.EqualFold(p.Param, o) }); i >= 0 {
+				if i := slices.IndexFunc(e.Outputs, func(p Pin) bool { return token.SameIdent(p.Param, o) }); i >= 0 {
 					attrs = pinAttrs(e.Outputs[i])
 				}
 				fmt.Fprintf(&b, `<variable formalParameter="%s"%s><connectionPointOut/></variable>`, esc(o), attrs)

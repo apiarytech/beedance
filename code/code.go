@@ -199,8 +199,10 @@ type Definition struct {
 	OperandWidths []int
 }
 
-// definitions maps each Opcode to its corresponding Definition.
-var definitions = map[Opcode]*Definition{
+// definitions holds each Opcode's Definition, indexed by the opcode; nil
+// for a byte that is no opcode. An array, not a map, so TinyGo keeps it in
+// flash rather than building it in RAM.
+var definitions = [256]*Definition{
 	// OpConstant pushes a constant from the constant pool onto the stack. Operand: constant index (2 bytes).
 	OpConstant: {"OpConstant", []int{2}},
 
@@ -291,8 +293,8 @@ var definitions = map[Opcode]*Definition{
 
 // Lookup retrieves the Definition for a given opcode byte.
 func Lookup(op byte) (*Definition, error) {
-	def, ok := definitions[Opcode(op)]
-	if !ok {
+	def := definitions[op]
+	if def == nil {
 		return nil, fmt.Errorf("opcode %d undefined", op)
 	}
 
@@ -301,8 +303,8 @@ func Lookup(op byte) (*Definition, error) {
 
 // Make creates a bytecode instruction from an opcode and its operands.
 func Make(op Opcode, operands ...int) []byte {
-	def, ok := definitions[op]
-	if !ok {
+	def := definitions[op]
+	if def == nil {
 		return []byte{}
 	}
 

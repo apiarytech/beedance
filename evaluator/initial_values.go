@@ -18,6 +18,7 @@ package evaluator
 import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 	"strings"
 )
 
@@ -150,7 +151,7 @@ func structValue(node *ast.VarDeclStatement, td *ast.TypeDeclaration, def *ast.S
 	for name := range overrides {
 		found := false
 		for _, m := range def.Members {
-			if strings.EqualFold(m.Name.Value, name) {
+			if token.SameIdent(m.Name.Value, name) {
 				found = true
 			}
 		}
@@ -194,7 +195,7 @@ func enumValue(node *ast.VarDeclStatement, td *ast.TypeDeclaration, def *ast.Enu
 	}
 	member := func(name string) object.Object {
 		for _, v := range def.Values {
-			if strings.EqualFold(v.Value, name) {
+			if token.SameIdent(v.Value, name) {
 				return &object.EnumeratedValue{TypeName: strings.ToUpper(td.Name.Value), Value: v.Value}
 			}
 		}
@@ -228,7 +229,7 @@ func dataTypeName(dataType ast.Expression) string {
 // lookupObjectFold finds a key in m, ignoring case.
 func lookupObjectFold(m map[string]object.Object, key string) (object.Object, bool) {
 	for k, v := range m {
-		if strings.EqualFold(k, key) {
+		if token.SameIdent(k, key) {
 			return v, true
 		}
 	}
@@ -239,7 +240,7 @@ func lookupObjectFold(m map[string]object.Object, key string) (object.Object, bo
 // member name case-insensitively, or false if it has no such member.
 func hashMemberKey(hash *object.Hash, member string) (object.HashKey, bool) {
 	for key, pair := range hash.Pairs {
-		if name, ok := pair.Key.(*object.String); ok && strings.EqualFold(name.Value, member) {
+		if name, ok := pair.Key.(*object.String); ok && token.SameIdent(name.Value, member) {
 			return key, true
 		}
 	}
@@ -474,7 +475,7 @@ func stampArrayParameters(params []*ast.VarDeclStatement, env *object.Environmen
 func lookupNamespace(name string, env *object.Environment) (*object.Namespace, bool) {
 	for e := env; e != nil; e = e.Outer() {
 		for _, n := range e.Names() {
-			if !strings.EqualFold(n, name) {
+			if !token.SameIdent(n, name) {
 				continue
 			}
 			if obj, ok := e.GetRaw(n); ok {

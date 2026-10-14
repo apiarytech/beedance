@@ -21,6 +21,7 @@ import (
 
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 )
 
 // referenceBuiltins are the operators this file evaluates, unless a program
@@ -191,7 +192,7 @@ func bindReference(node ast.Node, name string, rt *ast.RefToType, val object.Obj
 // function block or program.
 func findParamDecl(def object.Object, name string) *ast.VarDeclStatement {
 	for _, d := range getParamDecls(def) {
-		if strings.EqualFold(d.Name.Value, name) {
+		if token.SameIdent(d.Name.Value, name) {
 			return d
 		}
 	}

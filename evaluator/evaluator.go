@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 	"math"
 	"sort"
 	"strconv"
@@ -864,7 +865,7 @@ func p0StepsActive(action *object.Action) (active, any bool) {
 		}
 		for _, stmt := range step.Body.Statements {
 			assoc, ok := stmt.(*ast.ActionBlockStatement)
-			if ok && assoc.ActionName.Value == action.Name.Value && assoc.Qualifier != nil && strings.EqualFold(assoc.Qualifier.Value, "P0") {
+			if ok && assoc.ActionName.Value == action.Name.Value && assoc.Qualifier != nil && token.SameIdent(assoc.Qualifier.Value, "P0") {
 				any = true
 				active = active || step.IsActive
 			}
@@ -1681,7 +1682,7 @@ func aliasTypeDeclaration(node *ast.VarDeclStatement, env *object.Environment) *
 	default:
 		return nil
 	}
-	if strings.EqualFold(typeDecl.DataType.String(), typeName) {
+	if token.SameIdent(typeDecl.DataType.String(), typeName) {
 		return nil // A type defined as itself would recurse forever.
 	}
 
@@ -2845,7 +2846,7 @@ func evalIdentifier(
 	}
 
 	// NULL, the reference to nothing, unless a variable is called NULL.
-	if strings.EqualFold(node.Value, "NULL") {
+	if token.SameIdent(node.Value, "NULL") {
 		return NULL
 	}
 

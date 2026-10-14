@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
 )
 
 // elementarySizes are the sizes of the elementary types in bytes.
@@ -143,7 +144,7 @@ func StructMember(dt ast.Expression, name string, types func(string) (*ast.TypeD
 		}
 	}
 	for _, d := range members {
-		if d.Name != nil && strings.EqualFold(d.Name.Value, name) {
+		if d.Name != nil && token.SameIdent(d.Name.Value, name) {
 			return d
 		}
 	}

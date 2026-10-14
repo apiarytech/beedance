@@ -120,7 +120,13 @@ type Transpiler struct {
 	PreferOSCAT bool
 	// HostBinding generates New<Program>() and Variables() for each PROGRAM
 	// (see Options.HostBinding).
-	HostBinding      bool
+	HostBinding bool
+	// CompactImage gives the file a process image of only the entries its
+	// located variables use (see Options.CompactImage).
+	CompactImage bool
+	// imageSizes is, with CompactImage, the length each array of the image
+	// needs, by array name (B, C, W, ...).
+	imageSizes       map[string]int
 	programVarName   string // The name of the receiver for program methods, e.g., "p"
 	currentFunc      *ast.FunctionDeclaration
 	currentFuncBlock *ast.FunctionBlockDeclaration   // The current FB being transpiled
@@ -220,7 +226,11 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 			t.write("%s", plcTimeHelper)
 		}
 		if t.usesProcessImage {
-			t.write("%s", processImageDecl)
+			if t.CompactImage {
+				t.write("%s", t.compactImageDecl())
+			} else {
+				t.write("%s", processImageDecl)
+			}
 		}
 		return nil
 	case *ast.ProgramDeclaration:

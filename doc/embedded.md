@@ -22,7 +22,9 @@ tinygo test -stack-size=1MB ./compiler ./vm ./evaluator
 
 On a microcontroller, compile on the host and run only the VM (see below).
 A program with nested function blocks, timers and function calls runs in
-8 KB of stack, the Pico's default.
+8 KB of stack, the Pico's default. The evaluator, which parses and runs the
+source on the device, needs more: a TON program overflows 8 KB on an RP2040.
+Build it with `-stack-size=16KB` or more.
 
 ## Raspberry Pi Pico
 

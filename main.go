@@ -51,6 +51,7 @@ func main() {
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
 	uvmFlag := flag.Bool("uvm", false, "Use the universal microcontroller virtual machine instead of the evaluator")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
+	goCompactImage := flag.Bool("go-compact-image", false, "With -go: give located variables a process image of only the entries they use, instead of royaljelly's vars.ProcessImage (about 33 KB on a 32-bit microcontroller)")
 	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
 	fromXMLFile := flag.String("from-xml", "", "Path to input PLCopen TC6 XML file to convert to IEC 61131-3 text")
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
@@ -142,7 +143,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -go flag to specify the input file.")
 			os.Exit(1)
 		}
-		transpileFile(*iecFile, *goFile, os.Stdout)
+		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage}, os.Stdout)
 		os.Exit(0)
 	}
 
@@ -317,7 +318,7 @@ func printParserErrors(out io.Writer, errors []string) {
 	}
 }
 
-func transpileFile(inputFile, outputFile string, out io.Writer) {
+func transpileFile(inputFile, outputFile string, opts transpiler.Options, out io.Writer) {
 	file, err := os.Open(inputFile)
 	if err != nil {
 		fmt.Fprintf(out, "Error opening input file: %s\n", err)
@@ -347,7 +348,7 @@ func transpileFile(inputFile, outputFile string, out io.Writer) {
 
 	// Transpile to a complete Go file that imports the royaljelly packages
 	// the generated code uses.
-	formatted, err := transpiler.GoFile(program)
+	formatted, err := transpiler.GoFileWith(program, opts)
 	if err != nil {
 		fmt.Fprintf(out, "Transpilation error: %s\n", err)
 		return

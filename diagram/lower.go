@@ -40,6 +40,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // Lowered is a graphical body as Structured Text.
@@ -273,7 +275,7 @@ func (l *lowering) unique(name string) string {
 
 func findPin(pins []Pin, param string) *Pin {
 	for i := range pins {
-		if strings.EqualFold(pins[i].Param, param) {
+		if token.SameIdent(pins[i].Param, param) {
 			return &pins[i]
 		}
 	}
@@ -341,7 +343,7 @@ func (l *lowering) assignment(e *Elem, in *expr, lines []string) *stmt {
 		}
 	}
 	if len(e.Ins) > 0 && len(e.Ins[0].Conns) == 1 {
-		if flag, ok := l.enoFlag[e.Ins[0].Conns[0].Ref]; ok && !strings.EqualFold(e.Ins[0].Conns[0].Param, "ENO") {
+		if flag, ok := l.enoFlag[e.Ins[0].Conns[0].Ref]; ok && !token.SameIdent(e.Ins[0].Conns[0].Param, "ENO") {
 			for i := range lines {
 				lines[i] = "IF " + flag + " THEN " + lines[i] + " END_IF;"
 			}
@@ -397,7 +399,124 @@ func (l *lowering) wires(conns []Conn) (*expr, error) {
 	return out, nil
 }
 
-var simpleOperand = &lazyRegexp{src: `^(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])*|[+-]?[0-9][0-9A-Za-z_.#:+-]*|[A-Za-z_]+#[0-9A-Za-z_.:+-]+)$`}
+// isSimpleOperand reports whether text can stand in an expression without
+// parentheses: a string literal, a variable with members and indexes, a
+// number or a typed literal. It matches what the regexp
+//
+//	^(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])*|[+-]?[0-9][0-9A-Za-z_.#:+-]*|[A-Za-z_]+#[0-9A-Za-z_.:+-]+)$
+//
+// matches, without the regexp package, which would bring its Unicode tables
+// (about 70 KB of RAM) into firmware that parses diagrams.
+func isSimpleOperand(text string) bool {
+	return isQuoted(text, '\'') || isQuoted(text, '"') || isVariablePath(text) ||
+		isNumberLiteral(text) || isTypedLiteral(text)
+}
+
+// isQuoted reports whether s is a string literal in quote q, a doubled q
+// standing for one.
+func isQuoted(s string, q byte) bool {
+	if len(s) < 2 || s[0] != q {
+		return false
+	}
+	i := 1
+	for i < len(s) {
+		if s[i] != q {
+			i++
+		} else if i+1 < len(s) && s[i+1] == q {
+			i += 2
+		} else {
+			break
+		}
+	}
+	return i == len(s)-1
+}
+
+func isIdentStart(c byte) bool { return c == '_' || 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' }
+func isIdentChar(c byte) bool  { return isIdentStart(c) || '0' <= c && c <= '9' }
+
+// identEnd returns where the identifier starting at s[i] ends, or i if none
+// starts there.
+func identEnd(s string, i int) int {
+	if i >= len(s) || !isIdentStart(s[i]) {
+		return i
+	}
+	i++
+	for i < len(s) && isIdentChar(s[i]) {
+		i++
+	}
+	return i
+}
+
+// isVariablePath reports whether s is an identifier followed by members
+// (.name) and indexes ([...] holding no bracket).
+func isVariablePath(s string) bool {
+	i := identEnd(s, 0)
+	if i == 0 {
+		return false
+	}
+	for i < len(s) {
+		switch s[i] {
+		case '.':
+			j := identEnd(s, i+1)
+			if j == i+1 {
+				return false
+			}
+			i = j
+		case '[':
+			j := i + 1
+			for j < len(s) && s[j] != '[' && s[j] != ']' {
+				j++
+			}
+			if j == len(s) || s[j] != ']' {
+				return false
+			}
+			i = j + 1
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isLiteralChar reports whether c may follow the start of a number or a
+// typed literal's type: [0-9A-Za-z_.:+-], and # when hash is set.
+func isLiteralChar(c byte, hash bool) bool {
+	return isIdentChar(c) || c == '.' || c == ':' || c == '+' || c == '-' || hash && c == '#'
+}
+
+// isNumberLiteral reports whether s is [+-]?[0-9][0-9A-Za-z_.#:+-]*.
+func isNumberLiteral(s string) bool {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	if i >= len(s) || s[i] < '0' || s[i] > '9' {
+		return false
+	}
+	for i++; i < len(s); i++ {
+		if !isLiteralChar(s[i], true) {
+			return false
+		}
+	}
+	return true
+}
+
+// isTypedLiteral reports whether s is [A-Za-z_]+#[0-9A-Za-z_.:+-]+.
+func isTypedLiteral(s string) bool {
+	i := 0
+	for i < len(s) && (s[i] == '_' || 'A' <= s[i] && s[i] <= 'Z' || 'a' <= s[i] && s[i] <= 'z') {
+		i++
+	}
+	if i == 0 || i >= len(s) || s[i] != '#' || i+1 == len(s) {
+		return false
+	}
+	for i++; i < len(s); i++ {
+		if !isLiteralChar(s[i], false) {
+			return false
+		}
+	}
+	return true
+}
 
 // lazyRegexp compiles on first use, so a program that never draws
 // (firmware) does not carry the regexp package.
@@ -415,7 +534,7 @@ func (l *lazyRegexp) get() *regexp.Regexp {
 // operand returns text as it can stand inside an expression.
 func operand(text string) string {
 	text = strings.TrimSpace(text)
-	if simpleOperand.get().MatchString(text) {
+	if isSimpleOperand(text) {
 		return text
 	}
 	return "(" + text + ")"
@@ -528,7 +647,7 @@ func (l *lowering) blockOutput(e *Elem, param string) (*expr, error) {
 	if pin == nil && param == "" && len(e.Outputs) > 0 {
 		pin = &e.Outputs[0]
 		for i := range e.Outputs { // a block's main output, not its ENO
-			if !strings.EqualFold(e.Outputs[i].Param, "ENO") {
+			if !token.SameIdent(e.Outputs[i].Param, "ENO") {
 				pin = &e.Outputs[i]
 				break
 			}
@@ -543,7 +662,7 @@ func (l *lowering) blockOutput(e *Elem, param string) (*expr, error) {
 			out = param
 		}
 		text := name + "." + out
-		if strings.EqualFold(out, "ENO") {
+		if token.SameIdent(out, "ENO") {
 			flag, ok := l.enoFlag[e.ID]
 			if !ok {
 				return &expr{text: "TRUE", deps: []int{e.ID}}, nil // EN not wired: always enabled
@@ -569,20 +688,20 @@ func (l *lowering) blockOutput(e *Elem, param string) (*expr, error) {
 		}
 		en = x
 	}
-	if strings.EqualFold(param, "ENO") {
+	if token.SameIdent(param, "ENO") {
 		if en == nil {
 			return &expr{text: "TRUE"}, nil
 		}
 		return en, nil
 	}
-	if param != "" && pin != nil && pin != &e.Outputs[0] && !strings.EqualFold(pin.Param, "OUT") {
+	if param != "" && pin != nil && pin != &e.Outputs[0] && !token.SameIdent(pin.Param, "OUT") {
 		return nil, fmt.Errorf("output %s of function %s is not supported yet (only its result)", param, e.TypeName)
 	}
 	out := &expr{}
 	var args []string
 	for i := range e.Inputs {
 		in := &e.Inputs[i]
-		if strings.EqualFold(in.Param, "EN") {
+		if token.SameIdent(in.Param, "EN") {
 			continue
 		}
 		if in.In == nil || len(in.In.Conns) == 0 {

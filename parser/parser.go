@@ -1686,10 +1686,10 @@ func (p *Parser) refToStart() (pointer bool, ok bool) {
 	if !p.curTokenIs(token.IDENT) {
 		return false, false
 	}
-	if strings.EqualFold(p.curToken.Literal, "REF_TO") {
+	if token.SameIdent(p.curToken.Literal, "REF_TO") {
 		return false, true
 	}
-	if strings.EqualFold(p.curToken.Literal, "POINTER") && p.peekTokenIs(token.TO) {
+	if token.SameIdent(p.curToken.Literal, "POINTER") && p.peekTokenIs(token.TO) {
 		return true, true
 	}
 	return false, false

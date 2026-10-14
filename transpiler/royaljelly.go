@@ -61,6 +61,7 @@ var generatedPackages = map[string]string{
 	"iecmath":    royaljellyModule + "/std/math",
 	"fmt":        "fmt",
 	"time":       "time",
+	"sync":       "sync",
 	"strings":    "strings",
 	"context":    "context",
 	"os":         "os",
@@ -332,6 +333,13 @@ type Options struct {
 	HostBinding bool
 	// PreferOSCAT: see Transpiler.PreferOSCAT.
 	PreferOSCAT bool
+	// CompactImage declares, instead of a royaljelly vars.ProcessImage, a
+	// process image of only the entries the located variables use, with the
+	// same Read and Write methods. A vars.ProcessImage holds 255 entries of
+	// every type in each area, about 33 KB on a 32-bit microcontroller, which
+	// firmware with a handful of I/O points does not need. Only code in the
+	// generated package can reach either image.
+	CompactImage bool
 }
 
 // GoFileWith is GoFile with options.
@@ -339,6 +347,7 @@ func GoFileWith(program *ast.Program, o Options) ([]byte, error) {
 	var body bytes.Buffer
 	t := New(&body)
 	t.HostBinding, t.PreferOSCAT = o.HostBinding, o.PreferOSCAT
+	t.CompactImage = o.CompactImage
 	if err := t.Transpile(program); err != nil {
 		return nil, err
 	}

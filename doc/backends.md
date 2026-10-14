@@ -67,10 +67,17 @@ src, err := transpiler.GoFileWith(program, transpiler.Options{
     Package:     "programs", // default "main"
     HostBinding: true,       // New<Program>() and Variables(); see embedding.md
     PreferOSCAT: false,      // OSCAT's version of names the standard also defines
+    CompactImage: false,     // a process image of only the located variables' entries
 })
 ```
 
 or from the command line: `beedance -iec program.st -go program.go`.
+
+Located variables (`AT %IX0.0`) live in the generated file's process image,
+a royaljelly `vars.ProcessImage`: 255 entries of every type in each area,
+about 33 KB on a 32-bit microcontroller. For firmware, `CompactImage`
+(`-go-compact-image`) declares instead an image of only the entries the
+program uses, with the same `Read` and `Write` methods.
 
 - Generated code is formatted and imports only what it uses.
 - IEC names that Go cannot use are renamed; case-insensitive IEC names map

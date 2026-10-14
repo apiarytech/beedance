@@ -23,13 +23,14 @@ import (
 
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 )
 
 // isSizeofCall reports whether call is SIZEOF(x), unless the program
 // declares a function of that name.
 func isSizeofCall(call *ast.CallExpression, env *object.Environment) bool {
 	ident, ok := call.Function.(*ast.Identifier)
-	if !ok || !strings.EqualFold(ident.Value, "SIZEOF") || len(call.Arguments) != 1 {
+	if !ok || !token.SameIdent(ident.Value, "SIZEOF") || len(call.Arguments) != 1 {
 		return false
 	}
 	_, declared := env.Get("_function_" + ident.Value)

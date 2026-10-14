@@ -26,10 +26,10 @@ func (p *Parser) diagramBody() string {
 	next := p.afterComments()
 	switch {
 	case p.curTokenIs(token.LD):
-		if next.Type == token.IDENT && (strings.EqualFold(next.Literal, "RUNG") || strings.EqualFold(next.Literal, "END_LD")) {
+		if next.Type == token.IDENT && (token.SameIdent(next.Literal, "RUNG") || token.SameIdent(next.Literal, "END_LD")) {
 			return "LD"
 		}
-	case p.curTokenIs(token.IDENT) && strings.EqualFold(p.curToken.Literal, "FBD"):
+	case p.curTokenIs(token.IDENT) && token.SameIdent(p.curToken.Literal, "FBD"):
 		if next.Type == token.IDENT { // an ST statement never starts with a name and a name
 			return "FBD"
 		}

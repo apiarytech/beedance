@@ -27,6 +27,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // Layout sizes, in SVG user units (pixels at 100 %).
@@ -170,7 +172,7 @@ func (l *layout) networks() {
 		}
 		if e.Kind() == "continuation" {
 			for _, o := range l.order {
-				if o.Kind() == "connector" && strings.EqualFold(o.Name, e.Name) {
+				if o.Kind() == "connector" && token.SameIdent(o.Name, e.Name) {
 					parent[find(e.ID)] = find(o.ID)
 				}
 			}
@@ -320,7 +322,7 @@ func (l *layout) place(net int, nodes []*node) {
 func (l *layout) inIndex(reader *node, src int) int {
 	for _, p := range slices.Concat(reader.e.Inputs, reader.e.InOuts) {
 		if p.In != nil && slices.ContainsFunc(p.In.Conns, func(c Conn) bool { return c.Ref == src }) {
-			return slices.IndexFunc(reader.ins, func(s string) bool { return strings.EqualFold(s, p.Param) })
+			return slices.IndexFunc(reader.ins, func(s string) bool { return token.SameIdent(s, p.Param) })
 		}
 	}
 	return -1
@@ -328,7 +330,7 @@ func (l *layout) inIndex(reader *node, src int) int {
 
 // outIndex is the row of output param in a block, 0 for any other element.
 func outIndex(n *node, param string) int {
-	return slices.IndexFunc(n.outs, func(o string) bool { return strings.EqualFold(o, param) })
+	return slices.IndexFunc(n.outs, func(o string) bool { return token.SameIdent(o, param) })
 }
 
 // pins are the inputs and outputs a block shows: those it has and those
@@ -349,7 +351,7 @@ func (l *layout) pins(e *Elem) (ins, outs []string) {
 		}
 	}
 	for _, r := range l.readers[e.ID] {
-		if r.Param != "" && !slices.ContainsFunc(outs, func(o string) bool { return strings.EqualFold(o, r.Param) }) {
+		if r.Param != "" && !slices.ContainsFunc(outs, func(o string) bool { return token.SameIdent(o, r.Param) }) {
 			outs = append(outs, r.Param)
 		}
 	}
@@ -649,7 +651,7 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 		}
 		p.f(`<text class="t" x="%.1f" y="%.1f" text-anchor="middle">%s</text>`, cx, my+4, esc(text))
 		// An output variable: its value beside the box (L-40).
-		if (e.Kind() == "outVariable" || e.Kind() == "inOutVariable") && simpleOperand.get().MatchString(strings.TrimSpace(e.Expression)) {
+		if (e.Kind() == "outVariable" || e.Kind() == "inOutVariable") && isSimpleOperand(strings.TrimSpace(e.Expression)) {
 			slot(p, x+w+4, my+4, "start", strings.TrimSpace(e.Expression))
 		}
 	}
@@ -658,7 +660,7 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 func pinOf(e *Elem, param string) *Pin {
 	for _, pins := range [][]Pin{e.Inputs, e.InOuts} {
 		for i := range pins {
-			if strings.EqualFold(pins[i].Param, param) {
+			if token.SameIdent(pins[i].Param, param) {
 				return &pins[i]
 			}
 		}
@@ -810,7 +812,7 @@ func isName(s string) bool {
 }
 
 // isPower reports whether a pin is EN or ENO, a block's power flow.
-func isPower(pin string) bool { return strings.EqualFold(pin, "EN") || strings.EqualFold(pin, "ENO") }
+func isPower(pin string) bool { return token.SameIdent(pin, "EN") || token.SameIdent(pin, "ENO") }
 
 // pinClass is a pin label's class: pw for EN and ENO, d for data.
 func pinClass(pin string) string {

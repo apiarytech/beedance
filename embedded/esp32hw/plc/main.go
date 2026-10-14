@@ -49,7 +49,9 @@ func main() {
 		pulse                bool
 	)
 	err := program.Run(Scans, func(m *vm.VM) {
-		now := time.Now()
+		// The scan began LastScan ago: time its start, as Run schedules it,
+		// not its end, which a garbage collection in the scan delays.
+		now := time.Now().Add(-program.LastScan)
 		if n == 0 {
 			start = now
 		} else {

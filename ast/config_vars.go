@@ -10,7 +10,11 @@
 
 package ast
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/apiarytech/beedance/token"
+)
 
 // ConfigVarEntry is one VAR_CONFIG declaration matched to the program instance
 // it configures.
@@ -69,7 +73,7 @@ func relativeConfigPath(block *ConfigVarDeclaration, res *ResourceDeclaration, p
 	}
 	// Program-scoped (non-standard) form: the block names the program instance.
 	if block.ProgramInstanceName != nil {
-		if strings.EqualFold(block.ProgramInstanceName.Value, prog.InstanceName.Value) {
+		if token.SameIdent(block.ProgramInstanceName.Value, prog.InstanceName.Value) {
 			return path, true
 		}
 		return nil, false
@@ -82,7 +86,7 @@ func relativeConfigPath(block *ConfigVarDeclaration, res *ResourceDeclaration, p
 		return nil, false
 	}
 	for i, name := range prefix {
-		if !strings.EqualFold(path[i], name) {
+		if !token.SameIdent(path[i], name) {
 			return nil, false
 		}
 	}

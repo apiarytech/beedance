@@ -18,6 +18,7 @@ package transpiler
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -120,6 +121,7 @@ func (t *Transpiler) transpileProcessImage(receiver string, blocks ...[]*ast.Var
 			if err != nil {
 				return fmt.Errorf("'%s': %w", decl.Name.Value, err)
 			}
+			t.noteImageEntry(slot)
 			field := receiver + "." + decl.Name.Value
 			if area == "I" || area == "M" {
 				reads = append(reads, fmt.Sprintf("\t\t%s = %s(%s)\n", field, goType, slot))
@@ -131,11 +133,11 @@ func (t *Transpiler) transpileProcessImage(receiver string, blocks ...[]*ast.Var
 	}
 	if len(reads) > 0 {
 		t.usesProcessImage = true
-		t.write("\tprocessImage.Read(func(img *vars.Image) {\n%s\t})\n", strings.Join(reads, ""))
+		t.write("\tprocessImage.Read(func(img *%s) {\n%s\t})\n", t.imageType(), strings.Join(reads, ""))
 	}
 	if len(writes) > 0 {
 		t.usesProcessImage = true
-		t.write("\tdefer processImage.Write(func(img *vars.Image) {\n%s\t})\n", strings.Join(writes, ""))
+		t.write("\tdefer processImage.Write(func(img *%s) {\n%s\t})\n", t.imageType(), strings.Join(writes, ""))
 	}
 	return nil
 }
@@ -193,4 +195,84 @@ func (t *Transpiler) transpileLinkAccess(prog *ast.ProgramDeclaration) error {
 // sil package's go engine) writes and reads the entries.
 func ProcessImageSlot(address, typ string) (area, slot, slotType string, err error) {
 	return processImageSlot(strings.TrimPrefix(address, "%"), "iec."+strings.ToUpper(typ))
+}
+
+// imageType is the Go type of the image the generated Read and Write
+// functions are given.
+func (t *Transpiler) imageType() string {
+	if t.CompactImage {
+		return "processImageData"
+	}
+	return "vars.Image"
+}
+
+// noteImageEntry records, with CompactImage, that the entry slot (such as
+// `img.Q.B[3]`) is used, so its array is declared long enough.
+func (t *Transpiler) noteImageEntry(slot string) {
+	if !t.CompactImage {
+		return
+	}
+	// slot is img.<area>.<array>[<index>].
+	open := strings.IndexByte(slot, '[')
+	array := slot[len("img.X."):open]
+	index, err := strconv.Atoi(slot[open+1 : len(slot)-1])
+	if err != nil {
+		return
+	}
+	if t.imageSizes == nil {
+		t.imageSizes = map[string]int{}
+	}
+	t.imageSizes[array] = max(t.imageSizes[array], index+1)
+}
+
+// compactImageDecl declares, for CompactImage, the process image of the
+// entries the file uses: each area has the arrays of vars.Addresses that a
+// located variable is in, as long as the highest entry used, so the
+// generated code indexes it as it does a vars.Image.
+func (t *Transpiler) compactImageDecl() string {
+	arrays := make([]string, 0, len(t.imageSizes))
+	for array := range t.imageSizes {
+		arrays = append(arrays, array)
+	}
+	slices.Sort(arrays)
+	var fields strings.Builder
+	for _, array := range arrays {
+		fmt.Fprintf(&fields, "\t%s [%d]%s\n", array, t.imageSizes[array], processImageArrays[array])
+	}
+	return `
+// processImageArea is one area (I, Q or M) of processImage: the entries of
+// royaljelly's vars.Addresses that this file's located variables use.
+type processImageArea struct {
+` + fields.String() + `}
+
+// processImageData is the content of processImage, by area.
+type processImageData struct {
+	I, Q, M processImageArea
+}
+
+// processImageGuard guards processImageData as a vars.ProcessImage guards a
+// vars.Image.
+type processImageGuard struct {
+	mu  sync.RWMutex
+	img processImageData
+}
+
+// Read calls fn with shared (read-only) access to the image.
+func (p *processImageGuard) Read(fn func(img *processImageData)) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	fn(&p.img)
+}
+
+// Write calls fn with exclusive access to the image.
+func (p *processImageGuard) Write(fn func(img *processImageData)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fn(&p.img)
+}
+
+// processImage holds the located variables (AT %I, %Q, %M) of the programs
+// and function blocks in this file, compactly (Options.CompactImage).
+var processImage processImageGuard
+`
 }

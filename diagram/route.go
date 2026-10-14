@@ -22,7 +22,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // box is the area an element covers, its labels included.
@@ -117,7 +118,7 @@ func (l *layout) wiresInto(e *Elem, at map[int]geo, rt *router) []routedWire {
 	g := at[e.ID]
 	mid := func(id int) float64 { return at[id].y + rowH/2 - 4 }
 	inY := func(param string) float64 {
-		i := slices.IndexFunc(n.ins, func(s string) bool { return strings.EqualFold(s, param) })
+		i := slices.IndexFunc(n.ins, func(s string) bool { return token.SameIdent(s, param) })
 		return mid(e.ID) + float64(n.head+max(0, i))*rowH
 	}
 	// Each input turns on its own vertical in the gap before e, the top one

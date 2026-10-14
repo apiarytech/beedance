@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // Text is a body read from the text form: its elements, positioned at
@@ -99,8 +101,7 @@ func LowerText(pou, lang, src string, line int, opt Options) (*Lowered, error) {
 	low, err := Lower(pou, t.Elems, opt)
 	if err != nil {
 		// Elements have no number in the text: say where they are.
-		msg := elementRef.get().ReplaceAllStringFunc(err.Error(), func(m string) string {
-			id, _ := strconv.Atoi(elementRef.get().FindStringSubmatch(m)[1])
+		msg := replaceElementRefs(err.Error(), func(id int, m string) string {
 			if r, ok := t.Rows[id]; ok {
 				return fmt.Sprintf("line %d", r)
 			}
@@ -115,7 +116,35 @@ func LowerText(pou, lang, src string, line int, opt Options) (*Lowered, error) {
 	return low, nil
 }
 
-var elementRef = &lazyRegexp{src: `element (\d+)`}
+// replaceElementRefs replaces each "element N" in msg by repl(N, match), as
+// regexp `element (\d+)` with ReplaceAllStringFunc would, without the regexp
+// package: the parser lowers diagrams, and it runs on microcontrollers too.
+func replaceElementRefs(msg string, repl func(id int, match string) string) string {
+	const word = "element "
+	var b strings.Builder
+	for {
+		i := strings.Index(msg, word)
+		if i < 0 {
+			break
+		}
+		j := i + len(word)
+		k := j
+		for k < len(msg) && msg[k] >= '0' && msg[k] <= '9' {
+			k++
+		}
+		if k == j { // no number: not a match, look on past it
+			b.WriteString(msg[:j])
+			msg = msg[j:]
+			continue
+		}
+		id, _ := strconv.Atoi(msg[j:k])
+		b.WriteString(msg[:i])
+		b.WriteString(repl(id, msg[i:k]))
+		msg = msg[k:]
+	}
+	b.WriteString(msg)
+	return b.String()
+}
 
 // ---- scanning ----
 
@@ -309,12 +338,12 @@ func (b *builder) next() tok {
 
 func (b *builder) is(text string) bool {
 	t := b.peek()
-	return (t.kind == tPunct || t.kind == tIdent) && strings.EqualFold(t.text, text)
+	return (t.kind == tPunct || t.kind == tIdent) && token.SameIdent(t.text, text)
 }
 
 func (b *builder) expect(text string) (tok, error) {
 	t := b.next()
-	if (t.kind != tPunct && t.kind != tIdent) || !strings.EqualFold(t.text, text) {
+	if (t.kind != tPunct && t.kind != tIdent) || !token.SameIdent(t.text, text) {
 		return t, b.errorf(t, "expected %q, found %s", text, t)
 	}
 	return t, nil
@@ -411,7 +440,7 @@ func (b *builder) expression() (Conn, error) {
 			return Conn{}, b.errorf(n, "expected a number after %q", t.text)
 		}
 		return b.variable(t.text+n.text, t), nil
-	case t.kind == tIdent && strings.EqualFold(t.text, "NOT"):
+	case t.kind == tIdent && token.SameIdent(t.text, "NOT"):
 		b.next()
 		in, err := b.expression()
 		if err != nil {
@@ -478,7 +507,7 @@ func (b *builder) function(negated bool) (Conn, error) {
 		}
 		param := ""
 		if t := b.peek(); t.kind == tIdent && b.toks[b.pos+1].text == ":=" {
-			if !strings.EqualFold(t.text, "EN") || len(e.Inputs) > 0 {
+			if !token.SameIdent(t.text, "EN") || len(e.Inputs) > 0 {
 				return Conn{}, b.errorf(t, "the inputs of function %s are positional (only EN := may be named, first)", name.text)
 			}
 			b.next()
@@ -530,7 +559,7 @@ func (b *builder) call(e *Elem, power string) error {
 		op := b.next()
 		switch op.text {
 		case ":=":
-			if strings.EqualFold(pin.text, power) {
+			if token.SameIdent(pin.text, power) {
 				return b.errorf(pin, "%s of %s is driven by the rung; it may not be given", pin.text, e.InstanceName)
 			}
 			in, err := b.expression()
@@ -593,7 +622,7 @@ func (b *builder) callStatement(e *Elem) error {
 
 func isStandardFB(name string) bool {
 	for _, s := range StandardFunctionBlocks {
-		if strings.EqualFold(s, name) {
+		if token.SameIdent(s, name) {
 			return true
 		}
 	}
@@ -932,7 +961,7 @@ func End(src string, start int, word string) int {
 			for j < len(src) && (isLetter(src[j]) || isDigit(src[j])) {
 				j++
 			}
-			if strings.EqualFold(src[i:j], word) {
+			if token.SameIdent(src[i:j], word) {
 				return i
 			}
 			i = j

@@ -30,9 +30,10 @@ package diagram
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // Chart layout sizes, in SVG user units.
@@ -108,7 +109,7 @@ func (l *sfcLayout) next(n int) []int {
 	case sfcStepNode:
 		name := l.c.Steps[nd.index].Name
 		for i, t := range l.c.Transitions {
-			if slices.ContainsFunc(t.From, func(s string) bool { return strings.EqualFold(s, name) }) {
+			if slices.ContainsFunc(t.From, func(s string) bool { return token.SameIdent(s, name) }) {
 				out = append(out, l.transOf[i])
 			}
 		}
@@ -595,7 +596,7 @@ func (l *sfcLayout) joinY(g sfcGeo, n int) float64 { return g.rowTop[l.nodes[n].
 func condVars(cond string) []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, m := range condName.FindAllStringSubmatchIndex(cond, -1) {
+	for _, m := range condName.get().FindAllStringSubmatchIndex(cond, -1) {
 		name := cond[m[2]:m[3]]
 		rest := strings.TrimLeft(cond[m[1]:], " ")
 		up := strings.ToUpper(name)
@@ -611,7 +612,9 @@ func condVars(cond string) []string {
 	return out
 }
 
-var condName = regexp.MustCompile(`(?:^|[^A-Za-z0-9_#.])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+// condName compiles on first use (lazyRegexp): drawing a chart is not part
+// of lowering one, so firmware that parses charts does not carry regexp.
+var condName = &lazyRegexp{src: `(?:^|[^A-Za-z0-9_#.])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`}
 
 var condWords = map[string]bool{"AND": true, "OR": true, "XOR": true, "NOT": true, "MOD": true, "TRUE": true, "FALSE": true, "AND_THEN": true, "OR_ELSE": true}
 
@@ -660,7 +663,7 @@ func condExprs(cond string) []string {
 	var add func(s string, depth int)
 	add = func(s string, depth int) {
 		s = strings.TrimSpace(s)
-		if s == "" || depth > 8 || simpleOperand.get().MatchString(s) || len(out) >= maxCondExprs {
+		if s == "" || depth > 8 || isSimpleOperand(s) || len(out) >= maxCondExprs {
 			return
 		}
 		if !seen[s] {
@@ -790,7 +793,7 @@ func splitTop(s string, sep func(string) bool) []string {
 
 // cutWord cuts a leading keyword: "NOT x" is x.
 func cutWord(s, word string) (string, bool) {
-	if w := wordAt(s, 0); strings.EqualFold(w, word) {
+	if w := wordAt(s, 0); token.SameIdent(w, word) {
 		return s[len(w):], true
 	}
 	return "", false
@@ -873,7 +876,7 @@ func splitArith(s string, ops []string) []string {
 		}
 		for _, op := range ops {
 			word := op == "MOD"
-			if word && strings.EqualFold(wordAt(s, i), "MOD") || !word && strings.HasPrefix(s[i:], op) {
+			if word && token.SameIdent(wordAt(s, i), "MOD") || !word && strings.HasPrefix(s[i:], op) {
 				exponent := (op == "+" || op == "-") && i > 1 && (s[i-1] == 'e' || s[i-1] == 'E') && s[i-2] >= '0' && s[i-2] <= '9'
 				if endsOperand(s, i) && !exponent && !(op == "*" && strings.HasPrefix(s[i:], "**")) {
 					parts = append(parts, s[from:i])
@@ -905,7 +908,7 @@ func (l *sfcLayout) isVariable(action string) bool {
 		return false
 	}
 	for _, a := range l.c.Actions {
-		if strings.EqualFold(a.Name, action) {
+		if token.SameIdent(a.Name, action) {
 			return false
 		}
 	}

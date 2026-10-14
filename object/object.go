@@ -12,7 +12,6 @@ package object
 import (
 	"bytes"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"strings"
 	"time"
@@ -439,15 +438,11 @@ func (lr *LReal) HashKey() HashKey {
 }
 
 func (s *String) HashKey() HashKey {
-	h := fnv.New64a()
-	h.Write([]byte(s.Value))
-	return HashKey{Type: s.Type(), Value: h.Sum64()}
+	return HashKey{Type: STRING_OBJ, Value: fnv64a(s.Value)}
 }
 
 func (ws *WString) HashKey() HashKey {
-	h := fnv.New64a()
-	h.Write([]byte(ws.Value)) // Note: Hashing is based on byte representation.
-	return HashKey{Type: ws.Type(), Value: h.Sum64()}
+	return HashKey{Type: WSTRING_OBJ, Value: fnv64a(ws.Value)} // Note: Hashing is based on byte representation.
 }
 
 // EnumeratedType represents the definition of an enumerated type.
@@ -496,9 +491,7 @@ func (ev *EnumeratedValue) Inspect() string { return fmt.Sprintf("%s#%s", ev.Typ
 
 // HashKey returns a hash key for an EnumeratedValue object.
 func (ev *EnumeratedValue) HashKey() HashKey {
-	h := fnv.New64a()
-	h.Write([]byte(ev.TypeName + "#" + ev.Value))
-	return HashKey{Type: ev.Type(), Value: h.Sum64()}
+	return HashKey{Type: ev.Type(), Value: fnv64a(ev.TypeName + "#" + ev.Value)}
 }
 
 // HashPair stores a key-value pair in a hash map.
@@ -1277,4 +1270,16 @@ func (ad *ArrayDefinition) Inspect() string {
 	out.WriteString(ad.DataType.String())
 	out.WriteString(";")
 	return out.String()
+}
+
+// fnv64a is the 64-bit FNV-1a hash of s, as hash/fnv's New64a gives, without
+// allocating a hasher or copying s: hashing a key is part of every member
+// access of a structure or function block instance.
+func fnv64a(s string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	return h
 }

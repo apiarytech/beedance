@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/apiarytech/beedance/token"
 )
 
 // IsNumeric is a helper function that returns true if an object is one of the
@@ -581,7 +583,7 @@ func EvalInfix(left Object, operator string, right Object) Object {
 		// Enumerated values support equality only. They are equal when they
 		// name the same value of the same type; names are case-insensitive.
 		l, r := left.(*EnumeratedValue), right.(*EnumeratedValue)
-		same := strings.EqualFold(l.TypeName, r.TypeName) && strings.EqualFold(l.Value, r.Value)
+		same := token.SameIdent(l.TypeName, r.TypeName) && token.SameIdent(l.Value, r.Value)
 		switch operator {
 		case "=", "EQ":
 			return nativeBoolToBooleanObject(same)
