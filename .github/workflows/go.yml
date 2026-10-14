@@ -49,6 +49,14 @@ jobs:
         go vet ./...
         go test -v ./...
 
+    # Also a module of its own: it needs royaljelly for the transpiled engine.
+    - name: Test the embedded benchmark
+      working-directory: embedded/bench
+      run: |
+        go vet ./...
+        go run ./gen -check
+        go test -v ./...
+
   lint-race:
     name: Format and race detector
     runs-on: ubuntu-latest
@@ -189,6 +197,13 @@ jobs:
 
       - name: Build the hardware-in-the-loop rig
         run: tinygo build -target=${{ matrix.target }} -size short -o beedance-rig-${{ matrix.target }}.uf2 ./embedded/rig/pico/
+
+      # Each engine on its own and all three together, as embedded/bench measures them.
+      - name: Build the embedded benchmark
+        working-directory: embedded/bench
+        run: |
+          for fw in vm go none; do tinygo build -target=${{ matrix.target }} -size short -o "$RUNNER_TEMP/bench.elf" ./fw/$fw; done
+          for fw in eval all; do tinygo build -target=${{ matrix.target }} -stack-size=16KB -size short -o "$RUNNER_TEMP/bench.elf" ./fw/$fw; done
 
       - name: Upload the firmware
         uses: actions/upload-artifact@v4
