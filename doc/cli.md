@@ -101,22 +101,44 @@ process, stopped after `-go-timeout`.
 | `-go-replace` | | `MODULE=DIR,...`: build the go and wasm engines with local modules |
 | `-wasm-runtime` | wasmtime, wazero or Node.js 24+ in `PATH` | the command that runs a WASI module on the wasm engine, e.g. `"wazero run"` |
 
-Run on `TEST_Blink` and a `TEST_Add` that checks `2 + 3 = 5`:
+A test without `done` gets one scan, 10 ms of simulated time, so its
+checks are of that first scan: here, that a 2 s timer has not run out yet.
+To check `q` after the timer runs out, give the test `done`, as
+`TEST_Blink` does.
+
+```iecst
+PROGRAM TEST_BlinkOneScan
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR b : Blink; END_VAR
+b(run := TRUE, period := T#2s);
+IF b.q THEN failures := failures + 1; message := 'q set before 2 s'; END_IF;
+END_PROGRAM
+```
+
+Run on `TEST_Blink`, a `TEST_Add` that checks `2 + 3 = 5`, and
+`TEST_BlinkOneScan`:
 
 ```text
-beedance: 2 tests
+beedance: 3 tests
 
 TEST                               EVAL                   VM                     ENGINES
 TEST_Blink                         PASS (201 scans)       PASS (201 scans)       agree
 TEST_Add                           PASS (1 scans)         PASS (1 scans)         agree
+TEST_BlinkOneScan                  PASS (1 scans)         PASS (1 scans)         agree
 
-PASSED: all 2 tests
+PASSED: all 3 tests
 ```
 
 A failing test shows `FAIL (n)`, n being its `failures`, with a line per
 engine under it giving the reason: its last `message`, or `not done after
-50000 scans` for a test that did not finish. The summary then reads
-`FAILED: 1 of 2 tests`.
+50000 scans` for a test that did not finish. Had `TEST_BlinkOneScan`
+expected `q` set (`IF NOT b.q THEN ...`), its one scan would have failed:
+
+```text
+TEST_BlinkOneScan                  FAIL (1)               FAIL (1)               agree
+    eval: 1 failed checks, last: q not set after 2 s
+    vm: 1 failed checks, last: q not set after 2 s
+```
 
 Exit status: 0 when all tests pass, 1 when a test fails or the engines
 disagree, 2 when a file cannot be read or parsed or holds no tests. The
