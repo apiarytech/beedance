@@ -65,8 +65,10 @@ var known = map[string]string{
 	"INC2":         integerWidth,
 	"JD2000":       integerWidth,
 	"LTIME_TO_UTC": integerWidth,
+	"RND":          integerWidth, // EXPN(10, -32768): ABS wraps, so 1.0 in the source, 0 in the port
 	"SET_DATE":     integerWidth,
 	"SET_TOD":      integerWidth,
+	"UTC_TO_LTIME": integerWidth, // TIME_ZONE_OFFSET * 60 in an INT, past ±546 minutes
 	"YEAR_BEGIN":   integerWidth,
 	"YEAR_END":     integerWidth,
 
@@ -97,12 +99,6 @@ var known = map[string]string{
 	"SUN_POS":     untriaged,
 	"TIMER_EXT":   untriaged,
 	"TP_1D":       untriaged,
-
-	// The cleaned source of beebread v0.1.1-0.20261013225747-cef6fbaf2454 has
-	// U+FFFD for the ISO 8859-1 characters of the month names, such as the é
-	// of Février. Put back after it: this comes off the list when go.mod
-	// requires the fix.
-	"MONTH_TO_STRING": "characters lost by the cleaned source",
 }
 
 // domain limits the arguments of the POUs that loop for ever outside it, on
