@@ -76,6 +76,10 @@ func TestLiveOnEngines(t *testing.T) {
 	if onVM.Values["Run"] != "TRUE" || onVM.Values["Fault"] != "TRUE" {
 		t.Errorf("after a scan: Run = %s, Fault = %s; want both TRUE (sealed in; Mode = 2 sets Fault)", onVM.Values["Run"], onVM.Values["Fault"])
 	}
+	// A timer's ET is the wall-clock time since it started, different on
+	// every run: on Windows the clock is too coarse to see it, elsewhere not.
+	delete(onVM.Values, "t1.ET")
+	delete(onEval.Values, "t1.ET")
 	if !maps.Equal(onVM.Values, onEval.Values) || !maps.Equal(onVM.Exprs, onEval.Exprs) {
 		t.Errorf("the engines disagree:\nVM        %v %v\nevaluator %v %v", onVM.Values, onVM.Exprs, onEval.Values, onEval.Exprs)
 	}
