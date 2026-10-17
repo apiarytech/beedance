@@ -44,7 +44,7 @@ VAR_OUTPUT
     done     : BOOL;   (* optional: run scan by scan until TRUE *)
 END_VAR
 VAR b : Blink; END_VAR
-b(run := TRUE, period := T#2h);
+b(run := TRUE, period := T#2s);
 IF b.q THEN done := TRUE; END_IF;
 END_PROGRAM
 ```
@@ -52,7 +52,9 @@ END_PROGRAM
 A test without `done` runs one scan. With `done` it runs scan by scan,
 `-interval` of simulated time apart, until `done` is TRUE; one not done
 after `-max-scans` fails. Timers run on the simulated clock, so the test
-above takes 7,201 scans and well under a second.
+above takes 201 scans of 10 ms and well under a second. A longer timer
+needs a longer `-interval`: at 10 ms, a 2 h period would need 720,001
+scans, past `-max-scans`.
 
 By default each test runs on the evaluator and the VM, and the two must
 agree on every watched value of the test program after every scan (REAL
@@ -99,17 +101,22 @@ process, stopped after `-go-timeout`.
 | `-go-replace` | | `MODULE=DIR,...`: build the go and wasm engines with local modules |
 | `-wasm-runtime` | wasmtime, wazero or Node.js 24+ in `PATH` | the command that runs a WASI module on the wasm engine, e.g. `"wazero run"` |
 
+Run on `TEST_Blink` and a `TEST_Add` that checks `2 + 3 = 5`:
+
 ```text
 beedance: 2 tests
 
 TEST                               EVAL                   VM                     ENGINES
+TEST_Blink                         PASS (201 scans)       PASS (201 scans)       agree
 TEST_Add                           PASS (1 scans)         PASS (1 scans)         agree
-TEST_Blink                         FAIL (1)               FAIL (1)               agree
-    eval: 1 failed checks, last: q not set after 2 h
-    vm: 1 failed checks, last: q not set after 2 h
 
-FAILED: 1 of 2 tests
+PASSED: all 2 tests
 ```
+
+A failing test shows `FAIL (n)`, n being its `failures`, with a line per
+engine under it giving the reason: its last `message`, or `not done after
+50000 scans` for a test that did not finish. The summary then reads
+`FAILED: 1 of 2 tests`.
 
 Exit status: 0 when all tests pass, 1 when a test fails or the engines
 disagree, 2 when a file cannot be read or parsed or holds no tests. The
