@@ -57,6 +57,14 @@ jobs:
         go run ./gen -check
         go test -v ./...
 
+    # Also a module of its own: it needs beebread, whose OSCAT ports it
+    # compares with the evaluator running the OSCAT sources.
+    - name: Test the OSCAT ports against the evaluator
+      working-directory: oscatdiff
+      run: |
+        go vet ./...
+        go test -v ./...
+
   lint-race:
     name: Format and race detector
     runs-on: ubuntu-latest
