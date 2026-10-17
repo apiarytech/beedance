@@ -1,6 +1,9 @@
 package evaluator
 
-import "github.com/apiarytech/beedance/object"
+import (
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
+)
 
 // standardFBInitial are the inputs and outputs of the standard function
 // blocks with their IEC 61131-3 initial values. An instance has them from
@@ -82,4 +85,56 @@ func isBoolTrue(o object.Object) bool {
 func isBoolFalse(o object.Object) bool {
 	b, ok := o.(*object.Boolean)
 	return ok && !b.Value
+}
+
+// standardFBInputs are the inputs of each standard function block, in order.
+var standardFBInputs = map[string][]string{
+	"TON": {"IN", "PT"}, "TOF": {"IN", "PT"}, "TP": {"IN", "PT"},
+	"CTU": {"CU", "R", "PV"}, "CTD": {"CD", "LD", "PV"}, "CTUD": {"CU", "CD", "R", "LD", "PV"},
+	"R_TRIG": {"CLK"}, "F_TRIG": {"CLK"}, "SR": {"S1", "R"}, "RS": {"S", "R1"},
+}
+
+// namedStandardFBInputs returns the arguments of a call of a standard
+// function block with each positional one named by its input, as the
+// block's inputs are not declarations; or args unchanged.
+func namedStandardFBInputs(def object.Object, args []ast.Expression) []ast.Expression {
+	fb, ok := def.(*object.BuiltinFunctionBlock)
+	if !ok {
+		return args
+	}
+	var inputs []string
+	for name, std := range standardFBs {
+		if std == fb {
+			inputs = standardFBInputs[name]
+			break
+		}
+	}
+	if inputs == nil {
+		return args
+	}
+	named := make([]ast.Expression, len(args))
+	position := 0
+	for i, arg := range args {
+		switch arg.(type) {
+		case *ast.NamedArgument, *ast.OutputArgument:
+			named[i] = arg
+		default:
+			if position >= len(inputs) {
+				return args // too many: left to report
+			}
+			name := &ast.Identifier{Value: inputs[position]}
+			named[i] = &ast.NamedArgument{Name: name, Value: arg}
+			position++
+		}
+	}
+	return named
+}
+
+// integerAsFloat returns an integer value n, of val, as a float64; a ULINT
+// above the int64 range keeps its value.
+func integerAsFloat(val object.Object, n int64) float64 {
+	if u, ok := val.(*object.ULInt); ok {
+		return float64(u.Value)
+	}
+	return float64(n)
 }

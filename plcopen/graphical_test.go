@@ -368,10 +368,10 @@ func TestUnnamedStandardBlockGetsAnInstance(t *testing.T) {
 
 func TestGraphicalErrors(t *testing.T) {
 	for name, body := range map[string]string{
-		"dangling wire": outVar(1, 0, 0, "X", wire(9, "")),
-		"jump":          `<jump localId="1" label="L1"><position x="0" y="0"/></jump>`,
-		"duplicate id":  inVar(1, 0, 0, "A") + outVar(1, 0, 0, "X", wire(1, "")),
-		"open contact":  contact(1, 0, 0, "A", "") + coil(2, 0, 0, "X", "", wire(1, "")),
+		"dangling wire":        outVar(1, 0, 0, "X", wire(9, "")),
+		"jump without a label": `<jump localId="1"><position x="0" y="0"/></jump>`, // IEC-71: jumps lower, a nameless one does not
+		"duplicate id":         inVar(1, 0, 0, "A") + outVar(1, 0, 0, "X", wire(1, "")),
+		"open contact":         contact(1, 0, 0, "A", "") + coil(2, 0, 0, "X", "", wire(1, "")),
 		"guarded result into a block": inVar(1, 0, 0, "A") + inVar(4, 0, 0, "B") +
 			block(2, 0, 0, "ADD", "", []string{"OUT"}, pin{param: "EN", wire: wire(1, "")}, pin{param: "IN1", wire: wire(4, "")}, pin{param: "IN2", wire: wire(4, "")}) +
 			block(3, 0, 0, "MUL", "", []string{"OUT"}, pin{param: "IN1", wire: wire(2, "OUT")}, pin{param: "IN2", wire: wire(4, "")}) +

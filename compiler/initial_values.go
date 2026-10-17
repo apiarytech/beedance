@@ -46,6 +46,13 @@ func (c *Compiler) resolveDeclaredType(dataType ast.Expression) (declaredType, b
 		return declaredType{name: "ARRAY", node: arrayDef}, true
 	}
 	name := c.flattenExpressionToString(dataType)
+	// A CHAR is a one-character STRING, a WCHAR a one-character WSTRING.
+	switch strings.ToUpper(name) {
+	case "CHAR":
+		return declaredType{name: name, elementary: "STRING"}, true
+	case "WCHAR":
+		return declaredType{name: name, elementary: "WSTRING"}, true
+	}
 	if normalized := string(typedLiteralType(name)); isElementaryTypeName(normalized) {
 		return declaredType{name: name, elementary: normalized}, true
 	}
@@ -69,7 +76,8 @@ func isElementaryTypeName(name string) bool {
 // compileVarValue leaves the starting value of decl on the stack: its initial
 // value if it has one, otherwise the default value of its type.
 func (c *Compiler) compileVarValue(decl *ast.VarDeclStatement) error {
-	return c.compileStartingValue(decl.Name.Value, decl.DataType, decl.Value, map[ast.Node]bool{})
+	// A STRING(n) starts with at most n characters of its initial value.
+	return c.compileStartingValue(decl.Name.Value, decl.DataType, stringCut(decl, decl.Value), map[ast.Node]bool{})
 }
 
 // compileStartingValue leaves on the stack the value a variable named name, of
@@ -314,7 +322,8 @@ func (c *Compiler) compileEnumValue(name string, td *ast.TypeDeclaration, def *a
 	emitMember := func(member string) error {
 		for _, v := range def.Values {
 			if strings.EqualFold(v.Value, member) {
-				c.emitConstant(c.addConstant(&object.EnumeratedValue{TypeName: td.Name.Value, Value: v.Value}))
+				n, _ := def.NumberOf(v.Value)
+				c.emitConstant(c.addConstant(&object.EnumeratedValue{TypeName: td.Name.Value, Value: v.Value, Number: n}))
 				return nil
 			}
 		}
@@ -329,7 +338,13 @@ func (c *Compiler) compileEnumValue(name string, td *ast.TypeDeclaration, def *a
 		}
 		return emitMember(def.Values[0].Value)
 	case *ast.Identifier:
-		// A bare value name, unless it names a variable.
+		// A bare value name: one of the enumeration's own (MID, even though
+		// a built-in has that name), else unless it names a variable.
+		for _, m := range def.Values {
+			if strings.EqualFold(m.Value, v.Value) {
+				return emitMember(v.Value)
+			}
+		}
 		if _, isSymbol := c.symbolTable.Resolve(v.Value); !isSymbol {
 			return emitMember(v.Value)
 		}
@@ -429,6 +444,11 @@ func (c *Compiler) arrayLength(rng ast.Expression) (int, bool) {
 // is an array of arrays. A one-dimensional array literal may list fewer
 // elements than the array holds (the rest take the default) but not more.
 func (c *Compiler) compileArrayValue(name string, def *ast.ArrayDefinition, value ast.Expression, visiting map[ast.Node]bool) error {
+	// An ARRAY[*] VAR_IN_OUT has no array of its own until a call gives one.
+	if def.HasAnyRange() && value == nil {
+		c.emit(code.OpNull)
+		return nil
+	}
 	if err := c.compileArrayElements(name, def, value, visiting); err != nil {
 		return err
 	}

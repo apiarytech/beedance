@@ -100,7 +100,8 @@ type Pin struct {
 // Elem is any element of an FBD or LD body; the fields used depend on its
 // kind, the name of its PLCopen element (XMLName.Local): inVariable,
 // outVariable, inOutVariable, block, connector, continuation,
-// leftPowerRail, rightPowerRail, contact or coil.
+// leftPowerRail, rightPowerRail, contact, coil, or jump, label and return
+// (IEC-71).
 type Elem struct {
 	XMLName      xml.Name
 	ID           int       `xml:"localId,attr"`
@@ -115,6 +116,7 @@ type Elem struct {
 	Edge         string    `xml:"edge,attr"`
 	Storage      string    `xml:"storage,attr"`
 	Name         string    `xml:"name,attr"`
+	Label        string    `xml:"label,attr"` // a jump's target, a label's name (IEC-71)
 	TypeName     string    `xml:"typeName,attr"`
 	InstanceName string    `xml:"instanceName,attr"`
 	Inputs       []Pin     `xml:"inputVariables>variable"`
@@ -202,8 +204,11 @@ func Lower(pou string, elems []*Elem, opt Options) (*Lowered, error) {
 		switch e.Kind() {
 		case "comment", "addData", "documentation":
 			continue
-		case "jump", "label", "return":
-			return nil, fmt.Errorf("pou '%s': element %d: %s is not supported yet in FBD and LD", pou, e.ID, e.Kind())
+		case "jump", "label":
+			// IEC-71: they lower to ST jumps and labels (IEC-68).
+			if !isLabelName(e.Label) {
+				return nil, fmt.Errorf("pou '%s': element %d: %s needs a label name, got %q", pou, e.ID, e.Kind(), e.Label)
+			}
 		case "step", "transition", "selectionDivergence", "selectionConvergence", "simultaneousDivergence",
 			"simultaneousConvergence", "jumpStep", "macroStep", "actionBlock":
 			return nil, fmt.Errorf("pou '%s': element %d: SFC element %s in an FBD or LD body", pou, e.ID, e.Kind())
@@ -282,9 +287,44 @@ func findPin(pins []Pin, param string) *Pin {
 	return nil
 }
 
+// isLabelName reports whether s is an identifier, a label's name.
+func isLabelName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (i > 0 && r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 // statement returns the statement an element makes, if it makes one.
 func (l *lowering) statement(e *Elem) (*stmt, error) {
 	switch e.Kind() {
+	case "label":
+		// IEC-71: the start of its network (a label has no wires: it is a
+		// network of its own, above the one it names).
+		return &stmt{id: e.ID, lines: []string{strings.TrimSpace(e.Label) + ":"}, elem: e}, nil
+	case "jump", "return":
+		// IEC-71: unconditional when wired to the left rail (or not wired),
+		// else under the rung or signal wired into it.
+		do := "JMP " + strings.TrimSpace(e.Label) + ";"
+		if e.Kind() == "return" {
+			do = "RETURN;"
+		}
+		in, err := l.input(e)
+		if err != nil {
+			return nil, err
+		}
+		if in == nil || in.text == "TRUE" {
+			if in == nil {
+				in = &expr{}
+			}
+			return l.assignment(e, in, []string{do}), nil
+		}
+		return l.assignment(e, in, []string{"IF " + in.text + " THEN " + do + " END_IF;"}), nil
 	case "block":
 		if !l.isFB(e) {
 			return nil, nil // a function is an expression where it is read

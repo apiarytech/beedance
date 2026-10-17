@@ -28,7 +28,7 @@ func TestTemporalConversions(t *testing.T) {
 		{&Time{Value: 1500 * time.Millisecond}, "TIME", "DWORD", "DWORD#16#5DC"},
 		{&Time{Value: 1500 * time.Millisecond}, "TIME", "UDINT", "1500"},
 		{&Time{Value: 1500 * time.Millisecond}, "TIME", "LREAL", "1500.000000"},
-		{&Time{Value: 1500 * time.Millisecond}, "TIME", "STRING", "1.5s"},
+		{&Time{Value: 1500 * time.Millisecond}, "TIME", "STRING", "T#1s500ms"},
 		{&Time{Value: -time.Second}, "TIME", "UDINT", "ERROR: value -1000 is out of range for type UDINT (0 to 4294967295)"},
 		{&BitString{Value: 1500, Width: 32}, "DWORD", "TIME", "T#1.5s"},
 		{&LReal{Value: 2.5}, "LREAL", "TIME", "T#2.5ms"},

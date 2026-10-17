@@ -172,3 +172,44 @@ func TestConfigurationTaskPriorities(t *testing.T) {
 		}
 	}
 }
+
+// A configuration's connections, MAIN(k := g, out => cg), are made by each
+// run of the instance (IEC-57), and a resource's globals are the program's.
+func TestConfigurationProgramConnections(t *testing.T) {
+	p := parser.New(lexer.New(`
+PROGRAM MAIN
+	VAR_INPUT k : INT; END_VAR
+	VAR_OUTPUT out : INT; END_VAR
+	VAR_EXTERNAL rg : INT; END_VAR
+	out := rg + k;
+END_PROGRAM
+CONFIGURATION CF
+	VAR_GLOBAL cg : DINT; g : INT := 9; END_VAR
+	RESOURCE R1 ON PLC
+		VAR_GLOBAL rg : INT := 7; END_VAR
+		TASK T1(INTERVAL := T#10ms, PRIORITY := 1);
+		PROGRAM P1 WITH T1 : MAIN(k := g, out => cg);
+	END_RESOURCE
+END_CONFIGURATION`))
+	program := p.ParseProgram()
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Fatalf("parser errors: %v", errs)
+	}
+	var buf bytes.Buffer
+	if err := New(&buf).Transpile(program); err != nil {
+		t.Fatalf("transpile error: %s", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"func newMAIN(params map[string]string) (*MAIN, error) {",
+		"res1_prog1_instance, err := newMAIN(map[string]string{})",
+		"res1_prog1_instance.k = iec.INT(g)",
+		"res1_prog1_instance.Logic(now)",
+		"cg = iec.DINT(res1_prog1_instance.out)",
+		"var rg iec.INT = 7",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+}

@@ -207,7 +207,12 @@ func bindParameter(node ast.Node, decl *ast.VarDeclStatement, val object.Object,
 			return bindReference(node, decl.Name.Value, rt, val, env)
 		}
 	}
-	return object.CopyValue(val)
+	// A STRING(n) input keeps the first n characters of its argument.
+	val = cutToDeclaredLength(decl, object.CopyValue(val), env)
+	if decl != nil {
+		val = wrapToType(decl.DataType, val) // a narrow integer input wraps
+	}
+	return val
 }
 
 // evalReferenceDeref returns the variable a reference refers to, seen

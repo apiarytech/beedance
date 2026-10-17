@@ -87,6 +87,10 @@ func names(n ast.Node) map[string]bool {
 			if id != nil {
 				out[strings.ToUpper(id.Token.Literal)] = true // a function's return type
 			}
+		case *ast.ArrayDefinition:
+			if id != nil && id.DataType != nil {
+				out[strings.ToUpper(id.DataType.Token.Literal)] = true // ARRAY [..] OF MyFB
+			}
 		}
 		return x
 	})

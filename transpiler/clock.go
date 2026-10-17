@@ -21,7 +21,7 @@ import (
 // T_PLC_US use.
 func isClockCall(exp *ast.CallExpression) bool {
 	ident, ok := exp.Function.(*ast.Identifier)
-	return ok && len(exp.Arguments) == 0 && strings.EqualFold(ident.Value, "TIME")
+	return ok && len(exp.Arguments) == 0 && (strings.EqualFold(ident.Value, "TIME") || ident.Value == "__CLOCK")
 }
 
 // plcTimeHelper is the clock TIME() reads: the time since the program

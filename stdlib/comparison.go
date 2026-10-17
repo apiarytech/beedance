@@ -34,13 +34,29 @@ func init() {
 
 func comparisonBuiltin(op string) object.BuiltinFunction {
 	return func(args ...object.Object) object.Object {
-		if len(args) != 2 {
+		// GT, GE, EQ, LE and LT are extensible (IEC 61131-3): GT(a, b, c) is
+		// a > b AND b > c. NE takes two inputs.
+		if len(args) < 2 || (op == "NE" && len(args) != 2) {
 			return object.NewBuiltinError("wrong number of arguments for %s. got=%d, want=2", op, len(args))
 		}
 		opMap := map[string]string{"GT": ">", "GE": ">=", "EQ": "=", "LE": "<=", "LT": "<", "NE": "<>", "GREAT": ">"}
 		symbolicOp := opMap[op]
 
-		left, right := args[0], args[1]
+		var result object.Object
+		for i := 0; i+1 < len(args); i++ {
+			result = compareTwo(args[i], symbolicOp, args[i+1])
+			if b, isBool := result.(*object.Boolean); !isBool || !b.Value {
+				return result // an error, or FALSE
+			}
+		}
+		return result
+	}
+}
+
+// compareTwo compares two values with a comparison operator, =, <>, <, <=,
+// >, >=.
+func compareTwo(left object.Object, symbolicOp string, right object.Object) object.Object {
+	{
 		result := object.EvalInfix(left, symbolicOp, right)
 
 		// If EvalInfix returns a generic "unsupported operator" error, replace it

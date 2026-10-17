@@ -76,7 +76,7 @@ var ilMnemonics = map[string]bool{
 	"EQ": true, "NE": true, "LE": true, "LT": true, "JMP": true, "JMPC": true, // cspell:disable-line
 	"JMPCN": true, "CAL": true, "CALC": true, "CALCN": true, "RET": true,
 	"RETC": true, "RETCN": true, "AND": true, "ANDN": true, "OR": true,
-	"ORN": true, "XOR": true, "XORN": true, "NOT": true,
+	"ORN": true, "XOR": true, "XORN": true, "NOT": true, "&": true, // & is AND (Table 68, 5)
 	// Add standard functions that can be used as IL instructions
 	"ABS": true, "SQRT": true, "SIN": true, "COS": true, "TAN": true, "ASIN": true, "ACOS": true, "ATAN": true,
 	"LN": true, "LOG": true, "EXP": true, "MOD": true,
@@ -109,6 +109,11 @@ type Parser struct {
 	// declaration is reported; a use reads as the variable, so the mistake
 	// gives one error, not one per use.
 	misusedKeywords map[token.TokenType]bool
+
+	// bidiChecked: the source was checked for bidirectional control
+	// characters already (a body handed to a parser of its own is part of a
+	// source that was).
+	bidiChecked bool
 }
 
 // parseError is a custom error type used for panicking during parsing errors.
@@ -330,9 +335,9 @@ func (p *Parser) isIlInstruction() bool {
 		return false
 	}
 
-	// If a mnemonic is followed by ':=', it's an ST assignment, not an IL instruction.
+	// If a mnemonic is followed by ':=' (or '?='), it's an ST assignment, not an IL instruction.
 	// This is the primary way to resolve the `ST := ...` ambiguity.
-	if p.peekTokenIs(token.ASSIGN) {
+	if p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ATTEMPT) {
 		return false
 	}
 	// No IL operand starts with '.', '[' or '^', so a mnemonic followed by
@@ -387,6 +392,21 @@ func (p *Parser) isIlInstruction() bool {
 	}
 	// It's a mnemonic not followed by '(', so it's a standard IL instruction (e.g., LD var).
 	return true
+}
+
+// isStJump reports whether the current token starts an ST jump, JMP label;
+// (IEC-68). An IL jump has no semicolon after its label.
+func (p *Parser) isStJump() bool {
+	return p.curTokenIs(token.JMP) && p.peekTokenIs(token.IDENT) && p.peek2Token.Type == token.SEMICOLON
+}
+
+// parseStJump parses JMP label; leaving the parser on the semicolon.
+func (p *Parser) parseStJump() ast.Statement {
+	stmt := &ast.JumpStatement{Token: p.curToken}
+	p.nextToken()
+	stmt.Label = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken() // the semicolon
+	return stmt
 }
 
 // isIlMnemonic checks if the current token's literal is a known IL mnemonic.
@@ -465,6 +485,15 @@ func (p *Parser) ParseProgram() *ast.Program {
 	program.Statements = []ast.Statement{}
 	lastPosition := -1 // Track the last token position to detect infinite loops
 
+	// Bidirectional controls anywhere, comments and strings too, can make
+	// the text read differently from how it compiles (lexer.BidiControls).
+	if !p.bidiChecked {
+		p.bidiChecked = true
+		for _, b := range lexer.BidiControls(p.l.Input()) {
+			p.errors = append(p.errors, fmt.Sprintf("bidirectional control character U+%04X at row %d, column %d: it can make the text read differently from how it compiles", b.Rune, b.Row, b.Column))
+		}
+	}
+
 	for !p.curTokenIs(token.EOF) {
 		// Infinite loop detection: if the token position hasn't changed since the
 		// last iteration, we're stuck. This is the primary recovery mechanism.
@@ -506,6 +535,7 @@ func (p *Parser) ParseProgram() *ast.Program {
 		}()
 	}
 
+	p.checkJumps(program.Statements) // IEC-68
 	return program
 }
 
@@ -524,11 +554,16 @@ func (p *Parser) parseStatement() ast.Statement {
 	}
 	// A contextual keyword naming a variable at the start of a statement, e.g.
 	// STEP := STEP + 1, or a reference r^ := 1.
-	p.nameInContext(token.ASSIGN, token.DOT, token.LBRACKET, token.LPAREN, token.CARET)
+	p.nameInContext(token.ASSIGN, token.ATTEMPT, token.DOT, token.LBRACKET, token.LPAREN, token.CARET)
 
 	// Handle empty statements (just a semicolon).
 	if p.curTokenIs(token.SEMICOLON) {
 		return nil // The main parsing loop will advance the token.
+	}
+
+	// IEC-68: JMP label; in ST. The semicolon tells it from IL's JMP label.
+	if p.isStJump() {
+		return p.parseStJump()
 	}
 
 	// If the current token looks like an IL instruction, decide whether to parse it as IL or ST.
@@ -579,7 +614,7 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.ABSTRACT:
 		// Only FUNCTION_BLOCK can be abstract at the POU level.
 		// If it's something else (like ABSTRACT FUNCTION), we want the "no prefix" error.
-		if p.peekTokenIs(token.FUNCTION_BLOCK) {
+		if p.peekTokenIs(token.FUNCTION_BLOCK) || p.peekTokenIs(token.CLASS) {
 			return p.parsePoulDeclaration()
 		}
 		return p.parseExpressionStatement() // Fallback to get "no prefix" error
@@ -588,11 +623,11 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.PUBLIC, token.INTERNAL:
 		// An access specifier may prefix a function block declaration,
 		// e.g. `INTERNAL FUNCTION_BLOCK X` inside a NAMESPACE.
-		if p.peekTokenIs(token.FUNCTION_BLOCK) || p.peekTokenIs(token.ABSTRACT) {
+		if p.peekTokenIs(token.FUNCTION_BLOCK) || p.peekTokenIs(token.ABSTRACT) || p.peekTokenIs(token.CLASS) {
 			return p.parsePoulDeclaration()
 		}
 		return p.parseExpressionStatement() // Fallback to get "no prefix" error
-	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK:
+	case token.PROGRAM, token.FUNCTION, token.FUNCTION_BLOCK, token.CLASS:
 		return p.parsePoulDeclaration()
 	case token.INTERFACE:
 		return p.parseInterfaceDeclaration()
@@ -605,6 +640,20 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.EXIT:
 		return p.parseExitStatement()
 	case token.IDENT:
+		// IEC-68: label: before a statement. (In a CASE branch, name: starts
+		// the next branch instead: the statement loop stops there first.)
+		if p.peekTokenIs(token.COLON) {
+			stmt := &ast.LabelStatement{Token: p.curToken, Name: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}}
+			p.nextToken() // the colon; the statement loop moves past it
+			return stmt
+		}
+		// CONTINUE; is the statement, not a variable: CONTINUE is read as a
+		// keyword only there, so a program may still name a variable so.
+		if strings.EqualFold(p.curToken.Literal, "CONTINUE") && p.peekTokenIs(token.SEMICOLON) {
+			stmt := &ast.ContinueStatement{Token: p.curToken}
+			p.nextToken() // the semicolon
+			return stmt
+		}
 		return p.parseExpressionStatement()
 	default:
 		// Any other token that can start an expression.
@@ -678,6 +727,22 @@ func (p *Parser) parseVarBlockStatement() *ast.VarBlockDeclaration {
 	return stmt
 }
 
+// isWordLiteral reports whether a token's text is spelled as a name: a
+// letter or underscore, then letters, digits and underscores.
+func isWordLiteral(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		letter := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !letter && (i == 0 || c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 // parseStructMember parses a single member declaration within a STRUCT definition.
 func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	defer untrace(trace("parseStructMember"))
@@ -686,6 +751,11 @@ func (p *Parser) parseStructMember() *ast.VarDeclStatement {
 	// and, according to the IEC 61131-3 standard, without initial values.
 	stmt := &ast.VarDeclStatement{Token: p.curToken}
 
+	// A keyword spelled as a name, such as T, R or S, names a member when a
+	// colon follows it: a member is only ever read as s.T, so it is clear.
+	if !p.curTokenIs(token.IDENT) && isWordLiteral(p.curToken.Literal) && p.peekTokenIs(token.COLON) {
+		p.curToken.Type = token.IDENT
+	}
 	if !p.curTokenIs(token.IDENT) {
 		p.currentError("expected member name (identifier), got %s", p.curToken.Type)
 		// Synchronize to the next potential member or end of struct
@@ -1029,6 +1099,13 @@ func (p *Parser) parseTypeDeclaration() *ast.TypeDeclaration {
 		p.nextToken() // consume type, curToken is now '('
 		if isString {
 			decl.StringLength = p.parseGroupedExpression()
+		} else if p.peekTokenIs(token.IDENT) && (p.peek2TokenIs(token.ASSIGN) || p.peek2TokenIs(token.COMMA) || p.peek2TokenIs(token.RPAREN)) {
+			// A typed enumeration, INT (A := 1, B := 2): values of the
+			// base type, named.
+			if enum, ok := p.parseEnumDefinition().(*ast.EnumDefinition); ok && enum != nil {
+				enum.BaseType = decl.DataType
+				decl.DataType = enum
+			}
 		} else {
 			decl.Subrange = p.parseGroupedExpression()
 		}
@@ -1092,19 +1169,35 @@ func (p *Parser) parseEnumDefinition() ast.Expression {
 	// Current token is '('. We expect a list of identifiers.
 	p.nextToken() // consume '('
 
-	// Parse the first identifier
-	if p.curTokenIs(token.IDENT) {
+	// A value, with its number if one is written: RED := 1.
+	numbered := false
+	value := func() {
 		enumDef.Values = append(enumDef.Values, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
 		p.nextToken()
+		var number ast.Expression
+		if p.curTokenIs(token.ASSIGN) {
+			p.nextToken() // to the number
+			number = p.parseExpression(LOWEST)
+			p.nextToken()
+			numbered = true
+		}
+		enumDef.Numbers = append(enumDef.Numbers, number)
+	}
+
+	// Parse the first identifier
+	if p.curTokenIs(token.IDENT) {
+		value()
 	}
 
 	// Parse subsequent identifiers separated by commas
 	for p.curTokenIs(token.COMMA) {
 		p.nextToken() // consume ','
 		if p.curTokenIs(token.IDENT) {
-			enumDef.Values = append(enumDef.Values, &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal})
-			p.nextToken()
+			value()
 		}
+	}
+	if !numbered {
+		enumDef.Numbers = nil
 	}
 
 	// After the loop, the current token should be the closing parenthesis.
@@ -1233,6 +1326,7 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 		// After parsing the type, we should be on the type token.
 
 		var subrange, stringLength ast.Expression
+		stringBracket := false
 		if p.peekTokenIs(token.LPAREN) {
 			isString := false
 			if ident, ok := dataType.(*ast.Identifier); ok {
@@ -1244,6 +1338,29 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 				stringLength = p.parseGroupedExpression()
 			} else {
 				subrange = p.parseGroupedExpression()
+			}
+		}
+		// STRING[n] and WSTRING[n], as IEC 61131-3 writes a string's length,
+		// read as an index; they are STRING(n) and WSTRING(n).
+		if index, ok := dataType.(*ast.IndexExpression); ok && stringLength == nil {
+			if ident, isName := index.Left.(*ast.Identifier); isName && (strings.EqualFold(ident.Value, "STRING") || strings.EqualFold(ident.Value, "WSTRING")) {
+				dataType = &ast.Identifier{Token: ident.Token, Value: strings.ToUpper(ident.Value)}
+				stringLength = index.Index
+				stringBracket = true
+			}
+		}
+		// R_EDGE or F_EDGE after the type, c : BOOL R_EDGE, as IEC 61131-3
+		// writes it, qualifies this declaration.
+		risingEdge, fallingEdge := isRisingEdge, isFallingEdge
+		if p.peekTokenIs(token.R_EDGE) || p.peekTokenIs(token.F_EDGE) {
+			p.nextToken()
+			risingEdge = risingEdge || p.curTokenIs(token.R_EDGE)
+			fallingEdge = fallingEdge || p.curTokenIs(token.F_EDGE)
+			if blockType != token.VAR_INPUT {
+				p.currentError("R_EDGE and F_EDGE qualifiers can only be used in VAR_INPUT blocks")
+			}
+			if !strings.EqualFold(dataType.String(), "BOOL") {
+				p.currentError("R_EDGE and F_EDGE qualifiers can only be applied to BOOL variables")
 			}
 		}
 
@@ -1271,13 +1388,14 @@ func (p *Parser) parseVarDeclarations(endToken token.TokenType, blockType token.
 				Location:        atDecl,
 				DataType:        dataType,
 				StringLength:    stringLength,
+				StringBracket:   stringBracket,
 				Subrange:        subrange,
 				Value:           initialValue,
 				IsConstant:      isConstant, // Apply the block-level qualifier
 				IsRetain:        isRetain,
 				IsNonRetain:     isNonRetain,
-				IsRisingEdge:    isRisingEdge,
-				IsFallingEdge:   isFallingEdge,
+				IsRisingEdge:    risingEdge,
+				IsFallingEdge:   fallingEdge,
 				Scope:           string(blockType),
 				LeadingComments: p.leadingComments,
 			}
@@ -1750,7 +1868,13 @@ func (p *Parser) parseArrayDefinition() ast.Expression {
 
 	def.Ranges = []ast.Expression{}
 	for !p.curTokenIs(token.RBRACKET) {
-		rangeExp := p.parseExpression(LOWEST)
+		// ARRAY[*]: a dimension of any length, for a VAR_IN_OUT (3rd edition).
+		var rangeExp ast.Expression
+		if p.curTokenIs(token.ASTERISK) {
+			rangeExp = &ast.AnyRange{Token: p.curToken}
+		} else {
+			rangeExp = p.parseExpression(LOWEST)
+		}
 		def.Ranges = append(def.Ranges, rangeExp)
 
 		if p.peekTokenIs(token.COMMA) {
@@ -1946,11 +2070,67 @@ func (p *Parser) parseRealLiteral() ast.Expression {
 // parseStringLiteral parses a single-byte or wide-character string literal.
 func (p *Parser) parseStringLiteral() ast.Expression {
 	defer untrace(trace("parseStringLiteral")) // cspell:disable-line
+	// The token keeps the text as written; the value has its $ escapes decoded.
 	if p.curToken.Type == token.WSTRING_LITERAL {
-		return &ast.WStringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+		return &ast.WStringLiteral{Token: p.curToken, Value: decodeStringEscapes(p.curToken.Literal, true)}
 	} else {
-		return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+		return &ast.StringLiteral{Token: p.curToken, Value: decodeStringEscapes(p.curToken.Literal, false)}
 	}
+}
+
+// decodeStringEscapes decodes the $ escapes of a string literal's text (IEC
+// 61131-3): $$ $' $" $L $N $P $R $T, and a character code, $hh in a STRING
+// (a byte) or $hhhh in a WSTRING. Any other $ sequence is kept as written.
+func decodeStringEscapes(text string, wide bool) string {
+	if !strings.Contains(text, "$") {
+		return text
+	}
+	hex := func(s string) (int64, bool) {
+		n, err := strconv.ParseInt(s, 16, 32)
+		return n, err == nil
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		if text[i] != '$' || i+1 >= len(text) {
+			b.WriteByte(text[i])
+			continue
+		}
+		switch c := text[i+1]; c {
+		case '$', '\'', '"':
+			b.WriteByte(c)
+			i++
+			continue
+		case 'L', 'l', 'N', 'n':
+			b.WriteByte('\n')
+			i++
+			continue
+		case 'P', 'p':
+			b.WriteByte('\f')
+			i++
+			continue
+		case 'R', 'r':
+			b.WriteByte('\r')
+			i++
+			continue
+		case 'T', 't':
+			b.WriteByte('\t')
+			i++
+			continue
+		}
+		if digits := 2 + 2*map[bool]int{true: 1}[wide]; i+digits < len(text) {
+			if n, ok := hex(text[i+1 : i+1+digits]); ok {
+				if wide {
+					b.WriteRune(rune(n))
+				} else {
+					b.WriteByte(byte(n))
+				}
+				i += digits
+				continue
+			}
+		}
+		b.WriteByte('$')
+	}
+	return b.String()
 }
 
 // parsePrefixExpression parses a prefix operator expression (e.g., -5, NOT flag).
@@ -2045,6 +2225,10 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 
 	// Heuristic for struct literals: if it starts with `IDENT :=` inside the parens,
 	// or if it's an empty `()`, which could be an empty struct literal.
+	// A contextual keyword may name a member, (step := 3).
+	if contextualKeywords[p.peekToken.Type] && p.peek2TokenIs(token.ASSIGN) {
+		p.peekToken.Type = token.IDENT
+	}
 	if (p.peekTokenIs(token.IDENT) && p.peek2TokenIs(token.ASSIGN)) || p.peekTokenIs(token.RPAREN) {
 		lit := &ast.StructLiteral{Token: startToken}
 		// We can reuse parseExpressionList, which handles named arguments.
@@ -2549,11 +2733,12 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	startToken := p.curToken
 	leftExp := p.parseExpression(LOWEST)
 
-	// After parsing the left-hand side, check if it's an assignment.
-	if p.peekTokenIs(token.ASSIGN) {
+	// After parsing the left-hand side, check if it's an assignment (or an
+	// assignment attempt, ?=).
+	if p.peekTokenIs(token.ASSIGN) || p.peekTokenIs(token.ATTEMPT) {
 		p.nextToken() // consume leftExp, curToken is now ASSIGN
 		stmt := &ast.AssignmentStatement{
-			Token:           p.curToken, // The := token
+			Token:           p.curToken, // The := (or ?=) token
 			Left:            leftExp,
 			LeadingComments: p.leadingComments,
 		}
@@ -2666,11 +2851,13 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		return false
 	}
 
-	isParsingNamespace := false
+	isParsingNamespace, caseBranch := false, false
 	for _, et := range end {
 		if et == token.END_NAMESPACE {
 			isParsingNamespace = true
-			break
+		}
+		if et == token.END_CASE {
+			caseBranch = true
 		}
 	}
 
@@ -2712,7 +2899,8 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 		// (e.g., an INT like `3`, an IDENT like `MyState`). If we see a token that
 		// could start an expression and is followed by a comma or colon, it's very
 		// likely the start of the next case label list, so we should stop parsing statements for the current branch.
-		if p.isStartOfCaseLabel() {
+		// Only in a CASE branch: elsewhere name: is a jump label (IEC-68).
+		if caseBranch && p.isStartOfCaseLabel() {
 			break
 		}
 

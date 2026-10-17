@@ -431,7 +431,7 @@ func TestSfcErrorHandling(t *testing.T) {
 		{
 			name:          "Missing FROM in TRANSITION",
 			input:         `TRANSITION S1 TO S2 := TRUE; END_TRANSITION`,
-			expectedError: "expected next token to be FROM, got IDENT instead",
+			expectedError: "expected next token to be FROM, got TO instead", // S1 names the transition
 		},
 		{
 			name:          "Missing TO in TRANSITION",

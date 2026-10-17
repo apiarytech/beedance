@@ -28,6 +28,7 @@ import (
 
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/enables"
 	"github.com/apiarytech/beedance/object"
 )
 
@@ -104,6 +105,10 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 	inputs, inOuts, outputs := c.functionBlockParameters(fbDef)
 	params := append(append([]*ast.VarDeclStatement{}, inputs...), inOuts...)
 	var enable, enableTarget ast.Expression
+	// IEC-75: a block that declares EN or ENO itself has them as an input
+	// and an output like any other (package enables gives them their
+	// meaning); the call's own EN and ENO are for one that does not.
+	declaredEN, declaredENO := enables.Declares(inputs, outputs)
 	copyBacks := []*ast.AssignmentStatement{}
 	outputAssigns := []*ast.AssignmentStatement{}
 
@@ -117,15 +122,17 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 				return fmt.Errorf("argument for VAR_IN_OUT '%s' of %s must be a variable, got %s", param.Name.Value, describePOU(fbDef), value.String())
 			}
 			copyBacks = append(copyBacks, &ast.AssignmentStatement{Token: node.Token, Left: value, Value: field(param.Name.Value)})
+			return assign(field(param.Name.Value), value)
 		}
-		return assign(field(param.Name.Value), value)
+		// A STRING(n) input keeps the first n characters of its argument.
+		return assign(field(param.Name.Value), stringCut(param, value))
 	}
 
 	positional := 0
 	for _, arg := range node.Arguments {
 		switch a := arg.(type) {
 		case *ast.NamedArgument:
-			if strings.EqualFold(a.Name.Value, "EN") {
+			if strings.EqualFold(a.Name.Value, "EN") && !declaredEN {
 				enable = a.Value
 				continue
 			}
@@ -137,7 +144,7 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 				return err
 			}
 		case *ast.OutputArgument:
-			if strings.EqualFold(a.Source.Value, "ENO") {
+			if strings.EqualFold(a.Source.Value, "ENO") && !declaredENO {
 				enableTarget = a.Target
 				continue
 			}
@@ -198,8 +205,19 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 
 // instanceTypeName returns the declared type name of a variable, or of a
 // member of a structure or function block instance such as `THIS.inner` or
-// `line.start`.
+// `line.start`, or of an element of an array such as `steps[i]`.
 func (c *Compiler) instanceTypeName(exp ast.Expression) (string, bool) {
+	if index, isIndex := exp.(*ast.IndexExpression); isIndex {
+		array := index.Left
+		for inner, ok := array.(*ast.IndexExpression); ok; inner, ok = array.(*ast.IndexExpression) {
+			array = inner.Left // grid[i, j] is grid[i][j]
+		}
+		def, isArray := c.declaredVarType(array).(*ast.ArrayDefinition)
+		if !isArray || def.DataType == nil {
+			return "", false
+		}
+		return def.DataType.Token.Literal, true
+	}
 	member, isMember := exp.(*ast.MemberAccessExpression)
 	if !isMember {
 		return c.getExpressionTypeName(exp)

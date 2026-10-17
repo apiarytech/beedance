@@ -82,27 +82,31 @@ func evalTOF(instanceEnv, callEnv *object.Environment) object.Object {
 		}
 	}
 
-	var et time.Duration
-	q := FALSE
-
+	// The delay runs only while Q is on, as in the compiled TOF: a TOF whose
+	// IN has not been on keeps Q off, and with PT = T#0s Q goes off in the
+	// scan IN falls.
+	prevQ, _ := instanceEnv.Get("Q")
 	if inBool.Value {
 		instanceEnv.Set("__stopTime", nil)
-		q = TRUE
-		et = 0
-	} else {
-		// Falling edge of IN
-		if stopTime.IsZero() {
-			stopTime = nowFunc()
-			instanceEnv.Set("__stopTime", &object.DateAndTime{Value: stopTime})
-		}
+		instanceEnv.Set("Q", TRUE)
+		instanceEnv.Set("ET", &object.Time{Value: 0})
+		return TRUE
+	}
+	if b, ok := prevQ.(*object.Boolean); !ok || !b.Value {
+		return FALSE // Q and ET stay as they are
+	}
 
-		et = nowFunc().Sub(stopTime)
-		if et < ptDuration.Value {
-			q = TRUE
-		} else {
-			et = ptDuration.Value
-			q = FALSE
-		}
+	// IN is off and Q on: IN has fallen, or the delay is running.
+	if stopTime.IsZero() {
+		stopTime = nowFunc()
+		instanceEnv.Set("__stopTime", &object.DateAndTime{Value: stopTime})
+	}
+	et := nowFunc().Sub(stopTime)
+	q := TRUE
+	if et >= ptDuration.Value {
+		et = ptDuration.Value
+		q = FALSE
+		instanceEnv.Set("__stopTime", nil)
 	}
 
 	instanceEnv.Set("Q", q)
@@ -351,13 +355,8 @@ func evalSR(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("SR requires S1 (BOOL) and R (BOOL) inputs")
 	}
 
-	q1 := isBoolTrue(q1Obj)
-
-	if rBool.Value {
-		q1 = false
-	} else if s1Bool.Value {
-		q1 = true
-	}
+	// Set dominant (IEC 61131-3): Q1 := S1 OR (NOT R AND Q1).
+	q1 := s1Bool.Value || (!rBool.Value && isBoolTrue(q1Obj))
 
 	q1Result := nativeBoolToBooleanObject(q1)
 	instanceEnv.Set("Q1", q1Result)
@@ -377,13 +376,8 @@ func evalRS(instanceEnv, callEnv *object.Environment) object.Object {
 		return object.NewBuiltinError("RS requires S (BOOL) and R1 (BOOL) inputs")
 	}
 
-	q1 := isBoolTrue(q1Obj)
-
-	if sBool.Value {
-		q1 = true
-	} else if r1Bool.Value {
-		q1 = false
-	}
+	// Reset dominant (IEC 61131-3): Q1 := NOT R1 AND (S OR Q1).
+	q1 := !r1Bool.Value && (sBool.Value || isBoolTrue(q1Obj))
 
 	q1Result := nativeBoolToBooleanObject(q1)
 	instanceEnv.Set("Q1", q1Result)

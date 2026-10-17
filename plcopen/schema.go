@@ -627,6 +627,34 @@ func dataTypeFromName(name string) DataType {
 	}
 }
 
+// literalText is a string literal's text between its quotes: as written,
+// or, for a literal made in code, its value with $, the quote and control
+// characters escaped.
+func literalText(written, value string, quote byte) string {
+	if written != "" || value == "" {
+		return written
+	}
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; {
+		case c == '$' || c == quote:
+			b.WriteByte('$')
+			b.WriteByte(c)
+		case c == '\n':
+			b.WriteString("$N")
+		case c == '\r':
+			b.WriteString("$R")
+		case c == '\t':
+			b.WriteString("$T")
+		case c == '\f':
+			b.WriteString("$P")
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // constantText returns a constant as IEC 61131-3 source: a literal as
 // written, such as T#20ms, and a negative number without parentheses.
 func constantText(expr ast.Expression) string {
@@ -635,12 +663,13 @@ func constantText(expr ast.Expression) string {
 		if e.Operator == "-" || e.Operator == "+" {
 			return e.Operator + constantText(e.Right)
 		}
-	// The lexer keeps a string's $ escapes, such as $' and $$, as written, so
-	// its text only needs its quotes back.
+	// A string's token keeps its $ escapes, such as $' and $$, as written, so
+	// its text only needs its quotes back. A literal made in code has only
+	// its value, escaped here.
 	case *ast.StringLiteral:
-		return "'" + e.Value + "'"
+		return "'" + literalText(e.Token.Literal, e.Value, '\'') + "'"
 	case *ast.WStringLiteral:
-		return `"` + e.Value + `"`
+		return `"` + literalText(e.Token.Literal, e.Value, '"') + `"`
 	}
 	return expr.String()
 }

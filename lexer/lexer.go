@@ -144,9 +144,31 @@ func (l *Lexer) NextToken() token.Token {
 		} else {
 			tok = newToken(token.COLON, l.ch, startLine, startCol, startPos)
 		}
+	case '?':
+		// ?= is the assignment attempt.
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = token.Token{Type: token.ATTEMPT, Literal: "?=", Row: startLine, Column: startCol, Pos: startPos}
+		} else {
+			tok = newToken(token.QUESTION, l.ch, startLine, startCol, startPos) // IL ST?
+		}
 	case ',':
 		tok = newToken(token.COMMA, l.ch, startLine, startCol, startPos)
 	case '{':
+		// A pragma, {attribute 'hide'}, is a comment to every engine; a
+		// hash literal, {1: 2}, has a colon (or nothing) between its braces.
+		if end, isPragma := l.pragmaEnd(); isPragma {
+			literal := l.input[l.position : end+1]
+			for l.position < end {
+				l.readChar()
+			}
+			tok.Type = token.COMMENT
+			tok.Literal = literal
+			tok.Row = startLine
+			tok.Column = startCol
+			tok.Pos = startPos
+			break
+		}
 		tok = newToken(token.LBRACE, l.ch, startLine, startCol, startPos)
 	case '}':
 		tok = newToken(token.RBRACE, l.ch, startLine, startCol, startPos)
@@ -236,6 +258,14 @@ func (l *Lexer) NextToken() token.Token {
 				tok.Type = token.IDENT
 			} else {
 				tok.Type = token.LookupIdent(ident)
+			}
+			// The long time types of the 3rd edition, LTIME, LDATE, LTOD and
+			// LDT, hold nanoseconds as TIME, DATE, TOD and DT already do here:
+			// they are those types. LT# and LD# only before a #, where they
+			// prefix a literal (LT is also an operator, LD an IL keyword).
+			if short, isLong := token.LongTimeType(ident, l.ch == '#'); isLong {
+				tok.Literal = short
+				tok.Type = token.LookupIdent(short)
 			}
 			return tok
 		} else if isDigit(l.ch) {
@@ -423,6 +453,42 @@ func (l *Lexer) readDirectVariable() string {
 		l.readChar()
 	}
 	return l.input[position:l.position]
+}
+
+// pragmaEnd reports whether the { at the current position opens a pragma,
+// and where its } is: text up to a } on which no colon stands outside
+// quotes. Empty braces, and braces with a colon, are a hash literal.
+func (l *Lexer) pragmaEnd() (int, bool) {
+	// A pragma stands where a declaration or a statement may: first on its
+	// line, or after a semicolon. A brace elsewhere, fn(x) : INT { ... },
+	// macro(a) { ... } or x := {1: 2}, is code.
+	line := l.input[:l.position]
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	if before := strings.TrimSpace(line); before != "" && !strings.HasSuffix(before, ";") {
+		return 0, false
+	}
+	var quote byte
+	for i := l.position + 1; i < len(l.input); i++ {
+		c := l.input[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == ':' || c == '{':
+			return 0, false
+		case c == '}':
+			if strings.TrimSpace(l.input[l.position+1:i]) == "" {
+				return 0, false
+			}
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // readString consumes a string literal enclosed in either single or double quotes.

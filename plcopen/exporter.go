@@ -356,6 +356,15 @@ func toVarLists(decls []*ast.VarDeclStatement) []VarList {
 			Type:    DataTypeFromAST(d.DataType),
 			AddData: stTypeData(d.DataType),
 		}
+		// A string's length, STRING[20] or STRING(20).
+		if d.StringLength != nil {
+			length := &StringType{Length: constantText(d.StringLength)}
+			if v.Type.WSTRING != nil {
+				v.Type.WSTRING = length
+			} else if v.Type.STRING != nil {
+				v.Type.STRING = length
+			}
+		}
 		if d.Location != nil && d.Location.Location != nil {
 			v.Address = d.Location.Location.String()
 		}

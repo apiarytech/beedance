@@ -97,8 +97,9 @@ PROGRAM P
 END_PROGRAM`
 	checkContains(t, input,
 		"func (i *Inner) Init() { i.k = 3 i.s = Shade_Dark }",
-		// The parent's Init runs first; nested instances are initialized too.
-		"func (o *Outer) Init() { o.Inner.Init() o.v = 3 o.inn.Init() o.inn.k = 8 }",
+		// The parent's Init runs first; nested instances are initialized
+		// too, with EN TRUE so that calling them runs them.
+		"func (o *Outer) Init() { o.Inner.Init() o.v = 3 o.inn.Init() o.inn.k = 8 o.inn.EN = true o.pl.EN = true }",
 		// The program's factory initializes instances, then applies initializers.
 		"instance.o.Init() instance.o.v = 9 instance.o.EN = true",
 		"instance.pl.EN = true",

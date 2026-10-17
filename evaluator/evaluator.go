@@ -13,8 +13,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/enums"
+	"github.com/apiarytech/beedance/inputwrites"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/stdcalls"
 	"github.com/apiarytech/beedance/token"
+	"github.com/apiarytech/beedance/typedfbs"
 	"math"
 	"sort"
 	"strconv"
@@ -31,6 +35,8 @@ var (
 	FALSE = &object.Boolean{Value: false}
 	// EXIT is a singleton object used to signal the termination of a loop.
 	EXIT = &object.Exit{}
+	// CONTINUE is the singleton that signals a CONTINUE in a loop.
+	CONTINUE = &object.Continue{}
 
 	// currentResultVar is the internal name used in the environment to store the
 	// Instruction List (IL) accumulator, also known as the Current Result (CR).
@@ -330,7 +336,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 				// It's an enum type. Check if the value exists.
 				for _, enumVal := range enumDef.Values {
 					if enumVal.Value == valueStr {
-						return &object.EnumeratedValue{TypeName: strings.ToUpper(typeDecl.Name.Value), Value: valueStr}
+						n, _ := enumDef.NumberOf(valueStr)
+						return &object.EnumeratedValue{TypeName: strings.ToUpper(typeDecl.Name.Value), Value: valueStr, Number: n}
 					}
 				}
 				return newError(node, "enumerated value '%s' not found in type '%s'", valueStr, targetTypeName)
@@ -369,6 +376,13 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
 
+	// The current result of an IL body, the first input of LIMIT 0, 10.
+	case *ast.IlCurrentResult:
+		if cr, ok := env.Get(currentResultVar); ok {
+			return cr
+		}
+		return newError(node, "the current result is not set")
+
 	case *ast.BitStringLiteral:
 		return &object.BitString{Value: node.Value, Width: node.Width}
 
@@ -386,7 +400,7 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 	case *ast.EnumeratedValueLiteral:
 		// This is a new literal type for enum values like MyColor#RED
-		return &object.EnumeratedValue{TypeName: node.TypeName.Value, Value: node.Value.Value}
+		return &object.EnumeratedValue{TypeName: node.TypeName.Value, Value: node.Value.Value, Number: enumNumber(node.TypeName.Value, node.Value.Value, env)}
 
 	case *ast.PrefixExpression:
 		// A PrefixExpression (e.g., -5, NOT TRUE) is evaluated by first evaluating its operand, then applying the operator.
@@ -466,6 +480,15 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// EXIT statements simply return a special EXIT object
 		// that loop evaluators will catch.
 		return EXIT
+	case *ast.ContinueStatement:
+		// A CONTINUE skips the rest of the loop's body; the loop catches it.
+		return CONTINUE
+	case *ast.JumpStatement:
+		// IEC-68: JMP label; passes up, out of IFs and loops, to the
+		// statement list that holds the label (evalBlockStatement).
+		return &object.Jump{TargetLabel: node.Label.Value}
+	case *ast.LabelStatement:
+		return nil // a label only marks where a jump goes on
 	case *ast.CaseStatement:
 		return evalCaseStatement(node, env)
 
@@ -540,6 +563,19 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			}
 		}
 
+		// A method of the function block whose body or method is running,
+		// called by its name alone.
+		if ident, ok := node.Function.(*ast.Identifier); ok && function == nil {
+			if _, declared := env.Get(ident.Value); !declared {
+				if this, hasThis := env.Get("THIS"); hasThis {
+					if instance, isFB := this.(*object.FunctionBlockInstance); isFB && instance.Definition != nil {
+						if methodDef := findMethodOnFBChain(instance.Definition, ident.Value, env); methodDef != nil {
+							function = &object.Method{Definition: methodDef, Instance: instance}
+						}
+					}
+				}
+			}
+		}
 		if function == nil {
 			// Fallback to normal evaluation for function block instances, built-ins, etc.
 			function = Eval(node.Function, env)
@@ -703,14 +739,23 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 			}
 
 		case *ast.TransitionStatement:
+			priority := int64(math.MaxInt64)
+			if p, ok := elem.PriorityValue(); ok {
+				priority = p
+			}
 			sfc.Transitions = append(sfc.Transitions, &object.Transition{
 				FromSteps: elem.From,
 				ToSteps:   elem.To,
 				Condition: elem.Condition,
+				Priority:  priority,
 			})
 
 		}
 	}
+
+	// Transitions with a priority come first, lower first; the others keep
+	// their written order (as package sfc orders them).
+	sort.SliceStable(sfc.Transitions, func(i, j int) bool { return sfc.Transitions[i].Priority < sfc.Transitions[j].Priority })
 
 	// 3. Initialize the SFC state
 	if sfc.InitialStepName == "" {
@@ -1042,6 +1087,25 @@ func getHighestPriorityActiveQualifier(action *object.Action, env *object.Enviro
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
 	var result object.Object
 
+	// IEC-69: a POU's inputs are read-only, as on the VM, unless the session
+	// allows input writes (CODESYS's dialect). Checked before edges'
+	// lowering, which writes edge inputs through THIS.
+	if !allowInputWrites {
+		if err := inputwrites.Check(program); err != nil {
+			return newError(program, "%s", err)
+		}
+	}
+	// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
+	typedfbs.Declare(program)
+	// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
+	stdcalls.Positional(program)
+	// R_EDGE and F_EDGE inputs; see package edges.
+	if err := edgesThenEnables(program); err != nil {
+		return newError(program, "%s", err)
+	}
+	// Enumeration values named without their type; see package enums.
+	enums.Qualify(program)
+
 	// Reorder statements to process definitions (TYPE, FUNCTION_BLOCK, FUNCTION, INTERFACE)
 	// before usages (PROGRAM, VAR_GLOBAL, etc.). This is a simple two-pass approach
 	// to handle forward references, which are common in IEC 61131-3 projects.
@@ -1212,6 +1276,19 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 			return newError(node, "ST instruction executed but Current Result is not set")
 		}
 
+		// ST? x is x ?= the current result.
+		if modifier == "?" {
+			attempt := &ast.AssignmentStatement{
+				Token: token.Token{Type: token.ATTEMPT, Literal: "?=", Row: node.Token.Row, Column: node.Token.Column, Pos: node.Token.Pos},
+				Left:  node.Operand,
+				Value: &ast.Identifier{Token: node.Token, Value: currentResultVar},
+			}
+			if result := evalAssignmentAttempt(attempt, env); isError(result) {
+				return result
+			}
+			return crObj
+		}
+
 		isNegatedOperand := strings.Contains(modifier, "N") && !isConditional
 		if isNegatedOperand {
 			// Create a synthetic node for error reporting, using the token from the original instruction.
@@ -1230,6 +1307,13 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		return newError(node, "operand for ST must be a variable identifier")
 
 	case "S", "R": // Set, Reset
+		// S and R of an RS or SR instance set its input S or R (Table 70).
+		if _, isInstance := Eval(node.Operand, env).(*object.FunctionBlockInstance); isInstance {
+			call := *node
+			call.Operator, call.Modifier = "CAL", ""
+			call.Operand = ast.IlInputCall(token.Token{Type: token.IDENT, Literal: op, Row: node.Token.Row, Column: node.Token.Column}, node.Operand)
+			return evalIlInstructionStatement(&call, env)
+		}
 		if targetIdent, ok := node.Operand.(*ast.Identifier); ok {
 			// The S and R instructions only execute if the current result is TRUE.
 			if cr, ok := env.Get(currentResultVar); ok && object.IsTruthy(cr) {
@@ -1248,7 +1332,15 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 		}
 		return newError(node, "operand for S/R must be a boolean variable")
 
-	case "ADD", "SUB", "MUL", "DIV", "AND", "OR", "XOR", "GT", "LT", "EQ", "NE", "GE", "LE":
+	case "NOT":
+		// NOT negates the current result: logically for a BOOL, bitwise otherwise.
+		crObj, ok := env.Get(currentResultVar)
+		if !ok {
+			return newError(node, "NOT instruction executed but Current Result is not set")
+		}
+		return evalNotOperatorExpression(&ast.PrefixExpression{Token: node.Token, Operator: "NOT"}, crObj)
+
+	case "ADD", "SUB", "MUL", "DIV", "AND", "OR", "XOR", "GT", "LT", "EQ", "NE", "GE", "LE", "MOD":
 		crObj, ok := env.Get(currentResultVar)
 		if !ok {
 			return newError(node, "%s instruction executed but Current Result is not set", op)
@@ -1414,6 +1506,9 @@ func applyNegationToOperand(operand object.Object, modifier string, isConditiona
 // evalAssignmentStatement evaluates an assignment by first evaluating the right-hand
 // side value, and then setting it in the environment for the left-hand side identifier.
 func evalAssignmentStatement(node *ast.AssignmentStatement, env *object.Environment) object.Object {
+	if node.IsAttempt() {
+		return evalAssignmentAttempt(node, env) // ?=; see attempt.go
+	}
 	val := Eval(node.Value, env)
 	if isError(val) {
 		return val
@@ -1471,6 +1566,12 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 					return newError(node, "%s is a reference; it takes REF(), ADR() or NULL, not a %s", target.Value, val.Type())
 				}
 			}
+			// A STRING(n) keeps its first n characters; a narrow integer
+			// wraps into its range.
+			if decl, ok := env.Declaration(target.Value); ok {
+				val = cutToDeclaredLength(decl, val, env)
+				val = wrapToType(decl.DataType, val)
+			}
 			// An array keeps the bounds its variable was declared with.
 			keepArrayBounds(existing, val)
 			// A bit string variable keeps its type when given an integer.
@@ -1517,6 +1618,18 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 			if position < 0 || position >= int64(len(arrayObject.Elements)) {
 				return newError(target, "index out of bounds: %d", idx)
 			}
+			// An element of an array of narrow integers wraps into its range.
+			array := target.Left
+			for inner, ok := array.(*ast.IndexExpression); ok; inner, ok = array.(*ast.IndexExpression) {
+				array = inner.Left
+			}
+			if name, isName := array.(*ast.Identifier); isName {
+				if decl, ok := env.Declaration(name.Value); ok {
+					if def, isArray := decl.DataType.(*ast.ArrayDefinition); isArray && def.DataType != nil {
+						val = wrapToType(def.DataType, val)
+					}
+				}
+			}
 			arrayObject.Elements[position] = val
 		case left.Type() == object.HASH_OBJ:
 			hashObject := left.(*object.Hash)
@@ -1542,6 +1655,7 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				return newError(target, "structure has no member '%s'", target.Member.Value)
 			}
 			pair := structValue.Pairs[key]
+			val = wrapToType(declaredTypeOf(target, env), val) // a narrow integer member wraps
 			pair.Value = keepArrayBounds(pair.Value, val)
 			structValue.Pairs[key] = pair
 			return val
@@ -1562,8 +1676,9 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				return newError(target, "cannot access setter for property '%s': %s", propDef.Name.Value, err.Message)
 			}
 			setterEnv := object.NewEnclosedEnvironment(fbInstance.Env)
-			setterEnv.Set("value", val)       // The implicit 'value' variable for the setter
-			setterEnv.Set("THIS", fbInstance) // The setter body needs access to THIS.
+			setterEnv.Set("value", val)            // The implicit 'value' variable for the setter
+			setterEnv.Set(propDef.Name.Value, val) // or the property's name, as CODESYS writes it
+			setterEnv.Set("THIS", fbInstance)      // The setter body needs access to THIS.
 			if evalResult := Eval(propDef.Setter.Body, setterEnv); isError(evalResult) {
 				return evalResult
 			}
@@ -1578,6 +1693,7 @@ func assignValue(node ast.Node, left ast.Expression, val object.Object, env *obj
 				if err != nil {
 					return newError(target, "cannot assign to member variable '%s': %s", target.Member.Value, err.Message)
 				}
+				val = wrapToType(varDecl.DataType, val)
 			}
 		}
 		if existing, ok := fbInstance.Env.Get(target.Member.Value); ok {
@@ -1619,7 +1735,8 @@ func evalNamespaceDeclaration(node *ast.NamespaceDeclaration, env *object.Enviro
 func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) object.Object {
 	var result object.Object
 
-	for _, statement := range block.Statements {
+	for i := 0; i < len(block.Statements); i++ {
+		statement := block.Statements[i]
 		if overBudget() {
 			return newError(statement, "execution budget exceeded")
 		}
@@ -1628,17 +1745,41 @@ func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) obje
 		}
 		result = Eval(statement, env)
 
+		// IEC-68: a jump to a label of this list goes on after the label;
+		// one to a label further out passes up (the parser checked that it
+		// exists and that no jump enters a block).
+		if jump, ok := result.(*object.Jump); ok {
+			if at := labelIndex(block.Statements, jump.TargetLabel); at >= 0 {
+				i = at // the loop's i++ moves past the label
+				result = nil
+				continue
+			}
+			return result
+		}
+
 		// If a statement returns a value that should halt execution (like a RETURN or an ERROR),
 		// we must propagate it up immediately without executing subsequent statements.
 		if result != nil {
 			rt := result.Type()
-			if rt == object.RETURN_VALUE_OBJ || rt == object.ERROR_OBJ {
+			// EXIT and CONTINUE end the block too: the loop they are in
+			// acts on them, past the rest of its body.
+			if rt == object.RETURN_VALUE_OBJ || rt == object.ERROR_OBJ || rt == object.EXIT_OBJ || rt == object.CONTINUE_OBJ {
 				return result
 			}
 		}
 	}
 
 	return result
+}
+
+// labelIndex is where label is in stmts, or -1 (IEC-68).
+func labelIndex(stmts []ast.Statement, label string) int {
+	for i, s := range stmts {
+		if l, ok := s.(*ast.LabelStatement); ok && token.SameIdent(l.Name.Value, label) {
+			return i
+		}
+	}
+	return -1
 }
 
 // evalVarBlockStatement evaluates a `VAR ... END_VAR` block by evaluating each declaration within it.
@@ -1719,6 +1860,133 @@ func typeDefault(node *ast.VarDeclStatement, env *object.Environment) object.Obj
 		return val
 	}
 	return NULL
+}
+
+// enumNumber returns the number of a value of an enumeration declared in
+// env, or 0.
+func enumNumber(typeName, value string, env *object.Environment) int64 {
+	if td, ok := lookupTypeDeclaration(typeName, env); ok {
+		if def, isEnum := td.DataType.(*ast.EnumDefinition); isEnum {
+			n, _ := def.NumberOf(value)
+			return n
+		}
+	}
+	return 0
+}
+
+// declaredTypeOf returns the data type a variable, an element of an array
+// variable or a member of a structure was declared with, from the
+// declarations in env, or nil.
+func declaredTypeOf(exp ast.Expression, env *object.Environment) ast.Expression {
+	switch e := exp.(type) {
+	case *ast.Identifier:
+		if decl, ok := env.Declaration(e.Value); ok {
+			return decl.DataType
+		}
+	case *ast.IndexExpression:
+		if def, ok := declaredTypeOf(e.Left, env).(*ast.ArrayDefinition); ok && def.DataType != nil {
+			return def.DataType
+		}
+	case *ast.MemberAccessExpression:
+		owner := declaredTypeOf(e.Struct, env)
+		if owner == nil {
+			return nil
+		}
+		td, ok := lookupTypeDeclaration(dataTypeName(owner), env)
+		if !ok {
+			return nil
+		}
+		if def, isStruct := td.DataType.(*ast.StructDefinition); isStruct {
+			for _, m := range def.Members {
+				if strings.EqualFold(m.Name.Value, e.Member.Value) {
+					return m.DataType
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// wrapToType returns an integer value wrapped into the range of a narrow
+// integer type (SINT 127 + 1 is -128), as an overflowing PLC integer wraps
+// and as the VM's OpWrapInt does; any other value as it is.
+func wrapToType(dataType ast.Expression, val object.Object) object.Object {
+	if dataType == nil {
+		return val
+	}
+	n, _, isInt := object.GetIntegerObjectValue(val)
+	if !isInt || val.Type() == object.BITSTRING_OBJ {
+		return val
+	}
+	// An integer given to a REAL or LREAL becomes one (INT converts to REAL).
+	switch strings.ToUpper(dataType.String()) {
+	case "REAL":
+		return &object.Real{Value: integerAsFloat(val, n)}
+	case "LREAL":
+		return &object.LReal{Value: integerAsFloat(val, n)}
+	}
+	if w := object.WrapInteger(n, dataType.String()); w != n {
+		return &object.LInt{Value: w}
+	}
+	return val
+}
+
+// cutToDeclaredLength returns a string value cut to the length its variable
+// is declared with, STRING(n) or WSTRING(n): a STRING keeps its first n
+// bytes, a WSTRING its first n characters. Any other value is returned as
+// it is.
+func cutToDeclaredLength(decl *ast.VarDeclStatement, val object.Object, env *object.Environment) object.Object {
+	if decl == nil || decl.StringLength == nil {
+		return val
+	}
+	switch val.(type) {
+	case *object.String, *object.WString:
+	default:
+		return val
+	}
+	n, _, ok := object.GetIntegerObjectValue(Eval(decl.StringLength, env))
+	if !ok || n < 0 {
+		return val
+	}
+	switch s := val.(type) {
+	case *object.String:
+		if int64(len(s.Value)) > n {
+			return &object.String{Value: s.Value[:n]}
+		}
+	case *object.WString:
+		if r := []rune(s.Value); int64(len(r)) > n {
+			return &object.WString{Value: string(r[:n])}
+		}
+	}
+	return val
+}
+
+// resolveDeclaredType evaluates the data type of a declaration. A variable
+// named like the type, ignoring case (`sr : BOOL` next to `x : SR`), does
+// not hide it: the type is looked for in the outer scopes, then among the
+// standard function blocks.
+func resolveDeclaredType(dataType ast.Expression, env *object.Environment) object.Object {
+	typeObj := Eval(dataType, env)
+	isType := func(o object.Object) bool {
+		switch o.(type) {
+		case *object.FunctionBlock, *object.BuiltinFunctionBlock:
+			return true
+		}
+		return false
+	}
+	ident, named := dataType.(*ast.Identifier)
+	if isType(typeObj) || !named {
+		return typeObj
+	}
+	for outer := env.Outer(); outer != nil; outer = outer.Outer() {
+		if o, ok := outer.Get(ident.Value); ok && isType(o) {
+			return o
+		}
+	}
+	if fb, ok := standardFBs[strings.ToUpper(ident.Value)]; ok {
+		return fb
+	}
+	return typeObj
 }
 
 func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) object.Object {
@@ -1836,6 +2104,7 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 				object.IsRealType(upperTypeName) ||
 				object.IsBooleanType(upperTypeName) ||
 				object.IsStringType(upperTypeName) ||
+				upperTypeName == "CHAR" || upperTypeName == "WCHAR" ||
 				object.IsBitStringType(upperTypeName) ||
 				object.IsTimeDateKeyword(upperTypeName)
 
@@ -1849,7 +2118,7 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 
 				// It's not a primitive type, so it could be a user-defined FB, a built-in FB, or a user-defined type.
 				// Evaluate the data type expression to resolve it.
-				typeObj := Eval(node.DataType, env)
+				typeObj := resolveDeclaredType(node.DataType, env)
 				if isError(typeObj) {
 					return typeObj
 				}
@@ -1922,6 +2191,10 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 				val = &object.LReal{Value: 0.0}
 			} else if object.IsBooleanType(upperTypeName) {
 				val = FALSE
+			} else if upperTypeName == "CHAR" {
+				val = &object.String{Value: ""} // a character, as a one-character STRING
+			} else if upperTypeName == "WCHAR" {
+				val = &object.WString{Value: ""}
 			} else if object.IsStringType(upperTypeName) {
 				if upperTypeName == "STRING" {
 					val = &object.String{Value: ""}
@@ -1947,6 +2220,7 @@ func evalVarDeclStatement(node *ast.VarDeclStatement, env *object.Environment) o
 			}
 		}
 	}
+	val = cutToDeclaredLength(node, val, env)
 	if node.IsConstant {
 		env.Set(node.Name.Value, &object.Constant{Value: val})
 	} else {
@@ -2140,6 +2414,13 @@ func isCaseMatch(selector object.Object, valueNode ast.Expression, env *object.E
 // evalForLoopStatement evaluates a FOR loop. It creates a new enclosed environment
 // for the loop control variable and iterates from the start to the end value.
 func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) object.Object {
+	// A declared control variable is the loop's own, as on the VM and in
+	// transpiled Go: it ends the loop one step past the end value.
+	if ident, ok := fls.ControlVar.Left.(*ast.Identifier); ok {
+		if _, declared := env.Get(ident.Value); declared {
+			return evalForLoopOnVariable(fls, ident, env)
+		}
+	}
 	// Create an enclosed environment for the loop to isolate the control variable `i`.
 	// This prevents the control variable from leaking into the outer scope.
 	loopEnv := object.NewEnclosedEnvironment(env)
@@ -2200,7 +2481,7 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 		// Evaluate the loop body.
 		result := Eval(fls.Body, loopEnv)
 		if result != nil {
-			if result.Type() == object.ERROR_OBJ || result.Type() == object.RETURN_VALUE_OBJ || result.Type() == object.EXIT_OBJ {
+			if result.Type() == object.ERROR_OBJ || result.Type() == object.RETURN_VALUE_OBJ || result.Type() == object.EXIT_OBJ || result.Type() == object.JUMP_OBJ {
 				// If EXIT, stop the loop and return NULL. Otherwise, propagate RETURN/ERROR.
 				if result.Type() == object.EXIT_OBJ { // cspell:disable-line
 					return NULL
@@ -2214,6 +2495,68 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 	}
 
 	return NULL
+}
+
+// evalForLoopOnVariable runs a FOR loop whose control variable is declared:
+// it sets the variable to the start value, then while it has not passed the
+// end value runs the body and adds the step to it. The end and step values
+// are evaluated before each check, and the body may change the variable, as
+// on the VM.
+func evalForLoopOnVariable(fls *ast.ForLoopStatement, control *ast.Identifier, env *object.Environment) object.Object {
+	if res := Eval(fls.ControlVar, env); isError(res) {
+		return res
+	}
+	integer := func(exp ast.Expression, what string) (int64, object.Object) {
+		val := Eval(exp, env)
+		if isError(val) {
+			return 0, val
+		}
+		n, _, ok := object.GetIntegerObjectValue(val)
+		if !ok {
+			return 0, newError(exp, "FOR loop %s must be an integer, got %s", what, val.Type())
+		}
+		return n, nil
+	}
+	for {
+		if overBudget() {
+			return newError(fls, "execution budget exceeded")
+		}
+		current, err := integer(control, "control variable")
+		if err != nil {
+			return err
+		}
+		end, err := integer(fls.EndValue, "end value")
+		if err != nil {
+			return err
+		}
+		step := int64(1)
+		if fls.StepValue != nil {
+			if step, err = integer(fls.StepValue, "step value"); err != nil {
+				return err
+			}
+		}
+		if (step > 0 && current > end) || (step <= 0 && current < end) {
+			return NULL
+		}
+
+		result := Eval(fls.Body, env)
+		if result != nil {
+			switch result.Type() {
+			case object.EXIT_OBJ:
+				return NULL
+			case object.ERROR_OBJ, object.RETURN_VALUE_OBJ, object.JUMP_OBJ: // a jump leaves the loop (IEC-68)
+				return result
+			}
+		}
+
+		current, err = integer(control, "control variable")
+		if err != nil {
+			return err
+		}
+		if res := assignValue(fls.ControlVar, control, &object.LInt{Value: current + step}, env); isError(res) {
+			return res
+		}
+	}
 }
 
 // evalWhileStatement evaluates a WHILE loop. It repeatedly checks the condition
@@ -2235,7 +2578,7 @@ func evalWhileStatement(ws *ast.WhileStatement, env *object.Environment) object.
 		result := Eval(ws.Body, env)
 		if result != nil {
 			rt := result.Type()
-			if rt == object.ERROR_OBJ || rt == object.RETURN_VALUE_OBJ {
+			if rt == object.ERROR_OBJ || rt == object.RETURN_VALUE_OBJ || rt == object.JUMP_OBJ {
 				return result
 			}
 			if rt == object.EXIT_OBJ {
@@ -2256,7 +2599,7 @@ func evalRepeatStatement(rs *ast.RepeatStatement, env *object.Environment) objec
 		result := Eval(rs.Body, env)
 		if result != nil {
 			rt := result.Type()
-			if rt == object.ERROR_OBJ || rt == object.RETURN_VALUE_OBJ {
+			if rt == object.ERROR_OBJ || rt == object.RETURN_VALUE_OBJ || rt == object.JUMP_OBJ {
 				return result
 			}
 			if rt == object.EXIT_OBJ {
@@ -2565,6 +2908,12 @@ func applyConfigVar(decl *ast.VarDeclStatement, targetEnv *object.Environment, v
 		return NULL
 	}
 
+	// The variable's value, through its location if it has one.
+	target := &ast.Identifier{Token: decl.Token, Value: varName}
+	current := Eval(target, targetEnv)
+	if isError(current) {
+		return current
+	}
 	// Locations and plain initial values are declared like an ordinary
 	// variable in the target environment, which also converts the value to the
 	// declared type and registers located variables in the I/O map.
@@ -2577,6 +2926,14 @@ func applyConfigVar(decl *ast.VarDeclStatement, targetEnv *object.Environment, v
 	}
 	if result := evalVarDeclStatement(redeclared, targetEnv); isError(result) {
 		return result
+	}
+	// A location alone keeps the variable's value, y AT %Q* : INT := 4,
+	// unless it is an input, which the inputs' image gives.
+	isInput := decl.Location != nil && decl.Location.Location != nil && strings.HasPrefix(strings.ToUpper(strings.TrimPrefix(decl.Location.Location.Address, "%")), "I")
+	if decl.Value == nil && !isInput {
+		if result := assignValue(decl, target, current, targetEnv); isError(result) {
+			return result
+		}
 	}
 	return NULL
 }
@@ -2713,6 +3070,11 @@ func evalProgramConfiguration(progConfig *ast.ProgramConfiguration, resourceEnv 
 		}
 	}
 
+	// The connections are made again by each call without arguments: an
+	// input reads its global every cycle, an output writes its own.
+	progInstance.Connections = progConfig.Parameters
+	progInstance.ConnectionEnv = resourceEnv
+
 	// 5. Store the fully configured instance in the resource's environment.
 	resourceEnv.Set(progConfig.InstanceName.Value, progInstance)
 	return progInstance
@@ -2745,13 +3107,12 @@ func evalIdentifier(
 	node *ast.Identifier,
 	env *object.Environment,
 ) object.Object {
-	// Special handling for constant values to unwrap them.
-	if val, ok := env.GetRaw(node.Value); ok {
+	if val, ok := env.Get(node.Value); ok {
+		// A constant, local or from an outer scope (VAR_GLOBAL CONSTANT read
+		// in a POU), is its value.
 		if constant, isConst := val.(*object.Constant); isConst {
 			return constant.Value
 		}
-	}
-	if val, ok := env.Get(node.Value); ok {
 		// If the identifier points to a located variable, we must fetch the
 		// actual value from the shared I/O map. We check for a Pointer with a nil Env.
 		if ptr, isPtr := val.(*object.Pointer); isPtr && ptr.Env == nil {
@@ -3210,6 +3571,11 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// Pre-declare the program name as a variable in the local scope for the return value.
 		extendedEnv.Set(fn.Definition.Name.Value, NULL)
 
+		// A call without arguments makes the configuration's connections.
+		if len(args) == 0 && len(fn.Connections) > 0 && fn.ConnectionEnv != nil {
+			args, callEnv = fn.Connections, fn.ConnectionEnv
+		}
+
 		// Handle arguments.
 		_, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, extendedEnv, callNode)
 		if err != nil {
@@ -3283,9 +3649,20 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		}
 
 	case *object.FunctionBlockInstance:
+		// A CLASS has no body to call, only methods (Table 48).
+		if fn.Definition != nil && fn.Definition.Definition != nil && fn.Definition.Definition.IsClass() {
+			return newError(callNode, "instance of CLASS %s has no body: call its methods", fn.Definition.Definition.Name.Value)
+		}
 		// For a function block, we must first process the arguments to populate its
 		// internal environment and identify output mappings. This must happen before
 		// we check EN, because the output mappings need to be processed even if EN is false. // cspell:disable-line
+		// A standard function block's inputs in order, for a non-formal
+		// call, t(TRUE, T#5s).
+		if fn.Definition == nil {
+			if logic, ok := fn.Env.Get("__fb_logic__"); ok {
+				args = namedStandardFBInputs(logic, args)
+			}
+		}
 		extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env, callNode)
 		if err != nil {
 			return err
@@ -3312,6 +3689,10 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Set ENO to the value of EN by default.
 		extendedEnv.Set("ENO", enValue)
+		// The body sees its instance as THIS, for THIS^.Method() and THIS.x.
+		if fn.Definition != nil {
+			extendedEnv.Set("THIS", fn)
+		}
 
 		var result object.Object
 
@@ -3410,7 +3791,8 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 			}
 		}
 
-		return result
+		// IEC-74: a RETURN ends the block's own body, not its caller's.
+		return unwrapReturnValue(result)
 
 	case *object.Method:
 		// A method is being called. Create a new environment for its execution that
@@ -3611,7 +3993,7 @@ func isInOutParam(paramName string, def object.Object) bool {
 	}
 
 	for _, decl := range inOutDecls {
-		if decl.Name.Value == paramName {
+		if strings.EqualFold(decl.Name.Value, paramName) { // names are not case sensitive
 			return true
 		}
 	}
@@ -3837,8 +4219,10 @@ func evalMemberAccessExpression(node *ast.MemberAccessExpression, env *object.En
 		}
 	case *object.Action:
 		member := node.Member.Value
-		switch member {
-		case "Q":
+		switch strings.ToUpper(member) {
+		// Q: active. A: executing, which is Q, as an action has no final
+		// scan after it ends.
+		case "Q", "A":
 			return nativeBoolToBooleanObject(l.IsActive)
 		default:
 			return newError(node, "member '%s' not found for type ACTION", member)
@@ -4096,10 +4480,12 @@ func runSchedulerCycle(s *object.Scheduler, env *object.Environment, now time.Ti
 			fmt.Printf("Executing Task: %s (Priority: %d)\n", task.Name, task.Priority)
 			for _, prog := range task.Programs {
 				// Run the program instance as a call does: its VAR_TEMP starts
-				// afresh, and an IL or SFC body runs as such.
+				// afresh, an IL or SFC body runs as such, and the configuration's
+				// connections (k := g, out => cg) are made.
 				applyFunction(prog, nil, env, prog.Definition.Name)
 
-				// Handle output mappings (=>)
+				// Output mappings (=>) also reach a target the configuration does
+				// not declare, as they did before connections were calls.
 				for _, mapping := range prog.OutputMappings {
 					val, _ := prog.Env.Get(mapping.SourceParamName)
 					env.Set(mapping.TargetVarName, val) // Set in the global/resource scope
@@ -4198,7 +4584,23 @@ func getParamDecls(def object.Object) []*ast.VarDeclStatement {
 		if d == nil {
 			return nil
 		}
-		return append(append([]*ast.VarDeclStatement{}, d.VarInputs...), d.VarInOuts...)
+		// The inputs of the blocks it extends come first, as on the VM.
+		chain := []*object.FunctionBlock{d}
+		for cur := d; len(chain) < 16 && cur.Definition != nil && cur.Definition.Extends != nil && cur.Env != nil; {
+			parent, ok := cur.Env.Get(cur.Definition.Extends.String())
+			p, isFB := parent.(*object.FunctionBlock)
+			if !ok || !isFB {
+				break
+			}
+			chain = append([]*object.FunctionBlock{p}, chain...)
+			cur = p
+		}
+		var inputs, inOuts []*ast.VarDeclStatement
+		for _, fb := range chain {
+			inputs = append(inputs, fb.VarInputs...)
+			inOuts = append(inOuts, fb.VarInOuts...)
+		}
+		return append(inputs, inOuts...)
 	case *object.Function:
 		if d == nil {
 			return nil
@@ -4253,6 +4655,7 @@ func evalInterfaceDeclaration(node *ast.InterfaceDeclaration, env *object.Enviro
 		Name:       node.Name,
 		Methods:    node.Methods,
 		Properties: node.Properties,
+		Extends:    node.Extends,
 	}
 	env.Set(node.Name.Value, ifaceDef)
 	return NULL

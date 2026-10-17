@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/object"
 )
 
 // typeRank orders the elementary types by width: a value converts
@@ -80,10 +81,22 @@ func (t *Transpiler) exprGoType(e ast.Expression) string {
 		return t.elementaryGoType(e)
 	case *ast.BitAccessExpression, *ast.Boolean:
 		return "iec.BOOL"
+	case *ast.IlCurrentResult:
+		if t.ilCurrentCRType != "" {
+			return "iec." + t.ilCurrentCRType
+		}
 	case *ast.TypedLiteral:
 		return iecOnly("iec." + strings.ToUpper(e.TypeName))
 	case *ast.BitStringLiteral:
 		return bitStringGoType(e.Width)
+	case *ast.TimeLiteral:
+		return "iec.TIME"
+	case *ast.DateLiteral:
+		return "iec.DATE"
+	case *ast.TimeOfDayLiteral:
+		return "iec.TOD"
+	case *ast.DateAndTimeLiteral:
+		return "iec.DT"
 	case *ast.CallExpression:
 		ident, ok := e.Function.(*ast.Identifier)
 		if !ok {
@@ -94,6 +107,17 @@ func (t *Transpiler) exprGoType(e ast.Expression) string {
 		}
 		if isClockCall(e) {
 			return "iec.TIME"
+		}
+		if goType := timeFunctionGoType(e); goType != "" {
+			return goType
+		}
+		switch strings.ToUpper(ident.Value) {
+		case "TO_BIG_ENDIAN", "TO_LITTLE_ENDIAN", "FROM_BIG_ENDIAN", "FROM_LITTLE_ENDIAN":
+			if len(e.Arguments) == 1 {
+				return t.exprGoType(e.Arguments[0])
+			}
+		case "IS_VALID", "IS_VALID_BCD":
+			return "iec.BOOL"
 		}
 		if _, fn, ok := t.beebreadFunctionOf(e.Function); ok {
 			return iecOnly(fn.result)
@@ -260,6 +284,14 @@ func (t *Transpiler) transpileValue(value ast.Expression, target string) error {
 	expected := t.expectedGoType
 	t.expectedGoType = target
 	defer func() { t.expectedGoType = expected }()
+	// A constant that does not fit a narrow integer wraps into its range,
+	// as the value would at run time (Go refuses the overflowing constant).
+	if n, ok := constantInteger(value); ok && strings.HasPrefix(target, "iec.") {
+		if w := object.WrapInteger(n, strings.TrimPrefix(target, "iec.")); w != n {
+			t.write("%s(%d)", target, w)
+			return nil
+		}
+	}
 	if call, ok := value.(*ast.CallExpression); ok {
 		if ident, ok := call.Function.(*ast.Identifier); ok {
 			_, isStd := royaljellyFunctions[strings.ToUpper(ident.Value)]
@@ -287,7 +319,8 @@ func (t *Transpiler) transpileTimeComparison(exp *ast.InfixExpression) (bool, er
 	if !ok {
 		return false, nil
 	}
-	switch wider(t.exprGoType(exp.Left), t.exprGoType(exp.Right)) {
+	kind := wider(t.exprGoType(exp.Left), t.exprGoType(exp.Right))
+	switch kind {
 	case "iec.DATE", "iec.DT", "iec.TOD", "iec.TIME_OF_DAY":
 	default:
 		return false, nil
@@ -300,8 +333,16 @@ func (t *Transpiler) transpileTimeComparison(exp *ast.InfixExpression) (bool, er
 	if err != nil {
 		return true, err
 	}
+	point := func(v string) string { return "time.Time(" + v + ")" }
+	if kind == "iec.TOD" || kind == "iec.TIME_OF_DAY" {
+		// A time of day is its clock: one from DT_TO_TOD keeps its date, a
+		// literal has none, so both are taken on the same day.
+		point = func(v string) string {
+			return "time.Time{}.Add(time.Time(" + v + ").Sub(time.Time(" + v + ").Truncate(24 * time.Hour)))"
+		}
+	}
 	t.write("(")
-	t.write(format, "time.Time("+left+")", "time.Time("+right+")")
+	t.write(format, point(left), point(right))
 	t.write(")")
 	return true, nil
 }
@@ -373,8 +414,15 @@ func (t *Transpiler) stringLength(target ast.Expression) int64 {
 // stringCutHelper keeps the first n characters of a string, for an
 // assignment to a STRING(n).
 const stringCutHelper = `
-// stringCut returns the first n characters of s, as a STRING(n) keeps them.
-func stringCut(s iec.STRING, n int) iec.STRING {
+// stringCut returns the first n characters of s, as a STRING(n) or a
+// WSTRING(n) keeps them: bytes of a STRING, characters of a WSTRING.
+func stringCut[S ~string](s S, n int, wide bool) S {
+	if !wide {
+		if len(s) > n {
+			return s[:n]
+		}
+		return s
+	}
 	for i := range string(s) {
 		if n == 0 {
 			return s[:i]

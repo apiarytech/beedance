@@ -49,6 +49,7 @@ func main() {
 	iecFile := flag.String("iec", "", "Path to an IEC 61131-3 source file to execute")
 	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
+	allowInputWritesFlag := flag.Bool("allow-input-writes", false, "Let a POU assign its own VAR_INPUT variables, as CODESYS does and libraries written for it need (OSCAT; IEC-69), on every engine: -test, -vm, -go, the evaluator and configurations. Off, IEC 61131-3's rule, such a source is refused")
 	uvmFlag := flag.Bool("uvm", false, "Use the universal microcontroller virtual machine instead of the evaluator")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
 	goCompactImage := flag.Bool("go-compact-image", false, "With -go: give located variables a process image of only the entries they use, instead of royaljelly's vars.ProcessImage (about 33 KB on a 32-bit microcontroller)")
@@ -57,6 +58,7 @@ func main() {
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
 	testFlag := flag.Bool("test", false, "Run the PROGRAM TEST_... unit tests of the FILE.st arguments on a simulated clock")
 	interval := flag.Duration("interval", 10*time.Millisecond, "With -test: simulated time between scans")
+	flag.IntVar(&configCycles, "cycles", 0, "With -vm on a file with a CONFIGURATION: the cycles to run, 10 ms apart; 0 runs until interrupted")
 	maxScans := flag.Int("max-scans", 50000, "With -test: a test with done that is not done by then fails")
 	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on: eval, vm, go (the transpiler), wasm (the transpiler to WebAssembly, on a WASI runtime) or all (eval,vm,go); compared with the first")
 	tol := flag.Float64("tol", 1e-3, "With -test: relative tolerance when comparing REAL values between engines")
@@ -70,6 +72,9 @@ func main() {
 	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT or serial:PORT[?baud=N] (/dev/ttyACM0, COM3): hardware in the loop; implies -realtime")
 	realTime := flag.Bool("realtime", false, "With -test: run scans -interval apart on the wall clock instead of a simulated clock")
 	flag.Parse()
+	// IEC-69: input writes, CODESYS's dialect, on every engine.
+	allowInputWrites = *allowInputWritesFlag
+	evaluator.SetAllowInputWrites(allowInputWrites)
 
 	if *testFlag {
 		engines, err := sil.ParseEngines(*enginesFlag)
@@ -77,7 +82,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter,
+		opts := sil.Options{Interval: *interval, MaxScans: *maxScans, Tolerance: *tol, Engines: engines, Filter: *runFilter, AllowInputWrites: *allowInputWritesFlag,
 			Watch: watch.Options{Depth: *depth}, GoTimeout: *goTimeout, GoReplace: map[string]string{}, WasmRuntime: strings.Fields(*wasmRuntime)}
 		// Real I/O runs on the wall clock unless -realtime=false says not.
 		opts.RealTime = *realTime || (*ioFlag != "" && !flagSet("realtime"))
@@ -143,7 +148,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -go flag to specify the input file.")
 			os.Exit(1)
 		}
-		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage}, os.Stdout)
+		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
 		os.Exit(0)
 	}
 
@@ -210,6 +215,11 @@ func executeFile(filepath string, out io.Writer, engine string) {
 		return
 	}
 
+	// A CONFIGURATION runs its tasks and programs; see configuration_run.go.
+	if engine == "vm" && hasConfiguration(program) {
+		runConfiguration(input, out)
+		return
+	}
 	if engine == "vm" {
 		symbolTable := compiler.NewSymbolTable()
 		for _, v := range object.Builtins {
@@ -218,6 +228,7 @@ func executeFile(filepath string, out io.Writer, engine string) {
 		globals := make([]object.Object, vm.GlobalsSize)
 
 		comp := compiler.NewWithState(symbolTable, nil, nil, nil)
+		comp.AllowInputWrites = allowInputWrites // IEC-69
 
 		// Since we are executing a file, which is likely a full PROGRAM,
 		// we use the new CompileProgram function to get separated bytecode.
@@ -289,6 +300,7 @@ func executeString(input string, out io.Writer, engine string) {
 		globals := make([]object.Object, vm.GlobalsSize)
 
 		comp := compiler.NewWithState(symbolTable, nil, nil, nil)
+		comp.AllowInputWrites = allowInputWrites // IEC-69
 		err := comp.Compile(program)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)

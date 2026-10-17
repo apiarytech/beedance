@@ -41,7 +41,7 @@ func TestBuiltinTypeConversions(t *testing.T) {
 		{"STRING_TO_REAL('xyz');", "BUILTIN ERROR: could not parse string to real: xyz"},
 		{"TIME_TO_INT(T#40s);", "BUILTIN ERROR: value 40000 is out of range for type INT (-32768 to 32767)"},
 		{"BOOL_TO_DATE(TRUE);", "BUILTIN ERROR: conversion from BOOLEAN to DATE is not supported"},
-		{"BCD_TO_INT(BYTE#16#12);", "BUILTIN ERROR: argument for BCD_TO_INT must be a WORD (16-bit BitString), got BITSTRING"},
+		{"BCD_TO_INT(BYTE#16#12);", int64(12)},
 		{"BCD_TO_INT(WORD#16#1A2B);", "BUILTIN ERROR: invalid BCD format: nibble 2 has value 10 > 9"},
 		{"INT_TO_REAL();", "BUILTIN ERROR: wrong number of arguments for INT_TO_REAL. got=0, want=1"},
 	}

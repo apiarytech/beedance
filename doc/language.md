@@ -66,8 +66,13 @@ coils last:
 | Coil | `( X )`, `( /X )` | `X :=` the rung, or its negation |
 | Set, reset coil | `( S X )`, `( R X )` | latch, unlatch |
 | Edge coil | `( P X )`, `( N X )` | `X` TRUE for one call on a rising, falling rung |
+| Jump | `>>LABEL` | after the coils: jump to `LABEL` when the rung is on (IEC-71); a rung of only `>>LABEL` always jumps |
+| Return | `RETURN` | after the coils: the POU returns when the rung is on |
+| Label | `LABEL:` | on a line of its own, before the rung it names |
 
-A rung ends in a coil or a block. Rungs run top to bottom.
+A rung ends in a coil, a block, a jump or a return. Rungs run top to
+bottom; a jump goes on from its label's rung, as an ST jump (Jumps in
+Structured Text, below) with the same rules.
 
 ```
 FUNCTION_BLOCK Level
@@ -83,9 +88,11 @@ END_FUNCTION_BLOCK
 ```
 
 An FBD statement, one per line (or ended by `;`), is a variable written
-(`X := value`), a wire named (`w = value`) or a function block called
+(`X := value`), a wire named (`w = value`), a function block called
 (`inst : TYPE(...)`, which declares `inst` if the POU does not, or
-`inst(...)`). A value is a variable, a literal, a wire, `NOT value`, a
+`inst(...)`), or a jump, a return or a label (IEC-71): `>>LABEL(value)`
+jumps when the value is TRUE and `>>LABEL` always; `RETURN(value)` and
+`RETURN` likewise; `LABEL:` on a line of its own. A value is a variable, a literal, a wire, `NOT value`, a
 function with positional inputs (`ADD(a, b, c)`; `EN := x` may come
 first), or an instance's output (`inst.Q`). Statements run in their order,
 except that a block runs before the statements reading its outputs.
@@ -96,7 +103,12 @@ coils and blocks as IEC 61131-3 draws them. Editors use it for previews.
 
 ## Program organization units
 
-- `PROGRAM`, `FUNCTION`, `FUNCTION_BLOCK`, with `EN`/`ENO`.
+- `PROGRAM`, `FUNCTION`, `FUNCTION_BLOCK`, with `EN`/`ENO`. A POU may
+  declare them itself (`VAR_INPUT EN : BOOL := TRUE; END_VAR`,
+  `VAR_OUTPUT ENO : BOOL; END_VAR`): EN FALSE, its body is not run and ENO
+  is FALSE, a block's outputs keeping their values; otherwise ENO is TRUE
+  before the body runs, which may set it FALSE. A call that does not pass
+  EN leaves it as it was.
 - Variable blocks: `VAR`, `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT`,
   `VAR_GLOBAL`, `VAR_EXTERNAL`, `VAR_ACCESS`, `VAR_TEMP`, `VAR_CONFIG`;
   qualifiers `CONSTANT`, `RETAIN`, `NON_RETAIN`, `R_EDGE`, `F_EDGE`.
@@ -149,6 +161,36 @@ instances assigned to tasks with `WITH`, and instance-specific values with
 `VAR_CONFIG`. The evaluator runs program instances without a task in a
 background task.
 
+## Jumps in Structured Text
+
+`JMP label;` and `label:` (IEC-68), a CODESYS/TwinCAT extension that
+beedance has by the owner's decision that a jump is allowed in every
+language; IEC 61131-3 Ed.3 lists no jump among ST's statements. On every
+engine:
+
+```
+IF NOT IN_ENABLE THEN
+  JMP CLEAR_COMMANDS;
+END_IF;
+(* ... *)
+CLEAR_COMMANDS:
+CMD_ACK := FALSE;
+```
+
+- A label names the statement after it; a body may start with one. Labels
+  ignore case, as identifiers do.
+- A jump goes forward or back within its POU body (a program, function,
+  function block, method or action), never to another.
+- A jump may leave an `IF`, `CASE`, `FOR`, `WHILE` or `REPEAT` but not
+  enter one: its label is in the jump's own statement list or one around
+  it.
+- A label is used once in its body. A jump to no label, a label used twice
+  and a jump into a block are parse errors.
+- In a `CASE` branch, `name:` is the next branch, as always; a label goes
+  inside an `IF`, a loop or the body around the `CASE`.
+- An ST jump ends with `;`; IL's `JMP label` has none, which is how a body
+  starting with `JMP` is told apart.
+
 ## The CODESYS dialect used by OSCAT
 
 beedance parses the dialect of the OSCAT BASIC library, so the converted
@@ -159,7 +201,36 @@ and VM):
 - identifiers that ignore case;
 - `SR`, `RS`, `S` and `R` as the names of blocks and variables;
 - bit access on any bit string or integer;
-- integers widened to bit strings where CODESYS allows it.
+- integers widened to bit strings where CODESYS allows it;
+- a POU writing its own inputs, with input writes allowed (below).
+
+### Writing inputs
+
+IEC 61131-3 makes a `VAR_INPUT` read-only inside its POU. CODESYS allows
+the write, and libraries written for it use it: OSCAT, and beeguard's
+alarm blocks, which clear an operator's one-shot request once handled
+(`CMD_OP_ACK := FALSE;`). beedance follows IEC by default on every engine,
+the same way (IEC-69): `cannot assign to read-only variable 'X'`. It allows
+the write with:
+
+- `-allow-input-writes` on the command line (`-test`, `-vm`, `-go`, the
+  evaluator and configurations);
+- `sil.Options.AllowInputWrites`, `compiler.Compiler.AllowInputWrites`,
+  `evaluator.SetAllowInputWrites`, `transpiler.Options.AllowInputWrites`
+  and `vmconfig.LoadOptions.AllowInputWrites` in Go;
+- beehive, for a project with a library (logic, Check, Simulate, Test and
+  native builds alike).
+
+What is refused, on every engine as on the VM: an assignment to an input
+by name in a function, a function block (its own inputs and those of the
+blocks it extends) or a method (its own and its block's). A member or an
+element of an input, a `FOR` counting with one, IL's `ST` into one, and
+the edge inputs' own lowering are not.
+
+Allowed, an input is the instance's own copy, as in CODESYS: a write inside
+the block stays until a call passes the input again, and a call that does
+not pass it keeps the written value. A caller sets a request between calls
+(`alarm.CMD_OP_ACK := TRUE;`) and the block clears it.
 
 The transpiler maps OSCAT functions and blocks to the
 [beebread](https://github.com/apiarytech/beebread) Go packages. Where both
@@ -198,8 +269,15 @@ not read as variables.
 
 ## Not supported yet
 
-- Jumps, labels and returns in LD and FBD; macro steps and IL actions or
-  conditions in graphical SFC (see [PLCopen XML](plcopen.md)).
+The gaps against IEC 61131-3, numbered IEC-1 onwards and in the order they
+are to be fixed, are in [conformance.md](conformance.md). Also:
+
+- Macro steps and IL actions or conditions in graphical SFC (see
+  [PLCopen XML](plcopen.md)).
+- A function block with methods and an IL body (IEC-76): give it an ST
+  body, or put the IL in its methods.
+- `JMP` is to be allowed in every language (owner's decision, 2026-10-15;
+  [conformance.md](conformance.md), Phase 6).
 - `T`, `D`, `DT` and `TOD` are keywords (the short names of the time
   types), so a variable may not have one of these names.
 - A binary file format for compiled bytecode.

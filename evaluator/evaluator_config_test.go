@@ -377,3 +377,43 @@ func TestConfigurationWithVarExternal(t *testing.T) {
 	testEvalWithEnv(t, "MainApp();", resEnv)
 	testIntegerObjectInEnv(t, progEnv, "LocalCycleCount", 2)
 }
+
+// A RESOURCE's VAR_GLOBAL is seen by its programs (IEC-54), and a program's
+// inputs and outputs connect to globals (k := g, out => cg).
+func TestConfigurationResourceGlobalsAndConnections(t *testing.T) {
+	input := `
+		PROGRAM MAIN54
+			VAR_INPUT k : INT; END_VAR
+			VAR_OUTPUT out : INT; END_VAR
+			VAR_EXTERNAL rg : INT; END_VAR
+			out := rg + k;
+		END_PROGRAM
+
+		CONFIGURATION CF54
+			VAR_GLOBAL cg : INT := 0; g : INT := 9; END_VAR
+			RESOURCE R1 ON PLC
+				VAR_GLOBAL rg : INT := 7; END_VAR
+				TASK T1(INTERVAL := T#10ms, PRIORITY := 1);
+				PROGRAM P1 WITH T1 : MAIN54(k := g, out => cg);
+			END_RESOURCE
+		END_CONFIGURATION
+	`
+	env := object.NewEnvironment()
+	if result := testEvalWithEnv(t, input, env); isError(result) {
+		t.Fatalf("Configuration evaluation failed: %s", result.Inspect())
+	}
+	resObj, ok := env.Get("R1")
+	if !ok {
+		t.Fatal("Resource 'R1' not found in environment")
+	}
+	resEnv := resObj.(*object.FunctionBlockInstance).Env
+	progObj, ok := resEnv.Get("P1")
+	if !ok {
+		t.Fatal("Program instance 'P1' not found in resource environment")
+	}
+	if result := testEvalWithEnv(t, "P1();", resEnv); isError(result) {
+		t.Fatalf("P1(): %s", result.Inspect())
+	}
+	testIntegerObjectInEnv(t, progObj.(*object.ProgramInstance).Env, "out", 16)
+	testIntegerObjectInEnv(t, env, "cg", 16)
+}

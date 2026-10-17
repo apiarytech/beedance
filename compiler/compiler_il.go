@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/token"
 	"strings"
 )
 
@@ -140,12 +141,26 @@ func (c *Compiler) compileIlInstruction(node *ast.IlInstructionStatement, jumpsT
 		if !ok {
 			return fmt.Errorf("operand for ST must be a variable identifier")
 		}
+		// ST? x is x ?= the current result; see attemptAssignment.
+		if modifier == "?" {
+			c.ilResult()
+			tok := token.Token{Type: token.ATTEMPT, Literal: "?=", Row: node.Token.Row, Column: node.Token.Column, Pos: node.Token.Pos}
+			attempt := &ast.AssignmentStatement{Token: tok, Left: ident, Value: &ast.Identifier{Token: node.Token, Value: ilResultName}}
+			return c.Compile(attempt)
+		}
 		c.loadIlResult()
 		if isNegatedOperand {
 			c.emit(code.OpBang)
 		}
 		return c.storeTopInto(ident.Value)
 	case "S", "R":
+		// S and R of an RS or SR instance set its input S or R (Table 70).
+		if c.calleeFunctionBlock(node.Operand) != nil {
+			call := *node
+			call.Operator, call.Modifier = "CAL", ""
+			call.Operand = ast.IlInputCall(token.Token{Type: token.IDENT, Literal: op, Row: node.Token.Row, Column: node.Token.Column}, node.Operand)
+			return c.compileIlInstruction(&call, jumpsToPatch, labelPositions)
+		}
 		// Set (or reset) the operand when the current result is TRUE.
 		ident, ok := node.Operand.(*ast.Identifier)
 		if !ok {

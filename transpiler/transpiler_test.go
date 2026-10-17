@@ -207,7 +207,7 @@ type POINT struct {
 }
 
 // SMALL_INT is a subrange of iec.INT.
-type SMALL_INT iec.INT
+type SMALL_INT = iec.INT
 `
 	transpileAndCheck(t, "TestTypeDeclarationTranspilation", input, expected)
 }
@@ -323,7 +323,7 @@ END_PROGRAM
 `
 	expected := `
 // SMALL_INT is a subrange of iec.INT.
-type SMALL_INT iec.INT
+type SMALL_INT = iec.INT
 
 type SubrangeTest struct {
     mySmallInt SMALL_INT
@@ -712,20 +712,22 @@ func (p *MyIlCalJmpProgram) Logic(now time.Time) {
 	var cr_STRING iec.STRING
 	_ = cr_BOOL; _ = cr_LINT; _ = cr_LREAL; _ = cr_TIME; _ = cr_STRING // Avoid unused var errors
 
-Loop:
+	if false { goto L_LOOP }
+L_LOOP:
 	cr_LINT = iec.LINT(p.Counter)
 	cr_LINT = cr_LINT + iec.LINT(1)
 	p.Counter = iec.INT(cr_LINT)
 	p.MyTrigger.CLK = p.DoTrigger
 	p.MyTrigger.Logic(now)
 	cr_BOOL = p.MyTrigger.Q
-	if !cr_BOOL { goto EndLoop; }
+	if !cr_BOOL { goto L_ENDLOOP; }
 	cr_BOOL = iec.BOOL(true)
 	p.RisingEdgeDetected = iec.BOOL(cr_BOOL)
-EndLoop:
+	if false { goto L_ENDLOOP }
+L_ENDLOOP:
 	cr_LINT = iec.LINT(p.Counter)
 	cr_BOOL = cr_LINT > iec.LINT(10)
-	if !cr_BOOL { goto Loop; }
+	if !cr_BOOL { goto L_LOOP; }
 }
 `
 	transpileAndCheck(t, "TestILProgramWithFBAndJmpTranspilation", input, expected)

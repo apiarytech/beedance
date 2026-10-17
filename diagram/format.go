@@ -42,8 +42,6 @@ func Format(lang string, elems []*Elem, fbTypes []string) (string, error) {
 		switch e.Kind() {
 		case "comment", "addData", "documentation", "rightPowerRail":
 			continue
-		case "jump", "label", "return":
-			return "", fmt.Errorf("element %d: %s is not supported yet in the text form", e.ID, e.Kind())
 		}
 		if _, dup := f.elems[e.ID]; dup {
 			return "", fmt.Errorf("localId %d is used twice", e.ID)
@@ -346,6 +344,27 @@ func (f *formatter) netlist() (string, error) {
 				v = not(v)
 			}
 			stmts = append(stmts, strings.TrimSpace(e.Expression)+" := "+v)
+		case "label": // IEC-71
+			stmts = append(stmts, strings.TrimSpace(e.Label)+":")
+		case "jump", "return":
+			s := ">>" + strings.TrimSpace(e.Label)
+			if e.Kind() == "return" {
+				s = "RETURN"
+			}
+			if conns := insOf(e); len(conns) > 0 {
+				c, err := one(conns, e.Kind())
+				if err != nil {
+					return "", err
+				}
+				v, err := f.value(c)
+				if err != nil {
+					return "", err
+				}
+				if v != "TRUE" {
+					s += "(" + v + ")"
+				}
+			}
+			stmts = append(stmts, s)
 		case "inVariable", "continuation":
 		default:
 			return "", fmt.Errorf("element %d: a %s does not belong in FBD", e.ID, e.Kind())
@@ -387,10 +406,32 @@ func (f *formatter) ladder() (string, error) {
 		return strings.Join(parts, ",")
 	}
 	byKey := map[string]*rung{}
+	type labelAt struct {
+		name string
+		y    float64
+	}
+	var labels []labelAt // IEC-71: each before the rung below it
 	for _, e := range f.order {
 		switch e.Kind() {
-		case "coil":
-			power, err := f.coilPower(e, map[int]bool{})
+		case "label":
+			labels = append(labels, labelAt{strings.TrimSpace(e.Label), e.Pos.Y})
+		case "coil", "jump", "return":
+			var power []Conn
+			var err error
+			if e.Kind() == "coil" || len(insOf(e)) > 0 {
+				power, err = f.coilPower(e, map[int]bool{})
+			} else {
+				// IEC-71: an unwired jump or return is unconditional, from the rail.
+				for _, o := range f.order {
+					if o.Kind() == "leftPowerRail" {
+						power = []Conn{{Ref: o.ID}}
+						break
+					}
+				}
+				if power == nil {
+					return "", fmt.Errorf("element %d: an unwired %s in an LD with no power rail", e.ID, e.Kind())
+				}
+			}
 			if err != nil {
 				return "", err
 			}
@@ -433,7 +474,21 @@ func (f *formatter) ladder() (string, error) {
 	})
 	f.doms = map[int]map[int]bool{}
 	var b strings.Builder
+	nextLabel := 0
 	for _, r := range rungs {
+		for ; nextLabel < len(labels) && labels[nextLabel].y <= r.y; nextLabel++ {
+			b.WriteString("  " + labels[nextLabel].name + ":\n")
+		}
+		// A jump or return ends its rung, after the coils (IEC-71).
+		slices.SortStableFunc(r.coils, func(a, b *Elem) int {
+			end := func(e *Elem) int {
+				if e.Kind() == "coil" {
+					return 0
+				}
+				return 1
+			}
+			return end(a) - end(b)
+		})
 		var text string
 		var err error
 		if r.end != nil {
@@ -448,6 +503,9 @@ func (f *formatter) ladder() (string, error) {
 			text += " " + coilText(c)
 		}
 		b.WriteString("  RUNG\n    " + strings.TrimSpace(text) + "\n")
+	}
+	for ; nextLabel < len(labels); nextLabel++ {
+		b.WriteString("  " + labels[nextLabel].name + ":\n")
 	}
 	// Every element of a rung is written once; only plain contacts and
 	// function contacts, which have no state, may be written twice.
@@ -838,6 +896,10 @@ func (f *formatter) element(e *Elem) (string, error) {
 func coilText(e *Elem) string {
 	v := strings.TrimSpace(e.Variable)
 	switch {
+	case e.Kind() == "jump": // IEC-71
+		return ">>" + strings.TrimSpace(e.Label)
+	case e.Kind() == "return":
+		return "RETURN"
 	case e.Storage == "set":
 		return "( S " + v + " )"
 	case e.Storage == "reset":

@@ -22,6 +22,7 @@ import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 )
 
 // copiedValue is an assignment's value that is copied once computed.
@@ -43,6 +44,114 @@ func (c *Compiler) copyAssignedValue(node *ast.AssignmentStatement) *ast.Assignm
 	copied := *node
 	copied.Value = &copiedValue{Expression: node.Value}
 	return &copied
+}
+
+// wrappedInt is an assignment's value that wraps into the range of a narrow
+// integer type once computed (OpWrapInt with code).
+type wrappedInt struct {
+	ast.Expression
+	code int
+}
+
+// wrapAssignedInteger returns the assignment with its value wrapped into
+// the range of a target declared SINT, INT, DINT, USINT, UINT or UDINT (a
+// variable, a member, or an element of an array of them), as an
+// overflowing PLC integer wraps; or the assignment itself otherwise.
+func (c *Compiler) wrapAssignedInteger(node *ast.AssignmentStatement) *ast.AssignmentStatement {
+	if _, done := node.Value.(*wrappedInt); done {
+		return node
+	}
+	var dataType ast.Expression
+	switch target := node.Left.(type) {
+	case *ast.Identifier, *ast.MemberAccessExpression:
+		dataType = c.declaredVarType(target)
+	case *ast.IndexExpression:
+		array := target.Left
+		for inner, ok := array.(*ast.IndexExpression); ok; inner, ok = array.(*ast.IndexExpression) {
+			array = inner.Left
+		}
+		if def, isArray := c.declaredVarType(array).(*ast.ArrayDefinition); isArray && def.DataType != nil {
+			dataType = def.DataType
+		}
+	}
+	if dataType == nil {
+		return node
+	}
+	typeName := c.flattenExpressionToString(dataType)
+	code := object.IntegerWrapCode(typeName)
+	if code == 0 {
+		return node
+	}
+	// A constant in range needs no wrapping, nor a variable of a type that
+	// fits (INT := INT, DINT := SINT); arithmetic may overflow.
+	if n, err := c.evaluateConstantInteger(node.Value); err == nil && object.WrapInteger(n, typeName) == n {
+		return node
+	}
+	switch node.Value.(type) {
+	case *ast.Identifier, *ast.MemberAccessExpression, *ast.IndexExpression:
+		if from := c.valueTypeName(node.Value); from != "" && object.IntegerFits(from, typeName) {
+			return node
+		}
+	}
+	wrapped := *node
+	wrapped.Value = &wrappedInt{Expression: node.Value, code: code}
+	return &wrapped
+}
+
+// valueTypeName returns the declared type name of a variable, a member or
+// an element of an array, or "".
+func (c *Compiler) valueTypeName(exp ast.Expression) string {
+	var dataType ast.Expression
+	switch e := exp.(type) {
+	case *ast.Identifier, *ast.MemberAccessExpression:
+		dataType = c.declaredVarType(e)
+	case *ast.IndexExpression:
+		array := e.Left
+		for inner, ok := array.(*ast.IndexExpression); ok; inner, ok = array.(*ast.IndexExpression) {
+			array = inner.Left
+		}
+		if def, isArray := c.declaredVarType(array).(*ast.ArrayDefinition); isArray && def.DataType != nil {
+			dataType = def.DataType
+		}
+	}
+	if dataType == nil {
+		return ""
+	}
+	return c.flattenExpressionToString(dataType)
+}
+
+// cutAssignedString returns the assignment with its value cut to the length
+// of a variable declared STRING(n) or WSTRING(n), LEFT(value, n), as IEC
+// 61131-3 keeps only n characters; or the assignment itself otherwise.
+func (c *Compiler) cutAssignedString(node *ast.AssignmentStatement) *ast.AssignmentStatement {
+	target, ok := node.Left.(*ast.Identifier)
+	if !ok {
+		return node
+	}
+	decl := c.declarationOf(target.Value)
+	if decl == nil {
+		return node
+	}
+	value := stringCut(decl, node.Value)
+	if value == node.Value {
+		return node
+	}
+	cut := *node
+	cut.Value = value
+	return &cut
+}
+
+// stringCut returns value as LEFT(value, n) when decl declares a STRING(n)
+// or WSTRING(n), else value itself.
+func stringCut(decl *ast.VarDeclStatement, value ast.Expression) ast.Expression {
+	if decl.StringLength == nil || value == nil || decl.DataType == nil {
+		return value
+	}
+	if name := strings.ToUpper(decl.DataType.String()); name != "STRING" && name != "WSTRING" {
+		return value
+	}
+	left := &ast.Identifier{Token: token.Token{Type: token.IDENT, Literal: "LEFT"}, Value: "LEFT"}
+	return &ast.CallExpression{Token: left.Token, Function: left, Arguments: []ast.Expression{value, decl.StringLength}}
 }
 
 // holdsAggregate reports whether an assignment target was declared as an
@@ -192,4 +301,51 @@ func (c *Compiler) compileBitAccess(bit *ast.BitAccessExpression, value ast.Expr
 	}
 	c.emit(code.OpSetBit, int(bit.Bit), typeOperand)
 	return nil
+}
+
+// convertAssignedToReal returns the assignment of an integer to a target
+// declared REAL or LREAL with its value converted, TO_REAL(value), as an
+// integer converts to a real implicitly; or the assignment itself.
+func (c *Compiler) convertAssignedToReal(node *ast.AssignmentStatement) *ast.AssignmentStatement {
+	var dataType ast.Expression
+	switch target := node.Left.(type) {
+	case *ast.Identifier, *ast.MemberAccessExpression:
+		dataType = c.declaredVarType(target)
+	case *ast.IndexExpression:
+		array := target.Left
+		for inner, ok := array.(*ast.IndexExpression); ok; inner, ok = array.(*ast.IndexExpression) {
+			array = inner.Left
+		}
+		if def, isArray := c.declaredVarType(array).(*ast.ArrayDefinition); isArray && def.DataType != nil {
+			dataType = def.DataType
+		}
+	}
+	if dataType == nil {
+		return node
+	}
+	typeName := strings.ToUpper(c.flattenExpressionToString(dataType))
+	if typeName != "REAL" && typeName != "LREAL" {
+		return node
+	}
+	valueType, err := c.getExpressionType(node.Value)
+	if err != nil || !object.IsIntegerType(string(valueType)) {
+		return node
+	}
+	tok := node.Token
+	converted := *node
+	converted.Value = &ast.CallExpression{Token: tok, Function: &ast.Identifier{Token: tok, Value: "TO_" + typeName}, Arguments: []ast.Expression{node.Value}}
+	return &converted
+}
+
+// namesIdentifier reports whether node uses the identifier name, ignoring
+// case.
+func namesIdentifier(node ast.Node, name string) bool {
+	found := false
+	ast.Modify(node, func(n ast.Node) ast.Node {
+		if ident, ok := n.(*ast.Identifier); ok && strings.EqualFold(ident.Value, name) {
+			found = true
+		}
+		return n
+	})
+	return found
 }

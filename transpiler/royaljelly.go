@@ -63,6 +63,9 @@ var generatedPackages = map[string]string{
 	"time":       "time",
 	"sync":       "sync",
 	"strings":    "strings",
+	"strconv":    "strconv",
+	"gomath":     "math",
+	"gobits":     "math/bits",
 	"context":    "context",
 	"os":         "os",
 	"signal":     "os/signal",
@@ -125,6 +128,23 @@ func (t *Transpiler) standardFunctionBlockOf(dataType ast.Expression) (standardF
 // functionBlockRun returns the call that runs the function block instance
 // fbExpr once: its Logic method, or a standard function block's own call.
 func (t *Transpiler) functionBlockRun(fbExpr ast.Expression) string {
+	run := t.functionBlockRunNow(fbExpr)
+	// A function or a method has no now: the scan's time is plcNow.
+	if !t.hasNow {
+		t.usesPlcNow = true
+		run = strings.Replace(run, "(now)", "(plcNow)", 1)
+	}
+	return run
+}
+
+// functionBlockRunNow is functionBlockRun in a Logic method.
+func (t *Transpiler) functionBlockRunNow(fbExpr ast.Expression) string {
+	if _, isElement := fbExpr.(*ast.IndexExpression); isElement {
+		if fb, ok := t.standardFunctionBlockOf(t.valueDataType(fbExpr)); ok {
+			return fb.run
+		}
+		return "Logic(now)"
+	}
 	if td := t.resolveAssignmentTargetType(fbExpr); td != nil {
 		if fb, ok := t.standardFunctionBlockOf(td.DataType); ok {
 			return fb.run
@@ -340,6 +360,8 @@ type Options struct {
 	// firmware with a handful of I/O points does not need. Only code in the
 	// generated package can reach either image.
 	CompactImage bool
+	// AllowInputWrites: see Transpiler.AllowInputWrites (IEC-69).
+	AllowInputWrites bool
 }
 
 // GoFileWith is GoFile with options.
@@ -347,6 +369,7 @@ func GoFileWith(program *ast.Program, o Options) ([]byte, error) {
 	var body bytes.Buffer
 	t := New(&body)
 	t.HostBinding, t.PreferOSCAT = o.HostBinding, o.PreferOSCAT
+	t.AllowInputWrites = o.AllowInputWrites
 	t.CompactImage = o.CompactImage
 	if err := t.Transpile(program); err != nil {
 		return nil, err

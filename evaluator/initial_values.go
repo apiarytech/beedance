@@ -196,7 +196,8 @@ func enumValue(node *ast.VarDeclStatement, td *ast.TypeDeclaration, def *ast.Enu
 	member := func(name string) object.Object {
 		for _, v := range def.Values {
 			if token.SameIdent(v.Value, name) {
-				return &object.EnumeratedValue{TypeName: strings.ToUpper(td.Name.Value), Value: v.Value}
+				n, _ := def.NumberOf(v.Value)
+				return &object.EnumeratedValue{TypeName: strings.ToUpper(td.Name.Value), Value: v.Value, Number: n}
 			}
 		}
 		return newError(node, "initial value of '%s': '%s' is not a value of enumeration '%s'", node.Name.Value, name, td.Name.Value)
@@ -331,10 +332,21 @@ func arrayElements(node *ast.VarDeclStatement, def *ast.ArrayDefinition, env *ob
 		lengths = append(lengths, n)
 	}
 
+	// An element of ARRAY [..] OF MyFB (or TON) is an instance: its type is
+	// named as a variable's is, so that it resolves to the function block.
+	var elementType ast.Expression
+	if def.DataType != nil {
+		elementType = def.DataType
+		named := &ast.Identifier{Token: def.DataType.Token, Value: def.DataType.Token.Literal}
+		switch resolveDeclaredType(named, env).(type) {
+		case *object.FunctionBlock, *object.BuiltinFunctionBlock:
+			elementType = named
+		}
+	}
 	elementDefault := func() object.Object {
 		element := &ast.VarDeclStatement{Token: node.Token, Name: node.Name}
-		if def.DataType != nil {
-			element.DataType = def.DataType
+		if elementType != nil {
+			element.DataType = elementType
 		}
 		// Declared in a scratch scope so the variable itself is not set.
 		return evalVarDeclStatement(element, object.NewEnclosedEnvironment(env))

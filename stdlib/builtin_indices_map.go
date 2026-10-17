@@ -80,4 +80,16 @@ var BuiltinNameToIndex = map[string]int{
 	"__NATIVE_RUN": BuiltinNativeRun,
 	"__NATIVE_GET": BuiltinNativeGet,
 	"$CONVERT":     BuiltinConvert,
+
+	"CONCAT_DATE_TOD":    BuiltinConcatDateTod,
+	"$ATTEMPT":           BuiltinAttempt,
+	"$TIMEFN":            BuiltinTimefn,
+	"TO_BIG_ENDIAN":      BuiltinToBigEndian,
+	"TO_LITTLE_ENDIAN":   BuiltinToLittleEndian,
+	"FROM_BIG_ENDIAN":    BuiltinFromBigEndian,
+	"FROM_LITTLE_ENDIAN": BuiltinFromLittleEndian,
+	"IS_VALID":           BuiltinIsValid,
+	"IS_VALID_BCD":       BuiltinIsValidBcd,
+	"$DATEPART":          BuiltinDatepart,
+	"DAY_OF_WEEK":        BuiltinDayOfWeek,
 }

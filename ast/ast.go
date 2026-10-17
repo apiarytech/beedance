@@ -101,6 +101,7 @@ type VarDeclStatement struct {
 	DataType        Expression
 	Subrange        Expression
 	StringLength    Expression
+	StringBracket   bool       // the length was written STRING[n], not STRING(n)
 	Value           Expression // Initial value
 	IsConstant      bool
 	IsRetain        bool
@@ -166,9 +167,13 @@ func (vds *VarDeclStatement) String() string {
 		out.WriteString(vds.Subrange.String())
 	}
 	if vds.StringLength != nil {
-		out.WriteString("(")
+		open, close := "(", ")"
+		if vds.StringBracket {
+			open, close = "[", "]"
+		}
+		out.WriteString(open)
 		out.WriteString(vds.StringLength.String())
-		out.WriteString(")")
+		out.WriteString(close)
 	}
 
 	if vds.Value != nil {
@@ -478,10 +483,19 @@ func (as *AssignmentStatement) Pos() (int, int) { return as.Token.Row, as.Token.
 func (as *AssignmentStatement) TokenLiteral() string { return as.Token.Literal }
 
 // String returns the string representation of the assignment statement.
+// IsAttempt reports whether the assignment is an assignment attempt, r ?= i
+// (IEC 61131-3 3rd edition): the value is assigned if it is of the
+// target's type, NULL otherwise.
+func (as *AssignmentStatement) IsAttempt() bool { return as.Token.Type == token.ATTEMPT }
+
 func (as *AssignmentStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(as.Left.String())
-	out.WriteString(" := ")
+	if as.IsAttempt() {
+		out.WriteString(" ?= ")
+	} else {
+		out.WriteString(" := ")
+	}
 	if as.Value != nil {
 		out.WriteString(as.Value.String())
 	}
@@ -532,6 +546,24 @@ func (es *ExitStatement) Pos() (int, int) { return es.Token.Row, es.Token.Column
 
 // TokenLiteral returns the literal value of the token.
 func (es *ExitStatement) TokenLiteral() string { return es.Token.Literal }
+
+// ContinueStatement represents a CONTINUE statement: the rest of the loop's
+// body is skipped, and the loop goes on with its next iteration.
+type ContinueStatement struct {
+	Token token.Token // the 'CONTINUE' token
+}
+
+// statementNode marks ContinueStatement as a statement node.
+func (cs *ContinueStatement) statementNode() {}
+
+// Pos returns the position of the continue token.
+func (cs *ContinueStatement) Pos() (int, int) { return cs.Token.Row, cs.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (cs *ContinueStatement) TokenLiteral() string { return cs.Token.Literal }
+
+// String returns the string representation of the continue statement.
+func (cs *ContinueStatement) String() string { return cs.Token.Literal + ";" }
 
 // String returns the string representation of the exit statement.
 func (es *ExitStatement) String() string {
@@ -1536,7 +1568,11 @@ func (fbd *FunctionBlockDeclaration) String() string {
 	if fbd.AccessSpecifier != "" {
 		out.WriteString(fbd.AccessSpecifier + " ")
 	}
-	out.WriteString("FUNCTION_BLOCK ")
+	keyword, end := "FUNCTION_BLOCK ", "END_FUNCTION_BLOCK"
+	if fbd.IsClass() {
+		keyword, end = "CLASS ", "END_CLASS"
+	}
+	out.WriteString(keyword)
 	if fbd.Name != nil {
 		out.WriteString(fbd.Name.String())
 	}
@@ -1562,9 +1598,14 @@ func (fbd *FunctionBlockDeclaration) String() string {
 	if fbd.Body != nil {
 		out.WriteString(fbd.Body.String())
 	}
-	out.WriteString("\nEND_FUNCTION_BLOCK")
+	out.WriteString("\n" + end)
 	return out.String()
 }
+
+// IsClass reports whether the declaration is a CLASS (IEC 61131-3 3rd
+// edition): a function block with methods and no body, whose instances are
+// not called.
+func (fbd *FunctionBlockDeclaration) IsClass() bool { return fbd.Token.Type == token.CLASS }
 
 // HasMethod checks if a FunctionBlockDeclaration has a method or property with the given name.
 func (fbd *FunctionBlockDeclaration) HasMethod(name string) bool {
@@ -1934,6 +1975,48 @@ func (sd *StructDefinition) GetMemberType(memberName string) string {
 type EnumDefinition struct {
 	Token  token.Token // The '(' token
 	Values []*Identifier
+	// Numbers holds each value's number as written, (RED := 1, GREEN := 5),
+	// or nil for one written without; empty when none has one.
+	Numbers []Expression
+	// BaseType is the integer type of a typed enumeration, INT (A, B), or
+	// nil.
+	BaseType Expression
+}
+
+// NumberOf returns the number of an enumeration's value, ignoring case: as
+// written, or one more than the value before it (0 for the first).
+func (ed *EnumDefinition) NumberOf(name string) (int64, bool) {
+	next := int64(0)
+	for i, v := range ed.Values {
+		n := next
+		if i < len(ed.Numbers) && ed.Numbers[i] != nil {
+			if written, ok := constantInteger(ed.Numbers[i]); ok {
+				n = written
+			}
+		}
+		if strings.EqualFold(v.Value, name) {
+			return n, true
+		}
+		next = n + 1
+	}
+	return 0, false
+}
+
+// constantInteger returns the value of an integer literal, signed or not.
+func constantInteger(e Expression) (int64, bool) {
+	switch x := e.(type) {
+	case *IntegerLiteral:
+		return x.Value, true
+	case *UnsignedIntegerLiteral:
+		return int64(x.Value), true
+	case *PrefixExpression:
+		n, ok := constantInteger(x.Right)
+		if x.Operator == "-" {
+			return -n, ok
+		}
+		return n, ok && x.Operator == "+"
+	}
+	return 0, false
 }
 
 // expressionNode marks EnumDefinition as an expression node.
@@ -1950,7 +2033,11 @@ func (ed *EnumDefinition) String() string {
 	var out bytes.Buffer
 	ed.Pos() // Ensure Pos() is called
 	vals := []string{}
-	for _, v := range ed.Values {
+	for i, v := range ed.Values {
+		if i < len(ed.Numbers) && ed.Numbers[i] != nil {
+			vals = append(vals, v.String()+" := "+ed.Numbers[i].String())
+			continue
+		}
 		vals = append(vals, v.String())
 	}
 	out.WriteString("(")
@@ -2168,9 +2255,20 @@ func (ss *StepStatement) String() string {
 // TransitionStatement represents a TRANSITION in an SFC.
 type TransitionStatement struct {
 	Token     token.Token // The 'TRANSITION' token
+	Name      *Identifier // TRANSITION T1 FROM ..., or nil
+	Priority  Expression  // (PRIORITY := n): lower first; nil when not given
 	From      []*Identifier
 	To        []*Identifier
 	Condition Expression
+}
+
+// PriorityValue returns the transition's priority, lower first, or false
+// when it has none.
+func (ts *TransitionStatement) PriorityValue() (int64, bool) {
+	if ts.Priority == nil {
+		return 0, false
+	}
+	return constantInteger(ts.Priority)
 }
 
 // statementNode marks TransitionStatement as a statement node.
@@ -2186,6 +2284,12 @@ func (ts *TransitionStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TransitionStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString("TRANSITION")
+	if ts.Name != nil {
+		out.WriteString(" " + ts.Name.String())
+	}
+	if ts.Priority != nil {
+		out.WriteString(" (PRIORITY := " + ts.Priority.String() + ")")
+	}
 	if len(ts.From) > 0 {
 		out.WriteString(" FROM ")
 		froms := []string{}
@@ -2672,4 +2776,34 @@ func (ba *BitAccessExpression) TokenLiteral() string { return ba.Token.Literal }
 // String returns the bit access as written, e.g. flags.3.
 func (ba *BitAccessExpression) String() string {
 	return fmt.Sprintf("%s.%d", ba.Target.String(), ba.Bit)
+}
+
+// AnyRange is the dimension of an array of any length, ARRAY[*] OF INT, as
+// a VAR_IN_OUT of a function or function block may be declared (IEC 61131-3
+// 3rd edition): the array passed gives the bounds.
+type AnyRange struct {
+	Token token.Token // the '*' token
+}
+
+// expressionNode marks AnyRange as an expression node.
+func (ar *AnyRange) expressionNode() {}
+
+// Pos returns the position of the '*'.
+func (ar *AnyRange) Pos() (int, int) { return ar.Token.Row, ar.Token.Column }
+
+// TokenLiteral returns the literal value of the token.
+func (ar *AnyRange) TokenLiteral() string { return ar.Token.Literal }
+
+// String returns "*".
+func (ar *AnyRange) String() string { return "*" }
+
+// HasAnyRange reports whether an array has a dimension of any length,
+// ARRAY[*].
+func (ad *ArrayDefinition) HasAnyRange() bool {
+	for _, r := range ad.Ranges {
+		if _, ok := r.(*AnyRange); ok {
+			return true
+		}
+	}
+	return false
 }

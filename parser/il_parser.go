@@ -72,6 +72,12 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 
 	// 2. Parse the operator (e.g., LD, ST, ADD) and its modifiers.
 	if !p.isIlMnemonic() {
+		// A call of a function or a method loads its result.
+		if call, operator := p.parseIlCall(); call != nil {
+			stmt.Operator = operator
+			stmt.Operand = call
+			return stmt
+		}
 		p.currentError("expected IL instruction mnemonic (e.g., LD, ST, ADD), got %q", p.curToken.Literal)
 		return nil
 	}
@@ -80,6 +86,19 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 	// The lexer provides the full identifier (e.g., "LDN", "JMPC"). We need to split
 	// it into the base operator ("LD") and the modifier ("N", "C").
 	baseOp, modifier := p.extractIlModifiers(operatorStr)
+	// & is AND, and &N, which lexes as & and N, is ANDN.
+	if operatorStr == "&" {
+		baseOp = "AND"
+		if p.peekTokenIs(token.IDENT) && strings.EqualFold(p.peekToken.Literal, "N") && p.peekToken.Pos == p.curToken.Pos+1 {
+			modifier = "N"
+			p.nextToken() // consume &, leaving N as the operator's last token
+		}
+	}
+	// ST? is the assignment attempt (Table 68, 24): the modifier ?.
+	if strings.EqualFold(baseOp, "ST") && modifier == "" && p.peekTokenIs(token.QUESTION) {
+		modifier = "?"
+		p.nextToken() // consume ST, leaving ? as the operator's last token
+	}
 	stmt.Operator = baseOp
 	stmt.Modifier = modifier
 	p.skipPeekComments() // a comment may stand between operator and operand
@@ -90,8 +109,25 @@ func (p *Parser) parseIlInstruction() ast.Statement {
 		stmt.Modifier += "(" // Add '(' to the list of modifiers
 		p.nextToken()        // Consume the operator (e.g., AND)
 		p.nextToken()        // Consume the '('
+		// The short form, AND( b, starts with an operand, which LD loads.
+		var first *ast.IlInstructionStatement
+		for p.curTokenIs(token.COMMENT) {
+			p.nextToken()
+		}
+		if !p.curTokenIs(token.RPAREN) && !p.isIlMnemonic() && !(p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON)) {
+			first = &ast.IlInstructionStatement{Token: p.curToken, Operator: "LD", Operand: p.parseExpression(LOGICAL_AND)}
+			p.skipPeekComments()
+			if p.peekTokenIs(token.SEMICOLON) {
+				p.nextToken()
+			}
+			p.nextToken()
+		}
 		// The operand is the entire block of instructions inside the parentheses.
 		stmt.Operand = p.parseIlProgramBody(token.RPAREN)
+		if first != nil {
+			block := stmt.Operand.(*ast.BlockStatement)
+			block.Statements = append([]ast.Statement{first}, block.Statements...)
+		}
 		// parseIlProgramBody will stop at RPAREN, so we don't need to consume it here.
 		return stmt
 	}
@@ -214,7 +250,13 @@ func (p *Parser) skipPeekComments() {
 // body keeps its first statement's leading comments.
 func (p *Parser) ilBodyFollows() bool {
 	startsIL := func() bool {
-		return p.isIlInstruction() || (p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON))
+		if p.isStJump() {
+			return false // JMP label; is ST (IEC-68)
+		}
+		if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
+			return p.labelBeforeIL()
+		}
+		return p.isIlInstruction()
 	}
 	if !p.curTokenIs(token.COMMENT) {
 		return startsIL()
@@ -229,4 +271,68 @@ func (p *Parser) ilBodyFollows() bool {
 	p.curToken, p.peekToken, p.peek2Token, *p.l = cur, peek, peek2, lex
 	p.errors = p.errors[:errs]
 	return false
+}
+
+// labelBeforeIL reports, at a label that starts a body, whether the
+// statement after it is IL: a body may start with a label in ST too
+// (IEC-68). The parser is left as it was.
+func (p *Parser) labelBeforeIL() bool {
+	cur, peek, peek2, lex, errs := p.curToken, p.peekToken, p.peek2Token, *p.l, len(p.errors)
+	defer func() {
+		p.curToken, p.peekToken, p.peek2Token, *p.l = cur, peek, peek2, lex
+		p.errors = p.errors[:errs]
+	}()
+	p.nextToken() // the colon
+	p.nextToken() // what it labels
+	for p.curTokenIs(token.COMMENT) {
+		p.nextToken()
+	}
+	if p.curTokenIs(token.IDENT) && p.peekTokenIs(token.COLON) {
+		return true // label after label: IL's way, as before
+	}
+	return !p.isStJump() && p.isIlInstruction()
+}
+
+// parseIlCall parses an instruction that calls a function or a method
+// (Table 69): LIMIT 0, 10, whose first input is the current result;
+// LIMIT(MN := 0, IN := a, MX := 10); or f.Add(k := 5). It returns the call,
+// and the operator of the instruction: LD of a call of a function, CAL of an
+// input operator, CU c. It returns nil if the instruction is not one.
+func (p *Parser) parseIlCall() (call ast.Expression, operator string) {
+	if !p.curTokenIs(token.IDENT) {
+		return nil, ""
+	}
+	tok := p.curToken
+	// An input operator of a standard function block (Table 70), CU c, is
+	// CAL c(CU := the current result).
+	if ilFBInputOperators[strings.ToUpper(tok.Literal)] && p.peekToken.Row == tok.Row && !p.peekTokenIs(token.LPAREN) {
+		p.nextToken()
+		instance := p.parseExpression(LOGICAL_AND)
+		return ast.IlInputCall(tok, instance), "CAL"
+	}
+	if p.peekTokenIs(token.LPAREN) || p.peekTokenIs(token.DOT) {
+		if call, ok := p.parseExpression(LOWEST).(*ast.CallExpression); ok {
+			return call, "LD"
+		}
+		p.currentError("expected a call of a function or a method, got %q", tok.Literal)
+		return nil, ""
+	}
+	// The inputs after the first are on the instruction's line.
+	args := []ast.Expression{&ast.IlCurrentResult{Token: tok}}
+	for p.peekToken.Row == tok.Row && !p.peekTokenIs(token.EOF) && !p.peekTokenIs(token.SEMICOLON) && !p.peekTokenIs(token.COMMENT) {
+		p.nextToken()
+		args = append(args, p.parseExpression(LOWEST))
+		if !p.peekTokenIs(token.COMMA) {
+			break
+		}
+		p.nextToken() // the comma
+	}
+	return &ast.CallExpression{Token: tok, Function: &ast.Identifier{Token: tok, Value: tok.Literal}, Arguments: args}, "LD"
+}
+
+// ilFBInputOperators are the input operators of the standard function
+// blocks (Table 70) that are not also IL operators; S and R, which are, set
+// an input of an RS or SR instance as the engines see its type.
+var ilFBInputOperators = map[string]bool{
+	"S1": true, "R1": true, "CLK": true, "CU": true, "CD": true, "PV": true, "IN": true, "PT": true, "RESET": true,
 }

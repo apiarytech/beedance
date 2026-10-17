@@ -567,9 +567,9 @@ func TestConvertToStringFunctions(t *testing.T) {
 		expected string
 	}{
 		{"INT_TO_STRING(123);", "123"},
-		{"REAL_TO_STRING(1.23);", "1.230000"},
+		{"REAL_TO_STRING(1.23);", "1.23"},
 		{"BOOL_TO_STRING(TRUE);", "TRUE"},
-		{"TIME_TO_STRING(T#1m30s);", "1m30s"},
+		{"TIME_TO_STRING(T#1m30s);", "T#1m30s"},
 	}
 
 	for _, tt := range tests {

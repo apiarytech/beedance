@@ -122,6 +122,7 @@ func (p *Parser) parseDiagramBody(lang string, pou *ast.Identifier, vars *[]*ast
 	b.WriteString("\nEND_PROGRAM\n")
 
 	sub := New(lexer.New(b.String()))
+	sub.bidiChecked = true
 	prog := sub.ParseProgram()
 	if len(sub.Errors()) > 0 {
 		p.errors = append(p.errors, sub.Errors()...)

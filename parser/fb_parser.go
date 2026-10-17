@@ -33,19 +33,31 @@ func (p *Parser) parseFunctionBlockDeclaration() ast.Statement {
 		p.nextToken() // consume ABSTRACT
 	}
 
-	if !p.curTokenIs(token.FUNCTION_BLOCK) {
+	isFinal := false
+	if p.curTokenIs(token.FINAL) {
+		isFinal = true
+		p.nextToken() // consume FINAL
+	}
+
+	if !p.curTokenIs(token.FUNCTION_BLOCK) && !p.curTokenIs(token.CLASS) {
 		p.currentError("expected FUNCTION_BLOCK, got %s", p.curToken.Type)
 		return nil
 	}
-	fbToken := p.curToken // This is FUNCTION_BLOCK
+	fbToken := p.curToken // This is FUNCTION_BLOCK, or CLASS
 	p.nextToken()         // consume FUNCTION_BLOCK
+	// A CLASS is a function block of methods only; see ast.FunctionBlockDeclaration.IsClass.
+	end := token.TokenType(token.END_FUNCTION_BLOCK)
+	isClass := fbToken.Type == token.CLASS
+	if isClass {
+		end = token.END_CLASS
+	}
 
 	if !isAbstract && p.curTokenIs(token.ABSTRACT) {
 		isAbstract = true
 		p.nextToken() // consume ABSTRACT
 	}
 
-	isFinal := false
+	// FINAL may also follow the keyword.
 	if p.curTokenIs(token.FINAL) {
 		isFinal = true
 		p.nextToken() // consume FINAL
@@ -95,12 +107,18 @@ var_loop:
 		// This switch handles the various types of variable blocks that can appear
 		// at the start of a function block declaration.
 		switch p.curToken.Type {
-		case token.VAR_INPUT:
-			stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
-		case token.VAR_OUTPUT:
-			stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
-		case token.VAR_IN_OUT:
-			stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+		case token.VAR_INPUT, token.VAR_OUTPUT, token.VAR_IN_OUT:
+			if isClass {
+				p.currentError("%s declarations are not allowed in a CLASS", p.curToken.Type)
+			}
+			switch p.curToken.Type {
+			case token.VAR_INPUT:
+				stmt.VarInputs = append(stmt.VarInputs, p.parseVarBlock(token.VAR_INPUT)...)
+			case token.VAR_OUTPUT:
+				stmt.VarOutputs = append(stmt.VarOutputs, p.parseVarBlock(token.VAR_OUTPUT)...)
+			default:
+				stmt.VarInOuts = append(stmt.VarInOuts, p.parseVarBlock(token.VAR_IN_OUT)...)
+			}
 		case token.VAR_TEMP:
 			stmt.VarTemp = append(stmt.VarTemp, p.parseTempVarDeclStatement())
 		case token.VAR_EXTERNAL:
@@ -171,18 +189,21 @@ var_loop:
 	}
 
 	// Now, parse the main body of ST/IL/SFC statements if any exist.
-	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
+	if isClass && !p.curTokenIs(end) {
+		p.currentError("a CLASS has methods and no body, got %s", p.curToken.Type)
+	}
+	if !p.curTokenIs(end) {
 		// If methods were parsed, the main body can only be ST statements.
 		// If no methods were parsed, we detect the language of the body.
 		if lang := p.diagramBody(); len(body.Statements) == 0 && lang != "" {
 			stmt.Body = p.parseDiagramBody(lang, stmt.Name, &stmt.Vars, declaredNames(stmt.Name, stmt.VarInputs, stmt.VarOutputs, stmt.VarInOuts, stmt.Vars, externalVars(stmt.VarExternal), tempVars(stmt.VarTemp)))
 		} else if len(body.Statements) == 0 && p.isSFC() {
-			stmt.Body = p.parseSFCProgram(token.END_FUNCTION_BLOCK)
+			stmt.Body = p.parseSFCProgram(end)
 		} else if len(body.Statements) == 0 && p.ilBodyFollows() {
-			stmt.Body = p.parseIlProgramBody(token.END_FUNCTION_BLOCK)
+			stmt.Body = p.parseIlProgramBody(end)
 		} else {
 			// It's an ST body, or an ST body following methods.
-			mainBody := p.parseBlockStatementUntil(token.END_FUNCTION_BLOCK)
+			mainBody := p.parseBlockStatementUntil(end)
 			if mainBody != nil {
 				body.Statements = append(body.Statements, mainBody.Statements...)
 			}
@@ -192,8 +213,8 @@ var_loop:
 		stmt.Body = body
 	}
 
-	if !p.curTokenIs(token.END_FUNCTION_BLOCK) {
-		p.currentError("expected next token to be %s, got %s instead", token.END_FUNCTION_BLOCK, p.curToken.Type)
+	if !p.curTokenIs(end) {
+		p.currentError("expected next token to be %s, got %s instead", end, p.curToken.Type)
 	} else {
 		p.nextToken() // Consume END_FUNCTION_BLOCK
 	}

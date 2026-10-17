@@ -31,6 +31,7 @@ var varBlockStarts = map[token.TokenType]bool{
 var pouEnds = map[token.TokenType]token.TokenType{
 	token.PROGRAM:        token.END_PROGRAM,
 	token.FUNCTION_BLOCK: token.END_FUNCTION_BLOCK,
+	token.CLASS:          token.END_CLASS,
 	token.FUNCTION:       token.END_FUNCTION,
 }
 

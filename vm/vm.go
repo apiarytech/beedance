@@ -255,6 +255,19 @@ func (vm *VM) IO() map[string]object.Object {
 	return vm.io
 }
 
+// ShareIO makes image the VM's I/O image, which several VMs then share: the
+// programs of a configuration have one process image (see package
+// vmconfig). Values the VM's image held are kept in image unless it has
+// its own.
+func (vm *VM) ShareIO(image map[string]object.Object) {
+	for addr, v := range vm.io {
+		if _, ok := image[addr]; !ok {
+			image[addr] = v
+		}
+	}
+	vm.io = image
+}
+
 // externalAddress reads the 2-byte constant index operand of an external
 // access instruction at ip and returns the address string it names.
 func (vm *VM) externalAddress(ins code.Instructions, ip int) (string, error) {
@@ -414,6 +427,16 @@ func (vm *VM) Run() (runErr error) {
 		case code.OpCopy:
 			// Arrays and structures are assigned and passed by value.
 			vm.stack[vm.sp-1] = object.CopyValue(vm.stack[vm.sp-1])
+
+		case code.OpWrapInt:
+			// An integer assigned to a narrow integer type wraps into its range.
+			wrap := int(code.ReadUint8(ins[ip+1:]))
+			cur.ip += 1
+			if n, _, isInt := object.GetIntegerObjectValue(vm.stack[vm.sp-1]); isInt {
+				if w := object.WrapIntegerCode(n, wrap); w != n {
+					vm.stack[vm.sp-1] = &object.LInt{Value: w}
+				}
+			}
 
 		case code.OpGetBit:
 			// A bit of an integer or bit string, e.g. flags.3.
@@ -704,6 +727,11 @@ func (vm *VM) executeBinaryOperation(op code.Opcode) error {
 		return vm.executeBinaryIntegerOperation(op, left, right)
 	case isReal(left) && isReal(right):
 		return vm.executeBinaryRealOperation(op, left, right)
+	case (isReal(left) && isInteger(right)) || (isInteger(left) && isReal(right)):
+		// An integer with a real is widened to a real, as IEC 61131-3 does.
+		l, _ := object.GetFloat64Value(left)
+		r, _ := object.GetFloat64Value(right)
+		return vm.executeBinaryRealOperation(op, &object.LReal{Value: l}, &object.LReal{Value: r})
 	case isString(left) && isString(right):
 		return vm.executeBinaryStringOperation(op, left, right)
 	case usesSharedOperations(left) || usesSharedOperations(right):
@@ -851,6 +879,11 @@ func (vm *VM) executeComparison(op code.Opcode) error {
 
 	if isReal(left) && isReal(right) {
 		return vm.executeRealComparison(op, left, right)
+	}
+
+	// An integer and a real compare as reals (INT converts to REAL).
+	if (isInteger(left) && isReal(right)) || (isReal(left) && isInteger(right)) {
+		return vm.executeRealComparison(op, asLReal(left), asLReal(right))
 	}
 
 	if isString(left) && isString(right) {
@@ -1475,6 +1508,17 @@ func isInteger(obj object.Object) bool {
 }
 
 // isReal checks if an object is one of the real-number types.
+// asLReal returns an integer as an LREAL, and any other value as it is.
+func asLReal(obj object.Object) object.Object {
+	if n, _, ok := object.GetIntegerObjectValue(obj); ok && isInteger(obj) {
+		if u, isU := obj.(*object.ULInt); isU {
+			return &object.LReal{Value: float64(u.Value)}
+		}
+		return &object.LReal{Value: float64(n)}
+	}
+	return obj
+}
+
 func isReal(obj object.Object) bool {
 	switch obj.(type) {
 	case *object.Real, *object.LReal:

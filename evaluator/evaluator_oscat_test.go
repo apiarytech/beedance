@@ -12,12 +12,37 @@ package evaluator
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
 )
+
+// TestOscatNoLostCharacters checks that no OSCAT source in reference holds
+// U+FFFD, which an editor writes for a character it could not read: the
+// ISO 8859-1 characters of the month names and comments were lost so once,
+// and put back from OSCAT's exports in
+// github.com/eclipse-oscat/oscat-libs-archive.
+func TestOscatNoLostCharacters(t *testing.T) {
+	paths, err := filepath.Glob("../reference/*.st")
+	if err != nil || len(paths) == 0 {
+		t.Skipf("no sources in reference: %v", err)
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.ContainsRune(line, '�') {
+				t.Errorf("%s:%d holds U+FFFD: %.80s", filepath.Base(path), i+1, line)
+			}
+		}
+	}
+}
 
 // TestOscatLibraryRuns evaluates the converted OSCAT BASIC library with a
 // call to some of its functions. It is skipped without the library.
@@ -74,6 +99,9 @@ func TestCaseInsensitiveNames(t *testing.T) {
 		"VAR t : INT := 5; END_VAR T := t + 1; t;":                                                               6,
 		"FUNCTION F : INT VAR x : INT; END_VAR X := 3; f := x; END_FUNCTION f();":                                3,
 		"FUNCTION_BLOCK Fb VAR_OUTPUT q : INT; END_VAR Q := 7; END_FUNCTION_BLOCK VAR i : FB; END_VAR I(); i.Q;": 7,
+		// A VAR_IN_OUT is bound by its name in any case, as OSCAT's RMP_W
+		// binds _RMP_W's RMP with rmp := out.
+		"FUNCTION_BLOCK Inc VAR_IN_OUT X : INT; END_VAR x := x + 1; END_FUNCTION_BLOCK VAR i : Inc; v : INT := 4; END_VAR i(x := v); i(X := v); v;": 6,
 	} {
 		testIntegerObject(t, testEval(t, input), input, want)
 	}

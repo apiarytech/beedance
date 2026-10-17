@@ -144,6 +144,13 @@ func (t *Transpiler) memberName(exp ast.Expression, name string) string {
 	if decl := t.memberDecl(exp, name); decl != nil {
 		return decl.Name.Value
 	}
+	// A member of an element of an array of standard function blocks, such
+	// as timers[i].Q.
+	if _, isElement := exp.(*ast.IndexExpression); isElement {
+		if _, std := t.standardFunctionBlockOf(t.valueDataType(exp)); std {
+			return strings.ToUpper(name)
+		}
+	}
 	td := t.resolveAssignmentTargetType(exp)
 	if td == nil || td.DataType == nil {
 		return name

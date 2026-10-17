@@ -45,6 +45,10 @@ func TestOscatBuildingAndNetworkRun(t *testing.T) {
 		t.Fatalf("the libraries do not parse: %v", p.Errors()[0])
 	}
 	env := object.NewEnvironment()
+	// OSCAT is written in CODESYS's dialect: its blocks write their inputs
+	// (IEC-69).
+	SetAllowInputWrites(true)
+	defer SetAllowInputWrites(false)
 	if result := Eval(program, env); isError(result) {
 		t.Fatalf("the libraries do not evaluate: %s", result.Inspect())
 	}

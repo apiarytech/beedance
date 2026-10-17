@@ -490,7 +490,7 @@ func (t *Transpiler) defaultArgument(input *ast.VarDeclStatement) (string, error
 	t.programVarName, t.localVars = "", nil
 	defer func() { t.programVarName, t.localVars = originalReceiver, originalLocals }()
 
-	v, err := t.initialValue(input.DataType, input.Value)
+	v, err := t.initialValue(input.DataType, cutInitialValue(input))
 	if err != nil || v != "" {
 		return v, err
 	}
@@ -627,17 +627,55 @@ func (t *Transpiler) functionBlockInitStatements(fb *ast.FunctionBlockDeclaratio
 				return nil, err
 			}
 			stmts = append(stmts, init...)
+			// A function block's EN input is TRUE by default, as for a
+			// program's instances (transpileProgramVarInit).
+			if t.startsEN(decl.DataType) {
+				stmts = append(stmts, target+".EN = true")
+			}
 			continue
 		}
-		v, err := t.initialValue(decl.DataType, decl.Value)
+		v, err := t.initialValue(decl.DataType, cutInitialValue(decl))
 		if err != nil {
 			return nil, err
 		}
 		if v != "" {
 			stmts = append(stmts, fmt.Sprintf("%s = %s", target, v))
 		}
+		elements, err := t.arrayInstancesInit(target, decl.DataType)
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, elements...)
 	}
 	return stmts, nil
+}
+
+// arrayInstancesInit returns the statements that start each instance of an
+// array of function blocks named target, as one instance starts: its Init,
+// if it has one, and EN TRUE.
+func (t *Transpiler) arrayInstancesInit(target string, dataType ast.Expression) ([]string, error) {
+	def, ok := dataType.(*ast.ArrayDefinition)
+	if !ok || def.DataType == nil || !t.isFunctionBlockType(def.DataType) {
+		return nil, nil
+	}
+	element, open, end := target, "", ""
+	for d := range def.Ranges {
+		index := fmt.Sprintf("i%d", d)
+		open += fmt.Sprintf("for %s := range %s { ", index, element)
+		element += "[" + index + "]"
+		end += " }"
+	}
+	init, err := t.functionBlockInit(element, def.DataType, nil)
+	if err != nil {
+		return nil, err
+	}
+	if t.startsEN(def.DataType) {
+		init = append(init, element+".EN = true")
+	}
+	if len(init) == 0 {
+		return nil, nil
+	}
+	return []string{open + strings.Join(init, "; ") + end}, nil
 }
 
 // transpileFunctionBlockInit writes the Init method of a function block that
@@ -683,7 +721,7 @@ func (t *Transpiler) transpileProgramVarInit(decl *ast.VarDeclStatement) error {
 		}
 		// A function block's EN input is TRUE by default. Some of
 		// royaljelly's standard function blocks have no EN.
-		if std, isStd := t.standardFunctionBlockOf(decl.DataType); !isStd || std.hasEN {
+		if t.startsEN(decl.DataType) {
 			t.write("\t%s.EN = true\n", target)
 		}
 		return nil
@@ -697,12 +735,19 @@ func (t *Transpiler) transpileProgramVarInit(decl *ast.VarDeclStatement) error {
 	if _, isRef := decl.DataType.(*ast.ReferenceType); isRef {
 		return t.valueStatement(target, decl.Value)
 	}
-	v, err := t.initialValue(decl.DataType, decl.Value)
+	v, err := t.initialValue(decl.DataType, cutInitialValue(decl))
 	if err != nil {
 		return fmt.Errorf("initial value of '%s': %w", decl.Name.Value, err)
 	}
 	if v != "" {
 		t.write("\t%s = %s\n", target, v)
+	}
+	elements, err := t.arrayInstancesInit(target, decl.DataType)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range elements {
+		t.write("\t%s\n", stmt)
 	}
 	return nil
 }
@@ -730,7 +775,7 @@ func (t *Transpiler) transpileLocalVar(decl *ast.VarDeclStatement) error {
 		return err
 	}
 	if init == nil {
-		v, err := t.initialValue(decl.DataType, decl.Value)
+		v, err := t.initialValue(decl.DataType, cutInitialValue(decl))
 		if err != nil {
 			return err
 		}
@@ -909,7 +954,15 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 			return err
 		}
 		if i >= len(sig.inputs) {
-			v = "&" + v // A VAR_IN_OUT is passed by reference.
+			if def := t.arrayDefinitionOf(params[i].DataType); def != nil && def.HasAnyRange() {
+				// An ARRAY[*] VAR_IN_OUT: the array's bounds and its elements.
+				v, err = t.anyArrayArgument(def, value)
+				if err != nil {
+					return err
+				}
+			} else {
+				v = "&" + v // A VAR_IN_OUT is passed by reference.
+			}
 		}
 		args[i] = v
 		return nil
@@ -918,10 +971,10 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 		switch a := arg.(type) {
 		case *ast.NamedArgument:
 			named++
-			if strings.EqualFold(a.Name.Value, "EN") {
-				continue
-			}
 			i := indexOfDecl(params, a.Name.Value)
+			if i < 0 && strings.EqualFold(a.Name.Value, "EN") {
+				continue // the engine's own EN: a function that declares it takes it (IEC-75)
+			}
 			if i < 0 {
 				return fmt.Errorf("'%s' has no input '%s'", sig.name, a.Name.Value)
 			}
@@ -929,10 +982,10 @@ func (t *Transpiler) transpileUserCall(exp *ast.CallExpression, sig *callSignatu
 				return err
 			}
 		case *ast.OutputArgument:
-			if strings.EqualFold(a.Source.Value, "ENO") {
+			i := indexOfDecl(sig.outputs, a.Source.Value)
+			if i < 0 && strings.EqualFold(a.Source.Value, "ENO") {
 				continue
 			}
-			i := indexOfDecl(sig.outputs, a.Source.Value)
 			if i < 0 {
 				return fmt.Errorf("'%s' has no output '%s'", sig.name, a.Source.Value)
 			}
@@ -1196,4 +1249,29 @@ func (t *Transpiler) ownMethod(callee ast.Expression) *ast.MethodImplementation 
 		}
 	}
 	return nil
+}
+
+// cutInitialValue returns the initial value of a STRING(n) or WSTRING(n)
+// declaration given as a string literal, cut to its first n characters (as
+// stringCut does), or the declaration's value as it is.
+func cutInitialValue(decl *ast.VarDeclStatement) ast.Expression {
+	n, ok := constantInteger(decl.StringLength)
+	if decl.StringLength == nil || !ok || n < 0 {
+		return decl.Value
+	}
+	switch lit := decl.Value.(type) {
+	case *ast.StringLiteral:
+		if int64(len(lit.Value)) > n {
+			cut := *lit
+			cut.Value = lit.Value[:n]
+			return &cut
+		}
+	case *ast.WStringLiteral:
+		if r := []rune(lit.Value); int64(len(r)) > n {
+			cut := *lit
+			cut.Value = string(r[:n])
+			return &cut
+		}
+	}
+	return decl.Value
 }

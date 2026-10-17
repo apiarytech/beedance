@@ -72,5 +72,20 @@ func GetBuiltinByName(name string) (*Builtin, bool) {
 	if b, ok := builtinsByName[name]; ok {
 		return b, ok
 	}
+	if b, ok := timeFunctionBuiltin(name); ok {
+		return b, ok
+	}
 	return conversionBuiltin(name)
+}
+
+// BuiltinNames names the registered built-in functions, sorted. Unlike
+// Builtins it needs no FinalizeBuiltins and changes nothing: an editor's
+// completion reads it while programs compile.
+func BuiltinNames() []string {
+	names := make([]string, 0, len(builtinsByName))
+	for name := range builtinsByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

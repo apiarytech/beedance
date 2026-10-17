@@ -35,9 +35,22 @@ func Session(now func() time.Time) (end func()) {
 	return func() {
 		nowFunc, ioMap, ioTypes, traceFn = prevNow, prevIO, prevTypes, nil
 		budget, remaining = 0, 0
+		allowInputWrites = false
 		sessionMu.Unlock()
 	}
 }
+
+// allowInputWrites lets a POU assign its own inputs (SetAllowInputWrites).
+var allowInputWrites bool
+
+// SetAllowInputWrites lets a POU assign its own VAR_INPUT variables, as
+// CODESYS does and libraries written for it need (OSCAT, beeguard's alarm
+// blocks; IEC-69), from now on; false (the default, IEC 61131-3's rule)
+// refuses such a program as the VM does, with the same message. The
+// compiler's AllowInputWrites and the transpiler's Options.AllowInputWrites
+// are the same switch for the other engines. It is reset when the session
+// ends.
+func SetAllowInputWrites(allow bool) { allowInputWrites = allow }
 
 // IO returns the I/O image of the current session: the values of located
 // variables by address.

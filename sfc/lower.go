@@ -35,6 +35,8 @@ package sfc
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/apiarytech/beedance/ast"
@@ -84,6 +86,7 @@ type action struct {
 type transition struct {
 	from, to  []string
 	condition ast.Expression
+	priority  int64 // (PRIORITY := n), lower first; the largest when not given
 }
 
 // Program returns program with every PROGRAM and FUNCTION_BLOCK whose body
@@ -92,6 +95,7 @@ type transition struct {
 func Program(program *ast.Program) (*ast.Program, error) {
 	out := *program
 	out.Statements = make([]ast.Statement, len(program.Statements))
+	needFlags := false
 	for i, s := range program.Statements {
 		out.Statements[i] = s
 		switch d := s.(type) {
@@ -108,6 +112,7 @@ func Program(program *ast.Program) (*ast.Program, error) {
 			low.Vars = append(append([]*ast.VarDeclStatement{}, d.Vars...), vars...)
 			low.Body = body
 			out.Statements[i] = &low
+			needFlags = needFlags || declaresFlags(vars)
 		case *ast.FunctionBlockDeclaration:
 			chart, ok := d.Body.(*ast.SFCProgram)
 			if !ok {
@@ -121,7 +126,16 @@ func Program(program *ast.Program) (*ast.Program, error) {
 			low.Vars = append(append([]*ast.VarDeclStatement{}, d.Vars...), vars...)
 			low.Body = body
 			out.Statements[i] = &low
+			needFlags = needFlags || declaresFlags(vars)
 		}
+	}
+	if needFlags {
+		p := parser.New(lexer.New(stepFlagsDecl))
+		types := p.ParseProgram()
+		if errs := p.Errors(); len(errs) > 0 {
+			return nil, fmt.Errorf("the step flags type does not parse (a beedance defect): %s", errs[0])
+		}
+		out.Statements = append(types.Statements, out.Statements...)
 	}
 	return &out, nil
 }
@@ -212,7 +226,10 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 				a.assocs = append(a.assocs, assoc{step: name, code: code, duration: d})
 			}
 		case *ast.TransitionStatement:
-			t := transition{condition: e.Condition}
+			t := transition{condition: e.Condition, priority: math.MaxInt64}
+			if p, ok := e.PriorityValue(); ok {
+				t.priority = p
+			}
 			for _, s := range e.From {
 				t.from = append(t.from, s.Value)
 			}
@@ -222,6 +239,9 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 			trans = append(trans, t)
 		}
 	}
+	// Transitions with a priority come first, lower first; the others keep
+	// their written order.
+	sort.SliceStable(trans, func(i, j int) bool { return trans[i].priority < trans[j].priority })
 	if initial == "" {
 		return nil, nil, fmt.Errorf("%s: SFC program has no initial step", pou)
 	}
@@ -252,10 +272,32 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 	for i := range trans {
 		decls = append(decls, fmt.Sprintf("_sfc_f%d : BOOL;", i))
 	}
+	// A step whose flags the chart reads, S1.X or S1.T, is a variable of
+	// that name holding them (stepFlagsType).
+	flagged := flaggedSteps(chart, steps)
+	for _, s := range flagged {
+		decls = append(decls, fmt.Sprintf("%s : %s := (X := %s);", s, stepFlagsType, map[bool]string{true: "TRUE", false: "FALSE"}[strings.EqualFold(s, initial)]))
+	}
+	// So is an action whose flags it reads, A.Q or A.A (actionFlagsType),
+	// unless the POU has a BOOL of the action's name.
+	g.actionFlags = map[*action]bool{}
+	for _, a := range flaggedActions(chart, actions) {
+		if !a.output {
+			g.actionFlags[a] = true
+			decls = append(decls, fmt.Sprintf("%s : %s;", a.name, actionFlagsType))
+		}
+	}
 
+	// A step's time, as its actions and transitions read it this scan: the
+	// time since it became active (the evaluator's now - activation).
+	for _, s := range flagged {
+		g.line("%s(IN := %s, PT := %s);", stepTimer(s), stepVar(s), forever)
+		g.line("%s.T := %s.ET;", s, stepTimer(s))
+	}
 	// 1, 2: control, then output and body.
 	for _, a := range actions {
 		g.control(a)
+		g.syncAction(a)
 	}
 	for _, a := range actions {
 		g.effect(a)
@@ -278,6 +320,10 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 		}
 		g.line("END_IF;")
 	}
+	// The flags of the steps that moved, for the actions run again.
+	for _, s := range flagged {
+		g.line("%s.X := %s;", s, stepVar(s))
+	}
 	// 5: the actions of the steps that moved, again.
 	for _, a := range actions {
 		var fired []string
@@ -291,6 +337,7 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 		}
 		g.line("IF %s THEN", strings.Join(fired, " OR "))
 		g.control(a)
+		g.syncAction(a)
 		g.effect(a)
 		g.line("END_IF;")
 	}
@@ -323,6 +370,64 @@ func Lower(pou string, chart *ast.SFCProgram, bools map[string]bool) ([]*ast.Var
 
 func stepVar(step string) string { return "_sfc_" + step + "_X" }
 
+// stepFlagsType is the structure of a step's flags, IEC 61131-3's
+// <step>.X (active) and <step>.T (time active), declared by Program for a
+// chart that reads them.
+const stepFlagsType = "_SFC_STEP_FLAGS"
+
+// actionFlagsType is the structure of an action's flags, <action>.Q (active)
+// and <action>.A (executing).
+const actionFlagsType = "_SFC_ACTION_FLAGS"
+
+// stepFlagsDecl declares stepFlagsType and actionFlagsType.
+const stepFlagsDecl = "TYPE " + stepFlagsType + " : STRUCT X : BOOL; T : TIME; END_STRUCT; END_TYPE\n" +
+	"TYPE " + actionFlagsType + " : STRUCT Q : BOOL; A : BOOL; END_STRUCT; END_TYPE"
+
+// flaggedSteps returns the steps whose flags, <step>.X or <step>.T, the
+// chart's actions or transitions read.
+func flaggedSteps(chart *ast.SFCProgram, steps []string) []string {
+	byName := map[string]string{}
+	for _, s := range steps {
+		byName[strings.ToUpper(s)] = s
+	}
+	used := map[string]bool{}
+	visit := func(n ast.Node) {
+		if n == nil {
+			return
+		}
+		ast.Modify(n, func(x ast.Node) ast.Node {
+			if m, ok := x.(*ast.MemberAccessExpression); ok && m.Member != nil {
+				if id, ok := m.Struct.(*ast.Identifier); ok {
+					member := strings.ToUpper(m.Member.Value)
+					if s, isStep := byName[strings.ToUpper(id.Value)]; isStep && (member == "X" || member == "T") {
+						used[s] = true
+					}
+				}
+			}
+			return x
+		})
+	}
+	for _, el := range chart.Elements {
+		switch e := el.(type) {
+		case *ast.ActionStatement:
+			if e.Body != nil {
+				visit(e.Body)
+			}
+		case *ast.TransitionStatement:
+			if e.Condition != nil {
+				visit(e.Condition)
+			}
+		}
+	}
+	var out []string
+	for _, s := range steps {
+		if used[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // stepTimer is the TON whose ET is a step's elapsed time.
 func stepTimer(step string) string { return "_sfc_" + step + "_E" }
 
@@ -350,9 +455,19 @@ func allActive(steps []string) string {
 
 // gen writes the lowered body and keeps the placeholders it used.
 type gen struct {
-	b      strings.Builder
-	exprs  []ast.Expression
-	bodies []*ast.BlockStatement
+	b           strings.Builder
+	exprs       []ast.Expression
+	bodies      []*ast.BlockStatement
+	actionFlags map[*action]bool // actions whose flags are a variable (actionFlagsType)
+}
+
+// syncAction sets the flags of an action whose flags the chart reads to its
+// control, once worked out: Q, and A, which is Q as an action has no final
+// scan after it ends.
+func (g *gen) syncAction(a *action) {
+	if g.actionFlags[a] {
+		g.line("%s.Q := %sQ; %s.A := %sQ;", a.name, a.prefix(), a.name, a.prefix())
+	}
 }
 
 func (g *gen) line(format string, args ...any) {
@@ -505,4 +620,57 @@ func (g *gen) fillIf(st *ast.IfStatement) error {
 		return g.fill(alt)
 	}
 	return nil
+}
+
+// declaresFlags reports whether a lowered chart's variables include a step's
+// flags, so that the program needs stepFlagsType.
+func declaresFlags(vars []*ast.VarDeclStatement) bool {
+	for _, v := range vars {
+		if v.DataType != nil && (strings.EqualFold(v.DataType.String(), stepFlagsType) || strings.EqualFold(v.DataType.String(), actionFlagsType)) {
+			return true
+		}
+	}
+	return false
+}
+
+// flaggedActions returns the actions whose flags, <action>.Q or <action>.A,
+// the chart's actions or transitions read.
+func flaggedActions(chart *ast.SFCProgram, actions []*action) []*action {
+	byName := map[string]*action{}
+	for _, a := range actions {
+		byName[strings.ToUpper(a.name)] = a
+	}
+	used := map[*action]bool{}
+	visit := func(n ast.Node) {
+		ast.Modify(n, func(x ast.Node) ast.Node {
+			if m, ok := x.(*ast.MemberAccessExpression); ok && m.Member != nil {
+				if id, ok := m.Struct.(*ast.Identifier); ok {
+					member := strings.ToUpper(m.Member.Value)
+					if a, isAction := byName[strings.ToUpper(id.Value)]; isAction && (member == "Q" || member == "A") {
+						used[a] = true
+					}
+				}
+			}
+			return x
+		})
+	}
+	for _, el := range chart.Elements {
+		switch e := el.(type) {
+		case *ast.ActionStatement:
+			if e.Body != nil {
+				visit(e.Body)
+			}
+		case *ast.TransitionStatement:
+			if e.Condition != nil {
+				visit(e.Condition)
+			}
+		}
+	}
+	var out []*action
+	for _, a := range actions {
+		if used[a] {
+			out = append(out, a)
+		}
+	}
+	return out
 }

@@ -124,6 +124,12 @@ func XML(elems []*Elem) (string, error) {
 			fmt.Fprintf(&b, `<connector name="%s" localId="%d"%s>%s%s</connector>`, esc(e.Name), e.ID, size, position(g), pointIn(e.Ins))
 		case "continuation":
 			fmt.Fprintf(&b, `<continuation name="%s" localId="%d"%s>%s<connectionPointOut/></continuation>`, esc(e.Name), e.ID, size, position(g))
+		case "jump": // IEC-71
+			fmt.Fprintf(&b, `<jump localId="%d"%s label="%s">%s%s</jump>`, e.ID, size, esc(e.Label), position(g), pointIn(e.Ins))
+		case "return":
+			fmt.Fprintf(&b, `<return localId="%d"%s>%s%s</return>`, e.ID, size, position(g), pointIn(e.Ins))
+		case "label":
+			fmt.Fprintf(&b, `<label localId="%d"%s label="%s">%s</label>`, e.ID, size, esc(e.Label), position(g))
 		default:
 			return "", fmt.Errorf("element %d: a %s cannot be written as PLCopen XML", e.ID, e.Kind())
 		}

@@ -56,6 +56,16 @@ func SVGWires(elems []*Elem, wires map[Conn]string) string {
 	return drawingLayout(elems, drawnWires(elems, wires)).draw()
 }
 
+// SVGText draws a body read from the text form (ParseText) as SVGWires
+// does, wires may be nil, and wraps each element in a group naming its
+// place in the text, data-at="row:col": an editor tells from it which
+// element a click or a drop is on, and edits the text there.
+func SVGText(elems []*Elem, wires map[Conn]string) string {
+	l := drawingLayout(elems, drawnWires(elems, wires))
+	l.textAt = true
+	return l.draw()
+}
+
 // drawnWires keys the lowering's wires as forDrawing draws them: a
 // function in a rung is drawn with EN and ENO, and the AND the lowering
 // joins it to the rung with is not drawn, so its value is the ENO's.
@@ -101,6 +111,9 @@ type layout struct {
 	nets    [][]*node
 	netRail map[int]*Elem   // network index -> its rail, if any
 	wires   map[Conn]string // what each wire carries (SVGWires)
+	// textAt: each element is named by its place in the text form,
+	// data-at="row:col" (SVGText).
+	textAt bool
 }
 
 func newLayout(elems []*Elem) *layout {
@@ -230,8 +243,8 @@ func (l *layout) place(net int, nodes []*node) {
 		last = max(last, n.layer)
 	}
 	for _, n := range nodes {
-		if n.e.Kind() == "coil" {
-			n.layer = last // coils on the right, as a rung ends
+		if k := n.e.Kind(); k == "coil" || k == "jump" || k == "return" {
+			n.layer = last // coils, jumps and returns on the right, as a rung ends
 		}
 		n.ins, n.outs = l.pins(n.e)
 		n.label = n.e.Kind() == "block" && n.e.InstanceName != ""
@@ -395,6 +408,12 @@ func (l *layout) width(n *node) float64 {
 		return max(64, in+out+text(n.e.TypeName)+28, text(n.e.InstanceName)+8)
 	case "connector", "continuation":
 		return text(n.e.Name) + 24
+	case "jump": // IEC-71: ---->>LABEL
+		return text(">>"+n.e.Label) + 24
+	case "return": // ----<RETURN>
+		return text("<RETURN>") + 24
+	case "label": // LABEL: above its network
+		return text(n.e.Label+":") + 8
 	}
 	return max(36, text(n.e.Expression)+16)
 }
@@ -520,6 +539,10 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 	e := n.e
 	w := n.w
 	cx := x + w/2
+	if l.textAt && e.Pos.X > 0 && e.Pos.Y > 0 {
+		p.f(`<g class="at" data-at="%d:%d">`, int(e.Pos.Y)/20, int(e.Pos.X))
+		defer p.f(`</g>`)
+	}
 	// A contact, coil or variable names its variable, so a page can show
 	// it live (drone L-4: what is on drawn green): data-var, and data-neg
 	// for a negated one.
@@ -528,6 +551,15 @@ func (l *layout) drawElem(p *pen, n *node, x, y, my float64) {
 		defer p.f(`</g>`)
 	}
 	switch e.Kind() {
+	case "jump", "return": // IEC-71, as IEC 61131-3 draws them: a line into >>LABEL, <RETURN>
+		mark := ">>" + e.Label
+		if e.Kind() == "return" {
+			mark = "<RETURN>"
+		}
+		p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, my, x+14, my)
+		p.f(`<text class="t" x="%.1f" y="%.1f" font-weight="bold">%s</text>`, x+16, my+4, esc(mark))
+	case "label":
+		p.f(`<text class="t" x="%.1f" y="%.1f" font-weight="bold">%s</text>`, x, my+4, esc(e.Label+":"))
 	case "contact":
 		p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, x, my, cx-6, my)
 		p.f(`<line class="w" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, cx+6, my, x+w, my)

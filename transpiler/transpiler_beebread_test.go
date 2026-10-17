@@ -212,8 +212,8 @@ END_PROGRAM`,
 // types meet at the wider type, as OSCAT's sources need.
 func TestLiteralsAndWidening(t *testing.T) {
 	checkContains(t, `FUNCTION F : REAL
-VAR_INPUT r : REAL; i : INT; d : DINT; b : BYTE; w : WORD; t1, t2 : DATE; END_VAR
-VAR unused : INT; l : DINT; END_VAR
+VAR_INPUT r : REAL; i : INT; d : DINT; t1, t2 : DATE; END_VAR
+VAR unused : INT; l : DINT; b : BYTE; w : WORD; END_VAR
 l := i;
 F := 1.7453293E-2 * r * i;
 IF t1 < t2 THEN F := 2.805E-9; END_IF;
@@ -232,5 +232,21 @@ END_FUNCTION`,
 // An assignment to a STRING(n) keeps the first n characters.
 func TestStringLength(t *testing.T) {
 	checkContains(t, "PROGRAM P VAR s : STRING(2); u : STRING; END_VAR s := 'abc'; u := 'abc'; END_PROGRAM",
-		`p.s = stringCut(iec.STRING("abc"), 2)`, "func stringCut(s iec.STRING, n int) iec.STRING", `p.u = "abc"`)
+		`p.s = stringCut(iec.STRING("abc"), 2, false)`, "func stringCut[S ~string](s S, n int, wide bool) S", `p.u = "abc"`)
+}
+
+// DAY_OF_WEEK is IEC 61131-3's (0 for Sunday) unless PreferOSCAT is set,
+// when it is OSCAT's (1 for Monday to 7 for Sunday).
+func TestDayOfWeekIECOrOSCAT(t *testing.T) {
+	const program = "PROGRAM P VAR n : INT; END_VAR n := DAY_OF_WEEK(D#2026-10-18); END_PROGRAM"
+	checkContains(t, program, "time.Time(")
+	var out bytes.Buffer
+	tr := New(&out)
+	tr.PreferOSCAT = true
+	if err := tr.Transpile(parseForTest(t, program)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "oscattime.DAY_OF_WEEK(") {
+		t.Errorf("expected OSCAT's DAY_OF_WEEK in:\n%s", out.String())
+	}
 }

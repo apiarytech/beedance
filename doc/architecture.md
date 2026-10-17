@@ -50,6 +50,7 @@ flowchart LR
 | `plcopen` | PLCopen TC6 XML import, export and validation; LD, FBD and SFC bodies kept graphical both ways |
 | `diagram` | The model of the graphical languages: LD and FBD lowered to ST, their text form, PLCopen graphical XML both ways, and SVG drawings of LD, FBD and SFC bodies for previews |
 | `native` | Function blocks implemented in Go, given to a program by its host (for example the TCP/IP blocks OSCAT NETWORK needs) |
+| `ide` | The language half of an editor: go to definition, references, hover, completion, rename and the outline over one analysis of a source (`ide.Analyze`); LD, FBD and SFC bodies as models whose elements carry their text spans (`Diagrams`); gestures on them as minimal text edits, re-read and refused if they would add an error (`Apply`); a diagram live from any engine (`Values`: evaluator, VM, a rig, a controller as JSON), its wires worked out (`Diagram.Live`). beehive-lsp speaks LSP over it |
 | `watch` | What a host can watch of a running program, on either engine, under dotted names (`p.tSample.ET`) |
 | `sil` | Unit tests (`PROGRAM TEST_...`) on the evaluator, the VM and the transpiled Go, natively (`go`) or as a WASI module (`wasm`), compared scan by scan; I/O from a plant model, a rig over the rig protocol (TCP or serial), or a host such as beehive (`sil.IO`) |
 | `embedded` | Generates a standalone Go program that embeds the VM and bytecode |

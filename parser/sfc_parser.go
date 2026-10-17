@@ -10,6 +10,8 @@
 package parser
 
 import (
+	"strings"
+
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/token"
 )
@@ -109,6 +111,27 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	defer untrace(trace("parseTransitionStatement"))
 	stmt := &ast.TransitionStatement{Token: p.curToken}
 
+	// TRANSITION T1 (PRIORITY := 1) FROM ...: a name and a priority, both
+	// optional.
+	if p.peekTokenIs(token.IDENT) {
+		p.nextToken()
+		stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	}
+	if p.peekTokenIs(token.LPAREN) && strings.EqualFold(p.peek2Token.Literal, "PRIORITY") {
+		p.nextToken() // to (
+		p.nextToken() // to PRIORITY
+		if !p.expectPeek(token.ASSIGN) {
+			p.synchronize(token.END_TRANSITION)
+			return stmt
+		}
+		p.nextToken() // to the priority
+		stmt.Priority = p.parseExpression(LOWEST)
+		if !p.expectPeek(token.RPAREN) {
+			p.synchronize(token.END_TRANSITION)
+			return stmt
+		}
+	}
+
 	if !p.expectPeek(token.FROM) {
 		p.synchronize(token.END_TRANSITION) // Error logged by expectPeek. Synchronize to the end of the block.
 		return stmt
@@ -123,6 +146,18 @@ func (p *Parser) parseTransitionStatement() ast.Statement {
 	} else {
 		p.nextToken() // consume TO
 		stmt.To = p.parseStepList()
+	}
+
+	// The condition in IL, ':' then instructions; see il_condition.go.
+	if p.peekTokenIs(token.COLON) {
+		p.nextToken() // to ':'
+		stmt.Condition = p.parseIlTransitionCondition(p.curToken)
+		if !p.curTokenIs(token.END_TRANSITION) {
+			p.currentError("expected END_TRANSITION after the IL condition, got %s", p.curToken.Type)
+			return stmt
+		}
+		p.nextToken() // Consume END_TRANSITION
+		return stmt
 	}
 
 	if !p.expectPeek(token.ASSIGN) {

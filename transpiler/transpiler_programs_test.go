@@ -218,9 +218,9 @@ func TestIlProgram(t *testing.T) {
 		// Set, reset, and the jumps.
 		"if cr_BOOL { p.done = true }",
 		"if cr_BOOL { p.done = false }",
-		"if cr_BOOL { goto skip; }",
-		"if !cr_BOOL { goto over; }",
-		"goto tail",
+		"if cr_BOOL { goto L_SKIP; }",
+		"if !cr_BOOL { goto L_OVER; }",
+		"goto L_TAIL",
 		// CAL passes the named argument and converts the result.
 		"cr_LINT = iec.LINT(Triple(p.a))",
 		// A parenthesized operand has its own accumulator.
@@ -881,7 +881,7 @@ END_VAR
   ok := Fill(a);
 END_PROGRAM
 `,
-		"type Row [3]iec.INT",
+		"type Row = [3]iec.INT",
 		"func Second(v [3]iec.INT) (Second iec.INT)",
 		"func Fill(v *[3]iec.INT) (Fill iec.BOOL)",
 		"m [2][3]iec.INT",
@@ -932,9 +932,13 @@ b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
 	if err != nil || strings.Contains(out, "t1.EN") {
 		t.Errorf("TON has no EN, got %v:\n%s", err, out)
 	}
-	// Standard functions take their arguments in order.
-	if _, err := transpileSource(t, "PROGRAM P VAR r : REAL; END_VAR r := SQRT(IN := 2.0); END_PROGRAM"); err == nil || !strings.Contains(err.Error(), "takes its arguments in order") {
-		t.Errorf("expected an error for a named argument, got %v", err)
+	// A standard function's inputs may be named (package stdcalls), but only
+	// by the names it has.
+	if _, err := transpileSource(t, "PROGRAM P VAR r : REAL; END_VAR r := SQRT(IN := 2.0); END_PROGRAM"); err != nil {
+		t.Errorf("SQRT(IN := 2.0): %v", err)
+	}
+	if _, err := transpileSource(t, "PROGRAM P VAR r : REAL; END_VAR r := SQRT(X := 2.0); END_PROGRAM"); err == nil || !strings.Contains(err.Error(), "takes its arguments in order") {
+		t.Errorf("expected an error for an input SQRT does not have, got %v", err)
 	}
 }
 

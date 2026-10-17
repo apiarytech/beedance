@@ -19,7 +19,7 @@ func TestErrorLexing(t *testing.T) {
 		{"(* comment that never ends", token.UNTERMINATED_COMMENT, "(*", 1, 1},
 		// The inner comment closes; the outer one never does.
 		{"(* nested (* comment *) that never ends", token.UNTERMINATED_COMMENT, "(*", 1, 1},
-		{"VAR myVar : INT := ?;", token.ILLEGAL, "?", 1, 20},
+		{"VAR myVar : INT := ~;", token.ILLEGAL, "~", 1, 20},
 		{"@", token.ILLEGAL, "@", 1, 1},
 		{"$", token.ILLEGAL, "$", 1, 1},
 		{"%", token.ILLEGAL, "%", 1, 1},

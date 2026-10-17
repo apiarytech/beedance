@@ -59,7 +59,7 @@ func buildNative(ctx context.Context, source string, tests []*testInfo, opts Opt
 	// A fresh AST: the transpiler rewrites the one it is given, which the
 	// VM must not compile.
 	program, _ := parse(source)
-	code, err := transpiler.GoFileWith(program, transpiler.Options{Package: harnessPackage, HostBinding: true})
+	code, err := transpiler.GoFileWith(program, transpiler.Options{Package: harnessPackage, HostBinding: true, AllowInputWrites: opts.AllowInputWrites})
 	if err != nil {
 		return nil, fmt.Errorf("transpile: %v", err)
 	}

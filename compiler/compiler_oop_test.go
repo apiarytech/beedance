@@ -47,6 +47,7 @@ func TestFunctionBlockWithMethod(t *testing.T) {
 				code.Make(code.OpCall, 1),
 				code.Make(code.OpConstant, 5),
 				code.Make(code.OpAdd),
+				code.Make(code.OpWrapInt, 2),
 				code.Make(code.OpSetIndex),
 				code.Make(code.OpReturn),
 			}, "main"},
@@ -224,6 +225,7 @@ func TestFunctionBlockPropertyOverride(t *testing.T) {
 					code.Make(code.OpGetLocal, 0),
 					code.Make(code.OpConstant, 1),
 					code.Make(code.OpGetLocal, 1),
+					code.Make(code.OpWrapInt, 2),
 					code.Make(code.OpSetIndex),
 					code.Make(code.OpReturn),
 				},
@@ -333,7 +335,8 @@ func TestFunctionBlockWithMixedVars(t *testing.T) {
 					code.Make(code.OpConstant, 1), // "InVar"
 					code.Make(code.OpIndex),       // Get value of InVar
 					code.Make(code.OpAdd),         // Add
-					code.Make(code.OpSetIndex),    // Set member
+					code.Make(code.OpWrapInt, 2),
+					code.Make(code.OpSetIndex), // Set member
 
 					// OutVar := InstanceVar;
 					code.Make(code.OpGetLocal, 0), // Get THIS for assignment
@@ -471,6 +474,7 @@ func TestFunctionBlockProperty(t *testing.T) {
 				code.Make(code.OpGetLocal, 0),
 				code.Make(code.OpConstant, 1),
 				code.Make(code.OpGetLocal, 1),
+				code.Make(code.OpWrapInt, 2),
 				code.Make(code.OpSetIndex),
 				code.Make(code.OpReturn),
 			}, []code.Instructions{

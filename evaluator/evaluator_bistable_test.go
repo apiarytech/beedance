@@ -57,11 +57,11 @@ func TestSR_FunctionBlock(t *testing.T) {
 	runScan()
 	testBooleanObjectInEnv(t, progEnv, "OutputQ1", false)
 
-	// --- Cycle 6: Priority check (S1=T, R=T) -> Q1=F (Reset dominates) ---
+	// --- Cycle 6: Priority check (S1=T, R=T) -> Q1=T (SR is set dominant) ---
 	progEnv.Set("SetInput", TRUE)
 	progEnv.Set("ResetInput", TRUE)
 	runScan()
-	testBooleanObjectInEnv(t, progEnv, "OutputQ1", false)
+	testBooleanObjectInEnv(t, progEnv, "OutputQ1", true)
 
 	// --- Cycle 7: Release Reset first (S1=T, R=F) -> Q1=T ---
 	progEnv.Set("ResetInput", FALSE)
@@ -115,11 +115,11 @@ func TestRS_FunctionBlock(t *testing.T) {
 	runScan()
 	testBooleanObjectInEnv(t, progEnv, "OutputQ1", false)
 
-	// --- Cycle 5: Priority check (S=T, R1=T) -> Q1=T (Set dominates) ---
+	// --- Cycle 5: Priority check (S=T, R1=T) -> Q1=F (RS is reset dominant) ---
 	progEnv.Set("SetInput", TRUE)
 	progEnv.Set("ResetInput", TRUE)
 	runScan()
-	testBooleanObjectInEnv(t, progEnv, "OutputQ1", true)
+	testBooleanObjectInEnv(t, progEnv, "OutputQ1", false)
 
 	// --- Cycle 6: Release Set first (S=F, R1=T) -> Q1=F ---
 	progEnv.Set("SetInput", FALSE)

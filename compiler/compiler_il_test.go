@@ -798,6 +798,7 @@ func TestIlCompiler_ConditionalCalRet(t *testing.T) {
 					code.Make(code.OpConstant, 4),
 					code.Make(code.OpGetGlobal, 0),
 					code.Make(code.OpCall, 0),
+					code.Make(code.OpWrapInt, 2),
 					code.Make(code.OpSetIndex),
 					code.Make(code.OpReturn),
 				},

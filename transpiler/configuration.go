@@ -29,6 +29,7 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 		return fmt.Errorf("configuration '%s': a program has only one CONFIGURATION", config.Name.Value)
 	}
 	t.mainGenerated = true
+	t.currentConfig = config
 
 	// Match each VAR_CONFIG entry to the program instance it configures.
 	configEntries, unmatched := config.ResolveConfigVars()
@@ -36,8 +37,13 @@ func (t *Transpiler) transpileConfigurationDeclaration(config *ast.Configuration
 		return fmt.Errorf("VAR_CONFIG path '%s' does not name a variable of a program instance in configuration '%s'", unmatched[0].AccessPath.String(), config.Name.Value)
 	}
 
-	// The configuration's globals, which its programs and tasks share.
-	if err := t.transpileGlobalVarBlocks(config.GlobalVars); err != nil {
+	// The configuration's globals, which its programs and tasks share, and
+	// its resources', which their programs see.
+	globals := append([]*ast.GlobalVarDeclaration{}, config.GlobalVars...)
+	for _, res := range config.Resources {
+		globals = append(globals, res.GlobalVars...)
+	}
+	if err := t.transpileGlobalVarBlocks(globals); err != nil {
 		return err
 	}
 
@@ -144,6 +150,14 @@ func (t *Transpiler) transpileResourceDeclaration(res *ast.ResourceDeclaration, 
 			}
 		}
 		logicVar := fmt.Sprintf("%s_prog%d", resVar, i+1)
+		if len(progConfig.Parameters) > 0 {
+			// MAIN(k := g, out => cg): see transpileConnectedProgram.
+			if err := t.transpileConnectedProgram(progConfig, logicVar, params, res); err != nil {
+				return err
+			}
+			t.write("\t%s.AddProgram(&core.Program{Name: %q, Logic: %s})\n", taskVar, progConfig.InstanceName.Value, logicVar)
+			continue
+		}
 		t.write("\t%s, err := New%sFactory(map[string]string{%s})\n", logicVar, progConfig.TypeName.Value, strings.Join(params, ", "))
 		t.write("\tif err != nil {\n\t\tlog.Fatalf(\"program %s: %%v\", err)\n\t}\n", progConfig.InstanceName.Value)
 		t.write("\t%s.AddProgram(&core.Program{Name: %q, Logic: %s})\n", taskVar, progConfig.InstanceName.Value, logicVar)

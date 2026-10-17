@@ -311,6 +311,30 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		testTimeObjectInEnv(t, progEnv, "ET", 5*time.Second)     // ET is capped
 	})
 
+	// As the compiled TOF: Q stays off until IN has been on, and with
+	// PT = T#0s it goes off in the scan IN falls.
+	t.Run("TOF - before IN is on, and PT of 0", func(t *testing.T) {
+		env := object.NewEnvironment()
+		testEvalWithEnv(t, `VAR t : TOF; END_VAR`, env)
+		q := func(call string) bool {
+			b, ok := testEvalWithEnv(t, call+" t.Q;", env).(*object.Boolean)
+			return ok && b.Value
+		}
+		if q("t(IN := FALSE, PT := T#5s);") {
+			t.Error("Q is on before IN was on")
+		}
+		advanceTime(time.Second)
+		if q("t(IN := FALSE);") {
+			t.Error("Q is on a second later, IN still never on")
+		}
+		if !q("t(IN := TRUE, PT := T#0s);") {
+			t.Error("Q is off while IN is on")
+		}
+		if q("t(IN := FALSE);") {
+			t.Error("Q stays on when IN falls with PT = T#0s")
+		}
+	})
+
 	t.Run("CTD - Counter Down", func(t *testing.T) {
 		input := `
 			PROGRAM TestCTD

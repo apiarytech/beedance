@@ -15,8 +15,11 @@ import (
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
+	"github.com/apiarytech/beedance/enums"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sfc"
+	"github.com/apiarytech/beedance/stdcalls"
+	"github.com/apiarytech/beedance/typedfbs"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +34,10 @@ type CompiledProgram struct {
 	// Variables are the program's variables a host may bind to its own data
 	// (tags, retain storage), in declaration order.
 	Variables []Variable
+	// ConfigGlobals are the VAR_GLOBALs of the source's configurations and
+	// their resources, compiled with the program whether it uses them or
+	// not; a configuration runtime shares them between its programs.
+	ConfigGlobals []Variable
 }
 
 // Variable is a program variable as a host sees it while the program runs:
@@ -65,6 +72,16 @@ func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*Compi
 	if err != nil {
 		return nil, err
 	}
+	// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
+	typedfbs.Declare(program)
+	// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
+	stdcalls.Positional(program)
+	// R_EDGE and F_EDGE inputs; see package edges.
+	if err := edgesThenEnables(program); err != nil {
+		return nil, err
+	}
+	// Enumeration values named without their type; see package enums.
+	enums.Qualify(program)
 	c.buildPouInfo(program)
 	c.rootProgram = program
 	var target *ast.ProgramDeclaration
@@ -89,7 +106,48 @@ func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*Compi
 			return nil, err
 		}
 	}
-	return c.CompileProgram(target)
+	compiled, err := c.CompileProgram(target)
+	if err != nil {
+		return nil, err
+	}
+	compiled.ConfigGlobals = c.configGlobals(program)
+	return compiled, nil
+}
+
+// configGlobals lists the VAR_GLOBALs of program's configurations and their
+// resources, with their slots.
+func (c *Compiler) configGlobals(program *ast.Program) []Variable {
+	var out []Variable
+	for _, s := range program.Statements {
+		config, ok := s.(*ast.ConfigurationDeclaration)
+		if !ok {
+			continue
+		}
+		blocks := append([]*ast.GlobalVarDeclaration{}, config.GlobalVars...)
+		for _, res := range config.Resources {
+			blocks = append(blocks, res.GlobalVars...)
+		}
+		for _, b := range blocks {
+			for _, d := range b.Vars {
+				if d == nil || d.Name == nil {
+					continue
+				}
+				v := Variable{Name: d.Name.Value, Block: "VAR_GLOBAL", Global: -1, Retain: d.IsRetain, Constant: d.IsConstant}
+				if d.DataType != nil {
+					v.Type = c.flattenExpressionToString(d.DataType)
+				}
+				if d.Location != nil && d.Location.Location != nil {
+					v.Address = d.Location.Location.String()
+				} else if sym, ok := c.symbolTable.Resolve(d.Name.Value); ok && sym.Scope == GlobalScope {
+					v.Global = sym.Index
+				} else {
+					continue
+				}
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 // variables lists node's variables after its declarations were compiled.
@@ -149,6 +207,8 @@ type Compiler struct {
 	// directUses are the directly represented variables the program uses in
 	// statements, by address (see direct.go).
 	directUses []string
+	// stJumps are each scope's ST labels and jumps (IEC-68, jumps.go).
+	stJumps map[int]*stJumps
 	// stampingArray is set while an assignment to an array with declared
 	// lower bounds is compiled, before the bounds are set on the result.
 	stampingArray bool
@@ -253,7 +313,18 @@ func NewWithState(s *SymbolTable, constants []object.Object, typeInfo map[string
 // loopContext holds information about a loop being compiled, such as the
 // positions of `EXIT` statements (`break` in Go) that need to be patched.
 type loopContext struct {
-	breakPositions []int
+	breakPositions    []int
+	continuePositions []int // CONTINUE jumps, to the loop's next iteration
+}
+
+// patchLoopContinues points the current loop's CONTINUE jumps at target:
+// the increment of a FOR, the condition of a WHILE or the UNTIL of a REPEAT.
+func (c *Compiler) patchLoopContinues(target int) {
+	if loop := c.currentLoop(); loop != nil {
+		for _, pos := range loop.continuePositions {
+			c.changeOperand(pos, target)
+		}
+	}
 }
 
 // pushFunction adds a function declaration to the top of the function stack.
@@ -460,6 +531,11 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 	// Create a new, clean compiler for the cyclic part to ensure it doesn't
 	// re-declare variables. It shares the same symbol table and constants.
 	cyclicCompiler := NewWithState(c.symbolTable, c.constants, c.typeInfo, c.pouNamespaces)
+	// It knows the declarations, so the body sees what a variable was
+	// declared as (an element of ARRAY [..] OF MyFB is an instance).
+	for name, decl := range c.scopes[0].varDecls {
+		cyclicCompiler.scopes[0].varDecls[name] = decl
+	}
 
 	// Compile VAR_TEMP at the start of the cyclic code so they are re-initialized on each scan.
 	for _, tempBlock := range node.VarTemp {
@@ -512,6 +588,15 @@ func (c *Compiler) compileNode(node ast.Node) error {
 	switch node := node.(type) {
 	// A Program is the root of the AST, consisting of a series of statements.
 	case *ast.Program:
+		// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
+		typedfbs.Declare(node)
+		// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
+		stdcalls.Positional(node)
+		// R_EDGE and F_EDGE inputs; see package edges.
+		if err := edgesThenEnables(node); err != nil {
+			return err
+		}
+		enums.Qualify(node) // see package enums
 		// First pass: recursively build POU info, including namespaces.
 		c.buildPouInfo(node)
 		c.rootProgram = node // Set the root program node
@@ -1112,8 +1197,15 @@ func (c *Compiler) compileNode(node ast.Node) error {
 	case *ast.AssignmentStatement:
 		// Arrays and structures are assigned by value.
 		// A bit assignment, flags.3 := value, stores the whole target.
+		// target ?= value is target := $ATTEMPT(value, ...); see attempt.go.
+		if node.IsAttempt() {
+			node = c.attemptAssignment(node)
+		}
 		node = assignBit(node)
 		node = c.copyAssignedValue(node)
+		node = c.cutAssignedString(node)
+		node = c.wrapAssignedInteger(node)
+		node = c.convertAssignedToReal(node)
 		// An array assigned to a variable declared with lower bounds, e.g.
 		// ARRAY[1..3], takes those bounds, whatever array it came from.
 		if !c.stampingArray {
@@ -1268,6 +1360,15 @@ func (c *Compiler) compileNode(node ast.Node) error {
 							}
 						}
 						// Method assignment is not possible, so we don't check methods here.
+					}
+					// A structure's member must exist (IEC-73): s.nope := TRUE is
+					// refused as a read of s.nope is.
+					if td, isType := structTypeNode.(*ast.TypeDeclaration); isType {
+						if _, isStruct := td.DataType.(*ast.StructDefinition); isStruct {
+							if _, err := c.findMemberType(td, target.Member.Value); err != nil {
+								return positioned(target.Member, err)
+							}
+						}
 					}
 				}
 			}
@@ -1553,6 +1654,10 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		lreal := &object.LReal{Value: node.Value}
 		c.emitConstant(c.addConstant(lreal))
 
+	// The current result of an IL body, the first input of LIMIT 0, 10.
+	case *ast.IlCurrentResult:
+		c.loadIlResult()
+
 	// A Boolean literal emits either OpTrue or OpFalse directly.
 	case *ast.Boolean:
 		if node.Value {
@@ -1623,9 +1728,19 @@ func (c *Compiler) compileNode(node ast.Node) error {
 
 	// An EnumeratedValueLiteral is added to the constant pool.
 	case *ast.EnumeratedValueLiteral:
+		// BOOL#1, BOOL#0, BOOL#TRUE and BOOL#FALSE are BOOL literals.
+		if b, isBool := boolTypedLiteral(node); isBool {
+			if b {
+				c.emit(code.OpTrue)
+			} else {
+				c.emit(code.OpFalse)
+			}
+			return nil
+		}
 		c.emitConstant(c.addConstant(&object.EnumeratedValue{
 			TypeName: node.TypeName.Value,
 			Value:    node.Value.Value,
+			Number:   c.enumNumber(node.TypeName.Value, node.Value.Value),
 		}))
 
 	// A TypedLiteral is parsed and converted into the appropriate object.Object,
@@ -1715,7 +1830,8 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			return err
 		}
 
-		// 4. Increment
+		// 4. Increment, where a CONTINUE goes.
+		c.patchLoopContinues(len(c.currentInstructions()))
 		c.loadSymbol(symbol)
 		if node.StepValue != nil {
 			if err := c.Compile(node.StepValue); err != nil {
@@ -1753,6 +1869,7 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		}
 
 		c.emit(code.OpJump, loopStartPos)
+		c.patchLoopContinues(loopStartPos) // a CONTINUE checks the condition again
 
 		afterLoopPos := len(c.currentInstructions())
 		c.changeOperand(jumpToEndPos, afterLoopPos)
@@ -1769,6 +1886,7 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			return err
 		}
 
+		c.patchLoopContinues(len(c.currentInstructions())) // a CONTINUE checks UNTIL
 		if err := c.Compile(node.Condition); err != nil {
 			return err
 		}
@@ -1833,6 +1951,21 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		}
 		pos := c.emit(code.OpJump, 9999)
 		loop.breakPositions = append(loop.breakPositions, pos)
+
+	// A ContinueStatement jumps to the current loop's next iteration.
+	case *ast.ContinueStatement:
+		loop := c.currentLoop()
+		if loop == nil {
+			return fmt.Errorf("CONTINUE statement not within a loop")
+		}
+		pos := c.emit(code.OpJump, 9999)
+		loop.continuePositions = append(loop.continuePositions, pos)
+
+	// IEC-68: ST jumps and labels (jumps.go).
+	case *ast.JumpStatement:
+		c.compileJump(node)
+	case *ast.LabelStatement:
+		c.compileLabel(node)
 
 	// A BlockStatement compiles each of its inner statements.
 	case *ast.BlockStatement:
@@ -2006,6 +2139,14 @@ func (c *Compiler) compileNode(node ast.Node) error {
 						}
 					}
 				}
+				// A structure's member must exist (IEC-73).
+				if td, isType := structTypeNode.(*ast.TypeDeclaration); isType {
+					if _, isStruct := td.DataType.(*ast.StructDefinition); isStruct {
+						if _, err := c.findMemberType(td, node.Member.Value); err != nil {
+							return positioned(node.Member, err)
+						}
+					}
+				}
 			}
 		}
 		// --- End of new access control logic ---
@@ -2129,9 +2270,30 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		}
 		c.emit(code.OpCopy)
 
+	// An integer assigned to a narrow integer wraps; see wrapAssignedInteger.
+	case *wrappedInt:
+		if err := c.Compile(node.Expression); err != nil {
+			return err
+		}
+		c.emit(code.OpWrapInt, node.code)
+
 	// A CallExpression compiles the function/callable and all arguments, then
 	// emits an OpCall instruction.
 	case *ast.CallExpression:
+		// A function called by its namespace, LIB.Twice(3), is the function
+		// the namespace declares, compiled under its own name.
+		if fn := c.qualifiedFunction(node.Function); fn != nil {
+			call := *node
+			call.Function = &ast.Identifier{Token: node.Token, Value: fn.Name.Value}
+			node = &call
+		}
+		// A method of the function block being compiled, called by its name
+		// alone, is THIS.Method().
+		if ident, ok := node.Function.(*ast.Identifier); ok && c.currentFB != nil && c.ownMethod(ident.Value) {
+			call := *node
+			call.Function = &ast.MemberAccessExpression{Token: node.Token, Struct: &ast.ThisExpression{Token: node.Token}, Member: ident}
+			node = &call
+		}
 		// SIZEOF(x) is a constant: see sizeof.go.
 		if c.isSizeofCall(node) {
 			return c.compileSizeof(node)
@@ -2144,8 +2306,20 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		if from, to, ok := c.conversionCall(node); ok {
 			return c.compileConversion(node, from, to)
 		}
+		// ADD_TIME(a, b) and the other time functions are $TIMEFN('ADD_TIME',
+		// a, b); see object.TimeFunction.
+		if name, ok := c.timeFunctionCall(node); ok {
+			return c.compileTimeFunction(node, name)
+		}
+		// TO_BIG_ENDIAN(v) is TO_BIG_ENDIAN(v, 'T'), T the type of v.
+		if c.endianCall(node) {
+			node = c.typedEndianCall(node)
+		}
 		// Calling a function block instance runs its body; see compileFunctionBlockCall.
 		if fbDef := c.calleeFunctionBlock(node.Function); fbDef != nil {
+			if fbDef.IsClass() {
+				return fmt.Errorf("%s is an instance of CLASS %s, which has no body: call its methods", node.Function.String(), fbDef.Name.Value)
+			}
 			return c.compileFunctionBlockCall(node, fbDef)
 		}
 
@@ -2509,7 +2683,117 @@ func (c *Compiler) findMemberType(typeNode ast.Node, memberName string) (object.
 // An error is a *PositionError at the innermost expression that failed.
 func (c *Compiler) getExpressionType(expr ast.Expression) (object.ObjectType, error) {
 	t, err := c.expressionType(expr)
+	if err == nil {
+		t = c.aliasedType(t)
+	}
 	return t, positioned(expr, err)
+}
+
+// ownMethod reports whether name is a method of the function block being
+// compiled (or one it extends) and not a variable or function in scope.
+func (c *Compiler) ownMethod(name string) bool {
+	if c.declarationOf(name) != nil {
+		return false
+	}
+	if _, isSymbol := c.symbolTable.Resolve(name); isSymbol {
+		return false
+	}
+	seen := map[*ast.FunctionBlockDeclaration]bool{}
+	for fb := c.currentFB; fb != nil && !seen[fb]; {
+		seen[fb] = true
+		if fb.HasMethod(name) {
+			return true
+		}
+		if fb.Extends == nil {
+			break
+		}
+		parent, _ := c.resolveTypeNode(fb.Extends)
+		fb, _ = parent.(*ast.FunctionBlockDeclaration)
+	}
+	return false
+}
+
+// qualifiedFunction returns the function a callee qualified by namespaces
+// names, LIB.Twice or A.B.F, or nil.
+func (c *Compiler) qualifiedFunction(callee ast.Expression) *ast.FunctionDeclaration {
+	member, ok := callee.(*ast.MemberAccessExpression)
+	if !ok {
+		return nil
+	}
+	// A variable's member, such as fb.Method, is not a namespace.
+	root := member.Struct
+	for inner, isMember := root.(*ast.MemberAccessExpression); isMember; inner, isMember = root.(*ast.MemberAccessExpression) {
+		root = inner.Struct
+	}
+	if id, isName := root.(*ast.Identifier); !isName || c.declarationOf(id.Value) != nil {
+		return nil
+	} else if _, isVar := c.symbolTable.Resolve(id.Value); isVar {
+		return nil
+	}
+	fqn := c.flattenExpressionToString(member)
+	if fqn == "" {
+		return nil
+	}
+	fn, _ := c.typeInfo[strings.ToUpper(fqn)].(*ast.FunctionDeclaration)
+	return fn
+}
+
+// enumNumber returns the number of a value of a declared enumeration, or 0.
+func (c *Compiler) enumNumber(typeName, value string) int64 {
+	if td, ok := c.typeInfo[strings.ToUpper(typeName)].(*ast.TypeDeclaration); ok {
+		if def, isEnum := td.DataType.(*ast.EnumDefinition); isEnum {
+			n, _ := def.NumberOf(value)
+			return n
+		}
+	}
+	return 0
+}
+
+// boolTypedLiteral reports whether an enumerated value literal is a BOOL
+// literal, BOOL#1, BOOL#0, BOOL#TRUE or BOOL#FALSE, and its value.
+func boolTypedLiteral(lit *ast.EnumeratedValueLiteral) (value, ok bool) {
+	if lit.TypeName == nil || lit.Value == nil || !strings.EqualFold(lit.TypeName.Value, "BOOL") {
+		return false, false
+	}
+	switch strings.ToUpper(lit.Value.Value) {
+	case "1", "TRUE":
+		return true, true
+	case "0", "FALSE":
+		return false, true
+	}
+	return false, false
+}
+
+// aliasedType returns the elementary type an alias names, REAL for a VOLT
+// declared TYPE VOLT : REAL (through aliases of aliases), or t itself.
+func (c *Compiler) aliasedType(t object.ObjectType) object.ObjectType {
+	name := string(t)
+	switch strings.ToUpper(name) {
+	case "CHAR": // a one-character STRING
+		return object.STRING_OBJ
+	case "WCHAR":
+		return object.WSTRING_OBJ
+	}
+	for depth := 0; depth < 16; depth++ {
+		node, ok := c.resolveTypeName(name)
+		if !ok {
+			return t
+		}
+		td, isAlias := node.(*ast.TypeDeclaration)
+		if !isAlias || td.DataType == nil {
+			return t
+		}
+		switch td.DataType.(type) {
+		case *ast.Identifier, *ast.TypeSpecifier:
+		default:
+			return t // a structure, an enumeration or an array
+		}
+		name = strings.ToUpper(c.flattenExpressionToString(td.DataType))
+		if isElementaryTypeName(string(typedLiteralType(name))) {
+			return object.ObjectType(name)
+		}
+	}
+	return t
 }
 
 // expressionType determines an expression's type (see getExpressionType).
@@ -2520,6 +2804,8 @@ func (c *Compiler) expressionType(expr ast.Expression) (object.ObjectType, error
 	}
 	switch e := expr.(type) {
 	case *copiedValue:
+		return c.getExpressionType(e.Expression)
+	case *wrappedInt:
 		return c.getExpressionType(e.Expression)
 	case *ast.BitAccessExpression:
 		return object.BOOLEAN_OBJ, nil
@@ -2664,6 +2950,9 @@ func (c *Compiler) expressionType(expr ast.Expression) (object.ObjectType, error
 	case *ast.DateAndTimeLiteral:
 		return object.DATE_AND_TIME_OBJ, nil
 	case *ast.EnumeratedValueLiteral:
+		if _, isBool := boolTypedLiteral(e); isBool {
+			return object.BOOLEAN_OBJ, nil
+		}
 		return object.ObjectType(strings.ToUpper(e.TypeName.Value)), nil
 	case *ast.TypedLiteral:
 		return typedLiteralType(e.TypeName), nil
@@ -2954,6 +3243,14 @@ func (c *Compiler) getResultingType(op string, left, right object.ObjectType) (o
 			}
 			return left, nil
 		}
+		// On integers the operators are bitwise, as in CODESYS: an integer
+		// with an integer or a bit string keeps the integer's type.
+		if object.IsIntegerType(string(left)) && (object.IsIntegerType(string(right)) || object.IsBitStringType(string(right))) {
+			return left, nil
+		}
+		if object.IsBitStringType(string(left)) && object.IsIntegerType(string(right)) {
+			return right, nil
+		}
 		return "", fmt.Errorf("logical operator '%s' not defined for types %s and %s", op, left, right)
 	}
 
@@ -3202,6 +3499,7 @@ func (c *Compiler) enterScope() {
 	}
 	c.scopes = append(c.scopes, scope)
 	c.scopeIndex++
+	delete(c.stJumps, c.scopeIndex) // a new body: no labels of the last one here (IEC-68)
 
 	c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 }
@@ -3403,8 +3701,14 @@ func (c *Compiler) compileConfiguration(config *ast.ConfigurationDeclaration) er
 	// Define a global symbol for the configuration itself.
 	symbol := c.symbolTable.Define(config.Name.Value, false)
 
-	// Compile any global vars defined directly in the configuration.
-	for _, gv := range config.GlobalVars {
+	// Compile any global vars defined directly in the configuration, and
+	// those of its resources, which their programs see (as the
+	// configuration's: two resources may not declare the same name).
+	globals := append([]*ast.GlobalVarDeclaration{}, config.GlobalVars...)
+	for _, res := range config.Resources {
+		globals = append(globals, res.GlobalVars...)
+	}
+	for _, gv := range globals {
 		if err := c.Compile(gv); err != nil {
 			return err
 		}
@@ -3635,9 +3939,19 @@ func (c *Compiler) parseTypedLiteralValue(node *ast.TypedLiteral) (object.Object
 		}
 		return &object.BitString{Value: val, Width: width}, nil
 
+	// BOOL#1, BOOL#0, BOOL#TRUE, BOOL#FALSE.
+	case "BOOL":
+		switch strings.ToUpper(valueStr) {
+		case "1", "TRUE":
+			return object.TRUE, nil
+		case "0", "FALSE":
+			return object.FALSE, nil
+		}
+		return nil, fmt.Errorf("invalid BOOL literal '%s'", valueStr)
+
 	default:
 		// Fallback for enum types like `COLOR#RED` or other user-defined types.
-		return &object.EnumeratedValue{TypeName: node.TypeName, Value: valueStr}, nil
+		return &object.EnumeratedValue{TypeName: node.TypeName, Value: valueStr, Number: c.enumNumber(node.TypeName, valueStr)}, nil
 	}
 }
 
@@ -3809,8 +4123,58 @@ func (c *Compiler) evaluateConstantInteger(expr ast.Expression) (int64, error) {
 				}
 			}
 		}
+		// A function block's or function's own VAR CONSTANT, in the bounds
+		// of its arrays, which are built where an instance is declared; not
+		// a name declared here as a variable.
+		if c.declarationOf(e.Value) != nil {
+			break
+		}
+		if decl := c.pouConstant(e.Value); decl != nil {
+			c.constDepth++
+			v, err := c.evaluateConstantInteger(decl.Value)
+			c.constDepth--
+			return v, err
+		}
 	}
 	return 0, fmt.Errorf("expression is not a constant integer")
+}
+
+// pouConstant returns the CONSTANT with an initial value named name that the
+// current function block, or else any POU of the program, declares, or nil.
+func (c *Compiler) pouConstant(name string) *ast.VarDeclStatement {
+	find := func(decls []*ast.VarDeclStatement) *ast.VarDeclStatement {
+		for _, d := range decls {
+			if d != nil && d.Name != nil && d.IsConstant && d.Value != nil && strings.EqualFold(d.Name.Value, name) {
+				return d
+			}
+		}
+		return nil
+	}
+	if c.currentFB != nil {
+		if d := find(c.currentFB.Vars); d != nil {
+			return d
+		}
+	}
+	if c.rootProgram == nil {
+		return nil
+	}
+	for _, s := range c.rootProgram.Statements {
+		switch p := s.(type) {
+		case *ast.FunctionBlockDeclaration:
+			if d := find(p.Vars); d != nil {
+				return d
+			}
+		case *ast.FunctionDeclaration:
+			if d := find(p.Vars); d != nil {
+				return d
+			}
+		case *ast.ProgramDeclaration:
+			if d := find(p.Vars); d != nil {
+				return d
+			}
+		}
+	}
+	return nil
 }
 
 // checkArrayBounds performs a compile-time check to see if an array access
@@ -3963,8 +4327,15 @@ func (c *Compiler) compilePropertyAccessor(prop *ast.PropertyDeclaration, body *
 		c.setFunctionResult(returnSymbol, false)
 		numParams = 1 // THIS
 	} else {
-		c.symbolTable.Define("value", false) // Implicit 'value' parameter for setters
-		numParams = 2                        // THIS and value
+		value := c.symbolTable.Define("value", false) // Implicit 'value' parameter for setters
+		numParams = 2                                 // THIS and value
+		// The property's name also holds the value, as CODESYS writes a
+		// setter: SET lvl := Level; END_SET.
+		if !strings.EqualFold(prop.Name.Value, "value") && namesIdentifier(body, prop.Name.Value) {
+			alias := c.symbolTable.Define(prop.Name.Value, false)
+			c.emit(code.OpGetLocal, value.Index)
+			c.emit(code.OpSetLocal, alias.Index)
+		}
 	}
 
 	if err := c.Compile(body); err != nil {

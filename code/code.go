@@ -183,6 +183,10 @@ const (
 	// OpSetDeref pops a value and a reference, and writes the value to the
 	// variable the reference refers to (r^ := value).
 	OpSetDeref
+	// OpWrapInt wraps the integer on top of the stack into the range of the
+	// narrow integer type its operand names (object.IntegerWrapCode), as an
+	// assignment to a SINT, INT, DINT, USINT, UINT or UDINT keeps it.
+	OpWrapInt
 )
 
 // The scopes of the variable OpRef refers to.
@@ -289,6 +293,7 @@ var definitions = [256]*Definition{
 	OpRefIndex:     {"OpRefIndex", []int{}},
 	OpDeref:        {"OpDeref", []int{2}},
 	OpSetDeref:     {"OpSetDeref", []int{}},
+	OpWrapInt:      {"OpWrapInt", []int{1}},
 }
 
 // Lookup retrieves the Definition for a given opcode byte.

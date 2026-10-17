@@ -233,7 +233,7 @@ func TestImportOtherTools(t *testing.T) {
 		}
 	}
 	for _, tt := range []struct{ pou, want string }{
-		{`<pou name="Ladder" pouType="program"><body><LD><leftPowerRail localId="1"/><jump localId="2" label="L"/></LD></body></pou>`, "jump is not supported yet"},
+		{`<pou name="Ladder" pouType="program"><body><LD><leftPowerRail localId="1"/><jump localId="2" label="1st"/></LD></body></pou>`, "jump needs a label name"}, // IEC-71
 		{`<pou name="Chart" pouType="program"><body><SFC><step localId="1" name="S"/></SFC></body></pou>`, "SFC body: the chart has no initial step"},
 		{`<pou name="F" pouType="function"><body><ST><xhtml:p xmlns:xhtml="http://www.w3.org/1999/xhtml">F := 1;</xhtml:p></ST></body></pou>`, "function 'F' has no return type"},
 		{`<pou name="X" pouType="class"><body/></pou>`, "unknown pouType 'class'"},

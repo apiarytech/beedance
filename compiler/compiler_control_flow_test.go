@@ -104,10 +104,11 @@ func TestWhileAndRepeatCompilation(t *testing.T) {
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 1),
 				code.Make(code.OpLessThan),
-				code.Make(code.OpJumpNotTruthy, 29),
+				code.Make(code.OpJumpNotTruthy, 31),
 				code.Make(code.OpGetGlobal, 0),
 				code.Make(code.OpConstant, 2),
 				code.Make(code.OpAdd),
+				code.Make(code.OpWrapInt, 2), // i is an INT: it wraps on overflow
 				code.Make(code.OpSetGlobal, 0),
 				code.Make(code.OpJump, 6),
 			},

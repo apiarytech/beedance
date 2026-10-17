@@ -79,8 +79,8 @@ func TestParserErrorHandling(t *testing.T) {
 		},
 		{
 			name:          "Invalid IL mnemonic",
-			input:         `FUNCTION_BLOCK MyIlFb LD A; NOT_AN_OP B; END_FUNCTION_BLOCK`,
-			expectedError: `expected IL instruction mnemonic (e.g., LD, ST, ADD), got "NOT_AN_OP"`,
+			input:         `FUNCTION_BLOCK MyIlFb LD A; 5 B; END_FUNCTION_BLOCK`,
+			expectedError: `expected IL instruction mnemonic (e.g., LD, ST, ADD), got "5"`,
 		},
 		{
 			name:          "IL instruction followed by statement keyword",

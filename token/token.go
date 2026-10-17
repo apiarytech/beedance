@@ -45,6 +45,8 @@ const (
 
 	// Operators
 	ASSIGN    = ":="
+	ATTEMPT   = "?=" // the assignment attempt, r ?= i
+	QUESTION  = "?"  // The ? of IL ST?, the assignment attempt
 	PLUS      = "+"
 	MINUS     = "-"
 	ASTERISK  = "*"
@@ -155,6 +157,8 @@ const (
 	FROM               = "FROM"
 	FUNCTION_BLOCK     = "FUNCTION_BLOCK"
 	END_FUNCTION_BLOCK = "END_FUNCTION_BLOCK"
+	CLASS              = "CLASS"
+	END_CLASS          = "END_CLASS"
 	FUNCTION           = "FUNCTION"
 	END_FUNCTION       = "END_FUNCTION"
 	ACTION             = "ACTION"
@@ -303,6 +307,8 @@ var keywords = map[string]TokenType{
 	"FUNCTION_BLOCK":     FUNCTION_BLOCK,
 	"FUNCTIONBLOCK":      FUNCTION_BLOCK, // CODESYS 2.3 also accepts this spelling.
 	"END_FUNCTION_BLOCK": END_FUNCTION_BLOCK,
+	"CLASS":              CLASS,
+	"END_CLASS":          END_CLASS,
 	"ACTION":             ACTION,
 	"END_ACTION":         END_ACTION,
 	"TRANSITION":         TRANSITION,
@@ -417,4 +423,30 @@ func SameIdent(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// longTimeTypes are the long time types of IEC 61131-3 3rd edition and the
+// types beedance holds them as, which already have nanoseconds.
+var longTimeTypes = map[string]string{
+	"LTIME": "TIME", "LDATE": "DATE", "LTOD": "TOD", "LTIME_OF_DAY": "TIME_OF_DAY",
+	"LDT": "DT", "LDATE_AND_TIME": "DATE_AND_TIME",
+}
+
+// LongTimeType returns the type a long time type's name stands for, LTIME
+// for TIME, and whether ident is one. beforeHash: ident is followed by #,
+// where LT and LD, the short prefixes of LTIME and LDATE literals, count.
+func LongTimeType(ident string, beforeHash bool) (string, bool) {
+	upper := strings.ToUpper(ident)
+	if short, ok := longTimeTypes[upper]; ok {
+		return short, true
+	}
+	if beforeHash {
+		switch upper {
+		case "LT":
+			return "T", true
+		case "LD":
+			return "D", true
+		}
+	}
+	return "", false
 }

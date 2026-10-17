@@ -114,6 +114,10 @@ func ParseEngines(s string) ([]Engine, error) {
 type Options struct {
 	// Interval is the simulated time between scans; default 10 ms.
 	Interval time.Duration
+	// AllowInputWrites lets a POU assign its own VAR_INPUT variables on
+	// every engine, as CODESYS does (IEC-69); off, IEC 61131-3's rule, such
+	// a source fails on each engine with the same message.
+	AllowInputWrites bool
 	// MaxScans bounds a test with done: one not done by then fails;
 	// default 50000.
 	MaxScans int
@@ -430,6 +434,7 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 
 	env := object.NewEnvironment()
 	evaluator.SetBudget(opts.ScanBudget)
+	evaluator.SetAllowInputWrites(opts.AllowInputWrites)
 	if out := evaluator.Eval(program, env); isError(out) {
 		r.Err = out.Inspect()
 		return r
@@ -441,6 +446,23 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 		return r
 	}
 	call, _ := parse(decl.Name.Value + "();")
+	// A program a configuration's resource runs is run as that instance,
+	// which sees the resource's VAR_GLOBAL and its connections (k := g).
+	runEnv, progEnv := env, prog.Env
+	if resName, instName := configuredInstance(program, decl.Name.Value); instName != "" {
+		resEnv := env
+		if resObj, ok := env.Get(resName); ok && resName != "" {
+			if res, isRes := resObj.(*object.FunctionBlockInstance); isRes {
+				resEnv = res.Env
+			}
+		}
+		if instObj, ok := resEnv.Get(instName); ok {
+			if inst, isInst := instObj.(*object.ProgramInstance); isInst {
+				runEnv, progEnv = resEnv, inst.Env
+				call, _ = parse(instName + "();")
+			}
+		}
+	}
 	io, err := beginIO(ctx, opts.IO, decl.Name.Value, Evaluator, evaluator.IO(), evaluator.IOTypes())
 	if err != nil {
 		r.Err = err.Error()
@@ -463,13 +485,13 @@ func runEvaluator(ctx context.Context, source string, decl *ast.ProgramDeclarati
 		}
 		elapsed = t
 		evaluator.SetBudget(opts.ScanBudget)
-		if out := evaluator.Eval(call, env); isError(out) {
+		if out := evaluator.Eval(call, runEnv); isError(out) {
 			r.Err = fmt.Sprintf("scan %d: %s", n+1, out.Inspect())
 			break
 		}
 		values := Scan{}
 		for _, v := range vars {
-			o, ok := watch.Evaluator(prog.Env, v)
+			o, ok := watch.Evaluator(progEnv, v)
 			// A located variable points into the I/O image.
 			if p, isPtr := o.(*object.Pointer); ok && isPtr && p.Env == nil {
 				o, ok = evaluator.IO()[p.Name]
@@ -499,7 +521,9 @@ func runVM(ctx context.Context, program *ast.Program, decl *ast.ProgramDeclarati
 			r.Err = fmt.Sprintf("vm panic: %v", p)
 		}
 	}()
-	compiled, err := compiler.NewCompilerWithBuiltins(object.Builtins).CompileProgramUnit(program, decl.Name.Value)
+	comp := compiler.NewCompilerWithBuiltins(object.Builtins)
+	comp.AllowInputWrites = opts.AllowInputWrites // IEC-69
+	compiled, err := comp.CompileProgramUnit(program, decl.Name.Value)
 	if err != nil {
 		r.Err = "compile: " + err.Error()
 		return r
@@ -633,4 +657,29 @@ func bits(s string) (uint64, error) {
 		return strconv.ParseUint(strings.ReplaceAll(s[3:], "_", ""), 16, 64)
 	}
 	return strconv.ParseUint(s, 10, 64)
+}
+
+// configuredInstance returns the resource and the instance of the first
+// PROGRAM ... WITH ... : name of the configurations in program, or "" for
+// both; the resource is "" for the single-resource form, whose programs are
+// the configuration's.
+func configuredInstance(program *ast.Program, name string) (resource, instance string) {
+	for _, s := range program.Statements {
+		config, ok := s.(*ast.ConfigurationDeclaration)
+		if !ok {
+			continue
+		}
+		for _, res := range config.Resources {
+			for _, p := range res.Programs {
+				if p.TypeName == nil || p.InstanceName == nil || !strings.EqualFold(p.TypeName.Value, name) {
+					continue
+				}
+				if res.IsImplicit || res.Name == nil {
+					return "", p.InstanceName.Value
+				}
+				return res.Name.Value, p.InstanceName.Value
+			}
+		}
+	}
+	return "", ""
 }

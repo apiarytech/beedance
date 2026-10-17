@@ -10,6 +10,8 @@
 package parser
 
 import (
+	"strings"
+
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/token"
 )
@@ -28,7 +30,7 @@ func (p *Parser) parsePoulDeclaration() ast.Statement {
 		return p.parseFunctionBlockDeclaration()
 	case token.FUNCTION:
 		return p.parseFunctionDeclaration()
-	case token.FUNCTION_BLOCK:
+	case token.FUNCTION_BLOCK, token.CLASS:
 		return p.parseFunctionBlockDeclaration()
 	case token.PUBLIC:
 		return p.parseFunctionBlockDeclaration()
@@ -57,9 +59,16 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	}
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	if !p.expectPeek(token.COLON) {
-		return nil // Expected return type separator
+	// A function without a result type (IEC 61131-3 3rd edition) gives its
+	// results through VAR_OUTPUT and VAR_IN_OUT only.
+	if !p.peekTokenIs(token.COLON) {
+		p.nextToken() // past the name
+		if p.curTokenIs(token.SEMICOLON) {
+			p.nextToken()
+		}
+		return p.parseFunctionBody(stmt)
 	}
+	p.nextToken() // to ':'
 
 	p.nextToken() // Consume ':', move to return type
 	returnType := p.parseTypeSpecifier()
@@ -83,7 +92,12 @@ func (p *Parser) parseFunctionDeclaration() ast.Statement {
 	if p.curTokenIs(token.SEMICOLON) {
 		p.nextToken()
 	}
+	return p.parseFunctionBody(stmt)
+}
 
+// parseFunctionBody parses a function's variable blocks and body, up to
+// and past END_FUNCTION, after its header.
+func (p *Parser) parseFunctionBody(stmt *ast.FunctionDeclaration) ast.Statement {
 	// Consume any comments between the header and the variable blocks.
 	p.consumeLeadingComments()
 
@@ -501,6 +515,10 @@ func (p *Parser) parseMethodDeclaration(isPrototype bool) *ast.MethodDeclaration
 	stmt := &ast.MethodDeclaration{Token: p.curToken}
 	p.nextToken() // consume METHOD
 
+	// GET and SET, the accessors of a property, may name a method.
+	if p.curTokenIs(token.GET) || p.curTokenIs(token.SET) {
+		p.curToken.Type = token.IDENT
+	}
 	if !p.curTokenIs(token.IDENT) {
 		p.currentError("expected method name, got %s", p.curToken.Type)
 		return nil
@@ -566,12 +584,23 @@ modifiers:
 			stmt.IsAbstract = true
 		case token.FINAL:
 			stmt.IsFinal = true
+		case token.IDENT:
+			// OVERRIDE (IEC 61131-3): the method overrides its parent's,
+			// as any method of the same name does. A method may still be
+			// named OVERRIDE: the modifier is followed by the name.
+			if !strings.EqualFold(p.curToken.Literal, "OVERRIDE") || !(p.peekTokenIs(token.IDENT) || p.peekTokenIs(token.GET) || p.peekTokenIs(token.SET)) {
+				break modifiers
+			}
 		default:
 			break modifiers
 		}
 		p.nextToken()
 	}
 
+	// GET and SET, the accessors of a property, may name a method.
+	if p.curTokenIs(token.GET) || p.curTokenIs(token.SET) {
+		p.curToken.Type = token.IDENT
+	}
 	if !p.curTokenIs(token.IDENT) {
 		p.currentError("expected method name, got %s", p.curToken.Type)
 		return nil

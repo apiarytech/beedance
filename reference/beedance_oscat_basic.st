@@ -2488,18 +2488,18 @@ YLJ := YAE * 1.5812776724E-005;
 
 
 (*
-L�nge Meter m SI-Basiseinheit
-Astronomische Einheit* AE 1 AE = 149,597 870 � E9 m
-Parsec pc 1 pc = 206265 AE = 30,857 � E15 m
-Lichtjahr Lj 1 Lj = 9,460 530 � E15 m = 63240 AE = 0,306 59 pc
-�ngstr�m � 1 � = E�l0 m
-typograph. Punkt p 1 p = 0,376 065 mm � im Druckereigewerbe
-inch** in 1 in = 2,54 � E�2 m = 25,4 mm***
+Länge Meter m SI-Basiseinheit
+Astronomische Einheit* AE 1 AE = 149,597 870 · E9 m
+Parsec pc 1 pc = 206265 AE = 30,857 · E15 m
+Lichtjahr Lj 1 Lj = 9,460 530 · E15 m = 63240 AE = 0,306 59 pc
+Ångström Å 1 Å = El0 m
+typograph. Punkt p 1 p = 0,376 065 mm  im Druckereigewerbe
+inch** in 1 in = 2,54 · E2 m = 25,4 mm***
 foot ft 1 ft = 0,3048 m = 30,48 cm
 yard yd 1 yd = 0,9144 m
 mile mile 1 mile = 1609,344 m
 Internat. Seemeile sm 1 sm = 1852 m
-Fathom fm 1 fm = 1,829 m � in der Seeschifffahrt
+Fathom fm 1 fm = 1,829 m  in der Seeschifffahrt
 *)
 
 END_FUNCTION_BLOCK
@@ -2613,12 +2613,12 @@ YC := YJ * 0.238845896627496;
 YWh := YJ * 2.7777777778E-004;
 
 (*
-Arbeit, Energie, Joule* J 1 J = 1 N � m = 1 W � s = (1/3,6) E�6 kW � h = 1 kg � m2/s2
-W�rmemenge Kilowattstunde kW � h 1 kW � h = 3,6 MJ = 860 kcal
-Elektronvolt eV 1 eV = 160,218 92 E�21 J
-Erg erg 1 erg = 1E�7 J
-Kalorie calorie 1 calalorie = 4,1868 J = 1,163 E�3 W � h
-Therm therm 1 therm = 105,50 � 106 J
+Arbeit, Energie, Joule* J 1 J = 1 N · m = 1 W · s = (1/3,6) E6 kW · h = 1 kg · m2/s2
+Wärmemenge Kilowattstunde kW · h 1 kW · h = 3,6 MJ = 860 kcal
+Elektronvolt eV 1 eV = 160,218 92 E21 J
+Erg erg 1 erg = 1E7 J
+Kalorie calorie 1 calalorie = 4,1868 J = 1,163 E3 W · h
+Therm therm 1 therm = 105,50 · 106 J
 *)
 END_FUNCTION_BLOCK
 
@@ -2723,18 +2723,18 @@ Ysm := Ym * 0.00053995680;
 Yfm := Ym * 0.54674685621;
 
 (*
-L�nge Meter m SI-Basiseinheit
-Astronomische Einheit* AE 1 AE = 149,597 870 � E9 m
-Parsec pc 1 pc = 206265 AE = 30,857 � E15 m
-Lichtjahr Lj 1 Lj = 9,460 530 � E15 m = 63240 AE = 0,306 59 pc
-�ngstr�m � 1 � = E�l0 m
-typograph. Punkt p 1 p = 0,376 065 mm � im Druckereigewerbe
-inch** in 1 in = 2,54 � E�2 m = 25,4 mm***
+Länge Meter m SI-Basiseinheit
+Astronomische Einheit* AE 1 AE = 149,597 870 · E9 m
+Parsec pc 1 pc = 206265 AE = 30,857 · E15 m
+Lichtjahr Lj 1 Lj = 9,460 530 · E15 m = 63240 AE = 0,306 59 pc
+Ångström Å 1 Å = El0 m
+typograph. Punkt p 1 p = 0,376 065 mm  im Druckereigewerbe
+inch** in 1 in = 2,54 · E2 m = 25,4 mm***
 foot ft 1 ft = 0,3048 m = 30,48 cm
 yard yd 1 yd = 0,9144 m
 mile mile 1 mile = 1609,344 m
 Internat. Seemeile sm 1 sm = 1852 m
-Fathom fm 1 fm = 1,829 m � in der Seeschifffahrt
+Fathom fm 1 fm = 1,829 m  in der Seeschifffahrt
 *)
 
 END_FUNCTION_BLOCK
@@ -2797,9 +2797,9 @@ Ypa := ybar * 100000.0;
 
 
 (*
-Druck, Pascal Pa 1 Pa = 1 N/m2 = 1 kg/(s2 �E m) . 0,75 �E 10.2 mmHg
+Druck, Pascal Pa 1 Pa = 1 N/m2 = 1 kg/(s2 E m) . 0,75 E 10.2 mmHg
 mechanische 1 MPa = 1 N/mm2 . fur Festigkeitsangaben
-Spannung Bar bar 1 bar = 105 Pa = 103 mbar = 105 kg/(s2 �E m)
+Spannung Bar bar 1 bar = 105 Pa = 103 mbar = 105 kg/(s2 E m)
 Millimeter- mmHg 1 mmHg = 133,322 Pa = 1,333 22 mbar
 Quecksilbersaule . nur in Heilkunde zulassig
 physik. Atmosphare atm 1 atm = 1,013 25 bar
@@ -2844,7 +2844,7 @@ Ymh := Yms * 2.23693629205440;
 
 (*
 Geschwindigkeit Meter durch Sekunde m/s 1 m/s = 3,6 km/h
-km durch (pro) Stunde, nicht �Stundenkilometer� verwenden
+km durch (pro) Stunde, nicht Stundenkilometer verwenden
 Knoten kn 1 kn = 1 sm/h = 0,5144 m/s
 
 *)
@@ -3506,13 +3506,13 @@ END_VAR
 
 tx := TIME();
 T_PLC_MS := ULINT_TO_DWORD(TIME_TO_ULINT(Tx) MOD 4294967296);
-(* hier muss die korrektur f�r step7 stattfinden
+(* hier muss die korrektur für step7 stattfinden
 plctime muss den vollen wertebereich von time ausnutzen:
-wenn bei step7 time -24tage bis plus 24 tage ist dann muss der timer auch beim �berlauf auf -24tage springen 
+wenn bei step7 time -24tage bis plus 24 tage ist dann muss der timer auch beim überlauf auf -24tage springen 
 und auf keinen fall auf 0 !!!!
-f�r siemens muss ein weiterer fb im main eingebunden werden der sicherstellt das alle 32 bits durchgez�hlt werden.
+für siemens muss ein weiterer fb im main eingebunden werden der sicherstellt das alle 32 bits durchgezählt werden.
 es kann nur ein fb sein den er muss sich das oberste (32te) bit merken.
-oder etwa spring s7 bei �berlauf auf -24 tage????? dann w�re keine korrektur n�tig.
+oder etwa spring s7 bei überlauf auf -24 tage????? dann wäre keine korrektur nötig.
 *)
 IF debug THEN
 	T_PLC_MS := ULINT_TO_DWORD((DWORD_TO_ULINT(SHL(T_PLC_MS,N) OR ULINT_TO_DWORD(DWORD_TO_ULINT(SHL(DWORD#1,N))-1)) + DWORD_TO_ULINT(OFFSET)) MOD 4294967296);
@@ -3531,13 +3531,13 @@ END_VAR
 
 tx := TIME();
 T_PLC_US := ULINT_TO_DWORD((TIME_TO_ULINT(Tx)*1000) MOD 4294967296);
-(* hier muss die korrektur f�r step7 stattfinden
+(* hier muss die korrektur für step7 stattfinden
 plctime muss den vollen wertebereich von time ausnutzen:
-wenn bei step7 time -24tage bis plus 24 tage ist dann muss der timer auch beim �berlauf auf -24tage springen 
+wenn bei step7 time -24tage bis plus 24 tage ist dann muss der timer auch beim überlauf auf -24tage springen 
 und auf keinen fall auf 0 !!!!
-f�r siemens muss ein weiterer fb im main eingebunden werden der sicherstellt das alle 32 bits durchgez�hlt werden.
+für siemens muss ein weiterer fb im main eingebunden werden der sicherstellt das alle 32 bits durchgezählt werden.
 es kann nur ein fb sein den er muss sich das oberste (32te) bit merken.
-oder etwa spring s7 bei �berlauf auf -24 tage????? dann w�re keine korrektur n�tig.
+oder etwa spring s7 bei überlauf auf -24 tage????? dann wäre keine korrektur nötig.
 *)
 IF debug THEN
 	T_PLC_US := ULINT_TO_DWORD((DWORD_TO_ULINT(SHL(T_PLC_US,N) OR ULINT_TO_DWORD(DWORD_TO_ULINT(SHL(DWORD#1,N))-1)) + DWORD_TO_ULINT(OFFSET)) MOD 4294967296);
@@ -3721,9 +3721,9 @@ RES_NI := R0 + A * T + B * T2 + C * T2 * T2;
 
 (*
 
- Auszug aus DIN 43760 f�r Ni100
+ Auszug aus DIN 43760 für Ni100
 
-�C		R		�C		R		�C	R		�C		R		�C		R
+°C		R		°C		R		°C	R		°C		R		°C		R
 
 -60 	69,5 	-10 	94,6 	40 	123,0 	90 		154,9 	140 	190,9
 -55 	71,9 	-5 		97,3 	45 	126,0 	95 		158,3 	145 	194,8
@@ -3773,9 +3773,9 @@ END_IF;
 
 
 (*
- Auszug aus DIN 43760 f�r Pt100
+ Auszug aus DIN 43760 für Pt100
 
-�C		R		�C		R		�C	R			�C		R			�C		R			�C		R
+°C		R		°C		R		°C	R			°C		R			°C		R			°C		R
 
 -200 	18,49 	-100 	60,25 	0 	100,00 	100 	138,50 	200 	175,84 	300 	212,02
 -195 	20,65 	-95 	62,28 	5 	101,95 	105 	140,39 	205 	177,68 	305 	213,80
@@ -4250,7 +4250,7 @@ END_VAR
 VAR
 	(* Taktgenerator Simulation *)
 	tonRDMTimer	: TON ; (* Zeitbaustein Taktgenerator *)
-	tof_xQ		: TOF ; (* Ausschaltverz�gerung Taktgenerator *)
+	tof_xQ		: TOF ; (* Ausschaltverzögerung Taktgenerator *)
 	tRDMTime	: TIME ; (* Sollzeit *)
 	rRDMTime	: REAL ; (* Zufalswert Timer *)
 END_VAR
@@ -4262,10 +4262,10 @@ FUNCTION_BLOCK RDMTimer
 		 Ersteller / author :		 		 		 		 		 J.Schohaus
 		 Datum / date:		 		 		 		 		 		 13.07.2007
 ###############################################################################
-		 �nderungen / Datum / Ersteller :		 		 		 		 		 		 		 		 		 		 		 		 		 		 		 
+		 Änderungen / Datum / Ersteller :		 		 		 		 		 		 		 		 		 		 		 		 		 		 		 
 		 moditication / date / author :		 		 
 ###############################################################################
-		 Verwendete Bibliotheken		 ( * werden im Baustein nicht ben�tigt )
+		 Verwendete Bibliotheken		 ( * werden im Baustein nicht benötigt )
 		 		 		 		 Oscat.lib
 ###############################################################################
 Beschreibung:
@@ -4725,7 +4725,7 @@ ELSE
 	in2 := in;
 END_IF;
 
-(* begrenze in auf die zul�ssigen werte *)
+(* begrenze in auf die zulässigen werte *)
 in2 := LIMIT(low, in2, high);
 
 (* Berechne den Ausgangswert *)
@@ -4760,7 +4760,7 @@ ELSE
 	in2 := in;
 END_IF;
 
-(* begrenze in auf die zul�ssigen werte *)
+(* begrenze in auf die zulässigen werte *)
 in2 := LIMIT(low, in2, high);
 
 (* Berechne den Ausgangswert *)
@@ -6572,7 +6572,7 @@ END_VAR
 (* flankenerkennung clk wird high und edge war high reset ist nicht aktiv und set ist nicht aktiv *)
 IF CLK AND edge AND NOT rst THEN
 	edge := FALSE;	(* flanke wurde erkannt und weitere flankenerkennung wird verhindert bis edge wieder true ist *)
-	(* hier ist der code f�r das flankenevent *)
+	(* hier ist der code für das flankenevent *)
 	IF UP THEN						(*shift up *)
 		register := SHL(register,1);
 		register.0 := Din;
@@ -6587,8 +6587,8 @@ IF CLK AND edge AND NOT rst THEN
 		IF up THEN Dout := register.7; ELSE Dout := register.0; END_IF;
 	END_IF;
 END_IF;
-IF NOT clk THEN edge := TRUE; END_IF;	(* sobald clk wieder low wird warten auf n�chste flanke *)
-IF rst THEN									(* wenn reset aktiv dann ausgang r�cksetzen *)
+IF NOT clk THEN edge := TRUE; END_IF;	(* sobald clk wieder low wird warten auf nächste flanke *)
+IF rst THEN									(* wenn reset aktiv dann ausgang rücksetzen *)
 	register := 0;
 	Dout := FALSE;
 END_IF;
@@ -8816,8 +8816,8 @@ CRC_GEN := SHR(CRC_GEN, shift) XOR XOR_OUT;
 IF REV_OUT THEN CRC_GEN := REFLECT(CRC_GEN, PL); END_IF;
 
 (* suggested optimization by deninis klopke
-die betreffs genannte Funktion kann folgenderma�en optimiert werden:
-In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil �OR BOOL_TO_DWORD(DX.7)� entfallen, da nach 8maligem Linksshift von �DX� in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
+die betreffs genannte Funktion kann folgendermaßen optimiert werden:
+In Zeilen 33 und 35 des Implementierungsteils kann jeweils der Teil OR BOOL_TO_DWORD(DX.7) entfallen, da nach 8maligem Linksshift von DX in Zeile 26 der Wert von DX = BYTE#0 ist. Eine weitere Veroderung mit diesem Wert hat keine Auswirkungen auf das Ergebnis mehr.
 *)
 
 (* typical crc polynoms
@@ -9103,24 +9103,24 @@ VAR_INPUT
 END_VAR
 VAR
 	stack_count: UINT;				(* Laufvariable Stack*)
-	stack: ARRAY[1..32] OF UINT;	(* Stackgr��e~ 1,6*Log(n)/log(2) *)
-										(* Stackgr��e 32 => ~1 Mio Elemente *)
+	stack: ARRAY[1..32] OF UINT;	(* Stackgröße~ 1,6*Log(n)/log(2) *)
+										(* Stackgröße 32 => ~1 Mio Elemente *)
 	links: UINT;						(* Anfangselement des Arrays *)
 	rechts: UINT;						(* Endelement des Arrays *)
-	pivot: REAL;						(* tempor�rer Schwellwert f�r Tauschbedingung *)
+	pivot: REAL;						(* temporärer Schwellwert für Tauschbedingung *)
 	i: UINT;							(* Laufvariable1 *)
 	j: UINT;							(* Laufvariable2 *)
 	ende_innen: BOOL;				(* Ende innere Schleife *)
-	ende_aussen: BOOL;				(* Ende �u�ere Schleife *)
+	ende_aussen: BOOL;				(* Ende äußere Schleife *)
 	tmp: REAL;						(* Hilfsvariable zum Tauschen von Werten *)
 END_VAR
 
-(* Startwerte zur Arraygr��e *)
+(* Startwerte zur Arraygröße *)
 links := 1;					(* Anfangselement des Arrays *)
 rechts := ((size) / 4);		(* Endelement des Arrays *)
 stack_count := 1;			(* Laufvariable Stack *)
 
-WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
+WHILE NOT ende_aussen DO						(* äußere Schleife *)
 	IF links < rechts THEN
 		pivot := PT^[((rechts+links) / 2)];			(* Wert des mittleren Elements als Pivot-Wert *)
 		i := links -1;
@@ -9150,7 +9150,7 @@ WHILE NOT ende_aussen DO						(* �u�ere Schleife *)
 		UNTIL ende_innen END_REPEAT;
 
 		(* Push stack *)
-		stack[stack_count] := rechts;		(* rechten Teil sp�ter sortieren *)
+		stack[stack_count] := rechts;		(* rechten Teil später sortieren *)
 		IF Stack_count < 32 THEN
 			stack_count := stack_count +1;
 		ELSE
@@ -10542,10 +10542,10 @@ END_IF;
 binomialkoeffizient(n, k)
 1  wenn k = 0 return 1
 2  wenn 2k > n
-3      dann f�hre aus ergebnis \leftarrow binomialkoeffizient(n, n-k)
-4  sonst f�hre aus ergebnis \leftarrow n
+3      dann führe aus ergebnis \leftarrow binomialkoeffizient(n, n-k)
+4  sonst führe aus ergebnis \leftarrow n
 5          von i \leftarrow 2 bis k
-6              f�hre aus ergebnis \leftarrow ergebnis \cdot (n + 1 - i)
+6              führe aus ergebnis \leftarrow ergebnis \cdot (n + 1 - i)
 7                        ergebnis \leftarrow ergebnis : i
 8  return ergebnis
 *)
@@ -11330,10 +11330,10 @@ END_FUNCTION
 FUNCTION REAL_TO_FRAC : FRACTION
 VAR_INPUT
 	X : REAL;					(* in einen Bruch umzuwandelnder Wert *)
-	N : INT;					(* maximale Gr��e des Nenners *)
+	N : INT;					(* maximale Größe des Nenners *)
 END_VAR
 VAR
-	temp : DINT;				(* Merker f�r Berechnungen *)
+	temp : DINT;				(* Merker für Berechnungen *)
 
 	sign: BOOL;					(* Vorzeichen vom Eingangswert *)
 	X_gerundet: DINT;			(* Wert von Bruch, auf ganze Zahl gerundet *)
@@ -11373,8 +11373,8 @@ REPEAT
 	X_ohne_Nachkomma := DINT_TO_REAL(X_gerundet);
 	IF X_work = X_ohne_Nachkomma THEN						(* Bruch geht ohne Rest auf *)
 		IF ABS(denominator) <= N THEN						(* kein Rundungsfehler *)
-			numerator_old := numerator;					(* Numerator_old wird von Funktion zur�ckgegeben *)
-			denominator_old := denominator;			(* Denominator_old wird von Funktion zur�ckgegeben *)
+			numerator_old := numerator;					(* Numerator_old wird von Funktion zurückgegeben *)
+			denominator_old := denominator;			(* Denominator_old wird von Funktion zurückgegeben *)
 		END_IF
 		EXIT;											(* keine weitere Berechnung notwendig *)
 	ELSE
@@ -12055,7 +12055,7 @@ END_FUNCTION
 // END_VAR
 //
 //
-// (* pointer f�r die ausgabe ermitteln *)
+// (* pointer für die ausgabe ermitteln *)
 // pt := REF(BYTE_TO_STRB);
 // (* die 8 ausgabecharacter ermitteln und schreiben *)
 // FOR i := 1 TO 8 DO
@@ -12581,7 +12581,7 @@ END_FUNCTION
 // 	i: INT;
 // END_VAR
 //
-// (* pointer f�r die ausgabe ermitteln *)
+// (* pointer für die ausgabe ermitteln *)
 // pt := REF(DWORD_TO_STRB);
 // (* die 8 ausgabecharacter ermitteln und schreiben *)
 // FOR i := 1 TO 32 DO
@@ -13725,7 +13725,7 @@ END_FUNCTION
 //
 // hm	4. feb. 2008	rev 1.1
 // 	improved performance
-// 	added �.�,�
+// 	added Ä.Ö,Ü
 //
 // hm	6. mar. 2008	rev 1.2
 // 	added support for exteded Ascii
@@ -14178,19 +14178,19 @@ END_FUNCTION
 // END_VAR
 //
 // CASE in OF
-// 	196:	(* � *)
+// 	196:	(* Ä *)
 // 		TO_UML := 'Ae';
-// 	214:	(* � *)
+// 	214:	(* Ö *)
 // 		TO_UML := 'Oe';
-// 	220:	(* � *)
+// 	220:	(* Ü *)
 // 		TO_UML := 'Ue';
-// 	223:	(* � *)
+// 	223:	(* ß *)
 // 		TO_UML := 'ss';
-// 	228:	(* � *)
+// 	228:	(* ä *)
 // 		TO_UML := 'ae';
-// 	246:	(* � *)
+// 	246:	(* ö *)
 // 		TO_UML := 'oe';
-// 	252:	(* � *)
+// 	252:	(* ü *)
 // 		TO_UML := 'ue';
 // ELSE
 // 	TO_UML := CHR_TO_STRING(IN);
@@ -14317,7 +14317,7 @@ END_FUNCTION
 //
 // hm	4. feb. 2008	rev 1.1
 // 	improved performance
-// 	added �,�,�
+// 	added Ä,Ö,Ü
 //
 // hm	6. mar. 2008	rev 1.2
 // 	added support for exteded Ascii
@@ -14842,23 +14842,23 @@ msec := TIME_TO_INT(t1 - ty);
 (* decode information
 bits		content
 0			Bitwert immer 0
-1 bis 14	reserviert f�r Betriebsinformationen (nicht f�r DCF77-Nutzer bestimmt)
-15			Rufbit f�r Alarmierung der PTB-Mitarbeiter
+1 bis 14	reserviert für Betriebsinformationen (nicht für DCF77-Nutzer bestimmt)
+15			Rufbit für Alarmierung der PTB-Mitarbeiter
 			(bis Mai 2003: Bitwert = 0 falls normale Antenne in Verwendung; 1 = Backupantenne)
 16			Bitwert = 1 falls ein Wechsel von MEZ nach MESZ oder umgekehrt bevorsteht; Dauer der Anzeige: 1 Stunde
-17 + 18	g�ltige Zeit = MEZ, falls Bit 17=0 und Bit 18=1
-			g�ltige Zeit = MESZ, falls Bit 17=1 und Bit 18=0
-19			Bitwert = 1 falls innerhalb den n�chsten 59 Minuten eine Schaltsekunde angeordnet ist. Beim Einf�gen einer Schaltsekunde wird anstelle der 59. die 60. Sekundenmarke weggelassen und in der 58. erfolgt ausnahmsweise ein Tr�gerabfall.
-20			Startbit f�r Zeitinformation (immer 1)
+17 + 18	gültige Zeit = MEZ, falls Bit 17=0 und Bit 18=1
+			gültige Zeit = MESZ, falls Bit 17=1 und Bit 18=0
+19			Bitwert = 1 falls innerhalb den nächsten 59 Minuten eine Schaltsekunde angeordnet ist. Beim Einfügen einer Schaltsekunde wird anstelle der 59. die 60. Sekundenmarke weggelassen und in der 58. erfolgt ausnahmsweise ein Trägerabfall.
+20			Startbit für Zeitinformation (immer 1)
 21 - 27		1, 2, 4, 8, 10, 20, 40 Minuten (bitweise Addition)
-28			Pr�fbit (gerade Parit�t) f�r die Bits 21-27
+28			Prüfbit (gerade Parität) für die Bits 21-27
 29 - 34		1, 2, 4, 8, 10, 20 Stunden (bitweise Addition)
-35			Pr�fbit (gerade Parit�t) f�r die Bits 29-34
+35			Prüfbit (gerade Parität) für die Bits 29-34
 36 - 41		Tagesnummer im aktuellen Monat: 1, 2, 4, 8, 10, 20 (bitweise Addition)
 42 - 44		Tagesnummer in der aktuellen Woche: 1, 2, 4 (bitweise Addition)
 45 - 49		Monatsnummer: 1, 2, 4, 8, 10 (bitweise Addition)
 50 - 57		Jahr (zweistellig): 1, 2, 4, 8, 10, 20, 40, 80 (bitweise Addition)
-58			Pr�fbit (gerade Parit�t) f�R die Bits 36-57
+58			Prüfbit (gerade Parität) füR die Bits 36-57
 
 *)
 
@@ -15002,7 +15002,7 @@ o := x MOD 31 + 1;
 easter := set_Date(year,n,o);
 *)
 (*
-Im Magazin "Nature" vom 20. April 1876 ver�ffentlichte ein anonymer Autor eine Tabelle mit Regeln zur Berechnung des (Gregorianischen) Ostersonntages des Jahres J. In Formeln ausgedr�ckt erh�lt man das Folgende:
+Im Magazin "Nature" vom 20. April 1876 veröffentlichte ein anonymer Autor eine Tabelle mit Regeln zur Berechnung des (Gregorianischen) Ostersonntages des Jahres J. In Formeln ausgedrückt erhält man das Folgende:
 a	=	J mod 19
 b	=	int(J / 100)
 c	=	J mod 100
@@ -15010,15 +15010,15 @@ d	=	int(b / 4)
 e	=	b mod 4
 f	=	int((b + 8) / 25)
 g	=	int((b - f + 1) / 3
-h	=	(19 � a + b - d - g + 15) mod 30
+h	=	(19 · a + b - d - g + 15) mod 30
 i	=	int(c / 4)
 k	=	c mod 4
-l	=	(32 + 2 � e + 2 � i - h - k) mod 7
-m	=	int((a + 11 � h + 22 � l) / 451)
-n	=	int((h + l - 7 � m + 114) / 31)
-o	=	(h + l - 7 � m + 114) mod 31
+l	=	(32 + 2 · e + 2 · i - h - k) mod 7
+m	=	int((a + 11 · h + 22 · l) / 451)
+n	=	int((h + l - 7 · m + 114) / 31)
+o	=	(h + l - 7 · m + 114) mod 31
 
-n ist hierbei die Nummer des Monats, o + 1 die Nummer des Tages auf welchen der Ostersonntag im Jahr J f�llt. Dieser Algorithmus kommt ohne Hilfszahlen aus.
+n ist hierbei die Nummer des Monats, o + 1 die Nummer des Tages auf welchen der Ostersonntag im Jahr J fällt. Dieser Algorithmus kommt ohne Hilfszahlen aus.
 
 *)
 END_FUNCTION
@@ -15117,7 +15117,7 @@ ELSE
 	lx := MIN(language.LMAX, LANGU);
 END_IF;
 
-(* berechnung von ostern f�r das aktuelle jahr *)
+(* berechnung von ostern für das aktuelle jahr *)
 jahr := YEAR_OF_DATE(date_in);
 ostern := EASTER(jahr);
 wdx := DAY_OF_WEEK(DATE_IN);
@@ -15825,7 +15825,7 @@ d1 := YEAR_BEGIN(yr);
 (* wochentag von d1 *)
 w1 := DAY_OF_WEEK(d1);
 (* offset des montags der eletzten KW des vorjahres *)
-(* wenn der erste tag des jahres gr��er als donnerstag ist dann beginnt die letzte kw am montag davor *)
+(* wenn der erste tag des jahres größer als donnerstag ist dann beginnt die letzte kw am montag davor *)
 (* wenn der erste tag des jahres ein donnerstag oder kleiner ist beginnt die erste kw 2 montage davor *)
 IF w1 < 5 THEN
 	ds := ULINT_TO_DWORD(DATE_TO_ULINT(d1) - INT_TO_ULINT(w1+6) * 86400);
@@ -15934,8 +15934,8 @@ STRUCT
 													'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So',
 													'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di';
 	MONTHS : ARRAY[1..3, 1..12] OF STRING(10) :=	'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
-													'Januar', 'Februar', 'M�rz', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
-													'Janvier', 'F�vrier', 'mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Ao�t', 'Septembre', 'Octobre', 'Novembre', 'Decembre';
+													'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+													'Janvier', 'Février', 'mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Decembre';
 	MONTHS3 : ARRAY[1..3, 1..12] OF STRING(3) :=	'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 													'Jan', 'Feb', 'Mrz', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez',
 													'Jan', 'Fev', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aou', 'Sep', 'Oct', 'Nov', 'Dec';
@@ -15948,7 +15948,7 @@ END_TYPE
 TYPE CONSTANTS_LOCATION :
 STRUCT
 	(* location setup *)
-	DEFAULT : INT := 1; (* 1=germany, 2=austria 3=france 4=belgium-german 5= italien-S�dtirol *)
+	DEFAULT : INT := 1; (* 1=germany, 2=austria 3=france 4=belgium-german 5= italien-Südtirol *)
 	LMAX : INT := 5;
 
 	(* language spoken in the location *)
@@ -15976,9 +15976,9 @@ TYPE CONSTANTS_PHYS :
 STRUCT
 	C : REAL := 299792458.0;				(* Lichtgeschwindigkeit in m/s *)
 	E : REAL := 1.60217653E-19;				(* elementarladung in Colomb = A * s *)
-	G : REAL := 9.80665; 						(* Erdbeschleunigung in m / s� *)
-	T0 : REAL := -273.15;						(* absoluter Nullpunkt in �C *)
-	RU : REAL := 8.314472; 					(* Universelle Gaskonstante in J / (mol � K) *)
+	G : REAL := 9.80665; 						(* Erdbeschleunigung in m / s² *)
+	T0 : REAL := -273.15;						(* absoluter Nullpunkt in °C *)
+	RU : REAL := 8.314472; 					(* Universelle Gaskonstante in J / (mol · K) *)
 	PN : REAL := 101325.0;					(* NormalDruck in Pa *)
 END_STRUCT
 END_TYPE
@@ -15987,10 +15987,10 @@ TYPE CONSTANTS_SETUP :
 STRUCT
 	(* setup Parameters *)
 	EXTENDED_ASCII : BOOL := TRUE;
-	CHARNAMES : ARRAY[1..4] OF STRING(253) := ';"&quot;&&amp;<&lt;>&gt;�&euro;�&nbsp;�&iexcl;�&cent;�&pound;�&curren;�&yen;�&brvbar;�&sect;�&uml;�&copy;�&ordf;�&laquo;�&not;�&shy;�&reg;�&macr;�&deg;�&plusmn;�&sup2;�&sup3;�&acute;�&micro;�&para;�&middot;�&cedil;�&sup1;�&ordm;�&raquo;�&frac14;�&Ucirc;',
-		';�&frac34;�&iquest;�&Agrave;�&Aacute;�&Acirc;�&Atilde;�&Auml;�&Aring;�&AElig;�&Ccedil;�&Egrave;�&Eacute;�&Ecirc;�&Euml;�&Igrave;�&Iacute;�&Icirc;�&Iuml;�&ETH;�&Ntilde;�&Ograve;�&Oacute;�&Ocirc;�&Otilde;�&Ouml;�&times;�&Oslash;�&Ugrave;�&Uacute;�&frac12;',
-		';�&Uuml;�&Yacute;�&THORN;�&szlig;�&agrave;�&aacute;�&acirc;�&atilde;�&auml;�&aring;�&aelig;�&ccedil;�&egrave;�&eacute;�&ecirc;�&euml;�&igrave;�&iacute;�&icirc;�&iuml;�&eth;�&ntilde;�&ograve;�&oacute;�&ocirc;�&otilde;�&ouml;�&divide;�&oslash;�&ugrave;',
-		';�&uacute;�&ucirc;�&uuml;�&yacute;�&thorn;�&yuml;';
+	CHARNAMES : ARRAY[1..4] OF STRING(253) := ';"&quot;&&amp;<&lt;>&gt;&euro; &nbsp;¡&iexcl;¢&cent;£&pound;¤&curren;¥&yen;¦&brvbar;§&sect;¨&uml;©&copy;ª&ordf;«&laquo;¬&not;­&shy;®&reg;¯&macr;°&deg;±&plusmn;²&sup2;³&sup3;´&acute;µ&micro;¶&para;·&middot;¸&cedil;¹&sup1;º&ordm;»&raquo;¼&frac14;Û&Ucirc;',
+		';¾&frac34;¿&iquest;À&Agrave;Á&Aacute;Â&Acirc;Ã&Atilde;Ä&Auml;Å&Aring;Æ&AElig;Ç&Ccedil;È&Egrave;É&Eacute;Ê&Ecirc;Ë&Euml;Ì&Igrave;Í&Iacute;Î&Icirc;Ï&Iuml;Ð&ETH;Ñ&Ntilde;Ò&Ograve;Ó&Oacute;Ô&Ocirc;Õ&Otilde;Ö&Ouml;×&times;Ø&Oslash;Ù&Ugrave;Ú&Uacute;½&frac12;',
+		';Ü&Uuml;Ý&Yacute;Þ&THORN;ß&szlig;à&agrave;á&aacute;â&acirc;ã&atilde;ä&auml;å&aring;æ&aelig;ç&ccedil;è&egrave;é&eacute;ê&ecirc;ë&euml;ì&igrave;í&iacute;î&icirc;ï&iuml;ð&eth;ñ&ntilde;ò&ograve;ó&oacute;ô&ocirc;õ&otilde;ö&ouml;÷&divide;ø&oslash;ù&ugrave;',
+		';ú&uacute;û&ucirc;ü&uuml;ý&yacute;þ&thorn;ÿ&yuml;';
 	MTH_OFS : ARRAY[1..12] OF INT := 0,31,59,90,120,151,181,212,243,273,304,334;
 	DECADES : ARRAY[0..8] OF REAL := 1.0,10.0,100.0,1000.0,10000.0,100000.0,1000000.0,10000000.0,100000000.0;
 END_STRUCT

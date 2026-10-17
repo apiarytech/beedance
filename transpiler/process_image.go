@@ -113,7 +113,7 @@ func (t *Transpiler) transpileProcessImage(receiver string, blocks ...[]*ast.Var
 	reads, writes := []string{}, []string{}
 	for _, block := range blocks {
 		for _, decl := range block {
-			if decl.Location == nil || decl.Location.Location == nil {
+			if decl.Location == nil || decl.Location.Location == nil || isPartlyLocated(decl.Location.Location.Address) {
 				continue
 			}
 			goType := t.mapIecTypeToGo(decl.DataType)

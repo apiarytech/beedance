@@ -10,6 +10,7 @@ go install github.com/apiarytech/beedance@latest
 | `beedance -vm` | Starts the REPL with the bytecode VM |
 | `beedance -iec FILE` | Runs a source file with the evaluator |
 | `beedance -iec FILE -vm` | Compiles the file's first PROGRAM (with the file's function blocks, functions and types) and runs its initialization, then 5 scans 100 ms apart, printing each |
+| `beedance -iec FILE -vm [-cycles N]` with a `CONFIGURATION` | Runs the configuration (package [vmconfig](embedding.md#running-a-configuration-vm)): its tasks, 10 ms a cycle, for N cycles or until Ctrl+C, then prints its globals |
 | `beedance -e "TEXT"` | Evaluates a string (with `-vm`, on the VM) |
 | `beedance -iec FILE -go OUT.go` | Transpiles to Go |
 | `beedance -iec FILE -go OUT.go -go-compact-image` | Transpiles to Go with a process image of only the entries the located variables use, for microcontroller firmware |

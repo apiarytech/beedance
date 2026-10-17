@@ -43,6 +43,16 @@ func (c *Compiler) builtinResultType(name string, args []ast.Expression) (object
 			return t, true
 		}
 		return "", false
+	case "DAY_OF_WEEK":
+		return object.INT_OBJ, true
+	case "$DATEPART":
+		return object.DINT_OBJ, true
+	case "TO_BIG_ENDIAN", "TO_LITTLE_ENDIAN", "FROM_BIG_ENDIAN", "FROM_LITTLE_ENDIAN":
+		if len(args) == 0 {
+			return "", false
+		}
+		t, err := c.getExpressionType(args[0])
+		return t, err == nil && t != ""
 	}
 	if i := strings.LastIndex(upper, "_TO_"); i > 0 {
 		if t, ok := conversionTargets[upper[i+len("_TO_"):]]; ok {

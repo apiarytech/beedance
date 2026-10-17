@@ -23,6 +23,7 @@ func TestActionDeclaration(t *testing.T) {
 					code.Make(code.OpGetLocal, 0), // Get 'a'
 					code.Make(code.OpConstant, 0), // Push 1 for addition
 					code.Make(code.OpAdd),         // Add
+					code.Make(code.OpWrapInt, 2),
 					code.Make(code.OpSetLocal, 0), // Set 'a' again
 					code.Make(code.OpReturn),      // Implicit return
 				},

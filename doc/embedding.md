@@ -47,6 +47,32 @@ for t := range ticker.C {
 | `vm.New(b, vm.WithGlobalsSize(n))` | A VM with `n` global slots instead of `vm.GlobalsSize` (65536, 512 KB on a 32-bit target), for a microcontroller's RAM; a global past `n` fails the run |
 | `vm.GlobalsNeeded(b)` | The global slots bytecode `b` uses. For a store shared by init and scan, size it to the larger of the two, and to the `Global` slot of any variable the host binds |
 | `stdlib.ClockBuiltins(clock)` | `__CLOCK` (read by the standard timers) and `TIME()` reading the host's clock, by built-in index |
+| `VM.ShareIO(image)` | Makes `image` the VM's I/O image, so several VMs share one process image |
+
+## Running a configuration (VM)
+
+Package `vmconfig` runs a source file's `CONFIGURATION`: each program
+instance is its program compiled as a unit, the instances share the
+configuration's and resources' `VAR_GLOBAL`s and one process image, and the
+tasks run by `INTERVAL`, `SINGLE` (rising edge of a global) and `PRIORITY`;
+a program without a task runs every cycle after the tasks. Connections,
+`PROGRAM P1 WITH T1 : MAIN(k := g, out => cg)`, are made on every run, and
+`VAR_CONFIG` gives initial values (also of an instance's member,
+`R1.P1.t.PT`) and addresses (`%I*` ones too).
+
+```go
+c, err := vmconfig.LoadSource(source) // compiles and initializes every instance
+c.IO["%IX0.0"] = &object.Boolean{Value: true}
+err = c.Cycle(elapsed)                // the tasks due at elapsed; timers read it
+v, _ := c.Global("cg")                // a global after the cycle
+n, _ := c.Instance("R1.P1").Value("n")
+c.SetGlobal("trig", &object.Boolean{Value: true}) // e.g. a SINGLE trigger
+err = c.Run(ctx, 10*time.Millisecond) // or cycles on the wall clock until ctx ends
+```
+
+Two resources share one scope of globals, so they may not declare the same
+name. A `VAR_CONFIG` path reaches a program's variable or a member of one of
+its instances, not deeper.
 
 ## Binding variables
 

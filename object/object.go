@@ -39,6 +39,7 @@ const (
 	NULL_OBJ                    = "NULL"                    // Represents a null or uninitialized value
 	RETURN_VALUE_OBJ            = "RETURN_VALUE"            // A wrapper for return values
 	EXIT_OBJ                    = "EXIT"                    // A signal to exit a loop
+	CONTINUE_OBJ                = "CONTINUE"                // A signal to go on with a loop's next iteration
 	ERROR_OBJ                   = "ERROR"                   // Represents a runtime error
 	FUNCTION_OBJ                = "FUNCTION"                // A user-defined function
 	STRING_OBJ                  = "STRING"                  // A single-byte character string
@@ -240,6 +241,16 @@ func (e *Exit) Type() ObjectType { return EXIT_OBJ }
 
 // Inspect returns a string representation of the object.
 func (e *Exit) Inspect() string { return "EXIT" }
+
+// Continue objects signal a CONTINUE: the rest of the loop's body is
+// skipped, and the loop goes on with its next iteration.
+type Continue struct{}
+
+// Type returns the object's type.
+func (c *Continue) Type() ObjectType { return CONTINUE_OBJ }
+
+// Inspect returns a string representation of the object.
+func (c *Continue) Inspect() string { return "CONTINUE" }
 
 // It is an internal object used by the evaluator and not exposed to the user.
 type Jump struct {
@@ -481,6 +492,7 @@ func (st *SubrangeType) Inspect() string {
 type EnumeratedValue struct {
 	TypeName string
 	Value    string
+	Number   int64 // the value's number: as declared, or its place from 0
 }
 
 // Type returns the object's type.
@@ -721,6 +733,7 @@ type Transition struct {
 	FromSteps []*ast.Identifier
 	ToSteps   []*ast.Identifier
 	Condition ast.Expression
+	Priority  int64 // (PRIORITY := n), lower first; the largest when not given
 }
 
 // Type returns the object's type.
@@ -976,6 +989,7 @@ type InterfaceDefinition struct {
 	Name       *ast.Identifier
 	Methods    []*ast.MethodDeclaration
 	Properties []*ast.PropertyDeclaration
+	Extends    []ast.Expression // the interfaces it extends
 }
 
 // Type returns the object's type.
@@ -1105,6 +1119,11 @@ type ProgramInstance struct {
 	Env            *Environment
 	TaskName       string
 	OutputMappings []OutputMapping
+	// Connections are the instance's inputs and outputs connected in its
+	// configuration, PROGRAM P1 WITH T1 : MAIN(k := g, out => cg), which a
+	// call without arguments makes, in ConnectionEnv (its resource).
+	Connections   []ast.Expression
+	ConnectionEnv *Environment
 }
 
 // Type returns the object's type.

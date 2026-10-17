@@ -1374,7 +1374,7 @@ VAR
 	init: BOOL;
 END_VAR
 
-(* l�sche die millisekunden bei sunrise und sunset *)
+(* lösche die millisekunden bei sunrise und sunset *)
 SUN_RISE := DWORD_TO_TOD(TOD_TO_DWORD(SUN_RISE) / 1000 * 1000);
 SUN_SET := DWORD_TO_TOD(TOD_TO_DWORD(SUN_SET) / 1000 * 1000);
 
@@ -1931,7 +1931,7 @@ CASE state OF
 		last_change := tx;
 	END_IF;
 
-3:	(* abwarten bis z�ndung eingeschaltet werden kann *)
+3:	(* abwarten bis zündung eingeschaltet werden kann *)
 	IF tx - last_change >= pre_vent_time - pre_ignite_time THEN
 		ignite := TRUE;
 		state := 4;
@@ -1969,7 +1969,7 @@ CASE state OF
 		END_IF;
 	END_IF;
 
-6:	(* brenner l�uft, flammueberwachung und nach ablauf der nachigniteszeit ignite abschalten *)
+6:	(* brenner läuft, flammueberwachung und nach ablauf der nachigniteszeit ignite abschalten *)
 	IF NOT flame AND NOT multiple_ignition THEN
 		(* notabschaltung da flammwaechster keine flamme meldet *)
 		state := 7;
@@ -2009,7 +2009,7 @@ IF NOT in THEN
 	last_change := tx;
 END_IF;
 
-(* runtimez�hler *)
+(* runtimezähler *)
 timer1(in := flame AND in AND motor AND coil1 AND NOT coil2, seconds := runtime1, cycles := cycles);
 timer2(in := flame AND in AND motor AND coil1 AND coil2, seconds := runtime2, cycles := cycles2);
 KWH := UDINT_TO_REAL(runtime1) * KW1 / 3600.0 + UDINT_TO_REAL(runtime2) * KW2 / 3600.0;
@@ -2057,16 +2057,16 @@ END_IF;
 (*
 Bezeichnungen:
 r = relative Luftfeuchte
-T = Temperatur in �C
+T = Temperatur in °C
 TK = Temperatur in Kelvin (TK = T + 273.15)
-TD = Taupunkttemperatur in �C
+TD = Taupunkttemperatur in °C
 DD = Dampfdruck in hPa
-SDD = S�ttigungsdampfdruck in hPa
+SDD = Sättigungsdampfdruck in hPa
 
 Parameter:
-a = 7.5, b = 237.3 f�r T >= 0
-a = 7.6, b = 240.7 f�r T < 0 �ber Wasser (Taupunkt)
-a = 9.5, b = 265.5 f�r T < 0 �ber Eis (Frostpunkt)
+a = 7.5, b = 237.3 für T >= 0
+a = 7.6, b = 240.7 für T < 0 über Wasser (Taupunkt)
+a = 9.5, b = 265.5 für T < 0 über Eis (Frostpunkt)
 
 R* = 8314.3 J/(kmol*K) (universelle Gaskonstante)
 mw = 18.016 kg (Molekulargewicht des Wasserdampfes)
@@ -2121,16 +2121,16 @@ END_IF;
 (*
 Bezeichnungen:
 r = relative Luftfeuchte
-T = Temperatur in �C
+T = Temperatur in °C
 TK = Temperatur in Kelvin (TK = T + 273.15)
-TD = Taupunkttemperatur in �C
+TD = Taupunkttemperatur in °C
 DD = Dampfdruck in hPa
-SDD = S�ttigungsdampfdruck in hPa
+SDD = Sättigungsdampfdruck in hPa
 
 Parameter:
-a = 7.5, b = 237.3 f�r T >= 0
-a = 7.6, b = 240.7 f�r T < 0 �ber Wasser (Taupunkt)
-a = 9.5, b = 265.5 f�r T < 0 �ber Eis (Frostpunkt)
+a = 7.5, b = 237.3 für T >= 0
+a = 7.6, b = 240.7 für T < 0 über Wasser (Taupunkt)
+a = 9.5, b = 265.5 für T < 0 über Eis (Frostpunkt)
 
 R* = 8314.3 J/(kmol*K) (universelle Gaskonstante)
 mw = 18.016 kg (Molekulargewicht des Wasserdampfes)
@@ -2280,11 +2280,11 @@ HEAT := TY > 0.0;
 tv=ti+(tvmax-ti)*((ti-tau)/(ti-taumin))^(1/n)
 
 tv aktuelle Vorlauftemp.
-ti Raumtemperatur innen (20�C)
-tau aktuelle Au�entemperatur
-taumin minimale Au�entemperatur -12�C oder -15�C
-n Heizk�rperexponent (meistens 1,33)
-Fu�bodenheizung = 1,1
+ti Raumtemperatur innen (20°C)
+tau aktuelle Außentemperatur
+taumin minimale Außentemperatur -12°C oder -15°C
+n Heizkörperexponent (meistens 1,33)
+Fußbodenheizung = 1,1
 Wandheizung 1,3
 
 Normen z. B. DIN 4703, DIN 4725 oder die Literatur, z. B Recknagel Abschnitt 1.3.5.
@@ -2729,18 +2729,18 @@ END_VAR
 WATER_CP := LINEAR_INT(T, Data, Pts);
 
 (*
-    �C - die Celsius-Temperatur in Grad Celsius
-    v � das spezifische Volumen in Kubikdezimeter je Kilogramm dm�/kg
-    h � die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
-    u � die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
-    s � die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    cp - die spezifische W�rmekapazit�t bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    Y � Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
-    L � W�rmeleitf�higkeit in Milliwatt je Meter mal Kelvin  mW / (m�K)
-    n � Viskosit�t in Mikropascal mal Sekunde uPa�s
-    s ? � Oberfl�chenspannung in Millinewton je Meter  mN/m
+    °C - die Celsius-Temperatur in Grad Celsius
+    v  das spezifische Volumen in Kubikdezimeter je Kilogramm dm³/kg
+    h  die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
+    u  die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
+    s  die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    cp - die spezifische Wärmekapazität bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    Y  Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
+    L  Wärmeleitfähigkeit in Milliwatt je Meter mal Kelvin  mW / (m·K)
+    n  Viskosität in Mikropascal mal Sekunde uPa·s
+    s ?  Oberflächenspannung in Millinewton je Meter  mN/m
 
-�C 		v 				h 			u 		s 			cp 		Y 		L		n		s
+°C 		v 				h 			u 		s 			cp 		Y 		L		n		s
 -20		1,006580
 0 		1,000160 		0,06 		-0,04 	-0,0001 	4,228 	-0,080 	561,0 	1792 	75,65
 4		1,000028
@@ -2763,19 +2763,19 @@ WATER_CP := LINEAR_INT(T, Data, Pts);
 
 Stoffdaten von Wasser Quelle Wickipedia
 
-Wasser hat unter Normaldruck seine gr��te Dichte von 1000 Kilogramm pro Kubikmeter bei 3,98 �C und zeigt damit eine Dichteanomalie.
-Diese besteht darin, dass sich Wasser unterhalb von 3,98 �C bei weiterer Temperaturverringerung, auch beim Wechsel zum festen
-Aggregatzustand, wieder ausdehnt, was man nur von wenigen Stoffen kennt. Die derzeit genauesten publizierten Werte f�r die maximale
-Dichte liegen bei (999,974950 � 0,00084) kg/m� und bei (3,983 � 0,00067) �C f�r die Temperatur, bei der dieser Wert erreicht wird.
-Die Werte stellen einen Mittelwert der von verschiedenen physikalischen Instituten ver�ffentlichten Zahlen dar (Stand 2001).
+Wasser hat unter Normaldruck seine größte Dichte von 1000 Kilogramm pro Kubikmeter bei 3,98 °C und zeigt damit eine Dichteanomalie.
+Diese besteht darin, dass sich Wasser unterhalb von 3,98 °C bei weiterer Temperaturverringerung, auch beim Wechsel zum festen
+Aggregatzustand, wieder ausdehnt, was man nur von wenigen Stoffen kennt. Die derzeit genauesten publizierten Werte für die maximale
+Dichte liegen bei (999,974950 ± 0,00084) kg/m³ und bei (3,983 ± 0,00067) °C für die Temperatur, bei der dieser Wert erreicht wird.
+Die Werte stellen einen Mittelwert der von verschiedenen physikalischen Instituten veröffentlichten Zahlen dar (Stand 2001).
 
-Die Berechnung der Dichte von luftfreiem Wasser DLF in Abh�ngigkeit von der Temperatur T ([T] = �C) kann mit Hilfe der folgenden
+Die Berechnung der Dichte von luftfreiem Wasser DLF in Abhängigkeit von der Temperatur T ([T] = °C) kann mit Hilfe der folgenden
 Virialgleichung erfolgen:
 : \frac{D_{\rm LF}}{\rm g/l} = \frac{a_0 + a_1 T + a_2 T^2 + a_3 T^3 + a_4 T^4 + a_5 T^5}{1 + b T}.
-mit den Koeffizienten: a0 = 999,83952; a1 = 16,952577 (�C)-1; a2 = -7,9905127�10-3 (�C)-2; a3 = -4,6241757�10-5 (�C)-3;
-a4 = 1,0584601�10-7 (�C)-4; a5 = -2,8103006�10-10 (�C)-5 und b = 0,0168872.
-F�r die Berechnung der Dichte von luftges�ttigtem Wasser korrigiert man den Wert nach
-DLG/(g/l) = DLF/(g/l) - 0,004612 + 0,000106 (�C)-1�T. (Quelle: PTB-Mitteilungen 100/3-90)
+mit den Koeffizienten: a0 = 999,83952; a1 = 16,952577 (°C)-1; a2 = -7,9905127·10-3 (°C)-2; a3 = -4,6241757·10-5 (°C)-3;
+a4 = 1,0584601·10-7 (°C)-4; a5 = -2,8103006·10-10 (°C)-5 und b = 0,0168872.
+Für die Berechnung der Dichte von luftgesättigtem Wasser korrigiert man den Wert nach
+DLG/(g/l) = DLF/(g/l) - 0,004612 + 0,000106 (°C)-1·T. (Quelle: PTB-Mitteilungen 100/3-90)
 
 *)
 END_FUNCTION
@@ -2805,18 +2805,18 @@ WATER_DENSITY := (a0 + a1*T + a2*T2 + a3*T2*T + a4*T4 + a5*T4*T) / (1.0 + b*T);
 IF sat THEN WATER_DENSITY := WATER_DENSITY - 0.004612 + 0.000106 * T; END_IF;
 
 (*
-    �C - die Celsius-Temperatur in Grad Celsius
-    v � das spezifische Volumen in Kubikdezimeter je Kilogramm dm�/kg
-    h � die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
-    u � die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
-    s � die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    cp - die spezifische W�rmekapazit�t bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    Y � Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
-    L � W�rmeleitf�higkeit in Milliwatt je Meter mal Kelvin  mW / (m�K)
-    n � Viskosit�t in Mikropascal mal Sekunde uPa�s
-    s ? � Oberfl�chenspannung in Millinewton je Meter  mN/m
+    °C - die Celsius-Temperatur in Grad Celsius
+    v  das spezifische Volumen in Kubikdezimeter je Kilogramm dm³/kg
+    h  die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
+    u  die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
+    s  die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    cp - die spezifische Wärmekapazität bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    Y  Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
+    L  Wärmeleitfähigkeit in Milliwatt je Meter mal Kelvin  mW / (m·K)
+    n  Viskosität in Mikropascal mal Sekunde uPa·s
+    s ?  Oberflächenspannung in Millinewton je Meter  mN/m
 
-�C 		v 				h 			u 		s 			cp 		Y 		L		n		s
+°C 		v 				h 			u 		s 			cp 		Y 		L		n		s
 -20		1,006580
 0 		1,000160 		0,06 		-0,04 	-0,0001 	4,228 	-0,080 	561,0 	1792 	75,65
 4		1,000028
@@ -2854,18 +2854,18 @@ END_VAR
 WATER_ENTHALPY := LINEAR_INT(T, Data, Pts);
 
 (*
-    �C - die Celsius-Temperatur in Grad Celsius
-    v � das spezifische Volumen in Kubikdezimeter je Kilogramm dm�/kg
-    h � die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
-    u � die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
-    s � die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    cp - die spezifische W�rmekapazit�t bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg�K)
-    Y � Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
-    L � W�rmeleitf�higkeit in Milliwatt je Meter mal Kelvin  mW / (m�K)
-    n � Viskosit�t in Mikropascal mal Sekunde uPa�s
-    s ? � Oberfl�chenspannung in Millinewton je Meter  mN/m
+    °C - die Celsius-Temperatur in Grad Celsius
+    v  das spezifische Volumen in Kubikdezimeter je Kilogramm dm³/kg
+    h  die spezifische Enthalpie in Kilojoule je Kilogramm 	kJ/kg
+    u  die spezifische Innere Energie in Kilojoule je Kilogramm 	kJ/kg
+    s  die spezifische Entropie in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    cp - die spezifische Wärmekapazität bei konstantem Druck in Kilojoule je Kilogramm mal Kelvin 	kJ/(kg·K)
+    Y  Volumenausdehnungskoeffizient in 10-3 durch Kelvin  10-3/K
+    L  Wärmeleitfähigkeit in Milliwatt je Meter mal Kelvin  mW / (m·K)
+    n  Viskosität in Mikropascal mal Sekunde uPa·s
+    s ?  Oberflächenspannung in Millinewton je Meter  mN/m
 
-�C 		v 				h 			u 		s 			cp 		Y 		L		n		s
+°C 		v 				h 			u 		s 			cp 		Y 		L		n		s
 -20		1,006580
 0 		1,000160 		0,06 		-0,04 	-0,0001 	4,228 	-0,080 	561,0 	1792 	75,65
 4		1,000028
@@ -2888,19 +2888,19 @@ WATER_ENTHALPY := LINEAR_INT(T, Data, Pts);
 
 Stoffdaten von Wasser Quelle Wickipedia
 
-Wasser hat unter Normaldruck seine gr��te Dichte von 1000 Kilogramm pro Kubikmeter bei 3,98 �C und zeigt damit eine Dichteanomalie.
-Diese besteht darin, dass sich Wasser unterhalb von 3,98 �C bei weiterer Temperaturverringerung, auch beim Wechsel zum festen
-Aggregatzustand, wieder ausdehnt, was man nur von wenigen Stoffen kennt. Die derzeit genauesten publizierten Werte f�r die maximale
-Dichte liegen bei (999,974950 � 0,00084) kg/m� und bei (3,983 � 0,00067) �C f�r die Temperatur, bei der dieser Wert erreicht wird.
-Die Werte stellen einen Mittelwert der von verschiedenen physikalischen Instituten ver�ffentlichten Zahlen dar (Stand 2001).
+Wasser hat unter Normaldruck seine größte Dichte von 1000 Kilogramm pro Kubikmeter bei 3,98 °C und zeigt damit eine Dichteanomalie.
+Diese besteht darin, dass sich Wasser unterhalb von 3,98 °C bei weiterer Temperaturverringerung, auch beim Wechsel zum festen
+Aggregatzustand, wieder ausdehnt, was man nur von wenigen Stoffen kennt. Die derzeit genauesten publizierten Werte für die maximale
+Dichte liegen bei (999,974950 ± 0,00084) kg/m³ und bei (3,983 ± 0,00067) °C für die Temperatur, bei der dieser Wert erreicht wird.
+Die Werte stellen einen Mittelwert der von verschiedenen physikalischen Instituten veröffentlichten Zahlen dar (Stand 2001).
 
-Die Berechnung der Dichte von luftfreiem Wasser DLF in Abh�ngigkeit von der Temperatur T ([T] = �C) kann mit Hilfe der folgenden
+Die Berechnung der Dichte von luftfreiem Wasser DLF in Abhängigkeit von der Temperatur T ([T] = °C) kann mit Hilfe der folgenden
 Virialgleichung erfolgen:
 : \frac{D_{\rm LF}}{\rm g/l} = \frac{a_0 + a_1 T + a_2 T^2 + a_3 T^3 + a_4 T^4 + a_5 T^5}{1 + b T}.
-mit den Koeffizienten: a0 = 999,83952; a1 = 16,952577 (�C)-1; a2 = -7,9905127�10-3 (�C)-2; a3 = -4,6241757�10-5 (�C)-3;
-a4 = 1,0584601�10-7 (�C)-4; a5 = -2,8103006�10-10 (�C)-5 und b = 0,0168872.
-F�r die Berechnung der Dichte von luftges�ttigtem Wasser korrigiert man den Wert nach
-DLG/(g/l) = DLF/(g/l) - 0,004612 + 0,000106 (�C)-1�T. (Quelle: PTB-Mitteilungen 100/3-90)
+mit den Koeffizienten: a0 = 999,83952; a1 = 16,952577 (°C)-1; a2 = -7,9905127·10-3 (°C)-2; a3 = -4,6241757·10-5 (°C)-3;
+a4 = 1,0584601·10-7 (°C)-4; a5 = -2,8103006·10-10 (°C)-5 und b = 0,0168872.
+Für die Berechnung der Dichte von luftgesättigtem Wasser korrigiert man den Wert nach
+DLG/(g/l) = DLF/(g/l) - 0,004612 + 0,000106 (°C)-1·T. (Quelle: PTB-Mitteilungen 100/3-90)
 
 *)
 END_FUNCTION

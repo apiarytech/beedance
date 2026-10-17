@@ -52,10 +52,15 @@ type Text struct {
 // ParseText reads a body in the text form, lang "LD" or "FBD". src is the
 // text between the LD (or FBD) keyword and END_LD (END_FBD), and line is
 // the source line src starts on.
-func ParseText(lang, src string, line int) (*Text, error) {
+func ParseText(lang, src string, line int) (*Text, error) { return ParseTextAt(lang, src, line, 1) }
+
+// ParseTextAt is ParseText for src starting at column col of its line (1
+// for a line's start): src begins just after LD or FBD, so an element on
+// that line is placed at its column in the source, as an editor needs.
+func ParseTextAt(lang, src string, line, col int) (*Text, error) {
 	b := &builder{lang: strings.ToUpper(lang), rows: map[int]int{}, instances: map[string]*Elem{}, called: map[string]int{},
 		wires: map[string]bool{}, pending: map[int]*Elem{}}
-	toks, err := scan(src, line)
+	toks, err := scan(src, line, col)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", b.lang, err)
 	}
@@ -155,7 +160,7 @@ const (
 	tNewline
 	tIdent   // a name
 	tLiteral // a number, string or typed literal (T#5S, 16#FF, INT#3)
-	tPunct   // ( ) [ ] | , ; . : := => = / + -
+	tPunct   // ( ) [ ] | , ; . : := => = / + - >>
 )
 
 type tok struct {
@@ -175,9 +180,8 @@ func (t tok) String() string {
 }
 
 // scan splits src into tokens; comments are dropped, ends of lines kept.
-func scan(src string, line int) ([]tok, error) {
+func scan(src string, line, col int) ([]tok, error) {
 	var out []tok
-	col := 1
 	for i := 0; i < len(src); {
 		c := src[i]
 		start := tok{line: line, col: col}
@@ -267,8 +271,8 @@ func scan(src string, line int) ([]tok, error) {
 			advance(j - i)
 		default:
 			n := 1
-			if strings.HasPrefix(src[i:], ":=") || strings.HasPrefix(src[i:], "=>") {
-				n = 2
+			if strings.HasPrefix(src[i:], ":=") || strings.HasPrefix(src[i:], "=>") || strings.HasPrefix(src[i:], ">>") {
+				n = 2 // >> is a jump (IEC-71)
 			} else if strings.IndexByte("()[]|,;.:=/+-", c) < 0 {
 				return nil, fmt.Errorf("line %d, column %d: unexpected %q", start.line, start.col, string(c))
 			}
@@ -659,7 +663,8 @@ func (b *builder) netlist() error {
 			depth--
 		}
 		start := i == 0 || b.toks[i-1].kind == tNewline || b.toks[i-1].text == ";"
-		if depth == 0 && start && t.kind == tIdent && (b.toks[i+1].text == ":" || b.toks[i+1].text == "(") {
+		if depth == 0 && start && t.kind == tIdent && (b.toks[i+1].text == ":" || b.toks[i+1].text == "(") &&
+			!b.labelAt(i) && !(token.SameIdent(t.text, "RETURN") && b.toks[i+1].text == "(") && (i == 0 || b.toks[i-1].text != ">>") {
 			b.pending[i] = b.instance(t)
 		}
 	}
@@ -670,6 +675,16 @@ func (b *builder) netlist() error {
 		t := b.peek()
 		if t.kind == tEOF {
 			return nil
+		}
+		// IEC-71: LABEL:, >>LABEL [ (condition) ], RETURN [ (condition) ].
+		if done, err := b.fbdJump(); done || err != nil {
+			if err != nil {
+				return err
+			}
+			if t := b.peek(); t.kind != tNewline && t.kind != tEOF && !b.is(";") {
+				return b.errorf(t, "expected the end of the statement, found %s", t)
+			}
+			continue
 		}
 		if t.kind != tIdent {
 			return b.errorf(t, "expected a statement, found %s", t)
@@ -712,6 +727,68 @@ func (b *builder) netlist() error {
 	}
 }
 
+// labelAt reports whether a label, NAME then ':' alone at the end of its
+// line, starts at token i (IEC-71): in FBD, inst : TYPE has a type after
+// the colon.
+func (b *builder) labelAt(i int) bool {
+	if i < 0 || i+2 >= len(b.toks) || b.toks[i].kind != tIdent || b.toks[i+1].text != ":" {
+		return false
+	}
+	if i > 0 && b.toks[i-1].kind != tNewline && b.toks[i-1].text != ";" {
+		return false
+	}
+	n := b.toks[i+2]
+	return n.kind == tNewline || n.kind == tEOF || n.text == ";"
+}
+
+// label reads NAME: at the parser's position.
+func (b *builder) label() {
+	t := b.next()
+	b.next() // :
+	e := b.add("label", t)
+	e.Label = t.text
+}
+
+// fbdJump reads an FBD label, jump or return (IEC-71), if one is next.
+func (b *builder) fbdJump() (bool, error) {
+	t := b.peek()
+	switch {
+	case b.labelAt(b.pos):
+		b.label()
+		return true, nil
+	case b.is(">>"), t.kind == tIdent && token.SameIdent(t.text, "RETURN"):
+		kind := "return"
+		e := &Elem{}
+		if b.is(">>") {
+			b.next()
+			name := b.next()
+			if name.kind != tIdent {
+				return true, b.errorf(name, "expected a label after >>, found %s", name)
+			}
+			kind = "jump"
+			e = b.add(kind, t)
+			e.Label = name.text
+		} else {
+			b.next()
+			e = b.add(kind, t)
+		}
+		if b.is("(") && b.touching() {
+			b.next()
+			in, err := b.expression()
+			if err != nil {
+				return true, err
+			}
+			b.skipLines()
+			if _, err := b.expect(")"); err != nil {
+				return true, err
+			}
+			e.Ins = []PointIn{{Conns: []Conn{in}}}
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // ---- LD ----
 
 // powerPins are the input a rung drives and the output it continues from,
@@ -724,13 +801,17 @@ var powerPins = map[string][2]string{
 }
 
 // ladder reads an LD body: rungs, each RUNG [name] then its elements left
-// to right, coils last.
+// to right, coils last; a label, NAME:, before a rung (IEC-71).
 func (b *builder) ladder() error {
 	for {
 		b.skipLines()
 		t := b.peek()
 		if t.kind == tEOF {
 			return nil
+		}
+		if b.labelAt(b.pos) {
+			b.label()
+			continue
 		}
 		if !b.is("RUNG") {
 			return b.errorf(t, "expected RUNG, found %s", t)
@@ -760,7 +841,27 @@ func (b *builder) rung(at tok, name string) error {
 		}
 		coils++
 	}
-	if t := b.peek(); t.kind != tEOF && !b.is("RUNG") {
+	// IEC-71: a rung may end in a jump or a return, after its coils.
+	switch t := b.peek(); {
+	case b.is(">>"):
+		b.next()
+		name := b.next()
+		if name.kind != tIdent {
+			return b.errorf(name, "expected a label after >>, found %s", name)
+		}
+		e := b.add("jump", t)
+		e.Label = name.text
+		e.Ins = []PointIn{{Conns: power}}
+		coils++
+		b.skipLines()
+	case t.kind == tIdent && token.SameIdent(t.text, "RETURN"):
+		b.next()
+		e := b.add("return", t)
+		e.Ins = []PointIn{{Conns: power}}
+		coils++
+		b.skipLines()
+	}
+	if t := b.peek(); t.kind != tEOF && !b.is("RUNG") && !b.labelAt(b.pos) {
 		if coils > 0 {
 			return b.errorf(t, "coils end a rung; found %s after them", t)
 		}
@@ -781,7 +882,7 @@ func (b *builder) series(power []Conn, inBranch bool) ([]Conn, bool, error) {
 		b.skipLines()
 		t := b.peek()
 		switch {
-		case t.kind == tEOF, b.is("RUNG"), b.is("("):
+		case t.kind == tEOF, b.is("RUNG"), b.is("("), b.is(">>"), t.kind == tIdent && token.SameIdent(t.text, "RETURN") && !inBranch, b.labelAt(b.pos):
 			if inBranch {
 				return nil, false, b.errorf(t, "'[' not closed by ']'")
 			}

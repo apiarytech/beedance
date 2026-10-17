@@ -232,6 +232,26 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			input = &BitString{Value: uint64(i), Width: width}
 		}
 	}
+	// TO_<type>(x): from the type x has; an enumeration's value converts as
+	// its number.
+	if fromType == "ANY" {
+		if ev, isEnum := input.(*EnumeratedValue); isEnum {
+			return ApplyConversion(&LInt{Value: ev.Number}, "LINT", toType)
+		}
+		fromType = ConversionTypeOf(input)
+	}
+	// TRUNC_<type>(x): a real truncated toward zero.
+	if fromType == "TRUNC" {
+		f, ok := GetFloat64Value(input)
+		if !ok {
+			return NewBuiltinError("TRUNC_%s takes a REAL or an LREAL, got %s", toType, input.Type())
+		}
+		return ApplyConversion(&LInt{Value: int64(math.Trunc(f))}, "LINT", toType)
+	}
+	// A CHAR is a one-character STRING, a WCHAR a one-character WSTRING.
+	if r, handled := charConversion(input, strings.ToUpper(fromType), strings.ToUpper(toType)); handled {
+		return r
+	}
 	actualType := string(input.Type())
 	isValidFromType := false
 	if (IsIntegerType(fromType) && IsIntegerType(actualType)) ||
@@ -242,7 +262,7 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 		(IsBitStringType(fromType) && isBitStringOfWidth(input, fromType)) ||
 		(fromType == "ANY_INT" && IsIntegerType(actualType)) ||
 		(fromType == "ANY_REAL" && IsNumeric(input)) ||
-		(fromType == "BCD" && actualType == string(BITSTRING_OBJ)) ||
+		(fromType == "BCD" && (actualType == string(BITSTRING_OBJ) || IsIntegerType(actualType))) ||
 		(actualType == fromType) ||
 		(temporalTypeName(fromType) != "" && temporalTypeName(fromType) == actualType) {
 		isValidFromType = true
@@ -332,10 +352,11 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			}
 			return &String{Value: "FALSE"}
 		case *Time:
-			return &String{Value: val.Value.String()}
-		case *Real, *LReal:
-			floatVal, _ := GetFloat64Value(val)
-			return &String{Value: fmt.Sprintf("%f", floatVal)}
+			return &String{Value: FormatTime(val.Value)}
+		case *Real:
+			return &String{Value: FormatReal(val.Value, 32)}
+		case *LReal:
+			return &String{Value: FormatReal(val.Value, 64)}
 		case *BitString:
 			// BYTE_TO_STRING(16#C0) is '192', as in CODESYS.
 			return &String{Value: strconv.FormatUint(val.Value, 10)}
@@ -390,13 +411,16 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 	}
 	if toType == "BCD" {
 		switch val := input.(type) {
-		case *LInt, *SInt, *Int, *DInt:
+		case *LInt, *SInt, *Int, *DInt, *USInt, *UInt, *UDInt, *ULInt:
 			iVal, _, _ := GetIntegerObjectValue(val)
-			bcd, err := intToBcd(iVal)
+			// The BCD bit string is as wide as the integer type converted:
+			// SINT_TO_BCD a BYTE, INT_TO_BCD a WORD, DINT_TO_BCD a DWORD.
+			width := BCDWidth(fromType, iVal)
+			bcd, err := ToBCD(iVal, width)
 			if err != nil {
 				return NewBuiltinError("%s", err.Error())
 			}
-			return &BitString{Value: uint64(bcd), Width: 16}
+			return &BitString{Value: bcd, Width: width}
 		default:
 			return NewBuiltinError("conversion from %s to BCD is not supported", input.Type())
 		}
@@ -423,19 +447,80 @@ func intToBcd(val int64) (uint16, error) {
 	return bcd, nil
 }
 
-func bcdToInt(input Object) Object {
-	bs, ok := input.(*BitString)
-	if !ok || bs.Width != 16 {
-		return NewBuiltinError("argument for BCD_TO_INT must be a WORD (16-bit BitString), got %s", input.Type())
+// BCDWidth returns the width of the BCD bit string an integer of the type
+// typeName converts to: 8 for SINT and USINT, 16 for INT and UINT, 32 for
+// DINT and UDINT, 64 for LINT and ULINT; for another type, the narrowest of
+// 16, 32 and 64 bits that holds n.
+func BCDWidth(typeName string, n int64) int {
+	switch strings.ToUpper(typeName) {
+	case "SINT", "USINT":
+		return 8
+	case "INT", "UINT":
+		return 16
+	case "DINT", "UDINT":
+		return 32
+	case "LINT", "ULINT":
+		return 64
 	}
-	bcdVal := uint16(bs.Value)
+	switch {
+	case n <= 9999:
+		return 16
+	case n <= 99999999:
+		return 32
+	}
+	return 64
+}
+
+// ToBCD returns n as binary-coded decimal in a bit string of width bits,
+// four bits a digit: 1234 is 16#1234.
+func ToBCD(n int64, width int) (uint64, error) {
+	digits := width / 4
+	if n < 0 || (digits < 16 && n >= int64(math.Pow10(digits))) {
+		if digits < 16 {
+			return 0, fmt.Errorf("value %d out of range for %d-digit BCD conversion (0-%d)", n, digits, int64(math.Pow10(digits))-1)
+		}
+		return 0, fmt.Errorf("value %d out of range for %d-digit BCD conversion", n, digits)
+	}
+	var bcd uint64
+	for shift := uint(0); n > 0; shift += 4 {
+		bcd |= uint64(n%10) << shift
+		n /= 10
+	}
+	return bcd, nil
+}
+
+// FromBCD returns the number a binary-coded decimal holds, 16#1234 is 1234,
+// or an error if a digit is over 9.
+func FromBCD(v uint64) (int64, error) {
 	var result int64
-	for i := 3; i >= 0; i-- {
-		nibble := (bcdVal >> (i * 4)) & 0xF
+	for i := 15; i >= 0; i-- {
+		nibble := (v >> (uint(i) * 4)) & 0xF
 		if nibble > 9 {
-			return NewBuiltinError("invalid BCD format: nibble %d has value %d > 9", i, nibble)
+			return 0, fmt.Errorf("invalid BCD format: nibble %d has value %d > 9", i, nibble)
 		}
 		result = result*10 + int64(nibble)
+	}
+	return result, nil
+}
+
+func bcdToInt(input Object) Object {
+	var v uint64
+	switch val := input.(type) {
+	case *BitString:
+		if val.Width < 64 && val.Value>>uint(val.Width) != 0 {
+			return NewBuiltinError("argument for BCD_TO_INT: %d does not fit a %d-bit bit string", val.Value, val.Width)
+		}
+		v = val.Value
+	default:
+		n, _, isInt := GetIntegerObjectValue(input)
+		if !isInt || n < 0 {
+			return NewBuiltinError("argument for BCD_TO_INT must be a bit string or a positive integer, got %s", input.Type())
+		}
+		v = uint64(n)
+	}
+	result, err := FromBCD(v)
+	if err != nil {
+		return NewBuiltinError("%s", err.Error())
 	}
 	return &LInt{Value: result}
 }
@@ -516,6 +601,49 @@ func IsEqual(left, right Object) bool {
 
 // EvalInfix is a helper that performs infix operations.
 func EvalInfix(left Object, operator string, right Object) Object {
+	// NULL equals NULL (or a reference to nothing), and nothing else: an
+	// interface variable or a reference compared with NULL.
+	if operator == "=" || operator == "<>" || operator == "EQ" || operator == "NE" {
+		isNull := func(o Object) bool {
+			switch v := o.(type) {
+			case *Null:
+				return true
+			case *Reference:
+				return v.IsNull()
+			}
+			return false
+		}
+		// The other side is NULL, a reference or an instance; a number
+		// compared with NULL stays a type mismatch.
+		nullable := func(o Object) bool {
+			switch o.(type) {
+			case *Null, *Reference, *FunctionBlockInstance, *Hash:
+				return true
+			}
+			return false
+		}
+		_, leftNull := left.(*Null)
+		_, rightNull := right.(*Null)
+		if (leftNull || rightNull) && nullable(left) && nullable(right) {
+			same := isNull(left) && isNull(right)
+			if operator == "<>" || operator == "NE" {
+				return nativeBoolToBooleanObject(!same)
+			}
+			return nativeBoolToBooleanObject(same)
+		}
+	}
+	// The power operator, EXPT: an integer for two integers (truncated), a
+	// real otherwise, as the VM's OpExponent gives it.
+	if operator == "**" && IsNumeric(left) && IsNumeric(right) {
+		l, _ := GetFloat64Value(left)
+		r, _ := GetFloat64Value(right)
+		_, _, leftInt := GetIntegerObjectValue(left)
+		_, _, rightInt := GetIntegerObjectValue(right)
+		if leftInt && rightInt {
+			return &LInt{Value: int64(math.Pow(l, r))}
+		}
+		return &LReal{Value: math.Pow(l, r)}
+	}
 	switch {
 	case IsNumeric(left) && IsNumeric(right):
 		return EvalNumericInfix(left, right, operator)
@@ -1022,6 +1150,12 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 				return NewBuiltinError("division by zero in MOD")
 			}
 			uResultValue = uLeft % uRight
+		case "AND", "&":
+			uResultValue = uLeft & uRight // bitwise on integers, as CODESYS allows
+		case "OR":
+			uResultValue = uLeft | uRight
+		case "XOR":
+			uResultValue = uLeft ^ uRight
 		case "<", "LT":
 			return nativeBoolToBooleanObject(uLeft < uRight)
 		case ">", "GT":
@@ -1068,6 +1202,12 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 				return NewBuiltinError("division by zero in MOD")
 			}
 			resultValue = leftVal % rightVal
+		case "AND", "&":
+			resultValue = leftVal & rightVal // bitwise on integers, as CODESYS allows
+		case "OR":
+			resultValue = leftVal | rightVal
+		case "XOR":
+			resultValue = leftVal ^ rightVal
 		case "<", "LT", ">", "GT", "=", "EQ", "!=", "<>", "NE", "<=", "LE", ">=", "GE":
 			return evalGenericComparison(operator, leftVal, rightVal)
 		default:
@@ -1374,4 +1514,83 @@ func SetBitAs(value Object, n int64, bit bool, typeName string) (Object, error) 
 		_ = v
 		return updated, nil
 	}
+}
+
+// narrowIntegers are the integer types narrower than 64 bits, by name: their
+// width and whether they are signed.
+var narrowIntegers = map[string]struct {
+	width  uint
+	signed bool
+}{
+	"SINT": {8, true}, "INT": {16, true}, "DINT": {32, true},
+	"USINT": {8, false}, "UINT": {16, false}, "UDINT": {32, false},
+}
+
+// IntegerWrapCode returns the code OpWrapInt takes for an integer type
+// narrower than 64 bits (1 onwards, by name ignoring case), or 0.
+func IntegerWrapCode(typeName string) int {
+	switch strings.ToUpper(typeName) {
+	case "SINT":
+		return 1
+	case "INT":
+		return 2
+	case "DINT":
+		return 3
+	case "USINT":
+		return 4
+	case "UINT":
+		return 5
+	case "UDINT":
+		return 6
+	}
+	return 0
+}
+
+// integerWrapTypes are the type names of the codes IntegerWrapCode gives.
+var integerWrapTypes = [...]string{"", "SINT", "INT", "DINT", "USINT", "UINT", "UDINT"}
+
+// WrapInteger returns n wrapped into the range of an integer type, two's
+// complement as an overflowing PLC integer does (SINT 127 + 1 is -128), or n
+// itself for a type it does not narrow.
+func WrapInteger(n int64, typeName string) int64 {
+	t, ok := narrowIntegers[strings.ToUpper(typeName)]
+	if !ok {
+		return n
+	}
+	shift := 64 - t.width
+	if t.signed {
+		return n << shift >> shift
+	}
+	return int64(uint64(n) << shift >> shift)
+}
+
+// WrapIntegerCode is WrapInteger for a code of IntegerWrapCode.
+func WrapIntegerCode(n int64, code int) int64 {
+	if code <= 0 || code >= len(integerWrapTypes) {
+		return n
+	}
+	return WrapInteger(n, integerWrapTypes[code])
+}
+
+// IntegerFits reports whether every value of the integer type from is a
+// value of the integer type to (INT fits DINT, USINT fits INT, INT does not
+// fit UINT), by name ignoring case.
+func IntegerFits(from, to string) bool {
+	from, to = strings.ToUpper(from), strings.ToUpper(to)
+	if from == to {
+		return IsIntegerType(from)
+	}
+	src, okSrc := narrowIntegers[from]
+	dst, okDst := narrowIntegers[to]
+	switch {
+	case !okSrc || !IsIntegerType(to):
+		return false // a 64-bit type, or not integers
+	case !okDst:
+		return to == "LINT" || !src.signed // into LINT, or ULINT from unsigned
+	case src.signed && !dst.signed:
+		return false
+	case !src.signed && dst.signed:
+		return src.width < dst.width
+	}
+	return src.width <= dst.width
 }

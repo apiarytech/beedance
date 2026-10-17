@@ -12,6 +12,7 @@ package stdlib
 import (
 	"github.com/apiarytech/beedance/object"
 	"strings"
+	"unicode/utf8"
 )
 
 func init() {
@@ -46,7 +47,8 @@ var lenFn = func(args ...object.Object) object.Object {
 	case *object.String:
 		return &object.LInt{Value: int64(len(arg.Value))}
 	case *object.WString:
-		return &object.LInt{Value: int64(len(arg.Value))}
+		// A WSTRING counts characters, however many bytes each takes.
+		return &object.LInt{Value: int64(utf8.RuneCountInString(arg.Value))}
 	default:
 		return object.NewBuiltinError("argument to `LEN` not supported, got %s", args[0].Type())
 	}
@@ -90,39 +92,50 @@ var popFn = func(args ...object.Object) object.Object {
 }
 
 var lowerBoundFn = func(args ...object.Object) object.Object {
-	if len(args) != 2 {
-		return object.NewBuiltinError("wrong number of arguments for LOWER_BOUND. got=%d, want=2", len(args))
+	low, _, err := arrayBounds("LOWER_BOUND", args)
+	if err != nil {
+		return err
 	}
-	if _, ok := args[0].(*object.Array); !ok {
-		return object.NewBuiltinError("argument 1 to `LOWER_BOUND` must be of type ARRAY, got %s", args[0].Type())
-	}
-	dim, _, ok := object.GetIntegerObjectValue(args[1])
-	if !ok {
-		return object.NewBuiltinError("argument 2 to `LOWER_BOUND` must be of type INT, got %s", args[1].Type())
-	}
-	if dim != 1 {
-		return object.NewBuiltinError("invalid dimension %d for 1D array", dim)
-	}
-	return &object.LInt{Value: 0}
+	return &object.LInt{Value: low}
 }
 
 var upperBoundFn = func(args ...object.Object) object.Object {
+	_, high, err := arrayBounds("UPPER_BOUND", args)
+	if err != nil {
+		return err
+	}
+	return &object.LInt{Value: high}
+}
+
+// arrayBounds returns the declared lower and upper bound of dimension
+// args[1] (1 for the first) of the array args[0]: ARRAY[2..5] has 2 and 5.
+// A dimension past the first is the elements' array.
+func arrayBounds(name string, args []object.Object) (int64, int64, object.Object) {
 	if len(args) != 2 {
-		return object.NewBuiltinError("wrong number of arguments for UPPER_BOUND. got=%d, want=2", len(args))
+		return 0, 0, object.NewBuiltinError("wrong number of arguments for %s. got=%d, want=2", name, len(args))
 	}
 	arr, ok := args[0].(*object.Array)
 	if !ok {
-		return object.NewBuiltinError("argument 1 to `UPPER_BOUND` must be of type ARRAY, got %s", args[0].Type())
+		return 0, 0, object.NewBuiltinError("argument 1 to `%s` must be of type ARRAY, got %s", name, args[0].Type())
 	}
 	dim, _, ok := object.GetIntegerObjectValue(args[1])
 	if !ok {
-		return object.NewBuiltinError("argument 2 to `UPPER_BOUND` must be of type INT, got %s", args[1].Type())
+		return 0, 0, object.NewBuiltinError("argument 2 to `%s` must be of type INT, got %s", name, args[1].Type())
 	}
-	if dim != 1 {
-		return object.NewBuiltinError("invalid dimension %d for 1D array", dim)
+	dims := []*object.Array{arr}
+	for inner := arr; len(inner.Elements) > 0; {
+		next, isArray := inner.Elements[0].(*object.Array)
+		if !isArray {
+			break
+		}
+		dims = append(dims, next)
+		inner = next
 	}
-	upper := int64(len(arr.Elements) - 1)
-	return &object.LInt{Value: upper}
+	if dim < 1 || dim > int64(len(dims)) {
+		return 0, 0, object.NewBuiltinError("invalid dimension %d for %dD array", dim, len(dims))
+	}
+	arr = dims[dim-1]
+	return arr.LowerBound, arr.LowerBound + int64(len(arr.Elements)) - 1, nil
 }
 
 var firstFn = func(args ...object.Object) object.Object {
@@ -209,10 +222,11 @@ var insertFn = func(args ...object.Object) object.Object {
 		if !ok {
 			return object.NewBuiltinError("argument 2 to `INSERT` for wstrings must be WSTRING, got %s", args[1].Type())
 		}
-		strLen := int64(len(in1.Value))
+		r := []rune(in1.Value)
+		strLen := int64(len(r))
 		// IEC 61131-3: IN2 goes after the P-th character of IN1 (P 0: in front).
 		idx := min(max(p, 0), strLen)
-		return &object.WString{Value: in1.Value[:idx] + in2.Value + in1.Value[idx:]}
+		return &object.WString{Value: string(r[:idx]) + in2.Value + string(r[idx:])}
 	default:
 		return object.NewBuiltinError("argument 1 to `INSERT` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
 	}
@@ -259,7 +273,8 @@ var deleteFn = func(args ...object.Object) object.Object {
 		}
 		return &object.String{Value: in1.Value[:start] + in1.Value[end:]}
 	case *object.WString:
-		strLen := int64(len(in1.Value))
+		r := []rune(in1.Value)
+		strLen := int64(len(r))
 		if l <= 0 || p < 1 || p > strLen { // If L is non-positive or P is out of bounds, do nothing.
 			return in1
 		}
@@ -268,7 +283,7 @@ var deleteFn = func(args ...object.Object) object.Object {
 		if end > strLen { // If deletion goes past the end, truncate to the end.
 			end = strLen
 		}
-		return &object.WString{Value: in1.Value[:start] + in1.Value[end:]}
+		return &object.WString{Value: string(r[:start]) + string(r[end:])}
 	default:
 		return object.NewBuiltinError("argument 1 to `DELETE` must be ARRAY, STRING, or WSTRING, got %s", args[0].Type())
 	}
@@ -341,10 +356,11 @@ var leftFn = func(args ...object.Object) object.Object {
 		if l <= 0 {
 			return &object.WString{Value: ""}
 		}
-		if l >= int64(len(str.Value)) {
+		r := []rune(str.Value)
+		if l >= int64(len(r)) {
 			return str
 		}
-		return &object.WString{Value: str.Value[:l]}
+		return &object.WString{Value: string(r[:l])}
 	default:
 		return object.NewBuiltinError("argument 1 to `LEFT` must be STRING or WSTRING, got %s", args[0].Type())
 	}
@@ -370,14 +386,15 @@ var rightFn = func(args ...object.Object) object.Object {
 		}
 		return &object.String{Value: str.Value[sLen-l:]}
 	case *object.WString:
-		sLen := int64(len(str.Value))
+		r := []rune(str.Value)
+		sLen := int64(len(r))
 		if l <= 0 {
 			return &object.WString{Value: ""}
 		}
 		if l >= sLen {
 			return str
 		}
-		return &object.WString{Value: str.Value[sLen-l:]}
+		return &object.WString{Value: string(r[sLen-l:])}
 	default:
 		return object.NewBuiltinError("argument 1 to `RIGHT` must be STRING or WSTRING, got %s", args[0].Type())
 	}
@@ -409,7 +426,8 @@ var midFn = func(args ...object.Object) object.Object {
 		}
 		return &object.String{Value: str.Value[start:end]}
 	case *object.WString:
-		sLen := int64(len(str.Value))
+		r := []rune(str.Value)
+		sLen := int64(len(r))
 		if l <= 0 || p <= 0 || p > sLen {
 			return &object.WString{Value: ""}
 		}
@@ -418,7 +436,7 @@ var midFn = func(args ...object.Object) object.Object {
 		if end > sLen {
 			end = sLen
 		}
-		return &object.WString{Value: str.Value[start:end]}
+		return &object.WString{Value: string(r[start:end])}
 	default:
 		return object.NewBuiltinError("argument 1 to `MID` must be STRING or WSTRING, got %s", args[0].Type())
 	}
@@ -441,8 +459,12 @@ var findFn = func(args ...object.Object) object.Object {
 		if !ok {
 			return object.NewBuiltinError("argument 2 to `FIND` for wstrings must be WSTRING, got %s", args[1].Type())
 		}
+		// The position is in characters.
 		index := strings.Index(in1.Value, in2.Value)
-		return &object.LInt{Value: int64(index + 1)}
+		if index < 0 {
+			return &object.LInt{Value: 0}
+		}
+		return &object.LInt{Value: int64(utf8.RuneCountInString(in1.Value[:index]) + 1)}
 	case *object.Array:
 		toFind := args[1]
 		for i, elem := range in1.Elements {
@@ -499,18 +521,18 @@ var replaceFn = func(args ...object.Object) object.Object {
 		if !ok {
 			return object.NewBuiltinError("argument 2 to `REPLACE` must be WSTRING, got %s", args[1].Type())
 		}
-		str1 := in1.Value
+		str1 := []rune(in1.Value)
 		str2 := in2.Value
 		sLen := int64(len(str1))
 		start := p - 1
 		if start >= sLen {
-			return &object.WString{Value: str1 + str2}
+			return &object.WString{Value: in1.Value + str2}
 		}
 		endDelete := start + l
 		if endDelete > sLen {
 			endDelete = sLen
 		}
-		return &object.WString{Value: str1[:start] + str2 + str1[endDelete:]}
+		return &object.WString{Value: string(str1[:start]) + str2 + string(str1[endDelete:])}
 	default:
 		return object.NewBuiltinError("argument 1 to `REPLACE` must be STRING or WSTRING, got %s", args[0].Type())
 	}
