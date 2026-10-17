@@ -22,7 +22,7 @@ tinygo test ./token ./lexer ./ast ./code ./object ./parser ./stdlib
 | `token/` ... `transpiler/` | The packages; see [Architecture](architecture.md) |
 | `main.go`, `check_builtins.go` | The `beedance` command |
 | `examples/` | `simple`, `traffic_lights`, `oop_example`, `edge_cases` (the last two with tests) |
-| `embedded/` | Standalone VM program generator and the Pico example |
+| `embedded/` | Standalone VM program generator, firmware examples, the Pico rig, board and emulator tests, benchmarks; see [Architecture](architecture.md#packages) |
 | `reference/` | Grammar notes, sample configurations, the OSCAT BASIC source used in tests |
 | `doc/` | These pages |
 

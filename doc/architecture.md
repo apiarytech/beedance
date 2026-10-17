@@ -8,10 +8,13 @@ flowchart LR
     xml[PLCopen XML<br/>text and graphical] <-->|plcopen| ast
     ast <-->|diagram| svg[LD / FBD / SFC<br/>model, SVG drawings]
     ast --> mac[macro expansion]
-    mac --> ev[evaluator<br/>tree-walking]
-    mac --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
-    mac --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
+    mac --> low[lowering, every engine alike<br/>edges · enables · enums · stdcalls<br/>typedfbs · sfc · inputwrites]
+    low --> ev[evaluator<br/>tree-walking]
+    low --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
+    low --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
+    vm --> cfg[vmconfig<br/>a CONFIGURATION's tasks]
     bc --> emb[embedded<br/>standalone VM program]
+    emb --> mcu[Pico · ESP32 firmware<br/>boards and emulators]
     go -->|GOOS=wasip1| wmod[WASI module<br/>on a WASI runtime]
     ev & vm & go & wmod --> sil[sil<br/>unit tests, compared]
     sil <-->|sil.IO| io[plant model, rig,<br/>or beehive I/O]
@@ -24,11 +27,16 @@ flowchart LR
    and PLCopen imports. It records errors and resynchronizes at the next
    statement, so one mistake does not hide the rest.
 3. **Macros** are expanded on the AST before any backend runs.
-4. A **backend** runs or compiles the AST: see [Backends](backends.md).
-5. **Tests** (`PROGRAM TEST_...`) run on any of the backends through `sil`,
+4. **Lowerings** rewrite the parts of the language that mean the same on
+   every engine into plainer AST, so each backend gets them right alike:
+   edge inputs, EN/ENO, bare enumeration values, formal calls of standard
+   functions, the typed standard blocks, and (for the compiler and the
+   transpiler) SFC to ST. Each backend applies them to the tree it is given.
+5. A **backend** runs or compiles the AST: see [Backends](backends.md).
+6. **Tests** (`PROGRAM TEST_...`) run on any of the backends through `sil`,
    scan by scan, and the engines are compared: see
    [Testing in the loop](#testing-in-the-loop).
-6. **`wasm`** puts the pipeline itself behind one JSON call and builds it as
+7. **`wasm`** puts the pipeline itself behind one JSON call and builds it as
    a WebAssembly module, so it runs in a browser or a WASI runtime with no
    Go toolchain: see [wasm](../wasm/README.md).
 
@@ -42,10 +50,18 @@ flowchart LR
 | `ast` | The syntax tree, printing back to source, walking and modifying it, namespaces |
 | `object` | Runtime values shared by the evaluator and the VM: integers, reals, strings, times, arrays, structures (hashes), function-block instances, built-ins |
 | `stdlib` | Stateless built-in functions (conversions, arithmetic, strings, arrays, bit strings, selection, clock) registered with `object` at start-up |
+| `edges` | `R_EDGE` and `F_EDGE` inputs of function blocks, lowered to an `R_TRIG`/`F_TRIG` around the body |
+| `enables` | `EN` and `ENO` a POU declares itself, lowered to the IEC rules: the body runs only when `EN` is TRUE (IEC-75) |
+| `enums` | An enumeration's value named without its type (`RED` for `COLOR#RED`) where exactly one enumeration has it |
+| `stdcalls` | Formal calls of standard functions (`LIMIT(MN := 0, IN := v, MX := 20)`) rewritten to their inputs in order |
+| `typedfbs` | The typed standard function blocks of Ed.3 (`CTU_INT` ... `CTUD_ULINT`, `TON_LTIME`, `TOF_LTIME`, `TP_LTIME`) in ST, given to a program that uses one without declaring it |
+| `sfc` | Sequential Function Charts lowered to ST, so a chart runs on the compiler and VM, and in transpiled Go |
+| `inputwrites` | The check that no POU assigns its own `VAR_INPUT` (IEC-69), for the evaluator and the transpiler; `AllowInputWrites` lifts it for CODESYS-style libraries |
 | `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
 | `code` | Bytecode opcodes and their encoding |
 | `compiler` | AST to bytecode: symbol tables, initialization and cyclic bytecode, program variables (with their `VAR_EXTERNAL`s, for a host to bind to its globals) |
 | `vm` | The stack virtual machine that runs bytecode |
+| `vmconfig` | A `CONFIGURATION` on the VM: its resources, their tasks (`INTERVAL`, `SINGLE`, priorities) and the program instances they run, with `VAR_CONFIG` |
 | `transpiler` | AST to Go source for royaljelly; OSCAT functions from beebread; host binding |
 | `plcopen` | PLCopen TC6 XML import, export and validation; LD, FBD and SFC bodies kept graphical both ways |
 | `diagram` | The model of the graphical languages: LD and FBD lowered to ST, their text form, PLCopen graphical XML both ways, and SVG drawings of LD, FBD and SFC bodies for previews |
@@ -54,16 +70,29 @@ flowchart LR
 | `watch` | What a host can watch of a running program, on either engine, under dotted names (`p.tSample.ET`) |
 | `sil` | Unit tests (`PROGRAM TEST_...`) on the evaluator, the VM and the transpiled Go, natively (`go`) or as a WASI module (`wasm`), compared scan by scan; I/O from a plant model, a rig over the rig protocol (TCP or serial), or a host such as beehive (`sil.IO`) |
 | `embedded` | Generates a standalone Go program that embeds the VM and bytecode |
+| `embedded/example/raspberrypi` | The VM with embedded bytecode as TinyGo firmware, for a Pico, a Pico W or an ESP32 |
+| `embedded/esp32hw/plc` | `program.st` run as a PLC on the VM, scans 10 ms apart, reporting its outputs on the UART; `plc/gen` compiles it into `plc/program` (`go generate`) |
+| `embedded/esp32hw` | Tests of firmware on a real ESP32 on a serial port, reset through RTS (build tag `esp32hw`, `ESP32_PORT`) |
+| `embedded/esp32sim` | Tests of firmware on an emulated ESP32, ESP32-C3, ESP32-S3 or ESP32-C6 in Docker, Espressif's QEMU (build tag `esp32sim`) |
 | `embedded/rig/pico` | A hardware-in-the-loop rig on a Raspberry Pi Pico, built with TinyGo: the rig protocol on its serial port, 8 digital inputs, 8 outputs, 3 analog inputs |
 | `embedded/picosim` | Tests of Pico firmware, the rig among it, on an emulated RP2040 in Docker (build tag `picosim`) |
+| `embedded/bench` | A module of its own: the three engines measured on microcontrollers, speed on a board or the emulator, size per engine, a sampling profile (it needs royaljelly for the transpiled engine) |
 | `wasm` | The toolchain behind one JSON call, for a WebAssembly host: check, transpile, run the `TEST_` programs on the evaluator and the VM (`sil`), and sessions that run a PROGRAM on the VM scan by scan on a simulated clock, inputs set by name or address |
 | `wasm/cmd/beedance-wasm` | `wasm` as a module: `GOOS=js` gives a page `beedance.handle` (the playground in `wasm/web`); `GOOS=wasip1` answers JSON lines on stdin and runs `test` with CI exit codes. `wasm/Dockerfile` runs it under Node.js (SIL) and serves the playground; its tests check the native, WASI and web builds agree (build tag `wasmsil`) |
 | `connectors/honeycomb` | A module of its own: program variables to and from honeycomb tags, by address |
+| `oscatdiff` | A module of its own: beebread's Go ports of OSCAT checked against the evaluator running the OSCAT sources, function by function and block by block, scan by scan |
 | `repl` | The interactive read-eval-print loop |
 | `main` (root) | The `beedance` command |
 
 The compiler and VM do not import the evaluator, so a host that only runs
-bytecode does not carry the interpreter.
+bytecode does not carry the interpreter. `vmconfig` does, to work out a
+task's constant settings; a host that needs no `CONFIGURATION` uses the
+compiler and the VM directly.
+
+`examples/` holds sample programs and their tests; [Development](development.md#layout)
+lists them. A test in the module root checks that every package directory
+has a row here and that each top-level package appears in
+[architecture.svg](architecture.svg).
 
 ## The object model
 
