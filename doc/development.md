@@ -64,8 +64,6 @@ Tags are `vX.Y.Z` (`-betaN` for pre-releases). The `version` constant in
 
 ## Known issues
 
-- **`-uvm` does nothing.** The flag selects an engine that is not
-  implemented.
 - **TinyGo stacks**: under TinyGo the `compiler`, `vm` and `evaluator`
   tests need `-stack-size=1MB` (512 KB is enough today). TinyGo does not
   grow goroutine stacks, and the parser and compiler recurse deeply (see

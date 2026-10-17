@@ -143,6 +143,10 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     ```sh
     go run main.go -iec /path/to/your/program.st -go /path/to/output.go
     ```
+*   **`-embedded <path>`:** Writes a Go file that runs the first `PROGRAM` of the `-iec` file on the VM, scan by scan (`-interval` apart, 100 ms by default), for a microcontroller. Build it with TinyGo. See [doc/embedded.md](doc/embedded.md#generating-a-plc-program).
+    ```sh
+    go run main.go -iec /path/to/your/program.st -embedded main.go -interval 20ms
+    ```
 *   **`-test FILE.st...`:** Runs the `PROGRAM TEST_...` unit tests in the files on a simulated clock, on both the evaluator and the VM (with `-engines all`, also transpiled to Go), and compares the engines scan by scan. Exits 0 if all pass, 1 if a test fails or the engines disagree, 2 if parsing fails. See [doc/cli.md](doc/cli.md#unit-tests).
     ```sh
     go run . -test -interval 10ms lib.st tests.st

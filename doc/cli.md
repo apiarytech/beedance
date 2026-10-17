@@ -14,14 +14,13 @@ go install github.com/apiarytech/beedance@latest
 | `beedance -e "TEXT"` | Evaluates a string (with `-vm`, on the VM) |
 | `beedance -iec FILE -go OUT.go` | Transpiles to Go |
 | `beedance -iec FILE -go OUT.go -go-compact-image` | Transpiles to Go with a process image of only the entries the located variables use, for microcontroller firmware |
+| `beedance -iec FILE -embedded OUT.go [-interval D]` | Writes Go that runs the file's first PROGRAM on the VM scan by scan, D apart (default 100 ms), for a microcontroller; build it with TinyGo (see [Microcontrollers](embedded.md#generating-a-plc-program)) |
 | `beedance -iec FILE -to-xml OUT.xml` | Exports to PLCopen TC6 XML |
 | `beedance -from-xml FILE.xml [-iec OUT.st]` | Imports PLCopen XML to source text (printed, or written to the `-iec` file) |
 | `beedance -trace ...` | Prints the parser's trace, with any other flag |
 | `beedance -test FILE.st...` | Runs the `PROGRAM TEST_...` unit tests on a simulated clock, on both engines (see [Unit tests](#unit-tests)) |
 | `beedance -check-builtins` | Checks the built-in function tables (run from the repository root) |
 | `beedance -version` | Prints the version |
-
-`-uvm` is reserved for a future microcontroller VM and does nothing yet.
 
 ## Unit tests
 

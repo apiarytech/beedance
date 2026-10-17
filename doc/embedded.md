@@ -106,6 +106,14 @@ err = embedded.GenerateEmbeddedProgram(&out, prog, embedded.ProgramOptions{Inter
 os.WriteFile("main.go", out.Bytes(), 0o644) // then: tinygo build -target=pico -stack-size=16KB .
 ```
 
+The command line does the same for a file's first `PROGRAM`, with
+`-interval` as `Interval` (100 ms when it is not given):
+
+```bash
+beedance -iec blink.st -embedded main.go -interval 20ms
+tinygo build -target=pico -stack-size=16KB .
+```
+
 The file has `Run(scans, onScan)`, and a `main` that calls it. Give
 `ProgramOptions.Package` another name to leave out `main` and call `Run`
 from firmware of your own. `onScan` gets the VM after each scan. Its

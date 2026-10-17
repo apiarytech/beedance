@@ -25,6 +25,7 @@ import (
 
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded"
 	"github.com/apiarytech/beedance/evaluator"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
@@ -50,7 +51,7 @@ func main() {
 	evalStr := flag.String("e", "", "A string of IEC 61131-3 text to evaluate")
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
 	allowInputWritesFlag := flag.Bool("allow-input-writes", false, "Let a POU assign its own VAR_INPUT variables, as CODESYS does and libraries written for it need (OSCAT; IEC-69), on every engine: -test, -vm, -go, the evaluator and configurations. Off, IEC 61131-3's rule, such a source is refused")
-	uvmFlag := flag.Bool("uvm", false, "Use the universal microcontroller virtual machine instead of the evaluator")
+	embeddedFile := flag.String("embedded", "", "Path to the output Go file that runs the first PROGRAM of an -iec file on the VM, scan by scan, for a microcontroller (TinyGo); -interval sets its scan time")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
 	goCompactImage := flag.Bool("go-compact-image", false, "With -go: give located variables a process image of only the entries they use, instead of royaljelly's vars.ProcessImage (about 33 KB on a 32-bit microcontroller)")
 	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
@@ -132,8 +133,6 @@ func main() {
 	var engine string
 	if *vmFlag {
 		engine = "vm"
-	} else if *uvmFlag {
-		engine = "uvm"
 	} else {
 		engine = "eval"
 	}
@@ -149,6 +148,25 @@ func main() {
 			os.Exit(1)
 		}
 		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
+		os.Exit(0)
+	}
+
+	if *embeddedFile != "" {
+		if *iecFile == "" {
+			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -embedded flag to specify the input file.")
+			os.Exit(1)
+		}
+		// The generator's own scan time, unless -interval is given.
+		var scan time.Duration
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "interval" {
+				scan = *interval
+			}
+		})
+		if err := generateEmbedded(*iecFile, *embeddedFile, embedded.ProgramOptions{Interval: scan}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -273,8 +291,6 @@ func executeFile(filepath string, out io.Writer, engine string) {
 			fmt.Fprintf(out, "Cycle %d complete. Last popped value: %s\n", i+1, cyclicVM.LastPoppedStackElem().Inspect())
 			time.Sleep(100 * time.Millisecond) // Simulate scan time
 		}
-	} else if engine == "uvm" {
-		// UVM execution logic goes here
 	} else {
 		env := object.NewEnvironment()
 		evaluated := evaluator.Eval(program, env)
@@ -328,6 +344,46 @@ func printParserErrors(out io.Writer, errors []string) {
 	for _, msg := range errors {
 		io.WriteString(out, "\t"+msg+"\n")
 	}
+}
+
+// generateEmbedded writes outputFile, Go that runs the first PROGRAM of
+// inputFile on the VM as a PLC does (embedded.GenerateEmbeddedProgram), for
+// a microcontroller: build it with TinyGo (see doc/embedded.md).
+func generateEmbedded(inputFile, outputFile string, opts embedded.ProgramOptions) error {
+	src, err := os.ReadFile(inputFile)
+	if err != nil {
+		return err
+	}
+	p := parser.New(lexer.New(string(src)))
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		return fmt.Errorf("parser errors:\n\t%s", strings.Join(p.Errors(), "\n\t"))
+	}
+	var name string
+	for _, s := range program.Statements {
+		if pd, ok := s.(*ast.ProgramDeclaration); ok {
+			name = pd.Name.Value
+			break
+		}
+	}
+	if name == "" {
+		return fmt.Errorf("%s has no PROGRAM", inputFile)
+	}
+	comp := compiler.NewCompilerWithBuiltins(object.Builtins)
+	comp.AllowInputWrites = allowInputWrites // IEC-69
+	prog, err := comp.CompileProgramUnit(program, name)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+	if err := embedded.GenerateEmbeddedProgram(f, prog, opts); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func transpileFile(inputFile, outputFile string, opts transpiler.Options, out io.Writer) {
