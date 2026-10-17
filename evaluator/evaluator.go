@@ -757,6 +757,35 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 	// their written order (as package sfc orders them).
 	sort.SliceStable(sfc.Transitions, func(i, j int) bool { return sfc.Transitions[i].Priority < sfc.Transitions[j].Priority })
 
+	// Actions run in the order they are first named, by an ACTION or a
+	// step, as package sfc runs them; not in the map's random order, which
+	// let an action's body see another's flag before or after its update.
+	named := map[string]bool{}
+	name := func(n string) {
+		if _, ok := sfc.Actions[n]; ok && !named[n] {
+			named[n] = true
+			sfc.ActionOrder = append(sfc.ActionOrder, n)
+		}
+	}
+	for _, element := range program.Elements {
+		switch elem := element.(type) {
+		case *ast.ActionStatement:
+			name(elem.Name.Value)
+		case *ast.StepStatement:
+			for _, a := range elem.Actions {
+				name(a.ActionName.Value)
+			}
+		}
+	}
+	var rest []string
+	for n := range sfc.Actions {
+		if !named[n] {
+			rest = append(rest, n)
+		}
+	}
+	sort.Strings(rest)
+	sfc.ActionOrder = append(sfc.ActionOrder, rest...)
+
 	// 3. Initialize the SFC state
 	if sfc.InitialStepName == "" {
 		return newError(program, "SFC program has no initial step") //
@@ -775,15 +804,17 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 // 1. Evaluate action control logic. 2. Update action outputs and execute bodies.
 // 3. Evaluate transitions. 4. Update step states. 5. Re-evaluate actions for new steps.
 func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
+	actions := sfcActions(sfc)
+
 	// Phase 1: Evaluate Action Control Logic
-	for _, action := range sfc.Actions {
+	for _, action := range actions {
 		evaluateAction(action, env)
 	}
 
 	// Phase 2: Update Action Outputs & Execute Action Bodies
 	// This must happen BEFORE evaluating transitions so that transition conditions
 	// see the current state of the action outputs.
-	for _, action := range sfc.Actions {
+	for _, action := range actions {
 		// Update the boolean variable in the environment to reflect the action's active state.
 		if _, ok := env.Get(action.Name.Value); ok {
 			env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
@@ -869,8 +900,13 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 			}
 		}
 
-		// Now, re-run the evaluation and update logic for these specific actions.
-		for _, action := range actionsToReEvaluate {
+		// Now, re-run the evaluation and update logic for these specific
+		// actions, in the chart's order: one that a moved step turns off is
+		// off before another one's body reads its flag.
+		for _, action := range actions {
+			if actionsToReEvaluate[action.Name.Value] == nil {
+				continue
+			}
 			evaluateAction(action, env)
 			if _, ok := env.Get(action.Name.Value); ok {
 				env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
@@ -885,6 +921,15 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	}
 
 	return NULL // A single cycle completes successfully
+}
+
+// sfcActions returns a chart's actions in the order its scan runs them.
+func sfcActions(sfc *object.SFC) []*object.Action {
+	actions := make([]*object.Action, 0, len(sfc.ActionOrder))
+	for _, n := range sfc.ActionOrder {
+		actions = append(actions, sfc.Actions[n])
+	}
+	return actions
 }
 
 // evaluateAction determines an action's active state for this scan: its

@@ -701,6 +701,9 @@ type SFC struct {
 	InitialStepName string
 	Actions         map[string]*Action // Map of action name to action object
 	ActiveSteps     map[string]bool    // Map of step name to active status
+	// ActionOrder names the actions in the order they are first named,
+	// which a scan runs them in (as package sfc's lowering does).
+	ActionOrder []string
 }
 
 // Type returns the object's type.
