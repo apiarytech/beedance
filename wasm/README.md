@@ -43,6 +43,36 @@ runs in milliseconds. Values are set by variable name, or by address for
 located and direct variables, and are converted to the declared type. TIME
 values are strings such as `T#1s500ms`.
 
+## Debugging
+
+The web build also gives `globalThis.beedance.dap(onMessage)`: the
+debugger `beedance -dap` serves ([doc/debugging.md](../doc/debugging.md)),
+by whole Debug Adapter Protocol messages, without the `Content-Length`
+framing. It returns `{send(json), close()}`, and calls `onMessage(json)`
+with each response and event.
+
+```js
+const dbg = beedance.dap((msg) => console.log(JSON.parse(msg)));
+dbg.send(JSON.stringify({ seq: 1, type: 'request', command: 'initialize', arguments: {} }));
+dbg.send(JSON.stringify({ seq: 2, type: 'request', command: 'launch',
+  arguments: { program: 'main.st', source: text, realtime: false } }));
+```
+
+`launch` takes the program's text as `source` (a page has no files);
+`program` then only names it, and breakpoints are set on that name.
+`beedance/onlineChange` takes the new text as `source`. While the program
+runs, the debugger lets the page's event loop in between scans (every
+16 ms, `DAPYield`), so requests are answered and timers fire. Package
+`wasm`'s `DAP` is the same, natively.
+
+```bash
+node wasm/node/dap.mjs wasm/web/wasm_exec.js wasm/web/beedance.wasm   # under a timeout
+```
+
+debugs a program in the web module under Node.js, and fails if the
+running program starves the event loop. The browser debugger built on it
+is planned in [doc/web-debugger.md](../doc/web-debugger.md).
+
 ## Build
 
 From the beedance module root:

@@ -111,8 +111,12 @@ type capabilities struct {
 }
 
 type launchArgs struct {
-	// Program is the path of the .st file.
+	// Program is the path of the .st file. With Source, it only names the
+	// program (in messages, and the breakpoints' source path).
 	Program string `json:"program"`
+	// Source is the program's text, for a host with no files (a web
+	// page); when set, Program is not read.
+	Source string `json:"source"`
 	// ProgramName is the PROGRAM to run; empty: the first that is not a
 	// test.
 	ProgramName string `json:"programName"`
@@ -213,6 +217,12 @@ type disassembledInstruction struct {
 	Symbol      string  `json:"symbol,omitempty"`
 	Location    *source `json:"location,omitempty"`
 	Line        int     `json:"line,omitempty"`
+}
+
+// onlineChangeArgs are beedance/onlineChange's: Source is the new text of
+// the program; empty re-reads its file.
+type onlineChangeArgs struct {
+	Source string `json:"source"`
 }
 
 type forceArgs struct {
