@@ -58,6 +58,12 @@ type Server struct {
 
 	// Log, if set, receives every message, for debugging the adapter.
 	Log io.Writer
+	// YieldEvery is the sessions' vmdebug.Options.YieldEvery: set it when
+	// the host is single-threaded (a web page), so requests are answered
+	// while the program runs as fast as it goes.
+	YieldEvery time.Duration
+	// Yield is the sessions' vmdebug.Options.Yield.
+	Yield func()
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -323,8 +329,9 @@ func (s *Server) handle(m *message) (done bool) {
 			s.start(s.sess.StepScan)
 		}
 	case "beedance/onlineChange":
-		if needs(false) {
-			r, err := s.onlineChange()
+		var a onlineChangeArgs
+		if args(&a) && needs(false) {
+			r, err := s.onlineChangeTo(a.Source)
 			if err != nil {
 				s.fail(m, err)
 				return
@@ -356,16 +363,24 @@ func (s *Server) launch(a launchArgs) error {
 	if a.Program == "" {
 		return errors.New(`launch: give "program", the .st file to debug`)
 	}
-	path, err := filepath.Abs(a.Program)
-	if err != nil {
-		return err
-	}
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("launch: %w", err)
+	var path string
+	var src []byte
+	var err error
+	if a.Source != "" {
+		// No file: the path only names the program, and may not resolve
+		// (a web page has no working directory).
+		path, src = filepath.Clean(a.Program), []byte(a.Source)
+	} else {
+		if path, err = filepath.Abs(a.Program); err != nil {
+			return err
+		}
+		if src, err = os.ReadFile(path); err != nil {
+			return fmt.Errorf("launch: %w", err)
+		}
 	}
 	o := vmdebug.Options{Program: a.ProgramName, Realtime: a.Realtime == nil || *a.Realtime,
-		AllowInputWrites: a.AllowInputWrites, Notify: func(msg string) { s.output("stderr", msg) }}
+		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
+		Notify: func(msg string) { s.output("stderr", msg) }}
 	if a.Interval != "" {
 		if o.Interval, err = time.ParseDuration(a.Interval); err != nil {
 			return fmt.Errorf("launch: interval: %w", err)
@@ -771,10 +786,21 @@ func (s *Server) command(text string) (out string, ok bool, err error) {
 
 // onlineChange reads the program's file again and changes the running
 // program to it.
-func (s *Server) onlineChange() (vmdebug.Report, error) {
-	src, err := os.ReadFile(s.path)
-	if err != nil {
-		return vmdebug.Report{}, err
+func (s *Server) onlineChange() (vmdebug.Report, error) { return s.onlineChangeTo("") }
+
+// onlineChangeTo changes the running program to source, or, when source is
+// empty, to its file as it is now. A program launched from its text (no
+// file) can only be changed to a text given.
+func (s *Server) onlineChangeTo(source string) (vmdebug.Report, error) {
+	src := []byte(source)
+	if source == "" {
+		if s.args.Source != "" {
+			return vmdebug.Report{}, errors.New(`online change: the program was launched from its text; give the new text ("source")`)
+		}
+		var err error
+		if src, err = os.ReadFile(s.path); err != nil {
+			return vmdebug.Report{}, err
+		}
 	}
 	r, err := s.sess.Change(string(src))
 	if errors.Is(err, vmdebug.ErrMidScan) {

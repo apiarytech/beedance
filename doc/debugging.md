@@ -35,6 +35,7 @@ that is not a test. A `launch.json` chooses more:
 | `realtime` | `true` | run the scans an interval apart on the wall clock; `false` runs them as fast as they go |
 | `stopOnEntry` | `false` | stop before the first scan |
 | `allowInputWrites` | `false` | let a POU assign its own inputs, as CODESYS does (OSCAT) |
+| `source` | | the program's text, for a host with no files (a web page); `program` then only names it |
 
 The clock is simulated: it moves `interval` at the start of each scan, and
 stands still while the program is stopped, so a timer stopped at a
@@ -113,6 +114,14 @@ records every message). Launch arguments are those of `launch.json` above;
 the PLC commands are custom requests: `beedance/force` and
 `beedance/unforce` (`{"name", "value"}`), `beedance/forces`,
 `beedance/stepScan`, `beedance/onlineChange` and `beedance/live`.
+
+## In a web page
+
+The WebAssembly build of beedance serves the same adapter to a page, one
+message at a time (`globalThis.beedance.dap`, see
+[wasm](../wasm/README.md#debugging)): `launch` takes the program's text as
+`source`, and `beedance/onlineChange` the new text. A browser IDE built on
+it is planned in [Web debugger](web-debugger.md).
 
 ## From Go
 
