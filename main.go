@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apiarytech/beedance/analyzer"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/embedded"
@@ -59,6 +60,11 @@ func main() {
 	checkBuiltinsFlag := flag.Bool("check-builtins", false, "Run the built-in function consistency checker")
 	testFlag := flag.Bool("test", false, "Run the PROGRAM TEST_... unit tests of the FILE.st arguments on a simulated clock")
 	interval := flag.Duration("interval", 10*time.Millisecond, "With -test: simulated time between scans")
+	lintFlag := flag.Bool("lint", false, "Check the FILE.st arguments with the static analyzer: unused variables, unreachable code, narrowing, multiple writes, unbounded loops, the PLCopen coding guidelines")
+	lintLevel := flag.String("lint-level", "warning", "With -lint: the least severity to report: info, warning or error")
+	lintDisable := flag.String("lint-disable", "", "With -lint: rules not to report, by ID or PLCopen rule, e.g. if-without-else,CP19")
+	lintMaxIterations := flag.Int64("lint-max-iterations", analyzer.DefaultMaxIterations, "With -lint: the iterations a scan may make of a loop and those around it before loop-iterations reports it")
+	lintRules := flag.Bool("lint-rules", false, "List the static analyzer's rules")
 	flag.IntVar(&configCycles, "cycles", 0, "With -vm on a file with a CONFIGURATION: the cycles to run, 10 ms apart; 0 runs until interrupted")
 	maxScans := flag.Int("max-scans", 50000, "With -test: a test with done that is not done by then fails")
 	enginesFlag := flag.String("engines", "eval,vm", "With -test: engines to run the tests on: eval, vm, go (the transpiler), wasm (the transpiler to WebAssembly, on a WASI runtime) or all (eval,vm,go); compared with the first")
@@ -140,6 +146,21 @@ func main() {
 	if *trace {
 		parser.SetTracing(true)
 		fmt.Println("Parser tracing enabled.")
+	}
+
+	if *lintRules {
+		listLintRules(os.Stdout)
+		os.Exit(0)
+	}
+
+	if *lintFlag {
+		level, err := analyzer.ParseSeverity(*lintLevel)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		opts := analyzer.Options{Disable: lintDisabled(*lintDisable), MaxIterations: *lintMaxIterations}
+		os.Exit(runLint(flag.Args(), opts, level, os.Stdout, os.Stderr))
 	}
 
 	if *goFile != "" {

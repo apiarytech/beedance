@@ -19,6 +19,7 @@ go install github.com/apiarytech/beedance@latest
 | `beedance -from-xml FILE.xml [-iec OUT.st]` | Imports PLCopen XML to source text (printed, or written to the `-iec` file) |
 | `beedance -trace ...` | Prints the parser's trace, with any other flag |
 | `beedance -test FILE.st...` | Runs the `PROGRAM TEST_...` unit tests on a simulated clock, on both engines (see [Unit tests](#unit-tests)) |
+| `beedance -lint FILE.st...` | Checks the files with the static analyzer: unused variables, unreachable code, narrowing, multiple writes, unbounded loops, the PLCopen coding guidelines (see [Static analysis](analyzer.md)); `-lint-rules` lists its rules |
 | `beedance -check-builtins` | Checks the built-in function tables (run from the repository root) |
 | `beedance -version` | Prints the version |
 

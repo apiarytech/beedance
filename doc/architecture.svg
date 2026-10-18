@@ -55,6 +55,11 @@
   <text x="475" y="222" class="t">diagram</text>
   <text x="475" y="240" class="s">LD and FBD → ST statements</text>
   <text x="475" y="255" class="s">SVG of LD · FBD · SFC</text>
+  <rect x="612" y="200" width="98" height="70" rx="5" class="bt"/>
+  <text x="661" y="222" class="t">analyzer</text>
+  <text x="661" y="240" class="s">-lint, unused,</text>
+  <text x="661" y="255" class="s">loops · PLCopen</text>
+  <path d="M661,172 V198" class="ln" marker-end="url(#a)"/>
   <path d="M380,137 H398" class="ln" marker-end="url(#a)"/>
   <path d="M550,137 H568" class="ln" marker-end="url(#a)"/>
   <path d="M380,235 H398" class="ln" marker-start="url(#a)" marker-end="url(#a)"/>
@@ -87,7 +92,7 @@
   <text x="537.5" y="383" class="s">inputs read-only</text>
   <text x="654.5" y="368" class="s">applied by the evaluator,</text>
   <text x="654.5" y="383" class="s">compiler and transpiler</text>
-  <path d="M640,170 V302" class="ln" marker-end="url(#a)"/>
+  <path d="M596,170 V302" class="ln" marker-end="url(#a)"/>
   <path d="M710,324 H725 V132 H738" class="ln" marker-end="url(#a)"/>
   <path d="M725,210 H738" class="ln" marker-end="url(#a)"/>
   <path d="M725,324 V450 H738" class="ln" marker-end="url(#a)"/>

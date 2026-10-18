@@ -58,6 +58,7 @@ flowchart LR
 | `sfc` | Sequential Function Charts lowered to ST, so a chart runs on the compiler and VM, and in transpiled Go |
 | `inputwrites` | The check that no POU assigns its own `VAR_INPUT` (IEC-69), for the evaluator and the transpiler; `AllowInputWrites` lifts it for CODESYS-style libraries |
 | `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
+| `analyzer` | Static analysis on the parser's AST, with types of its own worked out from the declarations: unused variables, unreachable code, implicit narrowing, multiple writes to an output, loops that do not end or may overrun the cycle time, and the PLCopen coding guidelines (`beedance -lint`; see [Static analysis](analyzer.md)) |
 | `code` | Bytecode opcodes and their encoding |
 | `compiler` | AST to bytecode: symbol tables, initialization and cyclic bytecode, program variables (with their `VAR_EXTERNAL`s, for a host to bind to its globals) |
 | `vm` | The stack virtual machine that runs bytecode |

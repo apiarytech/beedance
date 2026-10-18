@@ -154,6 +154,7 @@ You can run `beedance` with the following flags. By default (with no flags), it 
 *   **`-version`:** Prints the application version.
     ```sh
     go run main.go -version
+*   **`-lint FILE.st...`:** Checks the files without running them: unused variables, unreachable code, implicit narrowing, outputs written in more than one place, loops that never end or may overrun the cycle time, and the PLCopen coding guidelines. Exits 0 when clean, 1 on a warning or an error, 2 if parsing fails. See [doc/analyzer.md](doc/analyzer.md).
     ```
 
 ### Examples
