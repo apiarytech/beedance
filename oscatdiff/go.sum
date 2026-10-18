@@ -1,4 +1,4 @@
-github.com/apiarytech/beebread v0.1.1-0.20261017213641-72bc69956c1e h1:wE9vA4CUgFVKE9iGe61z5sE2j17Dhl424MgeGy/a3x8=
-github.com/apiarytech/beebread v0.1.1-0.20261017213641-72bc69956c1e/go.mod h1:CgsC3+wVmoGlaXh4A0fs1oo9lhUyszGo31wx1xPy4SI=
-github.com/apiarytech/royaljelly v0.3.0 h1:PHM6C8Z8B9E0E+yhw2Rcg5Ea3AGJltbyBnSmdFHsCyw=
-github.com/apiarytech/royaljelly v0.3.0/go.mod h1:EqTWZxMNvS8lOZiwNMwjdGe9M/+fbo3bYzRBe4XR6NE=
+github.com/apiarytech/beebread v0.2.0 h1:MWyZyjYCsi9rt5EIwZ2b7lrxhZPR2oQnAbQbZakKbTU=
+github.com/apiarytech/beebread v0.2.0/go.mod h1:CgsC3+wVmoGlaXh4A0fs1oo9lhUyszGo31wx1xPy4SI=
+github.com/apiarytech/royaljelly v0.3.2 h1:+Ypwq0bj28o4rVRFClsykCagytVHb6a1NSN9ZbGkjdI=
+github.com/apiarytech/royaljelly v0.3.2/go.mod h1:grfictCc6MWc3N+/y2PfNlug1JZEReoJ3mbyxclBZSk=

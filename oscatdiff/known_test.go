@@ -31,11 +31,6 @@ const (
 	// the evaluator rounds halves away from zero.
 	roundingTies = "rounding of halves"
 
-	// royaljelly v0.3.0's TOF keeps Q on in the scan IN falls even when PT
-	// is T#0s, and turns Q on again when PT grows after its delay; IEC
-	// 61131-3 keeps Q off until IN rises. Fixed in royaljelly after v0.3.1:
-	// these come off the list when beebread requires the fix.
-	royaljellyTOF = "royaljelly: TOF after IN falls"
 	// Not traced to its cause yet.
 	untriaged = "UNTRIAGED"
 )
@@ -81,24 +76,20 @@ var known = map[string]string{
 	"IP4_DECODE": "STRING_TO_DWORD of a negative number",
 
 	// Function blocks.
-	"FT_PT2":      float32Rounding,
-	"FILTER_I":    integerWidth,
-	"BLIND_INPUT": royaljellyTOF,
-	"FADE":        untriaged,
-	"DEBOUNCE":    royaljellyTOF,
-	"INTERLOCK":   royaljellyTOF,
-	"ACTUATOR_A":  untriaged,
-	"CTRL_PWM":    untriaged,
-	"CYCLE_4":     untriaged,
-	"FT_IMP":      untriaged,
-	"FT_PDT1":     untriaged,
-	"FT_PT1":      untriaged,
-	"GEN_RDT":     royaljellyTOF,
-	"MOON_PHASE":  untriaged,
-	"PWM_DC":      untriaged,
-	"SUN_POS":     untriaged,
-	"TIMER_EXT":   untriaged,
-	"TP_1D":       untriaged,
+	"FT_PT2":     float32Rounding,
+	"FILTER_I":   integerWidth,
+	"FADE":       untriaged,
+	"ACTUATOR_A": untriaged,
+	"CTRL_PWM":   untriaged,
+	"CYCLE_4":    untriaged,
+	"FT_IMP":     untriaged,
+	"FT_PDT1":    untriaged,
+	"FT_PT1":     untriaged,
+	"MOON_PHASE": untriaged,
+	"PWM_DC":     untriaged,
+	"SUN_POS":    untriaged,
+	"TIMER_EXT":  untriaged,
+	"TP_1D":      untriaged,
 }
 
 // domain limits the arguments of the POUs that loop for ever outside it, on

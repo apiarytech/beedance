@@ -98,7 +98,7 @@ PASSED: all 4 tests
 
 `go` transpiles the source to Go, adds a harness that runs each test on
 the same simulated clock, and builds it in a temporary module with
-royaljelly v0.3.1 (and beebread v0.1.0 when OSCAT functions are used). It
+royaljelly v0.3.2 (and beebread v0.2.0 when OSCAT functions are used). It
 needs the Go toolchain, and downloads those modules the first time; after
 that a run takes a few seconds. `all` is the same as `eval,vm,go`.
 

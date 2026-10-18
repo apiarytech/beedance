@@ -30,8 +30,8 @@ import (
 // Module versions the transpiled tests build with, unless
 // Options.GoReplace points a module at a local directory.
 const (
-	RoyaljellyVersion = "v0.3.1"
-	BeebreadVersion   = "v0.1.0"
+	RoyaljellyVersion = "v0.3.2"
+	BeebreadVersion   = "v0.2.0"
 )
 
 // harnessPackage is the package of the transpiled source and its harness.
