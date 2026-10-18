@@ -70,6 +70,18 @@ type Options struct {
 	// Notify, if set, is told what went wrong with a write or force made
 	// while a run was in progress, when it was applied.
 	Notify func(msg string)
+	// YieldEvery, if positive, makes a run that is not Realtime give up
+	// the processor between scans once this much wall-clock time has gone
+	// since it last did, so a single-threaded host (a web page, GOOS=js)
+	// can deliver Pause, writes and forces while scans run as fast as they
+	// go. Zero never yields, as before.
+	YieldEvery time.Duration
+	// Yield gives up the processor; nil sleeps a millisecond. Under
+	// GOOS=js the host's event loop runs only once every goroutine is
+	// blocked with no timer due, so a shorter sleep (or runtime.Gosched)
+	// would not let it in. A host may give a function that blocks until
+	// its event loop has turned.
+	Yield func()
 }
 
 // Reason is why a session stopped.
@@ -402,8 +414,17 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 		}
 	}
 	begun := false // this run has started a scan
+	yielded := time.Now()
 	for {
 		if !s.midScan {
+			if begun && !s.opts.Realtime && s.opts.YieldEvery > 0 && time.Since(yielded) >= s.opts.YieldEvery {
+				if s.opts.Yield != nil {
+					s.opts.Yield()
+				} else {
+					sleep(ctx, time.Millisecond)
+				}
+				yielded = time.Now()
+			}
 			s.serveChanges()
 			if s.pauseReq.Swap(false) || ctx.Err() != nil {
 				return s.between(OnPause), nil
@@ -447,6 +468,19 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 			}
 			s.stepDepth, s.stepRow = 1, 0 // the step goes on into the next scan
 		}
+	}
+}
+
+// sleep blocks the run for d or until ctx is done, so the scheduler runs
+// the other goroutines and, under GOOS=js, returns to the host's event
+// loop, which delivers its callbacks (Pause, writes) meanwhile.
+// runtime.Gosched would not: it never leaves Go.
+func sleep(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	select {
+	case <-ctx.Done():
+		t.Stop()
+	case <-t.C:
 	}
 }
 
