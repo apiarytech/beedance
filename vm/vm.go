@@ -66,6 +66,11 @@ type VM struct {
 	// budget bounds the instructions of one run (SetBudget); used counts
 	// them since the last Reset.
 	budget, used int64
+
+	// hook is a debugger's (SetHook); resumed is set when it paused the
+	// run, so that the instruction it paused before runs on the next Run.
+	hook    Hook
+	resumed bool
 }
 
 // ErrBudget is returned by Run when a run executes more instructions than
@@ -202,7 +207,7 @@ func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []object.Object, opts ..
 }
 
 func newVM(bytecode *compiler.Bytecode, builtins []*object.Builtin, globals []object.Object, o options) *VM {
-	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions}
+	mainFn := &object.CompiledFunction{Instructions: bytecode.Instructions, Lines: bytecode.Lines}
 	mainClosure := &object.Closure{Fn: mainFn}
 	mainFrame := NewFrame(mainClosure, 0)
 
@@ -227,6 +232,7 @@ func newVM(bytecode *compiler.Bytecode, builtins []*object.Builtin, globals []ob
 // calls Run, Reset, Run, ... on one VM instead of building a VM per scan.
 func (vm *VM) Reset() {
 	vm.used = 0
+	vm.resumed = false
 	clear(vm.stack[:vm.sp])
 	vm.sp = 0
 	for _, f := range vm.frames[1:vm.framesIndex] {
@@ -320,6 +326,14 @@ func (vm *VM) Run() (runErr error) {
 		ins = cur.cl.Fn.Instructions
 		if cur.ip >= len(ins)-1 {
 			break
+		}
+		if vm.hook != nil {
+			if vm.resumed {
+				vm.resumed = false
+			} else if vm.hook(cur.cl.Fn, cur.ip+1, vm.framesIndex) {
+				vm.resumed = true
+				return ErrPaused
+			}
 		}
 		if vm.budget > 0 {
 			if vm.used++; vm.used > vm.budget {

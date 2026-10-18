@@ -176,18 +176,21 @@
 
   <!-- Tools -->
   <text x="250" y="816" class="g">tools</text>
-  <rect x="250" y="822" width="130" height="56" rx="5" class="bi"/>
-  <text x="315" y="843" class="t">repl</text>
-  <text x="315" y="861" class="s">interactive evaluator</text>
-  <rect x="393" y="822" width="300" height="56" rx="5" class="bi"/>
-  <text x="543" y="843" class="t">beedance command</text>
-  <text x="543" y="861" class="s">-iec · -to-xml · -from-xml · -go · -test -io</text>
-  <rect x="706" y="822" width="150" height="56" rx="5" class="bi"/>
-  <text x="781" y="843" class="t">ide</text>
-  <text x="781" y="861" class="s">the language half of LSP</text>
-  <rect x="870" y="822" width="200" height="56" rx="5" class="bi"/>
-  <text x="970" y="843" class="t">wasm · cmd/beedance-wasm</text>
-  <text x="970" y="861" class="s">the toolchain as WebAssembly</text>
+  <rect x="250" y="822" width="110" height="56" rx="5" class="bi"/>
+  <text x="305" y="843" class="t">repl</text>
+  <text x="305" y="861" class="s">the evaluator, live</text>
+  <rect x="370" y="822" width="270" height="56" rx="5" class="bi"/>
+  <text x="505" y="843" class="t">beedance command</text>
+  <text x="505" y="861" class="s">-iec · -to-xml · -from-xml · -go · -test</text>
+  <rect x="650" y="822" width="130" height="56" rx="5" class="bi"/>
+  <text x="715" y="843" class="t">ide</text>
+  <text x="715" y="861" class="s">language half of LSP</text>
+  <rect x="790" y="822" width="130" height="56" rx="5" class="bh"/>
+  <text x="855" y="843" class="t">vmdebug · dap</text>
+  <text x="855" y="861" class="s">debugger, VS Code</text>
+  <rect x="930" y="822" width="140" height="56" rx="5" class="bi"/>
+  <text x="1000" y="843" class="t">wasm</text>
+  <text x="1000" y="861" class="s">the toolchain, WASM</text>
 
   <!-- External, left -->
   <rect x="20" y="104" width="190" height="66" rx="6" class="ex"/>
@@ -253,6 +256,6 @@
     <text x="642" y="11" style="font-size:11.5px;fill:#333">outside</text>
     <path d="M706,6 H746" class="ln" marker-end="url(#a)"/>
     <text x="754" y="11" style="font-size:11.5px;fill:#333">source, tree, code</text>
-    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator (vmconfig does). Modules of their own: connectors/honeycomb, oscatdiff, embedded/bench. Details: doc/*.md, wasm/README.md.</text>
+    <text x="0" y="36" style="font-size:11.5px;fill:#555">The compiler and the VM do not import the evaluator (vmconfig and vmdebug do). Modules of their own: connectors/honeycomb, oscatdiff, embedded/bench. Details: doc/*.md, wasm/README.md.</text>
   </g>
 </svg>

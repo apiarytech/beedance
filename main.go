@@ -26,6 +26,7 @@ import (
 	"github.com/apiarytech/beedance/analyzer"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/dap"
 	"github.com/apiarytech/beedance/embedded"
 	"github.com/apiarytech/beedance/evaluator"
 	"github.com/apiarytech/beedance/lexer"
@@ -78,10 +79,31 @@ func main() {
 	wasmRuntime := flag.String("wasm-runtime", "", "With -test on the wasm engine: the command that runs a WASI module, e.g. \"wasmtime run\" (default: wasmtime, wazero or Node.js 24+, the first in PATH)")
 	ioFlag := flag.String("io", "", "With -test: connect located variables (%I, %Q) to a rig over the rig protocol at tcp://HOST:PORT or serial:PORT[?baud=N] (/dev/ttyACM0, COM3): hardware in the loop; implies -realtime")
 	realTime := flag.Bool("realtime", false, "With -test: run scans -interval apart on the wall clock instead of a simulated clock")
+	dapFlag := flag.Bool("dap", false, "Serve the Debug Adapter Protocol on stdin and stdout, for VS Code and other editors: debug a PROGRAM on the VM, scan by scan (see doc/debugging.md)")
+	dapLog := flag.String("dap-log", "", "With -dap: write every message of the protocol to this file")
 	flag.Parse()
 	// IEC-69: input writes, CODESYS's dialect, on every engine.
 	allowInputWrites = *allowInputWritesFlag
 	evaluator.SetAllowInputWrites(allowInputWrites)
+
+	if *dapFlag {
+		// stdout is the protocol's: nothing else may write to it.
+		server := dap.NewServer(os.Stdin, os.Stdout)
+		if *dapLog != "" {
+			f, err := os.Create(*dapLog)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			defer f.Close()
+			server.Log = f
+		}
+		if err := server.Serve(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *testFlag {
 		engines, err := sil.ParseEngines(*enginesFlag)

@@ -13,6 +13,7 @@ flowchart LR
     low --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
     low --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
     vm --> cfg[vmconfig<br/>a CONFIGURATION's tasks]
+    vm <--> dbg[vmdebug<br/>breakpoints, stepping,<br/>forcing, online change] <--> dapn[dap<br/>VS Code, any DAP editor]
     bc --> emb[embedded<br/>standalone VM program]
     emb --> mcu[Pico · ESP32 firmware<br/>boards and emulators]
     go -->|GOOS=wasip1| wmod[WASI module<br/>on a WASI runtime]
@@ -57,12 +58,14 @@ flowchart LR
 | `typedfbs` | The typed standard function blocks of Ed.3 (`CTU_INT` ... `CTUD_ULINT`, `TON_LTIME`, `TOF_LTIME`, `TP_LTIME`) in ST, given to a program that uses one without declaring it |
 | `sfc` | Sequential Function Charts lowered to ST, so a chart runs on the compiler and VM, and in transpiled Go |
 | `inputwrites` | The check that no POU assigns its own `VAR_INPUT` (IEC-69), for the evaluator and the transpiler; `AllowInputWrites` lifts it for CODESYS-style libraries |
-| `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
 | `analyzer` | Static analysis on the parser's AST, with types of its own worked out from the declarations: unused variables, unreachable code, implicit narrowing, multiple writes to an output, loops that do not end or may overrun the cycle time, and the PLCopen coding guidelines (`beedance -lint`; see [Static analysis](analyzer.md)) |
+| `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
 | `code` | Bytecode opcodes and their encoding |
 | `compiler` | AST to bytecode: symbol tables, initialization and cyclic bytecode, program variables (with their `VAR_EXTERNAL`s, for a host to bind to its globals) |
 | `vm` | The stack virtual machine that runs bytecode |
+| `dap` | The Debug Adapter Protocol over `vmdebug`, for VS Code and other editors (`beedance -dap`): launch, breakpoints, stepping (by instruction in the disassembly view), the call stack, variables (writable), hover and watch expressions, and the PLC's own operations as custom requests and debug console commands: force, step a scan, online change, live values. See [Debugging](debugging.md) |
 | `vmconfig` | A `CONFIGURATION` on the VM: its resources, their tasks (`INTERVAL`, `SINGLE`, priorities) and the program instances they run, with `VAR_CONFIG` |
+| `vmdebug` | A debugger for a PROGRAM on the VM, scan by scan on a simulated clock: breakpoints (with ST conditions) on source lines, stepping by statement (over, into, out) and by scan, pausing, the program's variables and each call's locals, writing and forcing variables and the I/O image, and online change between scans with the variables carried over by name and declared type. It runs on the line table the compiler gives the code (`Bytecode.Lines`, `CompiledFunction.Lines`) and the VM's hook (`vm.SetHook`, `vm.ErrPaused`) |
 | `transpiler` | AST to Go source for royaljelly; OSCAT functions from beebread; host binding |
 | `plcopen` | PLCopen TC6 XML import, export and validation; LD, FBD and SFC bodies kept graphical both ways |
 | `diagram` | The model of the graphical languages: LD and FBD lowered to ST, their text form, PLCopen graphical XML both ways, and SVG drawings of LD, FBD and SFC bodies for previews |
@@ -87,8 +90,8 @@ flowchart LR
 
 The compiler and VM do not import the evaluator, so a host that only runs
 bytecode does not carry the interpreter. `vmconfig` does, to work out a
-task's constant settings; a host that needs no `CONFIGURATION` uses the
-compiler and the VM directly.
+task's constant settings, and `vmdebug`, to evaluate breakpoint conditions;
+a host that needs neither uses the compiler and the VM directly.
 
 `examples/` holds sample programs and their tests; [Development](development.md#layout)
 lists them. A test in the module root checks that every package directory

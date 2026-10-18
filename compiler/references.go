@@ -175,6 +175,7 @@ func decodeFrom(ins code.Instructions, start int) []decodedOp {
 func (c *Compiler) truncateInstructions(pos int, before []decodedOp) {
 	scope := &c.scopes[c.scopeIndex]
 	scope.instructions = scope.instructions[:pos]
+	c.trimLines(pos)
 	scope.lastInstruction, scope.previousInstruction = EmittedInstruction{}, EmittedInstruction{}
 	if n := len(before); n > 0 {
 		scope.lastInstruction = EmittedInstruction{Opcode: before[n-1].op, Position: before[n-1].pos}

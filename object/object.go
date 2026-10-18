@@ -1148,6 +1148,39 @@ type CompiledFunction struct {
 	ParameterNames []string
 	OutputIndices  []int
 	OutputNames    []string
+	// Name is the POU the code is the body of, e.g. "Blink" or
+	// "Motor.Start", for a debugger's call stack; empty if it has none.
+	Name string
+	// Lines maps the code to its source, for a debugger (see package
+	// vmdebug): one entry per statement, in instruction order.
+	Lines []SourceLine
+	// LocalNames are the names of the local variables by slot; empty for
+	// a slot the compiler uses for itself.
+	LocalNames []string
+}
+
+// SourceLine is where a statement starts in the instructions it compiled
+// to (Offset) and in the source (Row and Column, from 1).
+type SourceLine struct {
+	Offset, Row, Column int
+}
+
+// LineAt is the statement of lines that the instruction at offset belongs
+// to: the last one starting at or before it.
+func LineAt(lines []SourceLine, offset int) (SourceLine, bool) {
+	lo, hi := 0, len(lines)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if lines[mid].Offset <= offset {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo == 0 {
+		return SourceLine{}, false
+	}
+	return lines[lo-1], true
 }
 
 // Type returns the object's type.

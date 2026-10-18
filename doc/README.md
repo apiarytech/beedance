@@ -16,6 +16,7 @@ The [README](../README.md) is the quick tour. These pages are the reference.
 | [Embedding beedance](embedding.md) | Running programs inside a host: scans, clocks, budgets, binding variables, engineering sessions |
 | [Command line](cli.md) | The `beedance` command, its REPL, and running ST unit tests (`-test`) |
 | [Static analysis](analyzer.md) | `-lint`: unused variables, unreachable code, narrowing, multiple writes, unbounded loops, the PLCopen coding guidelines |
+| [Debugging](debugging.md) | Debugging a PROGRAM on the VM in VS Code or any DAP editor (`-dap`): breakpoints, stepping, forcing, online change |
 | [Hardware in the loop](hil.md) | Running the unit tests against a plant model or real I/O: the `sil.IO` interface, the rig protocol, beehive |
 | [PLCopen XML](plcopen.md) | Importing and exporting TC6 XML projects |
 | [Microcontrollers](embedded.md) | TinyGo, Raspberry Pi Pico, and generating a standalone VM program |

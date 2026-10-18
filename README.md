@@ -38,6 +38,8 @@
 *   **Standard Library:**
     *   **Function Blocks:** `TON`, `TOF`, `TP`, `CTU`, `CTD`, `CTUD`, `R_TRIG`, `F_TRIG`, `SR`, `RS`.
     *   **Built-in Functions:** A rich library including type conversions (`INT_TO_REAL`), arithmetic (`ADD`, `SQRT`, `ABS`), string manipulation (`LEFT`, `MID`, `FIND`, `CONCAT`), array functions (`INSERT`, `DELETE`), and more.
+*   **Debugging:** a `PROGRAM` debugged on the VM, scan by scan, in VS Code or any editor that speaks the Debug Adapter Protocol (`beedance -dap`): breakpoints with conditions, stepping over, into and out of calls and by scan, a disassembly view stepped by instruction, the program's variables and each call's locals (writable), forcing variables and I/O, and online change, with the variables carried over. See [doc/debugging.md](doc/debugging.md).
+
 *   **System Configuration:**
     *   Full support for `CONFIGURATION`, `RESOURCE`, and `TASK` blocks.
     *   Program instantiation with task assignment (`WITH`).
@@ -69,6 +71,10 @@ A core principle of `beedance` is a clean, modular architecture with a clear sep
 *   **`plcopen`:** Import and export of PLCopen TC6 XML.
 
 *   **`transpiler`:** A source-to-source compiler that translates the iec61131 AST into human-readable and efficient Go code. This enables integration with Go-native runtimes and compilation to native binaries or WebAssembly.
+
+*   **`vmdebug`:** A debugger for a `PROGRAM` on the VM: breakpoints on source lines, stepping by statement, instruction or scan, the variables and locals, forcing, and online change. It runs on the line table the compiler keeps with the bytecode and a hook in the VM, which costs nothing when no debugger is attached.
+
+*   **`dap`:** The Debug Adapter Protocol over `vmdebug`, so VS Code and other editors can debug a program (`beedance -dap`).
 
 This modular design allows components like the compiler and VM to operate without any dependency on the evaluator, enabling the creation of lightweight, high-performance tools.
 ### Powerful Macro Engine
@@ -135,7 +141,7 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     ```sh
     go run main.go -e "MyVar := 10 + 20;"
     ```
-*   **`-trace`:** Enables detailed parser tracing, which is useful for debugging the parsing process. This can be combined with other flags.
+*   **`-trace`:** Traces beedance's parser: each parsing function as it is entered and left, for finding out why a source parses as it does. It does not trace a program as it runs; to debug a program, see `-dap`. This can be combined with other flags.
     ```sh
     go run main.go -trace -iec /path/to/your/program.st
     ```
@@ -148,13 +154,17 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     go run main.go -iec /path/to/your/program.st -embedded main.go -interval 20ms
     ```
 *   **`-test FILE.st...`:** Runs the `PROGRAM TEST_...` unit tests in the files on a simulated clock, on both the evaluator and the VM (with `-engines all`, also transpiled to Go), and compares the engines scan by scan. Exits 0 if all pass, 1 if a test fails or the engines disagree, 2 if parsing fails. See [doc/cli.md](doc/cli.md#unit-tests).
+*   **`-lint FILE.st...`:** Checks the files without running them: unused variables, unreachable code, implicit narrowing, outputs written in more than one place, loops that never end or may overrun the cycle time, and the PLCopen coding guidelines. Exits 0 when clean, 1 on a warning or an error, 2 if parsing fails. See [doc/analyzer.md](doc/analyzer.md).
     ```sh
     go run . -test -interval 10ms lib.st tests.st
+    ```
+*   **`-dap`:** Serves the Debug Adapter Protocol on stdin and stdout: an editor launches `beedance -dap` to debug a `PROGRAM` on the VM (VS Code through the beehive Studio extension). `-dap-log FILE` records every message. See [doc/debugging.md](doc/debugging.md).
+    ```sh
+    beedance -dap
     ```
 *   **`-version`:** Prints the application version.
     ```sh
     go run main.go -version
-*   **`-lint FILE.st...`:** Checks the files without running them: unused variables, unreachable code, implicit narrowing, outputs written in more than one place, loops that never end or may overrun the cycle time, and the PLCopen coding guidelines. Exits 0 when clean, 1 on a warning or an error, 2 if parsing fails. See [doc/analyzer.md](doc/analyzer.md).
     ```
 
 ### Examples

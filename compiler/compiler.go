@@ -239,6 +239,9 @@ type Compiler struct {
 	// constDepth guards evaluateConstantInteger against constants defined
 	// through each other.
 	constDepth int
+
+	// left is what the last scope left held for a debugger (lines.go).
+	left leftScope
 }
 
 // NewCompilerWithBuiltins creates a new compiler with a specific set of built-in functions.
@@ -580,6 +583,7 @@ func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgra
 // AST recursively, dispatching to specific compilation methods based on the node type.
 // An error is a *PositionError at the innermost node that failed.
 func (c *Compiler) Compile(node ast.Node) error {
+	c.markStatement(node)
 	return positioned(node, c.compileNode(node))
 }
 
@@ -902,12 +906,12 @@ func (c *Compiler) compileNode(node ast.Node) error {
 
 		numLocals := c.symbolTable.numDefinitions
 		mainLogicInstructions := c.leaveScope()
-		mainFn := &object.CompiledFunction{
+		mainFn := c.debugInfo(&object.CompiledFunction{
 			Instructions:   mainLogicInstructions,
 			NumLocals:      numLocals,
 			NumParameters:  1, // THIS
 			ParameterNames: []string{"THIS"},
-		}
+		}, node.Name.Value)
 		mainFnIndex := c.addConstant(mainFn)
 
 		// --- Compile-time Interface Implementation Check ---
@@ -981,11 +985,11 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		numLocals := c.symbolTable.numDefinitions
 		instructions := c.leaveScope()
 
-		fn := &object.CompiledFunction{
+		fn := c.debugInfo(&object.CompiledFunction{
 			Instructions:  instructions,
 			NumLocals:     numLocals,
 			NumParameters: 0, // Actions have no parameters
-		}
+		}, c.memberName(node.Name.Value))
 		fnIndex := c.addConstant(fn)
 
 		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
@@ -1169,14 +1173,14 @@ func (c *Compiler) compileNode(node ast.Node) error {
 		instructions := c.leaveScope()
 
 		c.popFunction()
-		compiledFn := &object.CompiledFunction{
+		compiledFn := c.debugInfo(&object.CompiledFunction{
 			Instructions:   instructions,
 			NumLocals:      numLocals,
 			NumParameters:  len(params),
 			ParameterNames: paramNames,
 			OutputNames:    outputNames,
 			OutputIndices:  outputIndices,
-		}
+		}, node.Name.Value)
 		fnIndex := c.addConstant(compiledFn)
 
 		// Create the closure and assign it to the variable in the outer scope.
@@ -2215,11 +2219,11 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			c.loadSymbol(s)
 		}
 
-		compiledFn := &object.CompiledFunction{
+		compiledFn := c.debugInfo(&object.CompiledFunction{
 			Instructions:  instructions,
 			NumLocals:     numLocals,
 			NumParameters: len(node.Parameters),
-		}
+		}, "")
 
 		fnIndex := c.addConstant(compiledFn)
 		c.emit(code.OpClosure, fnIndex, len(freeSymbols))
@@ -3333,6 +3337,7 @@ func (c *Compiler) Bytecode() *Bytecode {
 	return &Bytecode{
 		Instructions: c.currentInstructions(),
 		Constants:    c.constants,
+		Lines:        c.scopeLines(),
 	}
 }
 
@@ -3449,6 +3454,7 @@ func (c *Compiler) removeLastPop() {
 
 	old := c.currentInstructions()
 	new := old[:last.Position]
+	c.trimLines(last.Position)
 
 	c.scopes[c.scopeIndex].instructions = new
 	c.scopes[c.scopeIndex].lastInstruction = previous
@@ -3508,6 +3514,7 @@ func (c *Compiler) enterScope() {
 // compiled instructions, and restores the outer symbol table.
 func (c *Compiler) leaveScope() code.Instructions {
 	instructions := c.currentInstructions()
+	c.noteLeaving()
 
 	c.scopes = c.scopes[:len(c.scopes)-1]
 	c.scopeIndex--
@@ -3585,7 +3592,7 @@ func (c *Compiler) compileSFCProgram(node *ast.SFCProgram) error {
 			}
 			c.emit(code.OpReturn)
 			instructions := c.leaveScope()
-			fnIndex := c.addConstant(&object.CompiledFunction{Instructions: instructions})
+			fnIndex := c.addConstant(c.debugInfo(&object.CompiledFunction{Instructions: instructions}, action.Name.Value))
 			actionClosures[action.Name.Value] = fnIndex
 		}
 	}
@@ -3599,7 +3606,7 @@ func (c *Compiler) compileSFCProgram(node *ast.SFCProgram) error {
 			}
 			c.emit(code.OpReturnValue)
 			instructions := c.leaveScope()
-			fnIndex := c.addConstant(&object.CompiledFunction{Instructions: instructions})
+			fnIndex := c.addConstant(c.debugInfo(&object.CompiledFunction{Instructions: instructions}, "transition"))
 			transitionClosures[trans] = fnIndex
 		}
 	}
@@ -4057,6 +4064,9 @@ func (c *Compiler) emitConstant(index int) {
 type Bytecode struct {
 	Instructions code.Instructions
 	Constants    []object.Object
+	// Lines maps the instructions to the statements of the source, for a
+	// debugger.
+	Lines []object.SourceLine
 }
 
 // CompilationScope represents a single level of scope during compilation,
@@ -4066,6 +4076,7 @@ type CompilationScope struct {
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
 	varDecls            map[string]*ast.VarDeclStatement // Maps var name to its declaration AST node
+	lines               []object.SourceLine              // where statements start (lines.go)
 }
 
 // evaluateConstantInteger attempts to evaluate an expression at compile time.
@@ -4292,12 +4303,12 @@ func (c *Compiler) compileMethod(method *ast.MethodImplementation) (*object.Comp
 		paramNames = append(paramNames, p.Name.Value)
 	}
 
-	return &object.CompiledFunction{
+	return c.debugInfo(&object.CompiledFunction{
 		Instructions:   instructions,
 		NumLocals:      numLocals,
 		NumParameters:  len(method.VarInputs) + 1, // THIS is passed as the first argument
 		ParameterNames: paramNames,
-	}, nil
+	}, c.memberName(method.Name.Value)), nil
 }
 
 // compilePropertyAccessor compiles a property's GET or SET block into a CompiledFunction.
@@ -4348,11 +4359,11 @@ func (c *Compiler) compilePropertyAccessor(prop *ast.PropertyDeclaration, body *
 	numLocals := c.symbolTable.numDefinitions
 	instructions := c.leaveScope()
 
-	return &object.CompiledFunction{
+	return c.debugInfo(&object.CompiledFunction{
 		Instructions:  instructions,
 		NumLocals:     numLocals,
 		NumParameters: numParams,
-	}, nil
+	}, c.memberName(funcName)), nil
 }
 
 func (c *Compiler) compileMemberAccess(node *ast.MemberAccessExpression) error {
