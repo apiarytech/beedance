@@ -415,3 +415,40 @@ func TestStopOnEntryAndErrors(t *testing.T) {
 		t.Error("a stack trace with nothing launched")
 	}
 }
+
+// TestLaunchSource: a host with no files (a web page) launches a program
+// from its text, sets breakpoints on the name it gave it, and changes it
+// online by sending the new text.
+func TestLaunchSource(t *testing.T) {
+	c := newClient(t)
+	c.ok("initialize", map[string]any{"adapterID": "beedance"}, nil)
+	c.ok("launch", map[string]any{"program": "main.st", "source": program, "realtime": false, "stopOnEntry": true}, nil)
+	c.event("initialized")
+	incr := lineOf(t, program, "n := n + 1")
+	var bps struct{ Breakpoints []breakpoint }
+	c.ok("setBreakpoints", map[string]any{"source": map[string]any{"path": "main.st"},
+		"breakpoints": []map[string]any{{"line": incr}}}, &bps)
+	if !bps.Breakpoints[0].Verified {
+		t.Fatalf("breakpoints %+v", bps.Breakpoints)
+	}
+	c.ok("configurationDone", nil, nil)
+	if st := c.event("stopped"); st["reason"] != "entry" {
+		t.Fatalf("stopped %v", st)
+	}
+	if m := c.request("beedance/onlineChange", nil); m.Success {
+		t.Error("online change with no text, and no file, succeeded")
+	}
+	edited := strings.Replace(program, "n := n + 1;", "n := n + 10;", 1)
+	var r struct{ Reset, Added, Removed []string }
+	c.ok("beedance/onlineChange", map[string]any{"source": edited}, &r)
+	c.ok("continue", map[string]any{"threadId": 1}, nil)
+	if st := c.event("stopped"); st["reason"] != "breakpoint" {
+		t.Fatalf("stopped %v", st)
+	}
+	c.ok("next", map[string]any{"threadId": 1}, nil)
+	c.event("stopped")
+	vs, _ := c.vars(c.top().ID, "PROGRAM")
+	if vs["n"].Value != "10" {
+		t.Errorf("n = %s after the changed statement, want 10", vs["n"].Value)
+	}
+}

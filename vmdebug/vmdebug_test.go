@@ -290,6 +290,39 @@ func TestPause(t *testing.T) {
 	}
 }
 
+// TestYieldEvery: a run that yields between scans still runs scan after
+// scan, takes a write made while it runs, and stops on Pause. That it lets
+// a web page's event loop in is tested in package wasm, under Node.js.
+func TestYieldEvery(t *testing.T) {
+	s, err := Load(source, Options{YieldEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan Stop)
+	go func() {
+		st, _ := s.Continue(ctx)
+		done <- st
+	}()
+	time.Sleep(10 * time.Millisecond)
+	if err := s.Set("x", "TRUE"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	s.Pause()
+	var st Stop
+	select {
+	case st = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Pause did not stop Continue")
+	}
+	if st.Reason != OnPause || st.Scan < 2 {
+		t.Fatalf("stop %+v", st)
+	}
+	if got := value(t, s, "y"); got != "TRUE" {
+		t.Errorf("y = %s after x was set while running, want TRUE", got)
+	}
+}
+
 func TestForce(t *testing.T) {
 	s := load(t, source)
 	if err := s.Force("%IX0.0", "TRUE"); err != nil {
