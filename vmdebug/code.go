@@ -97,7 +97,7 @@ func (s *Session) Disassembly() []Instruction {
 		for i := 0; i < len(ins); {
 			in := Instruction{Address: b.base + i, POU: b.name}
 			if l, ok := object.LineAt(b.fn.Lines, i); ok {
-				in.Line, in.Column = l.Row, l.Column
+				in.Line, in.Column = s.lineOut(l.Row), l.Column
 			}
 			def, err := code.Lookup(ins[i])
 			if err != nil {

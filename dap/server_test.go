@@ -452,3 +452,61 @@ func TestLaunchSource(t *testing.T) {
 		t.Errorf("n = %s after the changed statement, want 10", vs["n"].Value)
 	}
 }
+
+// TestIOAndInputs: a simulator reads the I/O image, writes inputs a scan
+// at a time, and hears the scans while the program runs.
+func TestIOAndInputs(t *testing.T) {
+	c := newClient(t)
+	c.ok("initialize", map[string]any{"adapterID": "beedance"}, nil)
+	c.ok("launch", map[string]any{"program": "main.st", "source": program, "realtime": false,
+		"stopOnEntry": true, "scanEvents": 1}, nil)
+	c.event("initialized")
+	c.ok("configurationDone", nil, nil)
+	c.event("stopped")
+
+	// A press and a release before a scan runs: each gets a scan.
+	var q struct{ Queued int }
+	c.ok("beedance/setInputs", map[string]any{"values": map[string]any{"%IX0.0": true}}, &q)
+	c.ok("beedance/setInputs", map[string]any{"values": map[string]any{"%IX0.0": false}}, &q)
+	if q.Queued != 2 {
+		t.Fatalf("queued %d scans of inputs, want 2", q.Queued)
+	}
+	if m := c.request("beedance/setInputs", map[string]any{"values": map[string]any{"nothere": true}}); m.Success {
+		t.Error("an input that is no variable or address was queued")
+	}
+	type ioReply struct {
+		Scan      int
+		ElapsedMs float64
+		IO        map[string]any
+	}
+	var io ioReply
+	for i, want := range []bool{true, false} {
+		c.ok("beedance/stepScan", nil, nil)
+		c.event("stopped")
+		c.ok("beedance/io", nil, &io)
+		if io.Scan != i+1 || io.ElapsedMs != float64(10*(i+1)) || io.IO["%QX0.0"] != want {
+			t.Errorf("scan %d: io %+v, want %%QX0.0 = %v", i+1, io, want)
+		}
+	}
+
+	c.ok("beedance/force", map[string]any{"name": "%IX0.0", "value": "TRUE"}, nil)
+	c.ok("continue", map[string]any{"threadId": 1}, nil)
+	ev := c.event("beedance/scan") // the first is the image at launch, scan 0
+	for ev["scan"].(float64) < 3 {
+		ev = c.event("beedance/scan")
+	}
+	c.ok("pause", map[string]any{"threadId": 1}, nil)
+	c.event("stopped")
+	if ev["io"].(map[string]any)["%QX0.0"] != true {
+		t.Errorf("beedance/scan %v", ev)
+	}
+	found := false
+	for _, v := range ev["values"].([]any) {
+		if v := v.(map[string]any); v["name"] == "y" && v["text"] == "TRUE" && v["address"] == "%QX0.0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("beedance/scan values %v: no y = TRUE at %%QX0.0", ev["values"])
+	}
+}

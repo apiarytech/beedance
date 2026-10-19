@@ -27,6 +27,14 @@
 //	scan                beedance/stepScan run to the end of the scan
 //	change              beedance/onlineChange  re-read the file, change online
 //	live                beedance/live     the watched values, while running
+//
+// For a simulator's virtual field devices: beedance/io reads the I/O
+// image, beedance/setInputs queues inputs a scan at a time, and, when
+// launched with "scanEvents", a beedance/scan event brings the watched
+// values and the I/O image while the program runs. beedance/speed sets how
+// fast simulated time runs, beedance/trace records signals every scan, and
+// the plant models (PROGRAM PLANT_...) the session runs after each scan
+// are scopes of their own.
 package dap
 
 import (
@@ -45,7 +53,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apiarytech/beedance/ide"
 	"github.com/apiarytech/beedance/object"
+	"github.com/apiarytech/beedance/token"
 	"github.com/apiarytech/beedance/vmdebug"
 )
 
@@ -64,6 +74,10 @@ type Server struct {
 	YieldEvery time.Duration
 	// Yield is the sessions' vmdebug.Options.Yield.
 	Yield func()
+	// Attach, if set, answers the attach request: a host with programs
+	// of its own (beehive's logic) gives the session attached to the one
+	// asked for (attach.go). Without it, attach is refused.
+	Attach Attacher
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -80,6 +94,17 @@ type Server struct {
 
 	refs    map[int]varRef
 	nextRef int
+
+	lastScanEvent time.Time // when beedance/scan was last emitted
+
+	// beedance/diagrams and beedance/monitor (diagrams.go, monitor.go):
+	// the running source analyzed and lexed, and the names the session
+	// samples for each.
+	ideSource     string
+	ideIndex      *ide.Index
+	monitorSource string
+	monitorToks   []token.Token
+	sampled       map[string][]string
 }
 
 // NewServer is a debug adapter reading requests from r and writing
@@ -210,7 +235,15 @@ func (s *Server) handle(m *message) (done bool) {
 			s.emit("initialized", nil)
 		}
 	case "attach":
-		s.fail(m, errors.New("beedance debugs the program it launches; attach is not supported"))
+		var a AttachArgs
+		if args(&a) {
+			if err := s.attach(a); err != nil {
+				s.fail(m, err)
+				return
+			}
+			s.reply(m, nil)
+			s.emit("initialized", nil)
+		}
 	case "setBreakpoints":
 		var a setBreakpointsArgs
 		if args(&a) {
@@ -223,9 +256,13 @@ func (s *Server) handle(m *message) (done bool) {
 			return
 		}
 		s.reply(m, nil)
-		if s.args.StopOnEntry && !s.args.NoDebug {
+		switch {
+		case s.args.StopOnEntry && !s.args.NoDebug && s.sess.Attached():
+			s.sess.Pause() // it is running: stopped before its next scan
+			s.start(s.sess.Continue)
+		case s.args.StopOnEntry && !s.args.NoDebug:
 			s.stopped(vmdebug.Stop{Reason: vmdebug.OnEntry})
-		} else {
+		default:
 			s.start(s.sess.Continue)
 		}
 	case "threads":
@@ -331,6 +368,10 @@ func (s *Server) handle(m *message) (done bool) {
 	case "beedance/onlineChange":
 		var a onlineChangeArgs
 		if args(&a) && needs(false) {
+			if s.sess.Attached() {
+				s.fail(m, errors.New("the program runs on its host: make the change there (beehive: deploy it, LogicService.Apply), which restarts the program and ends this session"))
+				return
+			}
 			r, err := s.onlineChangeTo(a.Source)
 			if err != nil {
 				s.fail(m, err)
@@ -342,7 +383,52 @@ func (s *Server) handle(m *message) (done bool) {
 		if needs(false) {
 			s.reply(m, s.sess.Live())
 		}
+	case "beedance/io":
+		if needs(false) {
+			s.reply(m, s.io())
+		}
+	case "beedance/speed":
+		var a speedArgs
+		if args(&a) && needs(false) {
+			if s.sess.Attached() {
+				s.fail(m, errors.New("the host's task paces a program attached to"))
+				return
+			}
+			s.sess.SetSpeed(a.Factor)
+			s.reply(m, map[string]any{"speed": s.sess.Speed()})
+		}
+	case "beedance/trace":
+		var a traceArgs
+		if args(&a) && needs(false) {
+			if a.Signals != nil {
+				if err := s.sess.SetTrace(*a.Signals, a.Depth); err != nil {
+					s.fail(m, err)
+					return
+				}
+			}
+			s.reply(m, s.sess.TraceData(a.Scans))
+		}
+	case "beedance/monitor":
+		var a monitorArgs
+		if args(&a) && needs(false) {
+			s.reply(m, s.monitor(a))
+		}
+	case "beedance/diagrams":
+		var a diagramsArgs
+		if args(&a) && needs(false) {
+			s.reply(m, s.diagrams(a))
+		}
+	case "beedance/setInputs":
+		var a setInputsArgs
+		if args(&a) && needs(false) {
+			if err := s.sess.SetInputs(a.Values); err != nil {
+				s.fail(m, err)
+				return
+			}
+			s.reply(m, map[string]any{"queued": s.sess.QueuedInputs()})
+		}
 	case "disconnect", "terminate":
+		s.detach() // an attached program runs on without the debugger
 		s.stopRun()
 		s.reply(m, nil)
 		if m.Command == "terminate" {
@@ -381,6 +467,15 @@ func (s *Server) launch(a launchArgs) error {
 	o := vmdebug.Options{Program: a.ProgramName, Realtime: a.Realtime == nil || *a.Realtime,
 		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
 		Notify: func(msg string) { s.output("stderr", msg) }}
+	if a.ScanEvents > 0 {
+		every := time.Duration(a.ScanEvents) * time.Millisecond
+		o.Sampled = func(smp vmdebug.Sample) {
+			if now := time.Now(); now.Sub(s.lastScanEvent) >= every {
+				s.lastScanEvent = now
+				s.emit("beedance/scan", smp)
+			}
+		}
+	}
 	if a.Interval != "" {
 		if o.Interval, err = time.ParseDuration(a.Interval); err != nil {
 			return fmt.Errorf("launch: interval: %w", err)
@@ -389,6 +484,9 @@ func (s *Server) launch(a launchArgs) error {
 	sess, err := vmdebug.Load(string(src), o)
 	if err != nil {
 		return fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	if a.Speed != nil {
+		sess.SetSpeed(*a.Speed)
 	}
 	s.sess, s.path, s.args = sess, path, a
 	sess.Live() // sample from the first scan on, for the live values
@@ -501,8 +599,29 @@ func (s *Server) stopRun() {
 	}
 }
 
+// io is beedance/io's reply: the I/O image, and the scan and time it is
+// of. Running, it is as the last scan left it; stopped, as it is now, in
+// the middle of a scan if the program stopped there.
+func (s *Server) io() map[string]any {
+	if s.isRunning() {
+		smp := s.sess.Live()
+		return map[string]any{"scan": smp.Scan, "elapsedMs": ms(smp.Elapsed), "io": smp.IO}
+	}
+	return map[string]any{"scan": s.sess.Scans(), "elapsedMs": ms(s.sess.Elapsed()), "io": s.sess.IO()}
+}
+
+// ms is d in milliseconds.
+func ms(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+
 // stopped tells the editor the program stopped, and why.
 func (s *Server) stopped(st vmdebug.Stop) {
+	if st.Reason == vmdebug.OnDetach {
+		// The host let the program go (a stop, a restart, a detach): the
+		// session is over, and the program runs on.
+		s.output("console", "beedance: detached: the program runs on without the debugger")
+		s.emit("terminated", nil)
+		return
+	}
 	body := map[string]any{"threadId": 1, "allThreadsStopped": true}
 	switch st.Reason {
 	case vmdebug.OnScanEnd:
@@ -562,6 +681,7 @@ const (
 	refLocals
 	refMembers
 	refForces
+	refPlant // frame: the plant model's index
 )
 
 func (s *Server) ref(r varRef) int {
@@ -576,6 +696,9 @@ func (s *Server) scopes(frame int) []scope {
 		out = append(out, scope{Name: "Locals", PresentationHint: "locals", VariablesReference: s.ref(varRef{kind: refLocals, frame: frame})})
 	}
 	out = append(out, scope{Name: "PROGRAM " + s.name(), VariablesReference: s.ref(varRef{kind: refProgram})})
+	for i, name := range s.sess.Plants() {
+		out = append(out, scope{Name: "PLANT " + name, VariablesReference: s.ref(varRef{kind: refPlant, frame: i})})
+	}
 	if len(s.sess.Forced()) > 0 {
 		out = append(out, scope{Name: "Forced", VariablesReference: s.ref(varRef{kind: refForces})})
 	}
@@ -615,6 +738,15 @@ func (s *Server) variables(ref int) []variable {
 			path := ""
 			if r.path != "" && !strings.HasPrefix(v.Name, "[") {
 				path = r.path + "." + v.Name
+			}
+			add(v, path)
+		}
+	case refPlant:
+		plant := s.sess.Plants()[r.frame]
+		for _, v := range s.sess.PlantGlobals(r.frame) {
+			path := ""
+			if v.Address == "" {
+				path = plant + "." + v.Name
 			}
 			add(v, path)
 		}
@@ -664,6 +796,8 @@ func (s *Server) setVariable(a setVariableArgs) (string, error) {
 			return "", err
 		}
 		return a.Value, nil
+	case refPlant:
+		return "", errors.New("a plant model's variables are its own: change the plant's source, or force its inputs and outputs")
 	}
 	return a.Value, nil
 }

@@ -97,6 +97,9 @@ func (s *Session) serveChanges() {
 
 // change is Change, with mu held.
 func (s *Session) change(source string) (Report, error) {
+	if s.host != nil {
+		return Report{}, ErrAttached
+	}
 	if s.midScan {
 		return Report{}, ErrMidScan
 	}
@@ -137,6 +140,7 @@ func (s *Session) change(source string) (Report, error) {
 			r.Removed = append(r.Removed, v.Name)
 		}
 	}
+	carryPlants(old, img, c)
 	// The I/O image: the plant's inputs, the outputs as last written.
 	for addr, v := range old.vm.IO() {
 		img.vm.IO()[addr] = v
@@ -144,6 +148,7 @@ func (s *Session) change(source string) (Report, error) {
 
 	s.cmu.Lock()
 	s.img = img
+	s.retrace()
 	for key, f := range s.forces {
 		t, err := s.resolve(f.name)
 		if err == nil {

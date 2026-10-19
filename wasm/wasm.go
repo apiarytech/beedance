@@ -21,6 +21,13 @@
 //	{"op":"test","source":"...","engines":["eval","vm"],"filter":"",
 //	 "intervalMs":10,"maxScans":50000,"tolerance":1e-3,"scans":false}
 //	{"op":"transpile","source":"..."}                Go source on royaljelly
+//	{"op":"exportXML","source":"...","name":"...","sim":"{...}","from":"<xml>"}
+//	                                                 PLCopen XML (IEC 61131-10)
+//	{"op":"importXML","xml":"..."}                   its source, name and sim data
+//	{"op":"lint","source":"..."}                     the analyzer's findings
+//	{"op":"hover","source":"...","line":3,"column":5} also complete, definition,
+//	                                                 references, rename ("newName")
+//	{"op":"diagrams","source":"..."}                 LD, FBD and SFC bodies as SVG
 //	{"op":"load","source":"...","program":"Main","intervalMs":10}
 //	{"op":"scan","session":1,"count":1,"values":{"start":true,"%IX0.0":true}}
 //	{"op":"set","session":1,"values":{...}}
@@ -35,7 +42,6 @@
 package wasm
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,8 +54,6 @@ import (
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
-	"github.com/apiarytech/beedance/sil"
-	"github.com/apiarytech/beedance/transpiler"
 )
 
 // Request is one call. Only the fields its op uses are read.
@@ -71,6 +75,17 @@ type Request struct {
 	// scan: how many scans to run (default 1); values, set before them.
 	Count  int            `json:"count,omitempty"`
 	Values map[string]any `json:"values,omitempty"`
+	// exportXML: the project's name, the simulator's settings (JSON) and
+	// the XML it was imported from; importXML: the XML.
+	Name string `json:"name,omitempty"`
+	Sim  string `json:"sim,omitempty"`
+	From string `json:"from,omitempty"`
+	XML  string `json:"xml,omitempty"`
+	// hover, complete, definition, references, rename: a place in the
+	// source, 1-based; rename's new name.
+	Line    int    `json:"line,omitempty"`
+	Column  int    `json:"column,omitempty"`
+	NewName string `json:"newName,omitempty"`
 }
 
 // Host answers requests. It holds the sessions load starts; it is safe for
@@ -101,8 +116,10 @@ func (h *Host) Handle(request []byte) []byte {
 		reply = errorReply{Error: "bad request: " + err.Error()}
 	} else if r, err := h.Do(req); err != nil {
 		e := errorReply{Error: err.Error()}
-		var pe *sil.ParseError
-		if errors.As(err, &pe) {
+		var pe *ParseError
+		if errs, ok := parseErrors(err); ok {
+			e.Error, e.Errors = "parse errors", errs
+		} else if errors.As(err, &pe) {
 			e.Error, e.Errors = "parse errors", pe.Errors
 		}
 		reply = e
@@ -118,23 +135,22 @@ func (h *Host) Handle(request []byte) []byte {
 
 // Do answers a request with a reply to encode as JSON.
 func (h *Host) Do(req Request) (any, error) {
+	if r, ok, err := ideOp(req); ok {
+		return r, err
+	}
 	switch strings.ToLower(req.Op) {
 	case "version":
 		return versionReply{GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Ops: ops}, nil
 	case "check":
 		return check(req.Source), nil
 	case "test":
-		return test(req)
+		return testOp(req)
 	case "transpile":
-		program, err := parse(req.Source)
-		if err != nil {
-			return nil, err
-		}
-		src, err := transpiler.GoFile(program)
-		if err != nil {
-			return nil, err
-		}
-		return transpileReply{Go: string(src)}, nil
+		return transpileOp(req)
+	case "exportxml":
+		return exportXML(req)
+	case "importxml":
+		return importXML(req)
 	case "load":
 		return h.load(req)
 	case "scan", "set", "read", "unload":
@@ -145,7 +161,10 @@ func (h *Host) Do(req Request) (any, error) {
 	return nil, fmt.Errorf("unknown op %q: want one of %s", req.Op, strings.Join(ops, ", "))
 }
 
-var ops = []string{"version", "check", "test", "transpile", "load", "scan", "set", "read", "unload"}
+// ops are the ops this build answers: these, and the full build's
+// (full.go; a build with -tags lite leaves them out).
+var ops = append([]string{"version", "check", "exportXML", "importXML", "lint", "hover", "complete",
+	"definition", "references", "rename", "outline", "diagrams", "load", "scan", "set", "read", "unload"}, buildOps...)
 
 type versionReply struct {
 	GoVersion string   `json:"goVersion"`
@@ -154,37 +173,123 @@ type versionReply struct {
 	Ops       []string `json:"ops"`
 }
 
-type transpileReply struct {
-	Go string `json:"go"`
-}
-
 type checkReply struct {
 	OK     bool     `json:"ok"`
 	Errors []string `json:"errors,omitempty"`
 	// Programs are the PROGRAMs declared, tests among them.
 	Programs []string `json:"programs"`
 	Tests    []string `json:"tests"`
+	// POUs are the source's declarations, in order: an editor's outline
+	// and the scopes of a search.
+	POUs []pouInfo `json:"pous"`
+	// Located are the PROGRAMs' variables with an address (AT %IX0.0).
+	Located []locatedInfo `json:"located"`
+}
+
+// pouInfo is a declaration of the source: Kind is PROGRAM,
+// FUNCTION_BLOCK, FUNCTION, INTERFACE, TYPE, VAR_GLOBAL or
+// CONFIGURATION; Line is where it starts.
+type pouInfo struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	Line int    `json:"line"`
+}
+
+// locatedInfo is a PROGRAM's variable at an address.
+type locatedInfo struct {
+	Program string `json:"program"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Type    string `json:"type"`
+	Line    int    `json:"line"`
 }
 
 func check(source string) checkReply {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
-	r := checkReply{OK: len(p.Errors()) == 0, Errors: p.Errors(), Programs: []string{}, Tests: []string{}}
+	r := checkReply{OK: len(p.Errors()) == 0, Errors: p.Errors(), Programs: []string{}, Tests: []string{},
+		POUs: outline(program), Located: []locatedInfo{}}
 	for _, pd := range programs(program) {
 		name := pd.Name.Value
 		r.Programs = append(r.Programs, name)
 		if isTest(name) {
 			r.Tests = append(r.Tests, name)
 		}
+		for _, list := range [][]*ast.VarDeclStatement{pd.VarInputs, pd.VarOutputs, pd.VarInOuts, pd.Vars} {
+			for _, v := range list {
+				if v == nil || v.Name == nil || v.Location == nil || v.Location.Location == nil {
+					continue
+				}
+				addr := strings.ToUpper(v.Location.Location.Address)
+				if !strings.HasPrefix(addr, "%") {
+					addr = "%" + addr
+				}
+				li := locatedInfo{Program: name, Name: v.Name.Value, Address: addr}
+				if v.DataType != nil {
+					li.Type = v.DataType.String()
+				}
+				li.Line, _ = v.Location.Pos()
+				r.Located = append(r.Located, li)
+			}
+		}
 	}
 	return r
+}
+
+// outline lists the source's top-level declarations.
+func outline(program *ast.Program) []pouInfo {
+	out := []pouInfo{}
+	add := func(kind string, name *ast.Identifier, line int) {
+		if line <= 0 {
+			return
+		}
+		n := ""
+		if name != nil {
+			n = name.Value
+		}
+		out = append(out, pouInfo{Kind: kind, Name: n, Line: line})
+	}
+	for _, st := range program.Statements {
+		row, _ := st.Pos()
+		switch d := st.(type) {
+		case *ast.ProgramDeclaration:
+			add("PROGRAM", d.Name, row)
+		case *ast.FunctionBlockDeclaration:
+			add("FUNCTION_BLOCK", d.Name, row)
+		case *ast.FunctionDeclaration:
+			add("FUNCTION", d.Name, row)
+		case *ast.InterfaceDeclaration:
+			add("INTERFACE", d.Name, row)
+		case *ast.TypeBlockDeclaration:
+			var name *ast.Identifier
+			if len(d.Declarations) > 0 {
+				name = d.Declarations[0].Name
+			}
+			add("TYPE", name, row)
+		case *ast.TypeDeclaration:
+			add("TYPE", d.Name, row)
+		case *ast.GlobalVarDeclaration:
+			add("VAR_GLOBAL", nil, row)
+		case *ast.ConfigurationDeclaration:
+			add("CONFIGURATION", d.Name, row)
+		}
+	}
+	return out
+}
+
+// ParseError is the parse errors of a source, as sil.ParseError (which
+// the lite build has not got).
+type ParseError struct{ Errors []string }
+
+func (e *ParseError) Error() string {
+	return "parser errors:\n\t" + strings.Join(e.Errors, "\n\t")
 }
 
 func parse(source string) (*ast.Program, error) {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		return nil, &sil.ParseError{Errors: errs}
+		return nil, &ParseError{Errors: errs}
 	}
 	return program, nil
 }
@@ -208,20 +313,6 @@ func interval(ms float64) time.Duration {
 	return time.Duration(ms * float64(time.Millisecond))
 }
 
-type testReply struct {
-	Passed  bool         `json:"passed"`
-	Failed  int          `json:"failed"`
-	Results []testResult `json:"results"`
-}
-
-type testResult struct {
-	Name      string         `json:"name"`
-	Passed    bool           `json:"passed"`
-	Mismatch  string         `json:"mismatch,omitempty"`
-	Variables []variable     `json:"variables"`
-	Engines   []engineResult `json:"engines"`
-}
-
 type variable struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
@@ -229,72 +320,52 @@ type variable struct {
 	Address string `json:"address,omitempty"`
 }
 
-type engineResult struct {
-	Engine    string     `json:"engine"`
-	Passed    bool       `json:"passed"`
-	Done      bool       `json:"done"`
-	Failures  int        `json:"failures"`
-	Message   string     `json:"message,omitempty"`
-	Error     string     `json:"error,omitempty"`
-	Problems  []string   `json:"problems,omitempty"`
-	ScanCount int        `json:"scanCount"`
-	Scans     []sil.Scan `json:"scans,omitempty"`
-}
-
-// test runs the TEST_ programs of the source with package sil. The go and
-// wasm engines build the tests with the Go toolchain, which a WebAssembly
-// module has not got.
-func test(req Request) (testReply, error) {
-	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if len(req.Engines) > 0 {
-		var err error
-		if engines, err = sil.ParseEngines(strings.Join(req.Engines, ",")); err != nil {
-			return testReply{}, err
-		}
+// fromObject is an elementary value as Go holds it (as sil.FromObject,
+// which the lite build has not got).
+func fromObject(o object.Object) (any, error) {
+	switch x := o.(type) {
+	case *object.Boolean:
+		return x.Value, nil
+	case *object.Real:
+		return x.Value, nil
+	case *object.LReal:
+		return x.Value, nil
+	case *object.String:
+		return x.Value, nil
+	case *object.WString:
+		return x.Value, nil
+	case *object.Time:
+		return x.Value, nil
+	case *object.Byte:
+		return uint64(x.Value), nil
+	case *object.Word:
+		return uint64(x.Value), nil
+	case *object.DWord:
+		return uint64(x.Value), nil
+	case *object.LWord:
+		return x.Value, nil
+	case *object.BitString:
+		return x.Value, nil
+	case *object.ULInt:
+		return x.Value, nil
 	}
-	for _, e := range engines {
-		if (e == sil.Go || e == sil.Wasm) && runtime.GOARCH == "wasm" {
-			return testReply{}, fmt.Errorf("the %s engine needs the Go toolchain, which WebAssembly has not got: use eval and vm", e)
+	if n, unsigned, ok := object.GetIntegerObjectValue(o); ok {
+		if unsigned {
+			return uint64(n), nil
 		}
+		return n, nil
 	}
-	results, err := sil.Run(context.Background(), req.Source, sil.Options{
-		Interval:  interval(req.IntervalMs),
-		MaxScans:  req.MaxScans,
-		Tolerance: req.Tolerance,
-		Engines:   engines,
-		Filter:    req.Filter,
-	})
-	if err != nil {
-		return testReply{}, err
+	if o == nil {
+		return nil, fmt.Errorf("no value")
 	}
-	reply := testReply{Passed: true, Results: []testResult{}}
-	for _, res := range results {
-		tr := testResult{Name: res.Name, Passed: res.Passed, Mismatch: res.Mismatch, Variables: []variable{}}
-		for _, v := range res.Variables {
-			tr.Variables = append(tr.Variables, variable{Name: v.Name, Type: v.Type})
-		}
-		for _, r := range res.Engines {
-			er := engineResult{Engine: string(r.Engine), Passed: r.Passed, Done: r.Done, Failures: r.Failures,
-				Message: r.Message, Error: r.Err, Problems: r.Problems(), ScanCount: len(r.Scans)}
-			if req.Scans {
-				er.Scans = r.Scans
-			}
-			tr.Engines = append(tr.Engines, er)
-		}
-		if !res.Passed {
-			reply.Passed = false
-			reply.Failed++
-		}
-		reply.Results = append(reply.Results, tr)
-	}
-	return reply, nil
+	return nil, fmt.Errorf("%s (%T) is not an elementary value", o.Inspect(), o)
 }
 
 // jsonValue is o as JSON gives it to the host: a bool, number or string,
 // TIME as written in Structured Text (T#1s500ms), and anything else as the
 // engine prints it.
 func jsonValue(o object.Object) any {
-	v, err := sil.FromObject(o)
+	v, err := fromObject(o)
 	if err != nil {
 		return o.Inspect()
 	}

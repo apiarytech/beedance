@@ -11,6 +11,7 @@
 package vmdebug
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -77,16 +78,25 @@ func (s *Session) setBreakpoints(specs []BreakpointSpec) []Breakpoint {
 			}
 			b.cond = cond
 		}
-		b.Actual = s.img.statementLine(spec.Line)
+		// The breakpoints are kept by lines of the source; the client's
+		// lines may be offset from them (attach.go).
+		line := s.lineIn(spec.Line)
+		b.Actual = s.img.statementLine(line)
 		if b.Actual == 0 {
-			b.Message = fmt.Sprintf("line %d has no statement the program runs", spec.Line)
+			b.Message = s.img.whyNotRun(line)
 		} else {
 			b.Verified = true
 			s.bps[b.Actual] = b
 		}
-		out = append(out, *b)
+		out = append(out, s.breakpointOut(*b))
 	}
 	return out
+}
+
+// breakpointOut is b with its lines as the client sees them.
+func (s *Session) breakpointOut(b Breakpoint) Breakpoint {
+	b.Actual = s.lineOut(b.Actual)
+	return b
 }
 
 // Breakpoints are the breakpoints set, by line.
@@ -95,10 +105,33 @@ func (s *Session) Breakpoints() []Breakpoint {
 	defer s.cmu.Unlock()
 	out := make([]Breakpoint, 0, len(s.bps))
 	for _, b := range s.bps {
-		out = append(out, *b)
+		out = append(out, s.breakpointOut(*b))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Actual < out[j].Actual })
 	return out
+}
+
+// whyNotRun says why no statement on line runs: it is in a PROGRAM other
+// than the one debugged, or in a plant model, or there is none on it.
+func (img *image) whyNotRun(line int) string {
+	var in *ast.ProgramDeclaration
+	for _, st := range img.program.Statements {
+		row, _ := st.Pos()
+		if row <= 0 || row > line {
+			break
+		}
+		pd, _ := st.(*ast.ProgramDeclaration)
+		in = pd // nil after a POU that is no PROGRAM
+	}
+	switch {
+	case in == nil || in == img.decl || in.Name == nil:
+	case IsPlant(in.Name.Value):
+		return fmt.Sprintf("%s is a plant model: it runs after each scan, and no breakpoint stops it", in.Name.Value)
+	default:
+		return fmt.Sprintf("PROGRAM %s does not run in this session: it runs PROGRAM %s. Debug %s instead, or run both from a CONFIGURATION's tasks",
+			in.Name.Value, img.name, in.Name.Value)
+	}
+	return fmt.Sprintf("line %d has no statement the program runs", line)
 }
 
 // statementLine is line if a statement the program runs is on it, else the
@@ -688,18 +721,39 @@ func (s *Session) applyForces() {
 	}
 }
 
-// Sample is the watched values as a scan left them.
+// Sample is the watched values, and the I/O image, as a scan left them.
+// As JSON, Elapsed is "elapsedMs", in milliseconds.
 type Sample struct {
-	Scan    int
-	Elapsed time.Duration
-	Values  []Sampled
+	Scan    int           `json:"scan"`
+	Elapsed time.Duration `json:"-"`
+	Values  []Sampled     `json:"values"`
+	// IO is the I/O image (see Session.IO).
+	IO map[string]any `json:"io"`
+	// Extra are the values of the names SetSampled asked for, as text.
+	Extra map[string]string `json:"extra,omitempty"`
+}
+
+// MarshalJSON writes s with its Elapsed in milliseconds ("elapsedMs").
+func (s Sample) MarshalJSON() ([]byte, error) {
+	type plain Sample
+	return json.Marshal(struct {
+		plain
+		ElapsedMs float64 `json:"elapsedMs"`
+	}{plain(s), float64(s.Elapsed) / float64(time.Millisecond)})
 }
 
 // Sampled is a watched value in a Sample.
 type Sampled struct {
-	Name, Type, Address, Text string
-	Forced                    bool
+	Name    string `json:"name"`
+	Type    string `json:"type,omitempty"`
+	Address string `json:"address,omitempty"`
+	Text    string `json:"text"`
+	Forced  bool   `json:"forced,omitempty"`
 }
+
+// ExtraEvery is how often a run reads the names SetSampled asked for: the
+// Sample of a scan in between keeps the last values read.
+const ExtraEvery = 25 * time.Millisecond
 
 // Live is the watched values (Watched) at the end of the last scan, which
 // may be read while a run is in progress: what a PLC's online view shows.
@@ -720,13 +774,25 @@ func (s *Session) sample() {
 	if !s.liveWanted.Load() {
 		return
 	}
-	smp := Sample{Scan: s.scans, Elapsed: s.elapsed}
+	smp := Sample{Scan: s.scans, Elapsed: s.elapsed, IO: s.io()}
+	if names := s.sampled.Load(); names != nil && len(*names) > 0 {
+		// At most every ExtraEvery: a view of values (a monitor, a
+		// diagram) does not need each of a fast run's scans, and reading
+		// many names a scan would slow it.
+		if s.extra == nil || names != s.extraFor || time.Since(s.extraAt) >= ExtraEvery {
+			s.extra, s.extraFor, s.extraAt = s.texts(*names), names, time.Now()
+		}
+		smp.Extra = s.extra
+	}
 	for _, v := range s.watched() {
 		smp.Values = append(smp.Values, Sampled{Name: v.Name, Type: v.Type, Address: v.Address, Text: v.Text(), Forced: v.Forced})
 	}
 	s.lmu.Lock()
 	s.live = smp
 	s.lmu.Unlock()
+	if s.opts.Sampled != nil {
+		s.opts.Sampled(smp)
+	}
 }
 
 // ErrRunning is returned by what may not be done while a run is in

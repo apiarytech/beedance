@@ -127,6 +127,14 @@ type launchArgs struct {
 	// Realtime runs scans Interval apart on the wall clock; default true.
 	Realtime         *bool `json:"realtime"`
 	AllowInputWrites bool  `json:"allowInputWrites"`
+	// ScanEvents, if positive, emits a beedance/scan event (the watched
+	// values and the I/O image, as beedance/live) at most this many
+	// milliseconds apart while the program runs.
+	ScanEvents int `json:"scanEvents"`
+	// Speed, if set, is how fast simulated time runs against the wall
+	// clock while the program runs: 1 real time, 0 as fast as it goes. It
+	// overrides Realtime.
+	Speed *float64 `json:"speed"`
 }
 
 type source struct {
@@ -223,6 +231,26 @@ type disassembledInstruction struct {
 // the program; empty re-reads its file.
 type onlineChangeArgs struct {
 	Source string `json:"source"`
+}
+
+// speedArgs are beedance/speed's: as launchArgs.Speed.
+type speedArgs struct {
+	Factor float64 `json:"factor"`
+}
+
+// traceArgs are beedance/trace's: Signals, when given, are what to record
+// from now on (empty stops); Depth the scans kept; Scans how many of the
+// last scans to return (0: all kept).
+type traceArgs struct {
+	Signals *[]string `json:"signals"`
+	Depth   int       `json:"depth"`
+	Scans   int       `json:"scans"`
+}
+
+// setInputsArgs are beedance/setInputs': the values of one scan's inputs,
+// by address or name.
+type setInputsArgs struct {
+	Values map[string]any `json:"values"`
 }
 
 type forceArgs struct {
