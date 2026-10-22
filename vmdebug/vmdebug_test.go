@@ -57,12 +57,16 @@ func line(t *testing.T, src, text string) int {
 	return 0
 }
 
+// testEngine is the engine load uses: the tests run on each (engine_test.go).
+var testEngine = EngineVM
+
 func load(t *testing.T, src string) *Session {
 	t.Helper()
-	s, err := Load(src, Options{})
+	s, err := Load(src, Options{Engine: testEngine})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(s.Close)
 	return s
 }
 
@@ -230,7 +234,17 @@ func TestStepScan(t *testing.T) {
 
 // A run paused at every statement ends as one that never paused.
 func TestPausingChangesNothing(t *testing.T) {
-	plain, paused := load(t, source), load(t, source)
+	// One session at a time: the evaluator's session is the package's.
+	plain := load(t, source)
+	for range 40 {
+		stopped(t)(plain.StepScan(ctx))
+	}
+	unpaused := map[string]string{}
+	for _, name := range []string{"n", "c.total", "t.ET", "t.Q", "done"} {
+		unpaused[name] = value(t, plain, name)
+	}
+	plain.Close()
+	paused := load(t, source)
 	var all []BreakpointSpec
 	for l := 1; l <= strings.Count(source, "\n"); l++ {
 		all = append(all, BreakpointSpec{Line: l})
@@ -248,14 +262,11 @@ func TestPausingChangesNothing(t *testing.T) {
 			stopped(t)(paused.StepScan(ctx))
 		}
 	}
-	for range 40 {
-		stopped(t)(plain.StepScan(ctx))
-	}
 	if stops < 40*5 {
 		t.Errorf("%d stops in 40 scans", stops)
 	}
 	for _, name := range []string{"n", "c.total", "t.ET", "t.Q", "done"} {
-		if a, b := value(t, plain, name), value(t, paused, name); a != b {
+		if a, b := unpaused[name], value(t, paused, name); a != b {
 			t.Errorf("%s: %s without pausing, %s paused", name, a, b)
 		}
 	}
@@ -421,7 +432,9 @@ func TestChangeKeepsTheValues(t *testing.T) {
 	if value(t, s, "n") != "15" || value(t, s, "c.total") != "16" || value(t, s, "m") != "7" {
 		t.Errorf("after the change: n = %s, c.total = %s, m = %s", value(t, s, "n"), value(t, s, "c.total"), value(t, s, "m"))
 	}
-	if etAfter := value(t, s, "t.ET"); etAfter <= etBefore {
+	// On the go engine a standard block's own state (a timer's start) is
+	// royaljelly's, out of the debugger's reach: the timer starts over.
+	if etAfter := value(t, s, "t.ET"); etAfter <= etBefore && testEngine != EngineGo {
 		t.Errorf("the timer started over: ET %s before, %s after", etBefore, etAfter)
 	}
 	if !strings.Contains(s.Source(), "n + 10") {

@@ -132,6 +132,10 @@ type Transpiler struct {
 	// CompactImage gives the file a process image of only the entries its
 	// located variables use (see Options.CompactImage).
 	CompactImage bool
+	// Debug puts the debugger's hooks and variable tables in the file (see
+	// Options.Debug and debug.go).
+	Debug        bool
+	debugLocated []dbgLocated // the located variables, for dbgPoints
 	// imageSizes is, with CompactImage, the length each array of the image
 	// needs, by array name (B, C, W, ...).
 	imageSizes        map[string]int
@@ -209,6 +213,9 @@ func (t *Transpiler) Transpile(programAST *ast.Program) error { // Changed param
 
 // transpileNode is the recursive heart of the transpiler, handling code generation for each AST node.
 func (t *Transpiler) transpileNode(node ast.Node) error {
+	if stmt, ok := node.(ast.Statement); ok {
+		t.debugAt(stmt) // before each statement, wherever it is written from
+	}
 	// Check if the node has leading comments and transpile them.
 	if nodeWithComments, ok := node.(interface{ GetLeadingComments() []string }); ok {
 		t.transpileLeadingComments(nodeWithComments.GetLeadingComments())
@@ -303,6 +310,7 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		if t.usesPlcTime {
 			t.write("%s", plcTimeHelper)
 		}
+		t.transpileDebugTail()
 		if t.usesProcessImage {
 			if t.CompactImage {
 				t.write("%s", t.compactImageDecl())
@@ -621,6 +629,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 	}
 
 	t.write("}\n\n")
+	t.transpileDebugVars(prog.Name.Value, "", prog.VarInputs, prog.VarOutputs, prog.Vars)
 
 	// --- 2. Generate the factory function for initialization ---
 	// A program a configuration connects, MAIN(k := g, out => cg), also gets
@@ -677,6 +686,7 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 
 	t.write("func (%s *%s) Logic(now time.Time) {\n", t.programVarName, prog.Name.Value)
 	t.enterLogic()
+	t.debugEnter(prog.Name.Value, t.programVarName+".dbgVars")
 	if err := t.transpileProcessImage(t.programVarName, allVarBlocks...); err != nil {
 		return err
 	}
@@ -732,6 +742,7 @@ func (t *Transpiler) transpileIlProgram(body *ast.BlockStatement) error {
 
 	for _, stmt := range body.Statements {
 		if ilStmt, ok := stmt.(*ast.IlInstructionStatement); ok {
+			t.debugAt(ilStmt)
 			if err := t.transpileIlInstruction(ilStmt); err != nil {
 				t.ilCurrentCRType = "" // Reset on error
 				return err
@@ -1566,6 +1577,11 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	// VAR_EXTERNAL variables are not part of the struct; they are global.
 	// VAR_TEMP variables are local to the Logic() call, not fields of the struct.
 	t.write("}\n\n")
+	extends := ""
+	if fb.Extends != nil {
+		extends = fb.Extends.String()
+	}
+	t.transpileDebugVars(fb.Name.Value, extends, fb.VarInputs, fb.VarOutputs, fb.Vars)
 
 	// The receiver name is specific to this FB.
 	receiverName := receiverOf(fb.Name.Value)
@@ -1582,6 +1598,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 	t.write("// Logic executes the logic for the %s FUNCTION_BLOCK.\n", fb.Name.Value)
 	t.write("func (%s *%s) Logic(now time.Time) {\n", receiverName, fb.Name.Value)
 	t.enterLogic()
+	t.debugEnter(fb.Name.Value, receiverName+".dbgVars")
 
 	// --- EN/ENO wrapper logic ---
 	// For an EN or ENO the block declares, its body does this itself
@@ -1862,6 +1879,9 @@ func (t *Transpiler) transpileMethodDeclaration(fb *ast.FunctionBlockDeclaration
 				return err
 			}
 		}
+		if t.Debug {
+			t.debugEnter(fb.Name.Value+"."+method.Name.Value, t.debugLocals(method.Name.Value, returnType, method.VarInputs, method.VarOutputs, method.VarInOuts, method.Vars, receiverName))
+		}
 
 		if err := t.transpileNode(method.Body); err != nil { // This will call transpileNode recursively
 			return err
@@ -2052,6 +2072,9 @@ func (t *Transpiler) transpileFunctionDeclaration(fd *ast.FunctionDeclaration) e
 			}
 		}
 		t.write("\n")
+		if t.Debug {
+			t.debugEnter(fd.Name.Value, t.debugLocals(fd.Name.Value, returnType, fd.VarInputs, fd.VarOutputs, fd.VarInOuts, fd.Vars, ""))
+		}
 
 		// --- 3. Transpile the function body ---
 		if err := t.transpileNode(fd.Body); err != nil {
@@ -2955,6 +2978,7 @@ func (t *Transpiler) transpileTypeBlockDeclaration(tbd *ast.TypeBlockDeclaration
 				}
 			}
 			t.write("}\n\n")
+			t.transpileDebugVars(decl.Name.Value, "", structDef.Members)
 		} else if enumDef, ok := decl.DataType.(*ast.EnumDefinition); ok {
 			// Handle ENUM definitions
 			t.transpileEnumDefinition(decl.Name, enumDef)

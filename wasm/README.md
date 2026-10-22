@@ -27,9 +27,14 @@ set when the op failed, and `"errors"` lists any parse errors.
 | Request | Reply |
 |---|---|
 | `{"op":"version"}` | Go version, `goos`/`goarch`, the ops |
-| `{"op":"check","source":S}` | `ok`, `errors`, `programs`, `tests` |
+| `{"op":"check","source":S}` | `ok`, `errors`, `programs`, `tests`; `pous` (kind, name, line: an outline) and `located` (each PROGRAM's variables at an address) |
 | `{"op":"test","source":S,"engines":["eval","vm"],"filter":"","intervalMs":10,"maxScans":50000,"tolerance":1e-3,"scans":false}` | `passed`, `failed`, and per test the result on each engine; with `scans`, the values after every scan |
 | `{"op":"transpile","source":S}` | `go`: the Go source on royaljelly |
+| `{"op":"exportXML","source":S,"name":N,"sim":JSON,"from":X}` | `xml`: the source as a PLCopen project (IEC 61131-10, TC6 XML), the simulator's settings `sim` as additional data under `https://apiarytech.io/beedance/sim`; `from`, the XML it was imported from, keeps other tools' additional data |
+| `{"op":"lint","source":S}` | `findings`: line, column, severity (info, warning, error), rule, PLCopen, message (package analyzer) |
+| `{"op":"hover","source":S,"line":L,"column":C}`; `complete`, `definition`, `references`, `rename` (`"newName"`) | hover's `text` and `symbol`; completion's `items`; a `span`; the `spans` to change (package ide; columns in bytes, from 1) |
+| `{"op":"diagrams","source":S}` | `diagrams`: each LD, FBD and SFC body: its POU, language, model, SVG and the names its live view reads |
+| `{"op":"importXML","xml":X}` | `source`, `name`, and `sim` if the project has it; if `sim` holds the source and the POUs are still what it makes, that text, comments and all |
 | `{"op":"load","source":S,"program":"Main","intervalMs":10}` | `session`, the `variables` (name, type, block, address), their `values` and the `io` image |
 | `{"op":"scan","session":N,"count":1,"values":{...}}` | sets `values`, runs `count` scans; `scans`, `timeMs`, `values`, `io` |
 | `{"op":"set","session":N,"values":{"start":true,"%IX0.1":true,"limit":10}}` | as scan, without scanning |
@@ -45,11 +50,16 @@ values are strings such as `T#1s500ms`.
 
 ## Debugging
 
-The web build also gives `globalThis.beedance.dap(onMessage)`: the
-debugger `beedance -dap` serves ([doc/debugging.md](../doc/debugging.md)),
+The web build also gives `globalThis.beedance.dap(onMessage, options)`:
+the debugger `beedance -dap` serves ([doc/debugging.md](../doc/debugging.md);
+`launch` takes `engine`, `vm` or `eval` in a module),
 by whole Debug Adapter Protocol messages, without the `Content-Length`
 framing. It returns `{send(json), close()}`, and calls `onMessage(json)`
-with each response and event.
+with each response and event; `close()` ends the session and frees it.
+`options` is optional: `{yield: "message"}` lets the page in between scans
+by a MessageChannel message, which browsers schedule more evenly than the
+default 1 ms sleep (see [doc/web-debugger.md](../doc/web-debugger.md#the-yield));
+under Node.js keep the default.
 
 ```js
 const dbg = beedance.dap((msg) => console.log(JSON.parse(msg)));
@@ -70,8 +80,9 @@ node wasm/node/dap.mjs wasm/web/wasm_exec.js wasm/web/beedance.wasm   # under a 
 ```
 
 debugs a program in the web module under Node.js, and fails if the
-running program starves the event loop. The browser debugger built on it
-is planned in [doc/web-debugger.md](../doc/web-debugger.md).
+running program starves the event loop. What a page gets from the
+module, and the yield measured in browsers, is
+[doc/web-debugger.md](../doc/web-debugger.md).
 
 ## Build
 
@@ -84,7 +95,18 @@ GOOS=wasip1 GOARCH=wasm go build -o beedance-wasi.wasm ./wasm/cmd/beedance-wasm
 ```
 
 `wasm_exec.js` must come from the same Go that built the module. The
-module is about 13 MB, or 3 MB gzipped.
+module is about 17 MB, or 4 MB gzipped (Go 1.27).
+
+A page that edits, checks and debugs, and never runs the tests or the
+transpiler, can load a smaller module: `-tags lite` leaves out `test`
+(package sil) and `transpile`, and the `version` reply's `ops` lists what
+the build has; its `engines` lists the debugger's engines a `launch` may
+name (`vm` and `eval`, in either build). With `-ldflags="-s -w"`
+too, it is about 12.5 MB, or 3.2 MB gzipped:
+
+```bash
+GOOS=js GOARCH=wasm go build -trimpath -tags lite -ldflags="-s -w" -o beedance.wasm ./wasm/cmd/beedance-wasm
+```
 
 Built natively (`go run ./wasm/cmd/beedance-wasm`), the command speaks the
 same stdin/stdout protocol as the WASI build, which helps when debugging.

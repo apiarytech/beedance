@@ -92,6 +92,35 @@ jobs:
       working-directory: connectors/honeycomb
       run: go test -race -count=1 ./...
 
+  # The debugger in the web module (doc/web-debugger.md), under Node.js:
+  # a running program must not starve the event loop.
+  web:
+    name: Web debugger
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.27'
+
+    - name: Vet the js-only files
+      run: GOOS=js GOARCH=wasm go vet ./wasm/...
+
+    - name: Build the web module
+      run: |
+        GOOS=js GOARCH=wasm go build -o wasm/web/beedance.wasm ./wasm/cmd/beedance-wasm
+        cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" wasm/web/
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Debug a program in the module under Node.js
+      run: timeout 60 node wasm/node/dap.mjs wasm/web/wasm_exec.js wasm/web/beedance.wasm
+
   raspberry-pi:
     name: Raspberry Pi (${{ matrix.name }})
     runs-on: ubuntu-latest

@@ -116,13 +116,13 @@ func TestDAP(t *testing.T) {
 	if st := c.event("stopped"); st["reason"] != "pause" {
 		t.Fatalf("stopped %v", st)
 	}
-	if live["Scan"].(float64) < 2 {
+	if live["scan"].(float64) < 2 {
 		t.Errorf("live %v: the program did not run on", live)
 	}
 	lamp := ""
-	for _, v := range live["Values"].([]any) {
-		if v := v.(map[string]any); v["Name"] == "lamp" {
-			lamp, _ = v["Text"].(string)
+	for _, v := range live["values"].([]any) {
+		if v := v.(map[string]any); v["name"] == "lamp" {
+			lamp, _ = v["text"].(string)
 		}
 	}
 	if lamp != "TRUE" {

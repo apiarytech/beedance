@@ -16,13 +16,15 @@ Pico and ESP32), and `wasm` (the toolchain as WebAssembly).
 Start with `doc/architecture.md` (the pipeline and every package) and
 `doc/development.md` (build, CI, conventions).
 
-## Current initiative: the web debugger
+## Current initiative: the web debugger, the engine's side
 
-A browser IDE in the style of Wokwi or Tinkercad Circuits: an editor, a
-canvas of virtual field devices wired to the PLC's I/O, and the debugger,
-all on the VM compiled to WebAssembly. **The plan is
-`doc/web-debugger.md`: read it before working on this, and keep it current
-(mark what lands as built, record decisions and measurements there).**
+The debugger runs in a web page: the module built for the web serves the
+same adapter as `beedance -dap`. **`doc/web-debugger.md` is what the
+engine gives a page: read it before working on this, and keep it
+current.** The browser IDE on it (editor, canvas, plant library) is
+**beespace**, ApiaryTech's private, commercial product beside this
+repository (`../beespace`): its code, plans and pricing never come here;
+this repository's docs may say the IDE is beespace.
 
 The rules it rests on:
 
@@ -34,17 +36,20 @@ The rules it rests on:
 - **A running program must yield.** GOOS=js is single-threaded and Go does
   not preempt there. `vmdebug.Options.YieldEvery`/`Yield` make a free run
   give up the processor between scans; the web module sets them
-  (`wasm.DAPYield`). Never add a loop in the run path that can spin
-  without reaching that yield. `runtime.Gosched` and sub-millisecond
-  timers do not return to the JS event loop.
+  (`wasm.DAPYield`), by MessageChannel in a browser (`{yield: "message"}`).
+  Never add a loop in the run path that can spin without reaching that
+  yield. `runtime.Gosched` and sub-millisecond timers do not return to
+  the JS event loop.
 - **No files in the browser.** Anything the debugger reads from disk needs
   a text alternative (as `launch` `source` and `beedance/onlineChange`
   `source`). `filepath.Abs` and `os.Getwd` fail in a browser.
 - **Simulated time.** Scans advance the session's clock by the interval;
-  plant models (planned) run in the VM on that clock, not in JavaScript.
-- **Front end**: `wasm/sim/` (planned), plain ES modules and Web
-  Components, no build step, unless the open question in the plan is
-  settled otherwise. The existing `wasm/web/` playground stays as it is.
+  plant models (`PROGRAM PLANT_...`, `vmdebug/plant.go`) run in the VM on
+  that clock after each scan, not in JavaScript.
+- **beespace builds on this** (`../beespace`, `replace` in its go.mod):
+  a change to `dap`, `vmdebug` or `wasm` runs beespace's tests too
+  (`go test ./...` and `sh sim/test/run.sh` there). The `wasm/web/`
+  playground stays as it is.
 
 ## Commands
 
@@ -58,6 +63,7 @@ GOOS=js GOARCH=wasm go build -o wasm/web/beedance.wasm ./wasm/cmd/beedance-wasm
 cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" wasm/web/
 timeout 60 node wasm/node/dap.mjs wasm/web/wasm_exec.js wasm/web/beedance.wasm
 GOOS=js GOARCH=wasm go vet ./wasm/...        # the js-only files
+
 
 beedance -dap                                # the adapter on stdio (VS Code)
 beedance -test FILE.st                       # TEST_ programs on every engine
@@ -98,6 +104,7 @@ reason alone. `wasm_exec.js` must come from the Go that built the module.
 | `vm/debug.go` | `SetHook`, `ErrPaused`, `Frames`: the VM stops before an instruction and resumes |
 | `compiler/lines.go`, `object.SourceLine` | the line table the debugger maps instructions to statements with |
 | `vmdebug/session.go` | `Session`: run modes, breakpoints, the yield, scans and the clock |
+| `vmdebug/engine.go` | the engine interface: the VM (`engine_vm.go`), the evaluator (`engine_eval.go`, on `evaluator.Debug`), a transpiled program in its own process (`engine_go.go`, its runtime in `engine_go_runtime.go`, the hooks from `transpiler/debug.go`) |
 | `vmdebug/values.go` | variables, locals, evaluate, set, force, `Live` samples |
 | `vmdebug/change.go` | online change: carrying variables over |
 | `vmdebug/code.go` | disassembly, stepping by instruction |

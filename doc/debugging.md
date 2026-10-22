@@ -1,11 +1,12 @@
 # Debugging
 
-beedance debugs a `PROGRAM` on the VM as a PLC runs it, scan by scan:
-breakpoints on its lines, stepping through statements, calls and scans,
-its variables, forcing inputs and variables, and changing the program
-while it runs (online change). `beedance -dap` serves this over the Debug
-Adapter Protocol, so it works in VS Code and in any editor that speaks it;
-package `vmdebug` is the same as a Go API.
+beedance debugs a `PROGRAM` as a PLC runs it, scan by scan: breakpoints
+on its lines, stepping through statements, calls and scans, its
+variables, forcing inputs and variables, and changing the program while
+it runs (online change). The program runs on one of the three engines,
+the VM by default (see [Engines](#engines)). `beedance -dap` serves this
+over the Debug Adapter Protocol, so it works in VS Code and in any editor
+that speaks it; package `vmdebug` is the same as a Go API.
 
 ## In VS Code
 
@@ -36,6 +37,8 @@ that is not a test. A `launch.json` chooses more:
 | `stopOnEntry` | `false` | stop before the first scan |
 | `allowInputWrites` | `false` | let a POU assign its own inputs, as CODESYS does (OSCAT) |
 | `source` | | the program's text, for a host with no files (a web page); `program` then only names it |
+| `engine` | `vm` | what runs the program: `vm`, `eval` (the evaluator) or `go` (transpiled and built); see [Engines](#engines) |
+| `goReplace` | | for the `go` engine, a module pointed at a local directory, as a go.mod `replace` |
 
 The clock is simulated: it moves `interval` at the start of each scan, and
 stands still while the program is stopped, so a timer stopped at a
@@ -107,6 +110,33 @@ The I/O image, the clock, the forces and the breakpoints carry over too.
 While the program runs, the change waits for the end of the scan in
 progress; stopped inside a scan, run to its end first (`scan`).
 
+## Engines
+
+The same debugger runs the program on any of the toolchain's engines
+(`vmdebug.Options.Engine`, the `engine` launch argument, the engine
+selector in beespace). The session is the same on each: its scan loop,
+breakpoints, stepping, forces, writes, live values, trace, plant models
+and online change; the engine only runs a scan with the session's hook in
+it and gives the program's variables and frames.
+
+| Engine | What runs | What differs |
+|---|---|---|
+| `vm` | the program compiled to bytecode, on the VM (`vm.SetHook`) | the default; the only one with a disassembly and instruction steps |
+| `eval` | the tree-walking evaluator, the reference engine, through `evaluator.Debug` | runs in a browser as it is; one evaluator session at a time (a second launch on it, or a test run on it meanwhile, is refused: `ErrEvaluatorBusy`); a function block's locals show its call's variables then its instance's |
+| `go` | the program transpiled to Go with the debugger's hooks (`transpiler.Options.Debug`), built with the Go toolchain on royaljelly in a temporary module, as the firmware is built, and run in a process of its own; the debugger speaks to it on its pipes | needs `go` in PATH and the modules (a first build fetches royaljelly); values cross the pipe as the source writes them, so a breakpoint condition reads a snapshot; a standard block's own state (a timer's start) is royaljelly's and does not carry over an online change, so the timer starts over; no plant models yet beyond the I/O image mirrored each scan; a free run reports only the breakpoints' lines, so a pause takes effect between scans |
+
+The go engine's process stops before a statement and waits; stepping is
+a round trip a statement. `GoBuild.Timeout` (10 s) bounds a scan, so a
+runaway loop fails the scan instead of holding the session;
+`GoBuild.Keep` leaves the module behind (`Session.GoModule`) for a look at
+the generated code, which `transpiler.Options.Debug` instruments: a
+`dbgAt(row, col)` call before each statement, `dbgEnter` and `dbgLeave`
+around each body, a `dbgVars` table on each program, function block and
+structure (no reflection: a Text and a Set function a variable), each
+function's locals given to `dbgEnter`, and `dbgPoints`, the located
+variables' entries in the process image. The hooks go through `dbgHook`,
+nil unless a debugger sets it, so the same file runs as firmware does.
+
 ## Other editors
 
 `beedance -dap` speaks the protocol on stdin and stdout (`-dap-log FILE`
@@ -115,13 +145,46 @@ the PLC commands are custom requests: `beedance/force` and
 `beedance/unforce` (`{"name", "value"}`), `beedance/forces`,
 `beedance/stepScan`, `beedance/onlineChange` and `beedance/live`.
 
+For a simulator's virtual field devices, three more:
+
+| Request or event | |
+|---|---|
+| `beedance/io` | the I/O image, `{"scan", "elapsedMs", "io": {"%IX0.0": true, "%QW0": 70}}`: as it is when stopped, as the last scan left it while running |
+| `beedance/setInputs` `{"values": {"%IX0.0": true}}` | inputs for one scan, queued: each call is taken by the next scan to start, so a press and release faster than a scan is still seen; a force wins over them |
+| `beedance/scan` (event) | with `"scanEvents": MS` in `launch`, the watched values and the I/O image (as `beedance/live`) at most every MS of wall time while the program runs, and once at launch |
+
+`beedance/live` replies `{"scan", "elapsedMs", "values": [{"name", "type",
+"address", "text", "forced"}], "io"}`.
+
+And for simulation:
+
+| Request | |
+|---|---|
+| `beedance/speed` `{"factor": 2}` | how fast simulated time runs against the wall clock while the program runs: 1 real time, 0 as fast as it goes; also `"speed"` in `launch` |
+| `beedance/trace` `{"signals": [...], "depth": 4000, "scans": 500}` | record the signals (variables, addresses, `PLANT_Name.var`) at the end of every scan, keeping the last `depth`; replies the last `scans`: `{"signals", "scans", "timesMs", "values"}` |
+| `beedance/diagrams` `{"prefixes": {"Motor": "m"}}` | the LD, FBD and SFC bodies' live views (package ide): `{"program", "diagrams": [{"pou", "lang", "prefix", "live": {"values", "exprs", "steps"}}]}`; a function block's body is seen through `prefixes`' instance, else the program's first of its type |
+
+## Plant models
+
+A source's `PROGRAM`s named `PLANT_...` are plant models: they simulate
+what the program controls (a tank, a conveyor) in Structured Text. The
+debugger runs each after every scan of the program, on the same simulated
+clock and I/O image: a plant reads the outputs and writes the inputs
+through its located variables (`level AT %IW0 : INT`). It is not stopped
+by breakpoints; while stopped, its variables are a scope of their own
+(`PLANT PLANT_Tank`), read-only. Online change carries its variables as
+the program's, so a running plant keeps its state while the program is
+tuned. The PROGRAM debugged by default is the first that is neither a
+test nor a plant model.
+
 ## In a web page
 
 The WebAssembly build of beedance serves the same adapter to a page, one
 message at a time (`globalThis.beedance.dap`, see
 [wasm](../wasm/README.md#debugging)): `launch` takes the program's text as
-`source`, and `beedance/onlineChange` the new text. A browser IDE built on
-it is planned in [Web debugger](web-debugger.md).
+`source`, and `beedance/onlineChange` the new text. What a page needs to
+debug in a browser, and to simulate a plant with virtual field devices, is
+in [Web debugger](web-debugger.md).
 
 ## From Go
 
@@ -143,10 +206,62 @@ and the names of functions and their locals. The VM stops through a hook
 (`vm.SetHook`): `Run` returns `vm.ErrPaused`, and the next `Run` carries on
 where it stopped. Without a hook the VM runs as before.
 
+## Attached to a host's program
+
+A host that runs programs itself, on VMs of its own (beehive's logic:
+each program on royaljelly's scheduler, bound to a node's tags), can put a
+program under the debugger as it runs, without stopping it: `vmdebug.Attach`
+takes the host's compiled program, its globals store, its cyclic VM and
+its clock (`vmdebug.Host`) and returns a session with no VM or clock of
+its own. The host keeps its cycle; before each one it asks the session
+what to do (`State`), and in place of resetting and running its VM it
+calls `Scan`:
+
+| `State()` | The host's cycle |
+|---|---|
+| `HostScan` | as usual: the inputs, `Scan()`, the outputs |
+| `HostResume` | the scan the program stopped in goes on: `Scan()`, then the outputs; the inputs stay as the scan read them |
+| `HostHold` | nothing: the program is stopped, and its clock stands still, as under a hold |
+
+A breakpoint stops the program where it is, in the middle of a scan, with
+its outputs unwritten until the scan completes; the cycles meanwhile are
+skipped, as a held program's are. `Continue` and the steps do not run the
+VM: they let the program go on and wait for the host's cycles to stop it,
+so each step takes one cycle of the host's task. A step that reaches the
+end of the scan stops between scans (`OnScanEnd`), where the outputs have
+been written. `Pause` takes effect at the program's next statement when
+the hook is in (a breakpoint, a step), else before its next scan. Forces
+and writes are applied by `Scan` as they are in a session of `Load`'s.
+Without a breakpoint, a step or a pause, `Scan` runs the VM with no hook,
+at its full speed; a breakpoint set while it runs is seen from the next
+scan. `Detach` lets the program go: a run waiting for a stop gets
+`OnDetach`, a scan it was stopped in completes in the host's next cycle,
+and `Scan` returns `ErrDetached` after it, on which the host drops the
+session. A run's error (`OnException`) is also returned to the host, which
+faults as it would without the debugger.
+
+What the host does is refused on an attached session: an online change
+(`ErrAttached`: beehive's `Apply` makes those, and restarts the program,
+which ends the session) and a simulator's inputs; plant models do not run
+(the plant is real). A library the host compiles before the file the
+editor shows offsets its lines: `Host.LineOffset` makes the lines given
+and reported the file's.
+
+Over the protocol, `attach` takes `{"program", "file", "source",
+"stopOnEntry"}`: `dap.Server.Attach` is the host's hook that returns the
+session, `file` names the editor's source for the stack trace and the
+breakpoints, and `source`, if given, lets the host refuse a file that is
+not what the program runs from. `disconnect` and `terminate` detach; the
+program runs on. `beedance/onlineChange`, `beedance/speed` and
+`beedance/setInputs` are refused. beehive serves this through its gateway
+(`LogicService.Debug`, decision D-61 there), for VS Code's attach
+configuration.
+
 ## Not yet
 
 - One source file per session.
-- Debugging a program running on a beehive edge node (attach) is
-  beehive's to add, on this package.
+- The go engine in a browser: the program must be built by a service and
+  returned as a WebAssembly module the page runs beside the engine.
 - The firmware `-embedded` generates carries no line table, so it cannot
-  be debugged at source level on the board.
+  be debugged at source level on the board; the go engine's hooks
+  (`transpiler.Options.Debug`) are the way there.

@@ -122,6 +122,7 @@ func (t *Transpiler) transpileProcessImage(receiver string, blocks ...[]*ast.Var
 				return fmt.Errorf("'%s': %w", decl.Name.Value, err)
 			}
 			t.noteImageEntry(slot)
+			t.noteDebugLocated(decl.Location.Location.String(), goType, slot, slotType)
 			field := receiver + "." + decl.Name.Value
 			if area == "I" || area == "M" {
 				reads = append(reads, fmt.Sprintf("\t\t%s = %s(%s)\n", field, goType, slot))

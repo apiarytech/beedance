@@ -38,7 +38,7 @@
 *   **Standard Library:**
     *   **Function Blocks:** `TON`, `TOF`, `TP`, `CTU`, `CTD`, `CTUD`, `R_TRIG`, `F_TRIG`, `SR`, `RS`.
     *   **Built-in Functions:** A rich library including type conversions (`INT_TO_REAL`), arithmetic (`ADD`, `SQRT`, `ABS`), string manipulation (`LEFT`, `MID`, `FIND`, `CONCAT`), array functions (`INSERT`, `DELETE`), and more.
-*   **Debugging:** a `PROGRAM` debugged on the VM, scan by scan, in VS Code or any editor that speaks the Debug Adapter Protocol (`beedance -dap`): breakpoints with conditions, stepping over, into and out of calls and by scan, a disassembly view stepped by instruction, the program's variables and each call's locals (writable), forcing variables and I/O, and online change, with the variables carried over. See [doc/debugging.md](doc/debugging.md).
+*   **Debugging:** a `PROGRAM` debugged scan by scan, on the VM, on the evaluator, or transpiled to Go and run in a process of its own, in VS Code or any editor that speaks the Debug Adapter Protocol (`beedance -dap`): breakpoints with conditions, stepping over, into and out of calls and by scan, a disassembly view stepped by instruction, the program's variables and each call's locals (writable), forcing variables and I/O, and online change, with the variables carried over. See [doc/debugging.md](doc/debugging.md).
 
 *   **System Configuration:**
     *   Full support for `CONFIGURATION`, `RESOURCE`, and `TASK` blocks.
@@ -72,7 +72,7 @@ A core principle of `beedance` is a clean, modular architecture with a clear sep
 
 *   **`transpiler`:** A source-to-source compiler that translates the iec61131 AST into human-readable and efficient Go code. This enables integration with Go-native runtimes and compilation to native binaries or WebAssembly.
 
-*   **`vmdebug`:** A debugger for a `PROGRAM` on the VM: breakpoints on source lines, stepping by statement, instruction or scan, the variables and locals, forcing, and online change. It runs on the line table the compiler keeps with the bytecode and a hook in the VM, which costs nothing when no debugger is attached.
+*   **`vmdebug`:** A debugger for a `PROGRAM` on any of the three engines: breakpoints on source lines, stepping by statement, instruction (on the VM) or scan, the variables and locals, forcing, and online change. On the VM it runs on the line table the compiler keeps with the bytecode and a hook in the VM, which costs nothing when no debugger is attached; on the evaluator, on hooks in the evaluator; on the go engine, on hooks the transpiler puts in the generated Go, spoken to over the process's pipes.
 
 *   **`dap`:** The Debug Adapter Protocol over `vmdebug`, so VS Code and other editors can debug a program (`beedance -dap`).
 
@@ -158,7 +158,7 @@ You can run `beedance` with the following flags. By default (with no flags), it 
     ```sh
     go run . -test -interval 10ms lib.st tests.st
     ```
-*   **`-dap`:** Serves the Debug Adapter Protocol on stdin and stdout: an editor launches `beedance -dap` to debug a `PROGRAM` on the VM (VS Code through the beehive Studio extension). `-dap-log FILE` records every message. See [doc/debugging.md](doc/debugging.md).
+*   **`-dap`:** Serves the Debug Adapter Protocol on stdin and stdout: an editor launches `beedance -dap` to debug a `PROGRAM` on the engine its launch configuration names, the VM by default (VS Code through the beehive Studio extension). `-dap-log FILE` records every message. See [doc/debugging.md](doc/debugging.md).
     ```sh
     beedance -dap
     ```
@@ -281,4 +281,9 @@ If you'd like to contribute, please follow these general steps:
 4.  **Commit Your Changes:** Make your changes and commit them with clear, descriptive messages.
 5.  **Submit a Pull Request:** Push your branch to your fork and open a pull request against the main `beedance` repository. Please link the pull request to the issue you opened.
 
-We appreciate your help in making `beedance` a better tool for the industrial automation community!
+We appreciate your help in making `beedance` a better tool for the industrial automation community!
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to file issues and submit
+code (contributors sign the [CLA](CLA.md) once, because beedance is
+dual-licensed) and [SECURITY.md](SECURITY.md) for reporting a
+vulnerability privately.

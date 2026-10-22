@@ -97,6 +97,9 @@ func (s *Session) serveChanges() {
 
 // change is Change, with mu held.
 func (s *Session) change(source string) (Report, error) {
+	if s.host != nil {
+		return Report{}, ErrAttached
+	}
 	if s.midScan {
 		return Report{}, ErrMidScan
 	}
@@ -109,10 +112,10 @@ func (s *Session) change(source string) (Report, error) {
 	var r Report
 	c := carrier{old: old.members(), fresh: img.members()}
 	oldVars := map[string]bool{}
-	for _, v := range old.compiled.Variables {
+	for _, v := range old.eng.Variables() {
 		oldVars[strings.ToUpper(v.Name)] = true
 	}
-	for _, nv := range img.compiled.Variables {
+	for _, nv := range img.eng.Variables() {
 		key := strings.ToUpper(nv.Name)
 		ov, existed := old.decls[key]
 		delete(oldVars, key)
@@ -121,29 +124,38 @@ func (s *Session) change(source string) (Report, error) {
 			r.Added = append(r.Added, nv.Name)
 		case nv.Constant || !strings.EqualFold(nv.Type, ov.Type):
 			r.Reset = append(r.Reset, nv.Name)
-		case nv.Address != "" || nv.Global < 0 || ov.Global < 0:
+		case nv.Address != "":
 			r.Kept = append(r.Kept, nv.Name) // located: its value is in the I/O image
 		default:
-			if v, ok := c.carry(old.globals[ov.Global], img.globals[nv.Global], ov.Type, nv.Type); ok {
-				img.globals[nv.Global] = v
+			oldV, _ := old.eng.Read([]string{nv.Name})
+			freshV, _ := img.eng.Read([]string{nv.Name})
+			v, ok := c.carry(oldV, freshV, ov.Type, nv.Type)
+			if _, inPlace := v.(*remoteValue); ok && inPlace {
+				r.Kept = append(r.Kept, nv.Name) // carried member by member, in the other process
+			} else if ok && img.eng.Write([]string{nv.Name}, v) == nil {
 				r.Kept = append(r.Kept, nv.Name)
 			} else {
 				r.Reset = append(r.Reset, nv.Name)
 			}
 		}
 	}
-	for _, v := range old.compiled.Variables {
+	for _, v := range old.eng.Variables() {
 		if oldVars[strings.ToUpper(v.Name)] {
 			r.Removed = append(r.Removed, v.Name)
 		}
 	}
+	carryPlants(old, img, c)
 	// The I/O image: the plant's inputs, the outputs as last written.
-	for addr, v := range old.vm.IO() {
-		img.vm.IO()[addr] = v
+	if oldIO, newIO := old.eng.IO(), img.eng.IO(); oldIO != nil && newIO != nil {
+		for addr, v := range oldIO {
+			newIO[addr] = v
+		}
 	}
+	old.eng.Close()
 
 	s.cmu.Lock()
 	s.img = img
+	s.retrace()
 	for key, f := range s.forces {
 		t, err := s.resolve(f.name)
 		if err == nil {
@@ -188,6 +200,65 @@ func (c carrier) carry(old, fresh object.Object, oldType, freshType string) (obj
 		return old, isPlain(old)
 	}
 	switch f := fresh.(type) {
+	case *remoteValue:
+		// A value in another process (the go engine): member by member,
+		// written over the pipe.
+		if !f.structured {
+			return fresh, false
+		}
+		oldMembers := map[string]Value{}
+		for _, m := range Members(old) {
+			oldMembers[strings.ToUpper(m.Name)] = m
+		}
+		oldTypes, freshTypes := c.old[strings.ToUpper(typeName(old))], c.fresh[strings.ToUpper(f.typ)]
+		for _, fm := range f.members() {
+			key := strings.ToUpper(fm.Name)
+			om, ok := oldMembers[key]
+			if !ok || om.Object == nil {
+				continue
+			}
+			if inner, structured := fm.Object.(*remoteValue); structured && inner.structured {
+				c.carry(om.Object, inner, oldTypes[key], freshTypes[key])
+				continue
+			}
+			if v, ok := c.carry(om.Object, fm.Object, oldTypes[key], freshTypes[key]); ok {
+				f.set(fm.Name, Format(v))
+			}
+		}
+		return f, true
+	case *object.FunctionBlockInstance:
+		// An instance on the evaluator: member by member, in its environment.
+		o, ok := old.(*object.FunctionBlockInstance)
+		if !ok || typeName(o) != typeName(f) {
+			return fresh, false
+		}
+		oldTypes, freshTypes := c.old[strings.ToUpper(typeName(o))], c.fresh[strings.ToUpper(typeName(f))]
+		for _, name := range f.Env.Names() {
+			// Its variables, and a standard block's own state (__startTime),
+			// which a timer keeps its elapsed time in; not its code.
+			fv, _ := f.Env.GetRaw(name)
+			if isCode(fv) || strings.EqualFold(name, "THIS") {
+				continue
+			}
+			ov, ok := o.Env.GetRaw(name)
+			if !ok || isCode(ov) {
+				continue
+			}
+			key := strings.ToUpper(name)
+			if v, ok := c.carry(unwrap(ov), unwrap(fv), oldTypes[key], freshTypes[key]); ok {
+				if _, constant := fv.(*object.Constant); !constant {
+					f.Env.Set(name, v)
+				}
+			}
+		}
+		// A standard block's state the fresh instance has not made yet.
+		for _, name := range o.Env.Names() {
+			ov, _ := o.Env.GetRaw(name)
+			if _, fresh := f.Env.GetRaw(name); !fresh && strings.HasPrefix(name, "__") && ov != nil && isPlain(ov) {
+				f.Env.Set(name, ov)
+			}
+		}
+		return f, true
 	case *object.Hash:
 		o, ok := old.(*object.Hash)
 		if !ok || typeName(o) != typeName(f) {
@@ -266,12 +337,23 @@ func (img *image) members() map[string]map[string]string {
 	return out
 }
 
+// isCode reports whether o is code or a definition rather than a value.
+func isCode(o object.Object) bool {
+	switch o.(type) {
+	case *object.Builtin, *object.Function, *object.Program, *object.FunctionBlock, *object.BuiltinFunctionBlock,
+		*object.Method, *object.Closure, *object.CompiledFunction:
+		return true
+	}
+	return false
+}
+
 // isPlain reports whether o is a value that can move to another program:
 // not code, nor a reference into its variables.
 func isPlain(o object.Object) bool {
 	switch o.(type) {
 	case *object.Closure, *object.CompiledFunction, *object.Builtin,
-		*object.Reference, *object.Pointer, *object.Hash, *object.Array:
+		*object.Reference, *object.Pointer, *object.Hash, *object.Array,
+		*object.FunctionBlockInstance, *object.Constant, *remoteValue:
 		return false
 	}
 	return true

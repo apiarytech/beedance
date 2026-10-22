@@ -39,12 +39,8 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/lexer"
-	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
-	"github.com/apiarytech/beedance/stdlib"
-	"github.com/apiarytech/beedance/vm"
 	"github.com/apiarytech/beedance/watch"
 )
 
@@ -53,6 +49,11 @@ type Options struct {
 	// Program is the PROGRAM to run; empty is the first that is not a
 	// test (TEST_...), else the first.
 	Program string
+	// Engine runs the program: the VM (EngineVM, the default), the
+	// evaluator (EngineEvaluator) or a transpiled program (EngineGo).
+	Engine Engine
+	// GoBuild configures EngineGo (engine_go.go); the others ignore it.
+	GoBuild GoBuild
 	// Interval is the simulated time from one scan to the next; default
 	// 10 ms.
 	Interval time.Duration
@@ -82,6 +83,11 @@ type Options struct {
 	// would not let it in. A host may give a function that blocks until
 	// its event loop has turned.
 	Yield func()
+	// Sampled, if set, is given the Sample of each scan's end once Live
+	// has been called, from the goroutine running the scans, while the
+	// session is held: it must not call the session's methods that wait
+	// for a run to stop.
+	Sampled func(Sample)
 }
 
 // Reason is why a session stopped.
@@ -119,29 +125,46 @@ type Stop struct {
 // ErrMidScan is returned by what may only be done between scans (Change).
 var ErrMidScan = errors.New("vmdebug: a scan is in progress; step to its end first")
 
-// Session is a PROGRAM running on the VM under a debugger. A run
+// Session is a PROGRAM running on an engine (the VM, the evaluator or a
+// transpiled program: Options.Engine) under a debugger. A run
 // (Continue, the steps) holds the session until it stops; while it runs,
 // another goroutine may Pause it, set breakpoints, Force, Unforce and Set
 // (applied when the next scan starts) and read Live values. The other
 // methods wait for the run to stop.
 type Session struct {
-	mu   sync.Mutex // the VM and its state; held by a run
+	mu   sync.Mutex // the engine and its state; held by a run
 	opts Options
 
 	img     *image // replaced only with mu and cmu held
 	elapsed time.Duration
 	scans   int
 	midScan bool // a scan has started and not ended (paused in it)
+	closed  bool
+
+	// evalEnd ends the evaluator's session (engine_eval.go), which the
+	// session holds from its first evaluator engine until Close.
+	evalEnd func()
 
 	cmu     sync.Mutex          // what may change while a run is in progress:
 	bps     map[int]*Breakpoint // the breakpoints, by the line they are set on
 	forces  map[string]*force   // the forces, by upper-case name or address
 	pending []write             // writes for the next scan
+	inputs  [][]write           // inputs for the scans to come, one entry a scan (io.go)
 	changes []*changeRequest    // online changes for the next scan boundary
 
 	lmu        sync.Mutex
 	live       Sample
 	liveWanted atomic.Bool
+
+	trace   atomic.Pointer[tracer]   // the signals recorded every scan (trace.go)
+	sampled atomic.Pointer[[]string] // more names each Sample keeps (SetSampled)
+
+	// The last values of the sampled names, and when they were read: a
+	// run reads them at most every ExtraEvery (held by the run).
+	extra    map[string]string
+	extraFor *[]string
+	extraAt  time.Time
+	speed    atomic.Uint64 // a float64's bits: SetSpeed
 
 	// While a run is in progress: what stops it.
 	ctx       context.Context
@@ -151,6 +174,12 @@ type Session struct {
 	holdRow   int // a breakpoint's line just stopped at, not to stop at again at once
 	pauseReq  atomic.Bool
 	stop      Stop
+
+	// An attached session (attach.go): the host runs the scans.
+	host      *Host
+	stopped   bool      // the debugger holds the program: the host skips its cycles
+	detaching bool      // Detach was called: the host lets go after its next scan
+	stops     chan Stop // the stop a waiting run gets
 }
 
 type mode int
@@ -166,30 +195,26 @@ const (
 
 // image is what Load or Change made of a source.
 type image struct {
-	source   string
-	name     string // the PROGRAM's name, as declared
-	program  *ast.Program
-	decl     *ast.ProgramDeclaration
-	compiled *compiler.CompiledProgram
-	globals  []object.Object
-	vm       *vm.VM
+	source  string
+	name    string // the PROGRAM's name, as declared
+	program *ast.Program
+	decl    *ast.ProgramDeclaration
+	eng     engine
 
 	vars    []watch.Variable
-	decls   map[string]compiler.Variable // by upper-case name
-	located map[string]compiler.Variable // by upper-case address
-	userPOU map[string]bool              // the source's own POUs, upper case
+	decls   map[string]Variable // by upper-case name
+	located map[string]Variable // by upper-case address
+	userPOU map[string]bool     // the source's own POUs, upper case
 
-	marks    map[*object.CompiledFunction]map[int]object.SourceLine // statement starts; nil: not the source's
-	rows     map[int]bool                                           // lines that have a statement
-	pouRows  []int                                                  // lines POUs start on
-	firstRow int                                                    // the body's first statement
+	rows     map[int]bool // lines that have a statement
+	pouRows  []int        // lines POUs start on
+	firstRow int          // the body's first statement
 
-	blocks    []block // the code at its addresses (code.go)
-	blockBase map[*object.CompiledFunction]int
+	plants []*plant // the plant models, run after each scan (plant.go)
 }
 
-// Load compiles source's PROGRAM and runs its initialization; the session
-// is then between scans, before the first.
+// Load builds source's PROGRAM on the engine and runs its initialization;
+// the session is then between scans, before the first.
 func Load(source string, o Options) (*Session, error) {
 	if o.Interval <= 0 {
 		o.Interval = 10 * time.Millisecond
@@ -197,19 +222,75 @@ func Load(source string, o Options) (*Session, error) {
 	if o.Budget <= 0 {
 		o.Budget = 10_000_000
 	}
+	var err error
+	if o.Engine, err = ParseEngine(string(o.Engine)); err != nil {
+		return nil, err
+	}
 	s := &Session{opts: o, bps: map[int]*Breakpoint{}, forces: map[string]*force{}}
+	if o.Realtime {
+		s.SetSpeed(1)
+	}
 	img, err := s.build(source, o.Program)
 	if err != nil {
+		s.Close()
 		return nil, err
 	}
 	s.img = img
 	return s, nil
 }
 
-// build compiles source's PROGRAM name and runs its initialization on a
-// store of its own; the clock is the session's.
+// Engine is the engine the session runs the program on.
+func (s *Session) Engine() Engine { return s.opts.Engine }
+
+// Close ends the session: it frees what the engine holds (the evaluator,
+// a transpiled program's process). A run in progress must have stopped.
+// The session is not to be used after it.
+func (s *Session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	if s.img != nil && s.img.eng != nil {
+		s.img.eng.Close()
+	}
+	if s.evalEnd != nil {
+		s.evalEnd()
+		s.evalEnd = nil
+	}
+}
+
+// build makes source's PROGRAM name on the engine and runs its
+// initialization; the clock is the session's.
 func (s *Session) build(source, name string) (*image, error) {
-	object.FinalizeBuiltins()
+	img, err := s.analyze(source, name)
+	if err != nil {
+		return nil, err
+	}
+	clock := func() time.Duration { return s.elapsed }
+	switch s.opts.Engine {
+	case EngineEvaluator:
+		img.eng, err = newEvalEngine(img, s.opts, s.evalSession)
+	case EngineGo:
+		img.eng, err = newGoEngine(img, s.opts, clock)
+	default:
+		img.eng, err = newVMEngine(img, s.opts, clock)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.index(img)
+	if err := s.buildPlants(img); err != nil {
+		img.eng.Close()
+		return nil, err
+	}
+	return img, nil
+}
+
+// analyze parses source and picks its PROGRAM name: the image before it
+// is compiled, with what the debugger reads from the syntax tree.
+func (s *Session) analyze(source, name string) (*image, error) {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
@@ -220,9 +301,7 @@ func (s *Session) build(source, name string) (*image, error) {
 		return nil, err
 	}
 	img := &image{source: source, name: decl.Name.Value, program: program, decl: decl,
-		decls: map[string]compiler.Variable{}, located: map[string]compiler.Variable{},
-		userPOU: map[string]bool{}, marks: map[*object.CompiledFunction]map[int]object.SourceLine{},
-		rows: map[int]bool{}}
+		decls: map[string]Variable{}, located: map[string]Variable{}, userPOU: map[string]bool{}}
 	// The source's own POUs, before compiling adds the standard ones.
 	for _, st := range program.Statements {
 		var pou string
@@ -242,56 +321,24 @@ func (s *Session) build(source, name string) (*image, error) {
 		}
 	}
 	img.vars = watch.Variables(program, decl, s.opts.Watch)
+	return img, nil
+}
 
-	comp := compiler.NewCompilerWithBuiltins(object.Builtins)
-	comp.AllowInputWrites = s.opts.AllowInputWrites
-	compiled, err := comp.CompileProgramUnit(program, decl.Name.Value)
-	if err != nil {
-		return nil, fmt.Errorf("compile: %w", err)
-	}
-	img.compiled = compiled
-	for _, v := range compiled.Variables {
+// index reads what the debugger needs of img's engine: its variables by
+// name and address, and the lines a breakpoint can be on (the body's and
+// the source's POUs').
+func (s *Session) index(img *image) {
+	for _, v := range img.eng.Variables() {
 		img.decls[strings.ToUpper(v.Name)] = v
 		if v.Address != "" {
 			img.located[strings.ToUpper(v.Address)] = v
 		}
 	}
-
-	img.globals = make([]object.Object, vm.GlobalsSize)
-	initVM := vm.NewWithGlobalsStore(compiled.InitBytecode, img.globals)
-	img.vm = vm.NewWithGlobalsStore(compiled.CyclicBytecode, img.globals)
-	for idx, b := range stdlib.ClockBuiltins(func() time.Duration { return s.elapsed }) {
-		initVM.SetBuiltin(idx, b)
-		img.vm.SetBuiltin(idx, b)
-	}
-	initVM.SetBudget(s.opts.Budget)
-	if err := initVM.Run(); err != nil {
-		return nil, fmt.Errorf("init: %w", err)
-	}
-	for addr, v := range initVM.IO() {
-		img.vm.IO()[addr] = v
-	}
-	img.vm.SetBudget(s.opts.Budget)
-
-	// The lines a breakpoint can be on: the body's and the source's POUs'.
-	for _, l := range compiled.CyclicBytecode.Lines {
-		img.rows[l.Row] = true
-		if img.firstRow == 0 {
-			img.firstRow = l.Row
-		}
-	}
-	for _, c := range compiled.CyclicBytecode.Constants {
-		if fn, ok := c.(*object.CompiledFunction); ok && img.isUser(fn) {
-			for _, l := range fn.Lines {
-				img.rows[l.Row] = true
-			}
-		}
-	}
-	return img, nil
+	img.rows, img.firstRow = img.eng.Rows(), img.eng.FirstRow()
 }
 
 // pick finds the PROGRAM named name, or, when name is empty, the first that
-// is not a test, else the first.
+// is neither a test nor a plant model, else the first.
 func pick(program *ast.Program, name string) (*ast.ProgramDeclaration, error) {
 	var all []*ast.ProgramDeclaration
 	for _, st := range program.Statements {
@@ -303,7 +350,7 @@ func pick(program *ast.Program, name string) (*ast.ProgramDeclaration, error) {
 		return nil, errors.New("the source declares no PROGRAM")
 	}
 	for _, pd := range all {
-		if name == "" && !strings.HasPrefix(strings.ToUpper(pd.Name.Value), "TEST_") ||
+		if name == "" && !strings.HasPrefix(strings.ToUpper(pd.Name.Value), "TEST_") && !IsPlant(pd.Name.Value) ||
 			name != "" && strings.EqualFold(pd.Name.Value, name) {
 			return pd, nil
 		}
@@ -312,33 +359,6 @@ func pick(program *ast.Program, name string) (*ast.ProgramDeclaration, error) {
 		return all[0], nil
 	}
 	return nil, fmt.Errorf("no PROGRAM %s", name)
-}
-
-// isUser reports whether fn is the code of one of the source's own POUs
-// (or of the program's body), whose lines are the source's; a standard
-// block's are not.
-func (img *image) isUser(fn *object.CompiledFunction) bool {
-	if fn.Name == "" {
-		return true
-	}
-	pou, _, _ := strings.Cut(fn.Name, ".")
-	return img.userPOU[strings.ToUpper(pou)]
-}
-
-// markAt is the statement starting at ip in fn, if fn is the source's.
-func (img *image) markAt(fn *object.CompiledFunction, ip int) (object.SourceLine, bool) {
-	m, seen := img.marks[fn]
-	if !seen {
-		if img.isUser(fn) && len(fn.Lines) > 0 {
-			m = make(map[int]object.SourceLine, len(fn.Lines))
-			for _, l := range fn.Lines {
-				m[l.Offset] = l
-			}
-		}
-		img.marks[fn] = m
-	}
-	l, ok := m[ip]
-	return l, ok
 }
 
 // Program is the name of the PROGRAM being debugged. It may be called
@@ -397,11 +417,14 @@ func (s *Session) StepScan(ctx context.Context) (Stop, error) { return s.run(ctx
 func (s *Session) Pause() { s.pauseReq.Store(true) }
 
 func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if s.host != nil {
+		return s.runAttached(ctx, m)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ctx, s.mode = ctx, m
 	defer func() {
 		s.ctx = nil
@@ -410,14 +433,15 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 	s.stepDepth, s.stepRow = 1, 0
 	if s.midScan {
 		if fs := s.frames(); len(fs) > 0 {
-			s.stepDepth, s.stepRow = fs[0].depth, fs[0].Line
+			s.stepDepth, s.stepRow = fs[0].depth, fs[0].row
 		}
 	}
 	begun := false // this run has started a scan
 	yielded := time.Now()
+	due := time.Now() // when the next scan is due, at a speed
 	for {
 		if !s.midScan {
-			if begun && !s.opts.Realtime && s.opts.YieldEvery > 0 && time.Since(yielded) >= s.opts.YieldEvery {
+			if begun && s.opts.YieldEvery > 0 && time.Since(yielded) >= s.opts.YieldEvery {
 				if s.opts.Yield != nil {
 					s.opts.Yield()
 				} else {
@@ -429,22 +453,31 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 			if s.pauseReq.Swap(false) || ctx.Err() != nil {
 				return s.between(OnPause), nil
 			}
-			if begun && s.opts.Realtime && m == modeContinue {
-				t := time.NewTimer(s.opts.Interval)
-				select {
-				case <-ctx.Done():
-					t.Stop()
-					return s.between(OnPause), nil
-				case <-t.C:
+			if speed := s.Speed(); begun && speed > 0 && m == modeContinue {
+				// A scan every Interval/speed of wall-clock time; behind by
+				// more than a moment (a slow host), it carries on from now
+				// rather than racing to catch up.
+				due = due.Add(time.Duration(float64(s.opts.Interval) / speed))
+				if wait := time.Until(due); wait > 0 {
+					t := time.NewTimer(wait)
+					select {
+					case <-ctx.Done():
+						t.Stop()
+						return s.between(OnPause), nil
+					case <-t.C:
+					}
+					yielded = time.Now()
+				} else if wait < -100*time.Millisecond {
+					due = time.Now()
 				}
 			}
 			s.beginScan()
 			begun = true
 		}
 		s.midScan = true
-		s.img.vm.SetHook(s.hook)
-		err := s.img.vm.Run()
-		if errors.Is(err, vm.ErrPaused) {
+		s.hint(m)
+		err := s.img.eng.Run(s.hook, m == modeInstruction)
+		if errors.Is(err, errPaused) {
 			return s.stop, nil
 		}
 		if err != nil {
@@ -457,6 +490,10 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 		}
 		s.midScan = false
 		s.applyForces()
+		if err := s.runPlants(); err != nil {
+			return Stop{Reason: OnException, Scan: s.scans, Message: "plant model " + err.Error()}, nil
+		}
+		s.record()
 		s.sample()
 		switch m {
 		case modeScan, modeOut, modeInstruction:
@@ -469,6 +506,23 @@ func (s *Session) run(ctx context.Context, m mode) (Stop, error) {
 			s.stepDepth, s.stepRow = 1, 0 // the step goes on into the next scan
 		}
 	}
+}
+
+// hint tells an engine that asks (hinter) which statements the hook wants
+// in the run to come: every one for a step or a pause, else the
+// breakpoints' lines.
+func (s *Session) hint(m mode) {
+	h, ok := s.img.eng.(hinter)
+	if !ok {
+		return
+	}
+	s.cmu.Lock()
+	rows := make([]int, 0, len(s.bps))
+	for row := range s.bps {
+		rows = append(rows, row)
+	}
+	s.cmu.Unlock()
+	h.hints(rows, m != modeContinue || s.pauseReq.Load())
 }
 
 // sleep blocks the run for d or until ctx is done, so the scheduler runs
@@ -485,14 +539,17 @@ func sleep(ctx context.Context, d time.Duration) {
 }
 
 // beginScan starts the next scan: the clock moves on, the forces are
-// applied, the VM starts its body over.
+// applied, the engine starts the body over.
 func (s *Session) beginScan() {
 	s.scans++
-	s.elapsed += s.opts.Interval
+	if s.host == nil || s.host.Elapsed == nil {
+		s.elapsed += s.opts.Interval
+	}
 	s.holdRow = 0
+	s.applyInputs()
 	s.applyPending()
 	s.applyForces()
-	s.img.vm.Reset()
+	s.img.eng.Reset()
 }
 
 // between is a stop between scans.
@@ -500,45 +557,38 @@ func (s *Session) between(r Reason) Stop {
 	return Stop{Reason: r, Scan: s.scans}
 }
 
-// hook is the VM's hook while a run is in progress: it stops before a
+// hook is the engine's hook while a run is in progress: it stops before a
 // statement of the source as the run's mode, the breakpoints and Pause
 // say.
-func (s *Session) hook(fn *object.CompiledFunction, ip, depth int) bool {
-	if s.mode == modeInstruction {
-		if !s.img.isUser(fn) {
-			return false
-		}
-		l, _ := object.LineAt(fn.Lines, ip)
-		s.stop = Stop{Reason: OnStep, Scan: s.scans, Line: l.Row, Column: l.Column}
-		s.holdRow = l.Row
+func (s *Session) hook(at site) bool {
+	stopAt := func(r Reason, msg string) bool {
+		s.stop = Stop{Reason: r, Scan: s.scans, Line: s.lineOut(at.row), Column: at.column, Message: msg}
+		s.holdRow = at.row
 		return true
 	}
-	line, ok := s.img.markAt(fn, ip)
-	if !ok {
+	if s.mode == modeInstruction {
+		return stopAt(OnStep, "")
+	}
+	if !at.statement {
 		return false
 	}
-	if line.Row != s.holdRow {
+	if at.row != s.holdRow {
 		s.holdRow = 0
-	}
-	stopAt := func(r Reason, msg string) bool {
-		s.stop = Stop{Reason: r, Scan: s.scans, Line: line.Row, Column: line.Column, Message: msg}
-		s.holdRow = line.Row
-		return true
 	}
 	if s.pauseReq.Swap(false) || s.ctx != nil && s.ctx.Err() != nil {
 		return stopAt(OnPause, "")
 	}
 	switch s.mode {
 	case modeIn:
-		if depth > s.stepDepth || line.Row != s.stepRow {
+		if at.depth > s.stepDepth || at.row != s.stepRow {
 			return stopAt(OnStep, "")
 		}
 	case modeOver:
-		if depth < s.stepDepth || depth == s.stepDepth && line.Row != s.stepRow {
+		if at.depth < s.stepDepth || at.depth == s.stepDepth && at.row != s.stepRow {
 			return stopAt(OnStep, "")
 		}
 	case modeOut:
-		if depth < s.stepDepth {
+		if at.depth < s.stepDepth {
 			return stopAt(OnStep, "")
 		}
 	}
@@ -546,7 +596,7 @@ func (s *Session) hook(fn *object.CompiledFunction, ip, depth int) bool {
 		return false
 	}
 	s.cmu.Lock()
-	b := s.bps[line.Row]
+	b := s.bps[at.row]
 	s.cmu.Unlock()
 	if b != nil {
 		if holds, msg := s.holds(b); holds {
@@ -568,11 +618,12 @@ type Frame struct {
 	// in the innermost frame, the call in the others.
 	Line, Column int
 	// Address is the instruction it is at (see Disassembly); 0 between
-	// scans.
+	// scans, and on an engine with no disassembly.
 	Address int
 
 	depth int
-	vm    vm.FrameInfo
+	row   int // Line as a line of the source (attach.go: Host.LineOffset)
+	eng   frame
 }
 
 // Frames are the calls the session is stopped in, innermost first; between
@@ -586,24 +637,13 @@ func (s *Session) Frames() []Frame {
 
 func (s *Session) frames() []Frame {
 	if !s.midScan {
-		return []Frame{{Name: s.img.name, Line: s.img.firstRow, Column: 1, depth: 1}}
+		return []Frame{{Name: s.img.name, Line: s.lineOut(s.img.firstRow), Column: 1, depth: 1, row: s.img.firstRow}}
 	}
-	vfs := s.img.vm.Frames()
-	out := make([]Frame, 0, len(vfs))
-	for i := len(vfs) - 1; i >= 0; i-- {
-		f := vfs[i]
-		if !s.img.isUser(f.Fn) {
-			continue
-		}
-		fr := Frame{Name: f.Fn.Name, depth: i + 1, vm: f}
-		if fr.Name == "" {
-			fr.Name = s.img.name
-		}
-		if l, ok := object.LineAt(f.Fn.Lines, f.IP); ok {
-			fr.Line, fr.Column = l.Row, l.Column
-		}
-		fr.Address = s.img.address(f.Fn, f.IP)
-		out = append(out, fr)
+	efs := s.img.eng.Frames()
+	out := make([]Frame, 0, len(efs))
+	for _, f := range efs {
+		out = append(out, Frame{Name: f.name, Line: s.lineOut(f.row), Column: f.column, Address: f.address,
+			depth: f.depth, row: f.row, eng: f})
 	}
 	return out
 }
