@@ -281,4 +281,9 @@ If you'd like to contribute, please follow these general steps:
 4.  **Commit Your Changes:** Make your changes and commit them with clear, descriptive messages.
 5.  **Submit a Pull Request:** Push your branch to your fork and open a pull request against the main `beedance` repository. Please link the pull request to the issue you opened.
 
-We appreciate your help in making `beedance` a better tool for the industrial automation community!
+We appreciate your help in making `beedance` a better tool for the industrial automation community!
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to file issues and submit
+code (contributors sign the [CLA](CLA.md) once, because beedance is
+dual-licensed) and [SECURITY.md](SECURITY.md) for reporting a
+vulnerability privately.
