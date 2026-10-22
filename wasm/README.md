@@ -51,7 +51,8 @@ values are strings such as `T#1s500ms`.
 ## Debugging
 
 The web build also gives `globalThis.beedance.dap(onMessage, options)`:
-the debugger `beedance -dap` serves ([doc/debugging.md](../doc/debugging.md)),
+the debugger `beedance -dap` serves ([doc/debugging.md](../doc/debugging.md);
+`launch` takes `engine`, `vm` or `eval` in a module),
 by whole Debug Adapter Protocol messages, without the `Content-Length`
 framing. It returns `{send(json), close()}`, and calls `onMessage(json)`
 with each response and event; `close()` ends the session and frees it.
@@ -98,8 +99,9 @@ module is about 17 MB, or 4 MB gzipped (Go 1.27).
 
 A page that edits, checks and debugs, and never runs the tests or the
 transpiler, can load a smaller module: `-tags lite` leaves out `test`
-(package sil, which brings the evaluator) and `transpile`, and the
-`version` reply's `ops` lists what the build has. With `-ldflags="-s -w"`
+(package sil) and `transpile`, and the `version` reply's `ops` lists what
+the build has; its `engines` lists the debugger's engines a `launch` may
+name (`vm` and `eval`, in either build). With `-ldflags="-s -w"`
 too, it is about 12.5 MB, or 3.2 MB gzipped:
 
 ```bash

@@ -362,6 +362,14 @@ type Options struct {
 	CompactImage bool
 	// AllowInputWrites: see Transpiler.AllowInputWrites (IEC-69).
 	AllowInputWrites bool
+	// Debug puts the debugger's hooks in the file: a call before each
+	// statement with its place in the source, calls around each POU's
+	// body, and a table of each program's, function block's and
+	// structure's variables and of each function's locals, without
+	// reflection (debug.go). The hooks do nothing until a host sets
+	// dbgHook; package vmdebug's go engine does, with a runtime of its
+	// own in the same package.
+	Debug bool
 }
 
 // GoFileWith is GoFile with options.
@@ -371,6 +379,7 @@ func GoFileWith(program *ast.Program, o Options) ([]byte, error) {
 	t.HostBinding, t.PreferOSCAT = o.HostBinding, o.PreferOSCAT
 	t.AllowInputWrites = o.AllowInputWrites
 	t.CompactImage = o.CompactImage
+	t.Debug = o.Debug
 	if err := t.Transpile(program); err != nil {
 		return nil, err
 	}

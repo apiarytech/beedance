@@ -1219,6 +1219,12 @@ func evalIlProgram(stmts []ast.Statement, env *object.Environment) object.Object
 	var result object.Object
 	pc := 0
 	for pc < len(stmts) {
+		if traceFn != nil {
+			traceFn(stmts[pc], env)
+		}
+		if debugger != nil {
+			debugger.Statement(stmts[pc], env)
+		}
 		result = Eval(stmts[pc], env)
 
 		// Propagate errors immediately.
@@ -1787,6 +1793,9 @@ func evalBlockStatement(block *ast.BlockStatement, env *object.Environment) obje
 		}
 		if traceFn != nil {
 			traceFn(statement, env)
+		}
+		if debugger != nil {
+			debugger.Statement(statement, env)
 		}
 		result = Eval(statement, env)
 
@@ -3313,6 +3322,9 @@ func dereferencePointer(node ast.Node, obj object.Object) object.Object {
 
 // newError creates a new Error object with a formatted message, including line and column numbers from the AST node.
 func newError(node ast.Node, format string, a ...interface{}) *object.Error {
+	if debugger != nil {
+		debugger.Failed(node)
+	}
 	if node != nil {
 
 		line, col := node.Pos()
@@ -3447,6 +3459,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if err != nil {
 			return err
 		}
+		if debugger != nil && fn.Name != nil {
+			defer enter(fn.Name.Value, extendedEnv, 1)()
+		}
 
 		// The result starts at its type's default; omitted inputs of a formal call
 		// and the VAR_OUTPUTs start at their initial values or types' defaults.
@@ -3539,6 +3554,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if err != nil {
 			return err
 		}
+		if debugger != nil {
+			defer enter(fn.Name.Value, fn.Env, 1)()
+		}
 
 		// EN = FALSE skips the body; ENO follows EN.
 		enValue, _ := fn.Env.Get("EN")
@@ -3626,6 +3644,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		if err != nil {
 			return err
 		}
+		if debugger != nil {
+			defer enter(fn.Definition.Name.Value, extendedEnv, 2)()
+		}
 
 		// Initialize only VAR_TEMP variables for this specific call. Static VARs are already in fn.Env.
 		for _, tempBlock := range fn.Definition.VarTemp {
@@ -3711,6 +3732,9 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		extendedEnv, outputMappings, err := extendFunctionEnv(fn.Definition, args, callEnv, fn.Env, callNode)
 		if err != nil {
 			return err
+		}
+		if debugger != nil && fn.Definition != nil && fn.Definition.Name != nil {
+			defer enter(fn.Definition.Name.Value, extendedEnv, 2)()
 		}
 
 		// Re-initialize VAR_TEMP variables at the start of every scan cycle.
@@ -3848,6 +3872,13 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 
 		// Inject 'THIS' into the method's environment, pointing to the instance itself.
 		methodEnv.Set("THIS", fn.Instance)
+		if debugger != nil && fn.Definition.Name != nil {
+			pou := fn.Definition.Name.Value
+			if fn.Instance != nil && fn.Instance.Definition != nil && fn.Instance.Definition.Name != nil {
+				pou = fn.Instance.Definition.Name.Value + "." + pou
+			}
+			defer enter(pou, methodEnv, 2)()
+		}
 
 		// Handle arguments for the method call.
 		// We need to get the method's parameter declarations from its AST definition.

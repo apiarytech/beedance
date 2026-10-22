@@ -428,8 +428,8 @@ func (s *Server) handle(m *message) (done bool) {
 			s.reply(m, map[string]any{"queued": s.sess.QueuedInputs()})
 		}
 	case "disconnect", "terminate":
-		s.detach() // an attached program runs on without the debugger
-		s.stopRun()
+		s.cancel() // no stop is reported after this
+		s.closeSession() // an attached program runs on without the debugger
 		s.reply(m, nil)
 		if m.Command == "terminate" {
 			s.emit("terminated", nil)
@@ -464,9 +464,14 @@ func (s *Server) launch(a launchArgs) error {
 			return fmt.Errorf("launch: %w", err)
 		}
 	}
-	o := vmdebug.Options{Program: a.ProgramName, Realtime: a.Realtime == nil || *a.Realtime,
+	engine, err := vmdebug.ParseEngine(a.Engine)
+	if err != nil {
+		return fmt.Errorf("launch: %w", err)
+	}
+	o := vmdebug.Options{Program: a.ProgramName, Engine: engine, Realtime: a.Realtime == nil || *a.Realtime,
 		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
-		Notify: func(msg string) { s.output("stderr", msg) }}
+		Notify: func(msg string) { s.output("stderr", msg) },
+		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace}}
 	if a.ScanEvents > 0 {
 		every := time.Duration(a.ScanEvents) * time.Millisecond
 		o.Sampled = func(smp vmdebug.Sample) {
@@ -481,6 +486,7 @@ func (s *Server) launch(a launchArgs) error {
 			return fmt.Errorf("launch: interval: %w", err)
 		}
 	}
+	s.closeSession() // a session launched before this one
 	sess, err := vmdebug.Load(string(src), o)
 	if err != nil {
 		return fmt.Errorf("%s: %w", filepath.Base(path), err)
@@ -501,10 +507,33 @@ func (s *Server) launch(a launchArgs) error {
 	if interval == 0 {
 		interval = 10 * time.Millisecond
 	}
-	s.output("console", fmt.Sprintf("beedance: PROGRAM %s of %s on the VM, a scan every %v on %s. "+
+	s.output("console", fmt.Sprintf("beedance: PROGRAM %s of %s on %s, a scan every %v on %s. "+
 		"In this console: force NAME VALUE, unforce NAME, forces, scan, change, live, or an expression.",
-		sess.Program(), filepath.Base(path), interval, clock))
+		sess.Program(), filepath.Base(path), engineName(sess.Engine()), interval, clock))
 	return nil
+}
+
+// engineName is an engine as the console names it.
+func engineName(e vmdebug.Engine) string {
+	switch e {
+	case vmdebug.EngineEvaluator:
+		return "the evaluator"
+	case vmdebug.EngineGo:
+		return "the transpiled program (Go)"
+	}
+	return "the VM"
+}
+
+// closeSession ends the session, if there is one, once its run has
+// stopped; an attached program runs on.
+func (s *Server) closeSession() {
+	if s.sess == nil {
+		return
+	}
+	s.detach()
+	s.stopRun()
+	s.sess.Close()
+	s.sess = nil
 }
 
 // samePath reports whether a and b name one file.
@@ -590,7 +619,6 @@ func (s *Server) stopRun() {
 	s.rmu.Lock()
 	cancel := s.cancelRun
 	s.rmu.Unlock()
-	s.cancel()
 	if cancel != nil {
 		cancel()
 	}

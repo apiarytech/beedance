@@ -33,11 +33,58 @@ func Session(now func() time.Time) (end func()) {
 	prevNow, prevIO, prevTypes := nowFunc, ioMap, ioTypes
 	nowFunc, ioMap, ioTypes = now, make(map[string]object.Object), make(map[string]string)
 	return func() {
-		nowFunc, ioMap, ioTypes, traceFn = prevNow, prevIO, prevTypes, nil
+		nowFunc, ioMap, ioTypes, traceFn, debugger = prevNow, prevIO, prevTypes, nil, nil
 		budget, remaining = 0, 0
 		allowInputWrites = false
 		sessionMu.Unlock()
 	}
+}
+
+// Busy reports whether a session is in progress: a Session call would wait
+// for it to end. A single-threaded host (a web page) asks before it runs
+// the evaluator while a debugger holds a session (package vmdebug's
+// evaluator engine), rather than wait for ever.
+func Busy() bool {
+	if sessionMu.TryLock() {
+		sessionMu.Unlock()
+		return false
+	}
+	return true
+}
+
+// Debugger is what a debugger watches a session's evaluation through
+// (package vmdebug's evaluator engine). Its methods are called from the
+// goroutine evaluating, and may block it: a stopped program waits in
+// Statement.
+type Debugger interface {
+	// Enter is called when a POU's body starts: the program's (its name),
+	// a function's, a function block's (its type's name) or a method's
+	// ("FB.Method"), with the environment the body runs in; levels is how
+	// many environments, from env outward, hold the call's own variables
+	// (a function block's call environment and its instance's: 2).
+	Enter(pou string, env *object.Environment, levels int)
+	// Leave is called when the body is over, however it ended.
+	Leave()
+	// Statement is called before each statement, as Trace's function is,
+	// instructions of an IL body among them.
+	Statement(stmt ast.Statement, env *object.Environment)
+	// Failed is called where an error is raised, before it propagates.
+	Failed(node ast.Node)
+}
+
+// debugger is the session's debugger, if one watches it.
+var debugger Debugger
+
+// Debug sets the debugger a session's evaluation reports to, until the
+// session ends or Debug(nil) is called. Call it only within a Session.
+func Debug(d Debugger) { debugger = d }
+
+// enter tells the debugger a POU's body starts, and returns what tells it
+// the body is over: for defer.
+func enter(pou string, env *object.Environment, levels int) func() {
+	d := debugger
+	d.Enter(pou, env, levels)
+	return d.Leave
 }
 
 // allowInputWrites lets a POU assign its own inputs (SetAllowInputWrites).

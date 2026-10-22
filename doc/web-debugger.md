@@ -94,6 +94,17 @@ What a page with virtual field devices needs, in `dap` and `vmdebug`
   `data-expr` on a wire, `data-vals` and `data-val-expr(s)` on a value's
   text, `data-at="row:col"` an element's place in the source.
 
+## The engines
+
+`launch` takes `engine`: `vm` (the default) or `eval`, the evaluator,
+which runs in the module as it is; the `version` reply's `engines` lists
+them. The evaluator's session is the package's, one at a time: while a
+program is debugged on it, the `test` op refuses the evaluator engine
+rather than wait (a single thread would wait for ever), and a second
+launch on it fails. The `go` engine (the program transpiled and built
+with the Go toolchain, see [Debugging](debugging.md#engines)) is not in a
+browser: it waits for a build service.
+
 ## A smaller module
 
 A page that never runs the tests or the transpiler builds the module with

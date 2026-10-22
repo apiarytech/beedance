@@ -1,11 +1,12 @@
 # Debugging
 
-beedance debugs a `PROGRAM` on the VM as a PLC runs it, scan by scan:
-breakpoints on its lines, stepping through statements, calls and scans,
-its variables, forcing inputs and variables, and changing the program
-while it runs (online change). `beedance -dap` serves this over the Debug
-Adapter Protocol, so it works in VS Code and in any editor that speaks it;
-package `vmdebug` is the same as a Go API.
+beedance debugs a `PROGRAM` as a PLC runs it, scan by scan: breakpoints
+on its lines, stepping through statements, calls and scans, its
+variables, forcing inputs and variables, and changing the program while
+it runs (online change). The program runs on one of the three engines,
+the VM by default (see [Engines](#engines)). `beedance -dap` serves this
+over the Debug Adapter Protocol, so it works in VS Code and in any editor
+that speaks it; package `vmdebug` is the same as a Go API.
 
 ## In VS Code
 
@@ -36,6 +37,8 @@ that is not a test. A `launch.json` chooses more:
 | `stopOnEntry` | `false` | stop before the first scan |
 | `allowInputWrites` | `false` | let a POU assign its own inputs, as CODESYS does (OSCAT) |
 | `source` | | the program's text, for a host with no files (a web page); `program` then only names it |
+| `engine` | `vm` | what runs the program: `vm`, `eval` (the evaluator) or `go` (transpiled and built); see [Engines](#engines) |
+| `goReplace` | | for the `go` engine, a module pointed at a local directory, as a go.mod `replace` |
 
 The clock is simulated: it moves `interval` at the start of each scan, and
 stands still while the program is stopped, so a timer stopped at a
@@ -106,6 +109,33 @@ reported:
 The I/O image, the clock, the forces and the breakpoints carry over too.
 While the program runs, the change waits for the end of the scan in
 progress; stopped inside a scan, run to its end first (`scan`).
+
+## Engines
+
+The same debugger runs the program on any of the toolchain's engines
+(`vmdebug.Options.Engine`, the `engine` launch argument, the engine
+selector in beespace). The session is the same on each: its scan loop,
+breakpoints, stepping, forces, writes, live values, trace, plant models
+and online change; the engine only runs a scan with the session's hook in
+it and gives the program's variables and frames.
+
+| Engine | What runs | What differs |
+|---|---|---|
+| `vm` | the program compiled to bytecode, on the VM (`vm.SetHook`) | the default; the only one with a disassembly and instruction steps |
+| `eval` | the tree-walking evaluator, the reference engine, through `evaluator.Debug` | runs in a browser as it is; one evaluator session at a time (a second launch on it, or a test run on it meanwhile, is refused: `ErrEvaluatorBusy`); a function block's locals show its call's variables then its instance's |
+| `go` | the program transpiled to Go with the debugger's hooks (`transpiler.Options.Debug`), built with the Go toolchain on royaljelly in a temporary module, as the firmware is built, and run in a process of its own; the debugger speaks to it on its pipes | needs `go` in PATH and the modules (a first build fetches royaljelly); values cross the pipe as the source writes them, so a breakpoint condition reads a snapshot; a standard block's own state (a timer's start) is royaljelly's and does not carry over an online change, so the timer starts over; no plant models yet beyond the I/O image mirrored each scan; a free run reports only the breakpoints' lines, so a pause takes effect between scans |
+
+The go engine's process stops before a statement and waits; stepping is
+a round trip a statement. `GoBuild.Timeout` (10 s) bounds a scan, so a
+runaway loop fails the scan instead of holding the session;
+`GoBuild.Keep` leaves the module behind (`Session.GoModule`) for a look at
+the generated code, which `transpiler.Options.Debug` instruments: a
+`dbgAt(row, col)` call before each statement, `dbgEnter` and `dbgLeave`
+around each body, a `dbgVars` table on each program, function block and
+structure (no reflection: a Text and a Set function a variable), each
+function's locals given to `dbgEnter`, and `dbgPoints`, the located
+variables' entries in the process image. The hooks go through `dbgHook`,
+nil unless a debugger sets it, so the same file runs as firmware does.
 
 ## Other editors
 
@@ -230,5 +260,8 @@ configuration.
 ## Not yet
 
 - One source file per session.
+- The go engine in a browser: the program must be built by a service and
+  returned as a WebAssembly module the page runs beside the engine.
 - The firmware `-embedded` generates carries no line table, so it cannot
-  be debugged at source level on the board.
+  be debugged at source level on the board; the go engine's hooks
+  (`transpiler.Options.Debug`) are the way there.

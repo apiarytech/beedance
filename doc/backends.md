@@ -94,7 +94,7 @@ program uses, with the same `Read` and `Write` methods.
 | Speed | slowest | about 200× slower than native on arithmetic loops (296 µs against 1.5 µs for 1,000 iterations) | native |
 | Build step | none | compile on the target, in process | Go toolchain |
 | Change a running program | re-evaluate | swap bytecode between scans | rebuild and restart |
-| Debugging | statement by statement, source positions | scan level | Go tools |
+| Debugging | the debugger (`vmdebug`, `-dap`), in a browser too | the debugger, with a disassembly and instruction steps | the debugger, in a process built with the Go toolchain |
 | Best for | engineering, tests, REPL | a soft-PLC runtime with 10–100 ms scans | hot paths, devices without a VM |
 
 The VM's speed fits process control scans; the transpiler is the option

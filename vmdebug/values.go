@@ -25,7 +25,6 @@ import (
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
 	"github.com/apiarytech/beedance/sil"
-	"github.com/apiarytech/beedance/watch"
 )
 
 // BreakpointSpec asks for a breakpoint.
@@ -192,15 +191,34 @@ func (s *Session) environment(frame int) *object.Environment {
 	env := object.NewEnvironment()
 	for _, v := range s.globals() {
 		if v.Object != nil {
-			env.Set(v.Name, v.Object)
+			env.Set(v.Name, snapshot(v.Object, 4))
 		}
 	}
 	for _, v := range s.locals(frame) {
 		if v.Object != nil {
-			env.Set(v.Name, v.Object)
+			env.Set(v.Name, snapshot(v.Object, 4))
 		}
 	}
 	return env
+}
+
+// snapshot is o as the evaluator can read it: a value of a program in
+// another process (remoteValue) becomes a structure of its members, depth
+// levels down.
+func snapshot(o object.Object, depth int) object.Object {
+	r, ok := o.(*remoteValue)
+	if !ok {
+		return o
+	}
+	if !r.structured || depth <= 0 {
+		return &object.String{Value: r.Inspect()}
+	}
+	h := &object.Hash{Pairs: map[object.HashKey]object.HashPair{}}
+	for _, m := range r.members() {
+		key := &object.String{Value: m.Name}
+		h.Pairs[key.HashKey()] = object.HashPair{Key: key, Value: snapshot(m.Object, depth-1)}
+	}
+	return h
 }
 
 // parseExpression parses one Structured Text expression.
@@ -248,12 +266,10 @@ func (s *Session) Globals() []Value {
 
 func (s *Session) globals() []Value {
 	var out []Value
-	for _, v := range s.img.compiled.Variables {
+	for _, v := range s.img.eng.Variables() {
 		val := Value{Name: v.Name, Type: v.Type, Address: v.Address}
-		if v.Address != "" {
-			val.Object = s.img.vm.IO()[v.Address]
-		} else if v.Global >= 0 && v.Global < len(s.img.globals) {
-			val.Object = s.img.globals[v.Global]
+		if o, ok := s.img.eng.Read([]string{v.Name}); ok {
+			val.Object = o
 		}
 		val.Forced = s.isForced(v.Name, v.Address)
 		out = append(out, val)
@@ -272,28 +288,10 @@ func (s *Session) Locals(frame int) []Value {
 
 func (s *Session) locals(frame int) []Value {
 	fs := s.frames()
-	if frame < 0 || frame >= len(fs) || fs[frame].vm.Fn == nil {
+	if frame < 0 || frame >= len(fs) || fs[frame].eng.locals == nil {
 		return nil
 	}
-	f := fs[frame].vm
-	var out []Value
-	for i, o := range f.Locals {
-		name := ""
-		if i < len(f.Fn.LocalNames) {
-			name = f.Fn.LocalNames[i]
-		}
-		if name == "" || strings.HasPrefix(name, "__") {
-			continue
-		}
-		if strings.EqualFold(name, "THIS") {
-			if h, ok := o.(*object.Hash); ok {
-				out = append(Members(h), out...)
-			}
-			continue
-		}
-		out = append(out, Value{Name: name, Type: typeName(o), Object: o})
-	}
-	return out
+	return fs[frame].eng.locals()
 }
 
 // Watched are the values package watch lists for the program (Options.
@@ -335,12 +333,47 @@ func Members(o object.Object) []Value {
 			out = append(out, Value{Name: name, Type: typeName(p.Value), Object: p.Value})
 		}
 		sort.Slice(out, func(i, j int) bool { return strings.ToUpper(out[i].Name) < strings.ToUpper(out[j].Name) })
+	case *object.FunctionBlockInstance:
+		// An instance on the evaluator: its environment's own variables.
+		names := v.Env.Names()
+		sort.Slice(names, func(i, j int) bool { return strings.ToUpper(names[i]) < strings.ToUpper(names[j]) })
+		for _, name := range names {
+			m, _ := v.Env.GetRaw(name)
+			if hidden(name, m) {
+				continue
+			}
+			m = unwrap(m)
+			out = append(out, Value{Name: name, Type: typeName(m), Object: m})
+		}
 	case *object.Array:
 		for i, e := range v.Elements {
 			out = append(out, Value{Name: "[" + strconv.FormatInt(v.LowerBound+int64(i), 10) + "]", Type: typeName(e), Object: e})
 		}
+	case *remoteValue:
+		out = v.members()
 	}
 	return out
+}
+
+// hidden reports whether name, holding o in an evaluator environment, is
+// the evaluator's own bookkeeping rather than a variable.
+func hidden(name string, o object.Object) bool {
+	if strings.HasPrefix(name, "__") || strings.EqualFold(name, "THIS") || strings.EqualFold(name, "EN") || strings.EqualFold(name, "ENO") {
+		return true
+	}
+	switch o.(type) {
+	case nil, *object.Builtin, *object.Function, *object.Program, *object.FunctionBlock, *object.BuiltinFunctionBlock, *object.Method:
+		return true
+	}
+	return false
+}
+
+// unwrap is o without the evaluator's constant wrapper.
+func unwrap(o object.Object) object.Object {
+	if c, ok := o.(*object.Constant); ok {
+		return c.Value
+	}
+	return o
 }
 
 // typeName is the IEC type of o, as far as the value tells.
@@ -350,6 +383,18 @@ func typeName(o object.Object) string {
 		return ""
 	case *object.Boolean:
 		return "BOOL"
+	case *object.Constant:
+		return typeName(v.Value)
+	case *object.FunctionBlockInstance:
+		if v.Definition != nil && v.Definition.Name != nil {
+			return v.Definition.Name.Value
+		}
+		if d, ok := v.Env.Get("__fb_type__"); ok {
+			return d.Inspect()
+		}
+		return "FUNCTION_BLOCK"
+	case *remoteValue:
+		return v.typ
 	case *object.Hash:
 		if c, ok := v.Pairs[(&object.String{Value: "__class__"}).HashKey()]; ok {
 			if ch, ok := c.Value.(*object.Hash); ok {
@@ -386,8 +431,12 @@ func Format(o object.Object) string {
 		return `"` + v.Value + `"`
 	case *object.Time:
 		return "T#" + strings.TrimPrefix(strings.TrimPrefix(v.Inspect(), "T#"), "TIME#")
-	case *object.Hash, *object.Array:
+	case *object.Hash, *object.Array, *object.FunctionBlockInstance:
 		return typeName(o)
+	case *object.Constant:
+		return Format(v.Value)
+	case *remoteValue:
+		return v.text
 	}
 	return o.Inspect()
 }
@@ -398,20 +447,7 @@ func (s *Session) lookup(path []string) (object.Object, bool) {
 	if len(path) == 0 {
 		return nil, false
 	}
-	d, ok := s.img.decls[strings.ToUpper(path[0])]
-	if !ok {
-		return nil, false
-	}
-	var top object.Object
-	if d.Address != "" {
-		top = s.img.vm.IO()[d.Address]
-	} else if d.Global >= 0 && d.Global < len(s.img.globals) {
-		top = s.img.globals[d.Global]
-	}
-	if top == nil {
-		return nil, false
-	}
-	return watch.Member(top, path[1:])
+	return s.img.eng.Read(path)
 }
 
 // target is where a name or address points: a variable of the program, a
@@ -526,33 +562,10 @@ func parseValue(typ, text string) (object.Object, error) {
 // write puts o where t points.
 func (s *Session) write(t target, o object.Object) error {
 	if t.addr != "" {
-		s.img.vm.IO()[t.addr] = o
+		s.img.eng.IO()[t.addr] = o
 		return nil
 	}
-	d := s.img.decls[strings.ToUpper(t.path[0])]
-	if len(t.path) == 1 {
-		if d.Global < 0 || d.Global >= len(s.img.globals) {
-			return fmt.Errorf("%s has no slot", t.path[0])
-		}
-		s.img.globals[d.Global] = o
-		return nil
-	}
-	parent, ok := s.lookup(t.path[:len(t.path)-1])
-	if !ok {
-		return fmt.Errorf("no %s", strings.Join(t.path[:len(t.path)-1], "."))
-	}
-	h, ok := parent.(*object.Hash)
-	if !ok {
-		return fmt.Errorf("%s has no members", strings.Join(t.path[:len(t.path)-1], "."))
-	}
-	member := t.path[len(t.path)-1]
-	for k, p := range h.Pairs {
-		if strings.EqualFold(p.Key.Inspect(), member) {
-			h.Pairs[k] = object.HashPair{Key: p.Key, Value: o}
-			return nil
-		}
-	}
-	return fmt.Errorf("no %s", strings.Join(t.path, "."))
+	return s.img.eng.Write(t.path, o)
 }
 
 // write is a value to put somewhere when the next scan starts.
@@ -812,32 +825,43 @@ func (s *Session) SetIn(container object.Object, name, value string) (object.Obj
 }
 
 func setIn(container object.Object, name, value string) (object.Object, error) {
+	if r, ok := container.(*remoteValue); ok {
+		return r.set(name, value)
+	}
+	var cur object.Object
 	switch c := container.(type) {
-	case *object.Hash:
-		for k, p := range c.Pairs {
-			if strings.EqualFold(p.Key.Inspect(), name) {
-				o, err := parseValue(valueType(p.Value), value)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", name, err)
-				}
-				c.Pairs[k] = object.HashPair{Key: p.Key, Value: o}
-				return o, nil
-			}
+	case *object.Hash, *object.FunctionBlockInstance:
+		m, ok := readMember(c, []string{name})
+		if !ok {
+			return nil, fmt.Errorf("no member %s", name)
 		}
-		return nil, fmt.Errorf("no member %s", name)
+		cur = unwrap(m)
 	case *object.Array:
-		i, err := strconv.ParseInt(strings.Trim(name, "[] "), 10, 64)
-		if err != nil || i < c.LowerBound || i >= c.LowerBound+int64(len(c.Elements)) {
+		i, ok := arrayIndex(c, name)
+		if !ok {
 			return nil, fmt.Errorf("no element %s", name)
 		}
-		o, err := parseValue(valueType(c.Elements[i-c.LowerBound]), value)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
-		}
-		c.Elements[i-c.LowerBound] = o
-		return o, nil
+		cur = c.Elements[i]
+	default:
+		return nil, fmt.Errorf("%s has no members", Format(container))
 	}
-	return nil, fmt.Errorf("%s has no members", Format(container))
+	o, err := parseValue(valueType(cur), value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if err := setMember(container, name, o); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+// arrayIndex is the index in a's elements of the element name ("[2]").
+func arrayIndex(a *object.Array, name string) (int, bool) {
+	i, err := strconv.ParseInt(strings.Trim(name, "[] "), 10, 64)
+	if err != nil || i < a.LowerBound || i >= a.LowerBound+int64(len(a.Elements)) {
+		return 0, false
+	}
+	return int(i - a.LowerBound), true
 }
 
 // SetLocal writes value to the local variable name of frame (an index of
@@ -849,33 +873,10 @@ func (s *Session) SetLocal(frame int, name, value string) (object.Object, error)
 	}
 	defer s.mu.Unlock()
 	fs := s.frames()
-	if frame < 0 || frame >= len(fs) || fs[frame].vm.Fn == nil {
+	if frame < 0 || frame >= len(fs) || fs[frame].eng.setLocal == nil {
 		return nil, fmt.Errorf("frame %d has no locals", frame)
 	}
-	f := fs[frame].vm
-	for i, o := range f.Locals {
-		local := ""
-		if i < len(f.Fn.LocalNames) {
-			local = f.Fn.LocalNames[i]
-		}
-		if strings.EqualFold(local, "THIS") {
-			if h, ok := o.(*object.Hash); ok {
-				if v, err := setIn(h, name, value); err == nil {
-					return v, nil
-				}
-			}
-			continue
-		}
-		if strings.EqualFold(local, name) {
-			v, err := parseValue(valueType(o), value)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", name, err)
-			}
-			f.Locals[i] = v
-			return v, nil
-		}
-	}
-	return nil, fmt.Errorf("no local %s", name)
+	return fs[frame].eng.setLocal(name, value)
 }
 
 // valueType is the elementary type values written over o take.

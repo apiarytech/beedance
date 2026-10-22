@@ -70,12 +70,16 @@ func (s *Session) buildPlants(img *image) error {
 		if err := initVM.Run(); err != nil {
 			return fmt.Errorf("init %s: %w", p.name, err)
 		}
+		io := img.eng.IO()
+		if io == nil {
+			return fmt.Errorf("%s: plant models do not run on the %s engine", pd.Name.Value, img.eng.Engine())
+		}
 		for addr, v := range initVM.IO() {
-			if ast.IsInputAddress(addr) || img.vm.IO()[addr] == nil {
-				img.vm.IO()[addr] = v
+			if ast.IsInputAddress(addr) || io[addr] == nil {
+				io[addr] = v
 			}
 		}
-		p.vm.ShareIO(img.vm.IO())
+		p.vm.ShareIO(io)
 		p.vm.SetBudget(s.opts.Budget)
 		for _, v := range compiled.Variables {
 			p.decls[strings.ToUpper(v.Name)] = v
@@ -145,7 +149,7 @@ func (s *Session) PlantGlobals(i int) []Value {
 	for _, v := range p.compiled.Variables {
 		val := Value{Name: v.Name, Type: v.Type, Address: v.Address}
 		if v.Address != "" {
-			val.Object = s.img.vm.IO()[v.Address]
+			val.Object = s.img.eng.IO()[v.Address]
 		} else if v.Global >= 0 && v.Global < len(p.globals) {
 			val.Object = p.globals[v.Global]
 		}

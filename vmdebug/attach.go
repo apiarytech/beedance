@@ -30,6 +30,9 @@ import (
 	"github.com/apiarytech/beedance/vm"
 )
 
+// The debugger attached to a host's program always runs on the VM: the
+// host's.
+
 // Host is a program its host runs itself, scan by scan, on a VM of its
 // own: what Attach needs of it.
 type Host struct {
@@ -101,6 +104,7 @@ func Attach(h Host, o Options) (*Session, error) {
 	if o.Interval <= 0 {
 		o.Interval = 10 * time.Millisecond
 	}
+	o.Engine = EngineVM
 	s := &Session{opts: o, bps: map[int]*Breakpoint{}, forces: map[string]*force{}, stops: make(chan Stop, 1)}
 	host := h
 	s.host = &host
@@ -109,11 +113,14 @@ func Attach(h Host, o Options) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	img.compiled, img.globals, img.vm = h.Compiled, h.Globals, h.VM
+	img.eng = attachVMEngine(img, h.Compiled, h.Globals, h.VM)
 	s.index(img)
 	s.img = img
 	return s, nil
 }
+
+// hostVM is the attached host's VM engine.
+func (s *Session) hostVM() *vmEngine { return s.img.eng.(*vmEngine) }
 
 // Attached reports whether the session is on a host's program (Attach)
 // rather than a VM of its own (Load).
@@ -158,13 +165,12 @@ func (s *Session) Scan() error {
 	}
 	if s.detaching {
 		// The last scan: a scan in progress goes on without the hook.
-		s.img.vm.SetHook(nil)
 		if !s.midScan {
 			s.scans++
-			s.img.vm.Reset()
+			s.img.eng.Reset()
 		}
 		s.midScan = true
-		err := s.img.vm.Run()
+		err := s.img.eng.Run(nil, false)
 		s.midScan = false
 		if err != nil {
 			return err
@@ -181,13 +187,12 @@ func (s *Session) Scan() error {
 		s.beginScan()
 	}
 	s.midScan = true
+	var hook func(site) bool
 	if s.needsHook() {
-		s.img.vm.SetHook(s.hook)
-	} else {
-		s.img.vm.SetHook(nil)
+		hook = s.hook
 	}
-	err := s.img.vm.Run()
-	if errors.Is(err, vm.ErrPaused) {
+	err := s.img.eng.Run(hook, false)
+	if errors.Is(err, errPaused) {
 		return s.stopAttached(s.stop)
 	}
 	if err != nil {
@@ -280,7 +285,7 @@ func (s *Session) Detach() {
 	}
 	s.mu.Lock()
 	s.detaching, s.stopped = true, false
-	s.img.vm.SetHook(nil)
+	s.hostVM().unhook()
 	s.mu.Unlock()
 	select {
 	case s.stops <- Stop{Reason: OnDetach}:

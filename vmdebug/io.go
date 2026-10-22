@@ -37,7 +37,7 @@ func (s *Session) IO() map[string]any {
 
 func (s *Session) io() map[string]any {
 	out := map[string]any{}
-	for addr, o := range s.img.vm.IO() {
+	for addr, o := range s.img.eng.IO() {
 		if o != nil {
 			out[addr] = ioValue(o)
 		}
@@ -181,7 +181,7 @@ func (s *Session) texts(names []string) map[string]string {
 		var o object.Object
 		var ok bool
 		if strings.HasPrefix(n, "%") {
-			o, ok = s.img.vm.IO()[strings.ToUpper(n)]
+			o, ok = s.img.eng.IO()[strings.ToUpper(n)]
 		} else {
 			o, ok = s.lookup(strings.Split(n, "."))
 		}

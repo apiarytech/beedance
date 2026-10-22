@@ -510,3 +510,64 @@ func TestIOAndInputs(t *testing.T) {
 		t.Errorf("beedance/scan values %v: no y = TRUE at %%QX0.0", ev["values"])
 	}
 }
+
+// TestLaunchEngine: a program launched on the evaluator stops, steps, shows
+// its variables and a function block's members, and is changed online, as
+// one on the VM does; an unknown engine is refused.
+func TestLaunchEngine(t *testing.T) {
+	c := newClient(t)
+	c.ok("initialize", map[string]any{"adapterID": "beedance"}, nil)
+	if m := c.request("launch", map[string]any{"program": "main.st", "source": program, "engine": "cobol"}); m.Success {
+		t.Error("an unknown engine launched")
+	}
+	c.ok("launch", map[string]any{"program": "main.st", "source": program, "realtime": false, "engine": "eval"}, nil)
+	c.event("initialized")
+	call := lineOf(t, program, "c(step")
+	c.ok("setBreakpoints", map[string]any{"source": map[string]any{"path": "main.st"},
+		"breakpoints": []map[string]any{{"line": call}}}, nil)
+	c.ok("configurationDone", nil, nil)
+	if st := c.event("stopped"); st["reason"] != "breakpoint" {
+		t.Fatalf("stopped %v", st)
+	}
+	c.ok("stepIn", map[string]any{"threadId": 1}, nil)
+	c.event("stopped")
+	if top := c.top(); top.Name != "Counter" || top.Line != lineOf(t, program, "tmp := total") {
+		t.Fatalf("stepped into %+v", top)
+	}
+	locals, _ := c.vars(c.top().ID, "Locals")
+	if locals["step"].Value != "2" {
+		t.Errorf("locals %+v: step = %q, want 2", locals, locals["step"].Value)
+	}
+	c.ok("stepOut", map[string]any{"threadId": 1}, nil)
+	c.event("stopped")
+	vs, ref := c.vars(c.top().ID, "PROGRAM")
+	if vs["c"].VariablesReference == 0 {
+		t.Fatalf("c has no members: %+v", vs["c"])
+	}
+	var members struct{ Variables []variable }
+	c.ok("variables", map[string]any{"variablesReference": vs["c"].VariablesReference}, &members)
+	total := ""
+	for _, v := range members.Variables {
+		if v.Name == "total" {
+			total = v.Value
+		}
+	}
+	if total != "2" {
+		t.Errorf("c.total = %q after the call, want 2 (%+v)", total, members.Variables)
+	}
+	var set struct{ Value string }
+	c.ok("setVariable", map[string]any{"variablesReference": ref, "name": "n", "value": "40"}, &set)
+	if set.Value != "40" {
+		t.Errorf("set n: %+v", set)
+	}
+	c.ok("beedance/stepScan", nil, nil) // a change is made between scans
+	c.event("stopped")
+	edited := strings.Replace(program, "n := n + 1;", "n := n + 10;", 1)
+	var r struct{ Kept, Reset []string }
+	c.ok("beedance/onlineChange", map[string]any{"source": edited}, &r)
+	if len(r.Kept) == 0 {
+		t.Errorf("online change on the evaluator kept nothing: %+v", r)
+	}
+	c.ok("disconnect", nil, nil)
+}
+

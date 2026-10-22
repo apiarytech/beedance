@@ -54,6 +54,7 @@ import (
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
+	"github.com/apiarytech/beedance/vmdebug"
 )
 
 // Request is one call. Only the fields its op uses are read.
@@ -140,7 +141,8 @@ func (h *Host) Do(req Request) (any, error) {
 	}
 	switch strings.ToLower(req.Op) {
 	case "version":
-		return versionReply{GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Ops: ops}, nil
+		return versionReply{GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Ops: ops,
+			Engines: []string{string(vmdebug.EngineVM), string(vmdebug.EngineEvaluator)}}, nil
 	case "check":
 		return check(req.Source), nil
 	case "test":
@@ -171,6 +173,11 @@ type versionReply struct {
 	GOOS      string   `json:"goos"`
 	GOARCH    string   `json:"goarch"`
 	Ops       []string `json:"ops"`
+	// Engines are the debugger's engines this module can launch a program
+	// on (the launch request's "engine"): the VM and the evaluator; the
+	// go engine needs the Go toolchain, which a WebAssembly module has
+	// not got.
+	Engines []string `json:"engines"`
 }
 
 type checkReply struct {

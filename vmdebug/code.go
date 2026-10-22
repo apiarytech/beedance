@@ -45,54 +45,58 @@ type block struct {
 }
 
 // blocks are the program's code at their addresses, made on first use.
-func (img *image) codeBlocks() []block {
-	if img.blocks != nil {
-		return img.blocks
+func (e *vmEngine) codeBlocks() []block {
+	if e.blocks != nil {
+		return e.blocks
 	}
-	main := img.vm.Frames()[0].Fn
+	main := e.vm.Frames()[0].Fn
 	fns := []*object.CompiledFunction{main}
-	for _, c := range img.compiled.CyclicBytecode.Constants {
-		if fn, ok := c.(*object.CompiledFunction); ok && fn.Name != "" && img.isUser(fn) {
+	for _, c := range e.compiled.CyclicBytecode.Constants {
+		if fn, ok := c.(*object.CompiledFunction); ok && fn.Name != "" && e.isUser(fn) {
 			fns = append(fns, fn)
 		}
 	}
 	base := 0x1000
-	img.blockBase = map[*object.CompiledFunction]int{}
+	e.blockBase = map[*object.CompiledFunction]int{}
 	for _, fn := range fns {
 		name := fn.Name
 		if fn == main {
-			name = img.name
+			name = e.name
 		}
-		img.blocks = append(img.blocks, block{fn: fn, name: name, base: base})
-		img.blockBase[fn] = base
+		e.blocks = append(e.blocks, block{fn: fn, name: name, base: base})
+		e.blockBase[fn] = base
 		base += (len(fn.Instructions)/0x100 + 1) * 0x100
 	}
-	return img.blocks
+	return e.blocks
 }
 
 // address is the address of offset ip of fn; 0 if fn is not the source's.
-func (img *image) address(fn *object.CompiledFunction, ip int) int {
-	img.codeBlocks()
-	if base, ok := img.blockBase[fn]; ok {
+func (e *vmEngine) address(fn *object.CompiledFunction, ip int) int {
+	e.codeBlocks()
+	if base, ok := e.blockBase[fn]; ok {
 		return base + ip
 	}
 	return 0
 }
 
-// Disassembly is the program's code, in address order.
+// Disassembly is the program's code, in address order; nil on an engine
+// other than the VM, which has no code to show.
 func (s *Session) Disassembly() []Instruction {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	img := s.img
+	e, ok := s.img.eng.(*vmEngine)
+	if !ok {
+		return nil
+	}
 	names := map[int]string{}
-	for _, v := range img.compiled.Variables {
+	for _, v := range e.compiled.Variables {
 		if v.Global >= 0 {
 			names[v.Global] = v.Name
 		}
 	}
-	consts := img.compiled.CyclicBytecode.Constants
+	consts := e.compiled.CyclicBytecode.Constants
 	var out []Instruction
-	for _, b := range img.codeBlocks() {
+	for _, b := range e.codeBlocks() {
 		ins := b.fn.Instructions
 		for i := 0; i < len(ins); {
 			in := Instruction{Address: b.base + i, POU: b.name}
@@ -143,7 +147,9 @@ func (s *Session) Disassembly() []Instruction {
 }
 
 // StepInstruction runs one instruction of the source's code: the next,
-// into a call or out of one; standard blocks' code is run through.
+// into a call or out of one; standard blocks' code is run through. On an
+// engine with no instructions it steps to the next statement, into a
+// call if there is one.
 func (s *Session) StepInstruction(ctx context.Context) (Stop, error) {
 	return s.run(ctx, modeInstruction)
 }

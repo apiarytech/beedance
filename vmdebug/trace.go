@@ -157,7 +157,7 @@ func (s *Session) record() {
 // traceRead reads a traced signal; mu is held.
 func (s *Session) traceRead(t traceTarget) (object.Object, bool) {
 	if t.addr != "" {
-		o, ok := s.img.vm.IO()[t.addr]
+		o, ok := s.img.eng.IO()[t.addr]
 		return o, ok
 	}
 	if t.plant != "" {
@@ -171,7 +171,7 @@ func (s *Session) traceRead(t traceTarget) (object.Object, bool) {
 			}
 			var top object.Object
 			if d.Address != "" {
-				top = s.img.vm.IO()[d.Address]
+				top = s.img.eng.IO()[d.Address]
 			} else if d.Global >= 0 && d.Global < len(p.globals) {
 				top = p.globals[d.Global]
 			}

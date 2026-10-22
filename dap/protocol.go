@@ -135,6 +135,13 @@ type launchArgs struct {
 	// clock while the program runs: 1 real time, 0 as fast as it goes. It
 	// overrides Realtime.
 	Speed *float64 `json:"speed"`
+	// Engine runs the program: "vm" (the default), "eval" (the
+	// evaluator) or "go" (transpiled and built with the Go toolchain, in
+	// a process of its own).
+	Engine string `json:"engine"`
+	// GoReplace points a module the go engine's program imports at a local
+	// directory, as a go.mod replace directive.
+	GoReplace map[string]string `json:"goReplace"`
 }
 
 type source struct {
