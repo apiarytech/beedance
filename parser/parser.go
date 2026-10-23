@@ -10,7 +10,9 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -2054,6 +2056,13 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 		// Parse as signed integer
 		lit := &ast.IntegerLiteral{Token: p.curToken}
 		value, err := strconv.ParseInt(valueStr, base, 64)
+		if errors.Is(err, strconv.ErrRange) {
+			// Above LINT's range, an untyped literal can still be a ULINT
+			// or LWORD value: 18446744073709551615, 16#FFFFFFFFFFFFFFFF.
+			if uValue, uErr := strconv.ParseUint(valueStr, base, 64); uErr == nil {
+				return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
+			}
+		}
 		if err != nil {
 			msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
 			p.errors = append(p.errors, msg)
@@ -2159,6 +2168,16 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 	p.nextToken()
 
 	expression.Right = p.parseExpression(PREFIX)
+
+	// -9223372036854775808 is LINT's minimum: its digits alone are above
+	// LINT's range and parse as an unsigned literal, so fold the minus in.
+	if lit, ok := expression.Right.(*ast.UnsignedIntegerLiteral); ok && expression.Operator == "-" &&
+		lit.Value == 1<<63 && lit.Token.Type == token.INT {
+		tok := lit.Token
+		tok.Literal = "-" + tok.Literal
+		tok.Row, tok.Column, tok.Pos = expression.Token.Row, expression.Token.Column, expression.Token.Pos
+		return &ast.IntegerLiteral{Token: tok, Value: math.MinInt64}
+	}
 
 	return expression
 }
@@ -2707,6 +2726,12 @@ func (p *Parser) parseIntOrType() ast.Expression {
 					return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
 				default:
 					value, err := strconv.ParseInt(valueStr, base, 64)
+					if errors.Is(err, strconv.ErrRange) {
+						// Above LINT's range: a ULINT or LWORD value.
+						if uValue, uErr := strconv.ParseUint(valueStr, base, 64); uErr == nil {
+							return &ast.UnsignedIntegerLiteral{Token: p.curToken, Value: uValue}
+						}
+					}
 					if err != nil {
 						p.currentError("could not parse %q as integer with base %d", valueStr, base)
 						return nil
