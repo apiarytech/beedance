@@ -30,16 +30,17 @@ import (
 // Module versions the transpiled tests build with, unless
 // Options.GoReplace points a module at a local directory.
 const (
-	RoyaljellyVersion = "v0.3.2"
+	RoyaljellyVersion = "v0.3.3"
 	BeebreadVersion   = "v0.2.0"
 )
 
-// goDirective is the go directive of the temporary module: the lowest Go
-// that royaljelly at RoyaljellyVersion accepts (its own go directive), so a
-// toolchain that can build royaljelly needs no download. Change it with
-// RoyaljellyVersion. A royaljelly replaced by a local directory gives its
-// own go directive instead.
-const goDirective = "1.27.2"
+// GoDirective is the go directive of the temporary module the go and wasm
+// engines build in (and vmdebug's): the lowest Go that royaljelly at
+// RoyaljellyVersion accepts (its own go directive), so a toolchain that can
+// build royaljelly needs no download. Change it with RoyaljellyVersion. A
+// royaljelly replaced by a local directory gives its own go directive
+// instead.
+const GoDirective = "1.25.0"
 
 // moduleGoDirective returns the go directive of the go.mod in dir, or "".
 func moduleGoDirective(dir string) string {
@@ -211,7 +212,7 @@ func (n *native) run(ctx context.Context, e Engine, t *testInfo, opts Options) (
 // transpiled code uses OSCAT, at the versions above or replaced.
 func goMod(code string, replace map[string]string) string {
 	var b strings.Builder
-	directive := goDirective
+	directive := GoDirective
 	if dir, ok := replace["github.com/apiarytech/royaljelly"]; ok {
 		if v := moduleGoDirective(dir); v != "" {
 			directive = v

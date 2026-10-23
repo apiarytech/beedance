@@ -20,8 +20,8 @@ import (
 // TestGoModDirective covers issue #19: the temporary module's go directive
 // is royaljelly's, from a replaced royaljelly's own go.mod when there is one.
 func TestGoModDirective(t *testing.T) {
-	if got := goMod("", nil); !strings.Contains(got, "\ngo "+goDirective+"\n") {
-		t.Errorf("go.mod without replace:\n%s\nwant go %s", got, goDirective)
+	if got := goMod("", nil); !strings.Contains(got, "\ngo "+GoDirective+"\n") {
+		t.Errorf("go.mod without replace:\n%s\nwant go %s", got, GoDirective)
 	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/apiarytech/royaljelly\n\ngo 1.25\n"), 0o600); err != nil {

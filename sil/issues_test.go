@@ -146,9 +146,8 @@ END_PROGRAM
 func TestCountersPastPV(t *testing.T) { runOnEveryEngine(t, countersPastPV) }
 
 // TP is not retriggerable: an edge of IN during a pulse is ignored, and ET
-// stays PT after the pulse while IN is TRUE. royaljelly's TP does this from
-// v0.3.3 (its issue #31); until RoyaljellyVersion is that, the test runs on
-// the evaluator and the VM.
+// stays PT after the pulse while IN is TRUE, on every engine (royaljelly
+// from v0.3.3, its issue #31).
 const tpNotRetriggerable = `
 PROGRAM TEST_TpNotRetriggerable
 VAR_OUTPUT failures : INT; message : STRING; done : BOOL; END_VAR
@@ -163,20 +162,7 @@ IF scans >= 150 THEN done := TRUE; END_IF;
 END_PROGRAM
 `
 
-func TestTPNotRetriggerable(t *testing.T) {
-	results, err := sil.Run(context.Background(), tpNotRetriggerable, sil.Options{Engines: []sil.Engine{sil.Evaluator, sil.VM}, MaxScans: 200})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range results {
-		if !r.Passed {
-			t.Errorf("%s failed: mismatch %q", r.Name, r.Mismatch)
-			for _, e := range r.Engines {
-				t.Logf("    %s: %v", e.Engine, e.Problems())
-			}
-		}
-	}
-}
+func TestTPNotRetriggerable(t *testing.T) { runOnEveryEngine(t, tpNotRetriggerable) }
 
 // Issues #10 and #13: a conversion rounds a REAL half to even on every engine,
 // and one that does not fit its target is a runtime error on every engine.

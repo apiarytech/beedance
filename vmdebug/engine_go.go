@@ -194,7 +194,7 @@ func newGoEngine(img *image, o Options, clock func() time.Duration) (eng *goEngi
 // uses OSCAT, at package sil's versions, or replaced.
 func goModule(code string, replace map[string]string) string {
 	var b strings.Builder
-	b.WriteString("module beedance.debug/run\n\ngo 1.27.2\n\n")
+	b.WriteString("module beedance.debug/run\n\ngo " + sil.GoDirective + "\n\n")
 	b.WriteString("require github.com/apiarytech/royaljelly " + sil.RoyaljellyVersion + "\n")
 	if strings.Contains(code, "github.com/apiarytech/beebread") {
 		b.WriteString("require github.com/apiarytech/beebread " + sil.BeebreadVersion + "\n")
