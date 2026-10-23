@@ -12,7 +12,6 @@ package sil_test
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -61,7 +60,7 @@ END_PROGRAM
 // the transpiled Go (where the Go toolchain is), which agree scan by scan.
 func TestBistablesOnEveryEngine(t *testing.T) {
 	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if _, err := exec.LookPath("go"); err == nil && !testing.Short() {
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
 		engines = append(engines, sil.Go)
 	}
 	results, err := sil.Run(context.Background(), bistables, sil.Options{Engines: engines, MaxScans: 20, GoTimeout: time.Minute})

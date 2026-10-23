@@ -12,7 +12,6 @@ package sfc_test
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +49,7 @@ END_PROGRAM
 // scan and give IEC 61131-3's results.
 func TestQualifiersOnEveryEngine(t *testing.T) {
 	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if _, err := exec.LookPath("go"); err == nil && !testing.Short() {
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
 		engines = append(engines, sil.Go)
 	}
 	results, err := sil.Run(context.Background(), charts+pulsesAndStores, sil.Options{Engines: engines, MaxScans: 500, GoTimeout: 30 * time.Second})

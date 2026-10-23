@@ -13,7 +13,6 @@ package sil
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +25,8 @@ func wasmOptions(t *testing.T) Options {
 	if testing.Short() {
 		t.Skip("builds Go code for WebAssembly")
 	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain")
+	if err := GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	opts := Options{WasmRuntime: strings.Fields(os.Getenv("SIL_WASM_RUNTIME"))}
 	if _, err := wasmRuntime(context.Background(), opts, t.TempDir()); err != nil {
@@ -123,8 +122,8 @@ func TestWasmEngineNoRuntime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds Go code")
 	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain")
+	if err := GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	results, err := Run(context.Background(), suite, Options{
 		Engines: []Engine{VM, Wasm}, Filter: "add", WasmRuntime: []string{"no-such-wasi-runtime"},

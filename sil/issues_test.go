@@ -12,7 +12,6 @@ package sil_test
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -27,7 +26,7 @@ import (
 func runOnEveryEngine(t *testing.T, src string) {
 	t.Helper()
 	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if _, err := exec.LookPath("go"); err == nil && !testing.Short() {
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
 		engines = append(engines, sil.Go)
 	}
 	results, err := sil.Run(context.Background(), src, sil.Options{Engines: engines, MaxScans: 200, GoTimeout: time.Minute})

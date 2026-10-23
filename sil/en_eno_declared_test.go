@@ -12,7 +12,6 @@ package sil_test
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -67,7 +66,7 @@ END_PROGRAM
 // transpiled Go agree, as the standard says.
 func TestEnEnoDeclaredOnEveryEngine(t *testing.T) {
 	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if _, err := exec.LookPath("go"); err == nil && !testing.Short() {
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
 		engines = append(engines, sil.Go)
 	}
 	results, err := sil.Run(context.Background(), enEnoDeclared, sil.Options{Engines: engines, MaxScans: 3, GoTimeout: time.Minute})

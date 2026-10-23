@@ -12,7 +12,6 @@ package sil_test
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -52,7 +51,7 @@ END_PROGRAM
 // the transpiled Go (where the Go toolchain is), which agree.
 func TestForVariableOnEveryEngine(t *testing.T) {
 	engines := []sil.Engine{sil.Evaluator, sil.VM}
-	if _, err := exec.LookPath("go"); err == nil && !testing.Short() {
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
 		engines = append(engines, sil.Go)
 	}
 	results, err := sil.Run(context.Background(), forLoops, sil.Options{Engines: engines, MaxScans: 10, GoTimeout: time.Minute})

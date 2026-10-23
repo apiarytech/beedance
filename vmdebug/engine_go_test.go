@@ -11,16 +11,17 @@
 package vmdebug
 
 import (
-	"os/exec"
 	"testing"
+
+	"github.com/apiarytech/beedance/sil"
 )
 
 // TestGoEngine runs the session's tests on the go engine, which builds the
 // program with the Go toolchain (and fetches royaljelly): without go in
 // PATH it is skipped; elsewhere it fails as package sil's go engine does.
 func TestGoEngine(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain in PATH")
+	if err := sil.GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	runOn(t, EngineGo)
 }

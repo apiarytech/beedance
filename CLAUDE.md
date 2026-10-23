@@ -72,8 +72,9 @@ beedance -test FILE.st                       # TEST_ programs on every engine
 Go 1.27.2 is required (`go.mod`). The `go` engine of the `sil` tests
 (`sil`, `sfc`, `examples/unit_tests`, `transpiler`, `oscatdiff`) builds
 transpiled programs with the Go toolchain and fetches royaljelly, so it
-needs that Go and network access; elsewhere those tests fail for that
-reason alone. `wasm_exec.js` must come from the Go that built the module.
+needs that Go and royaljelly from the module cache or the network;
+where either is missing, `sil.GoEngineAvailable` skips that engine.
+`wasm_exec.js` must come from the Go that built the module.
 
 ## Conventions
 

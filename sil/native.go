@@ -34,6 +34,27 @@ const (
 	BeebreadVersion   = "v0.2.0"
 )
 
+// goDirective is the go directive of the temporary module: the lowest Go
+// that royaljelly at RoyaljellyVersion accepts (its own go directive), so a
+// toolchain that can build royaljelly needs no download. Change it with
+// RoyaljellyVersion. A royaljelly replaced by a local directory gives its
+// own go directive instead.
+const goDirective = "1.27.2"
+
+// moduleGoDirective returns the go directive of the go.mod in dir, or "".
+func moduleGoDirective(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "go "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // harnessPackage is the package of the transpiled source and its harness.
 const harnessPackage = "siltests"
 
@@ -190,7 +211,13 @@ func (n *native) run(ctx context.Context, e Engine, t *testInfo, opts Options) (
 // transpiled code uses OSCAT, at the versions above or replaced.
 func goMod(code string, replace map[string]string) string {
 	var b strings.Builder
-	b.WriteString("module beedance.sil/run\n\ngo 1.27.2\n\n")
+	directive := goDirective
+	if dir, ok := replace["github.com/apiarytech/royaljelly"]; ok {
+		if v := moduleGoDirective(dir); v != "" {
+			directive = v
+		}
+	}
+	b.WriteString("module beedance.sil/run\n\ngo " + directive + "\n\n")
 	b.WriteString("require github.com/apiarytech/royaljelly " + RoyaljellyVersion + "\n")
 	if strings.Contains(code, "github.com/apiarytech/beebread") {
 		b.WriteString("require github.com/apiarytech/beebread " + BeebreadVersion + "\n")

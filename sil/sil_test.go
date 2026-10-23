@@ -13,7 +13,6 @@ package sil
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -206,8 +205,8 @@ func TestRunGoEngine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds Go code; downloads royaljelly the first time")
 	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain")
+	if err := GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	results, err := Run(context.Background(), suite, Options{
 		Engines: []Engine{Evaluator, VM, Go}, Interval: time.Second, MaxScans: 10000,

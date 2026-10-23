@@ -15,7 +15,6 @@ package unittests
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +41,7 @@ func source(t *testing.T, files ...string) string {
 // or without a Go toolchain (it builds Go code, and downloads royaljelly
 // the first time).
 func engines() []sil.Engine {
-	if _, err := exec.LookPath("go"); err != nil || testing.Short() {
+	if sil.GoEngineAvailable() != nil || testing.Short() {
 		return []sil.Engine{sil.Evaluator, sil.VM}
 	}
 	return []sil.Engine{sil.Evaluator, sil.VM, sil.Go}

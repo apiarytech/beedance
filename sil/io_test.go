@@ -17,7 +17,6 @@ import (
 	"io"
 	"math"
 	"net"
-	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -213,8 +212,8 @@ func TestIOGoEngine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds Go code")
 	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain")
+	if err := GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	k := &tank{}
 	results, err := Run(context.Background(), tankSource, Options{IO: k, Deterministic: true,
@@ -397,8 +396,8 @@ func TestIOGoEngineRunaway(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds Go code")
 	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no Go toolchain")
+	if err := GoEngineAvailable(); err != nil {
+		t.Skip("the go engine cannot build here:", err)
 	}
 	src := `
 PROGRAM TEST_Spin
