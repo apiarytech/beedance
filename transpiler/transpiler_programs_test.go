@@ -924,7 +924,7 @@ b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
 		"p.r = iec.REAL(numerical.SQRT(p.r))",
 		"p.s = stdValue(iecstrings.LEFT(iec.STRING(p.s), iec.LINT(2)))",
 		"p.b = iec.BYTE(bitwise.SHL(p.b, uint(2)))",
-		"p.x = conversion.REAL_TO_INT(iec.REAL(p.r))",
+		"p.x = iec.INT(iecConvFS(float64(p.r), -32768, 32767, \"REAL_TO_INT\"))",
 		"p.x = iec.INT(numerical.ABS(iec.INT((-3))))",
 		"func stdValue[T any](value T, _ error) T { return value }")
 	// Standard function blocks without EN are not given one.

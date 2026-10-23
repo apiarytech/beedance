@@ -305,11 +305,9 @@ func ApplyConversion(input Object, fromType, toType string) Object {
 			}
 			return checkAndCreateIntegerObject(ObjectType(toType), iVal, uint64(iVal), isUnsigned)
 		case *Real:
-			rounded := int64(math.Round(val.Value))
-			return checkAndCreateIntegerObject(ObjectType(toType), rounded, uint64(rounded), false)
+			return realToInteger(toType, val.Value)
 		case *LReal:
-			rounded := int64(math.Round(val.Value))
-			return checkAndCreateIntegerObject(ObjectType(toType), rounded, uint64(rounded), false)
+			return realToInteger(toType, val.Value)
 		case *BitString:
 			return checkAndCreateIntegerObject(ObjectType(toType), int64(val.Value), val.Value, true)
 		case *String:
@@ -528,6 +526,24 @@ func bcdToInt(input Object) Object {
 // checkAndCreateIntegerObject validates a computed integer value against the
 // bounds of a target IEC integer type and, if valid, creates and returns the
 // corresponding object (e.g., SInt, UINT).
+// realToInteger converts f to the integer type t, rounded half to even
+// (IEC 61131-3 Ed. 3, as royaljelly): REAL_TO_INT(2.5) is 2. A value that
+// does not fit t, NaN or an infinity is an error.
+func realToInteger(t string, f float64) Object {
+	r := math.RoundToEven(f)
+	switch {
+	case math.IsNaN(r) || math.IsInf(r, 0):
+		return NewBuiltinError("value %v is out of range for type %s", f, t)
+	case r >= 0 && r < 1<<64 && strings.HasPrefix(t, "U"):
+		u := uint64(r)
+		return checkAndCreateIntegerObject(ObjectType(t), int64(u), u, true)
+	case r >= -(1<<63) && r < 1<<63:
+		v := int64(r)
+		return checkAndCreateIntegerObject(ObjectType(t), v, uint64(v), false)
+	}
+	return NewBuiltinError("value %v is out of range for type %s", f, t)
+}
+
 func checkAndCreateIntegerObject(t ObjectType, val int64, uval uint64, isUnsigned bool) Object {
 	targetRange, ok := integerTypeRanges[string(t)]
 	if !ok {

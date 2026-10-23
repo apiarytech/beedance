@@ -176,3 +176,50 @@ func TestTPNotRetriggerable(t *testing.T) {
 		}
 	}
 }
+
+// Issues #10 and #13: a conversion rounds a REAL half to even on every engine,
+// and one that does not fit its target is a runtime error on every engine.
+const conversionsInRange = `
+PROGRAM TEST_InRange
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR i : INT := 300; s : SINT; r : REAL := 2.5; w : WORD; d : DINT; u : USINT; t : TIME := T#1s500ms; b : BYTE; l : LREAL := -2.5; END_VAR
+s := INT_TO_SINT(INT#100);
+IF s <> 100 THEN failures := failures + 1; message := 'int'; END_IF;
+i := REAL_TO_INT(r);
+IF i <> 2 THEN failures := failures + 1; message := 'half even'; END_IF;
+i := LREAL_TO_INT(l);
+IF i <> -2 THEN failures := failures + 1; message := 'half even neg'; END_IF;
+w := INT_TO_WORD(INT#5);
+IF w <> WORD#5 THEN failures := failures + 1; message := 'word'; END_IF;
+d := TIME_TO_DINT(t);
+IF d <> 1500 THEN failures := failures + 1; message := 'time'; END_IF;
+u := WORD_TO_USINT(WORD#200);
+IF u <> 200 THEN failures := failures + 1; message := 'word usint'; END_IF;
+b := DWORD_TO_BYTE(DWORD#16#1FF);
+IF b <> BYTE#16#FF THEN failures := failures + 1; message := 'mask'; END_IF;
+END_PROGRAM
+
+`
+
+func TestConversionsInRangeIssue13(t *testing.T) { runOnEveryEngine(t, conversionsInRange) }
+
+func TestConversionOutOfRangeIsAnErrorIssue10(t *testing.T) {
+	engines := []sil.Engine{sil.Evaluator, sil.VM}
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
+		engines = append(engines, sil.Go)
+	}
+	for _, conv := range []string{"i := REAL_TO_INT(40000.0);", "s := INT_TO_SINT(n);", "w := INT_TO_WORD(m);", "i := TIME_TO_INT(T#40s);", "i := LREAL_TO_INT(LREAL#1.0E30);"} {
+		src := "PROGRAM TEST_Out\nVAR_OUTPUT failures : INT; END_VAR\nVAR i : INT; s : SINT; w : WORD; n : INT := 300; m : INT := -5; END_VAR\n" + conv + "\nEND_PROGRAM\n"
+		results, err := sil.Run(context.Background(), src, sil.Options{Engines: engines, MaxScans: 1, GoTimeout: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range results {
+			for _, e := range r.Engines {
+				if e.Err == "" {
+					t.Errorf("%s on %s: no runtime error", conv, e.Engine)
+				}
+			}
+		}
+	}
+}

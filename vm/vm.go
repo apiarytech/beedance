@@ -1445,6 +1445,11 @@ func (vm *VM) callBuiltin(builtin *object.Builtin, numArgs int) error {
 	result := builtin.Fn(args...)
 	vm.sp = vm.sp - numArgs - 1
 
+	// A built-in that fails returns an error object: raise it, as the
+	// evaluator does, instead of storing it in a variable as a value.
+	if errObj, isErr := result.(*object.Error); isErr {
+		return fmt.Errorf("%s", strings.TrimPrefix(errObj.Message, "BUILTIN ERROR: "))
+	}
 	if result != nil {
 		vm.push(result)
 	} else {

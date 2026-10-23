@@ -68,8 +68,6 @@ var known = map[string]string{
 	"YEAR_END":     integerWidth,
 
 	"REAL_TO_STRF": roundingTies,
-	"ROUND":        roundingTies,
-	"STAIR":        roundingTies,
 
 	// STRING_TO_DWORD('-12'): the port wraps the negative number, the
 	// evaluator gives 0.

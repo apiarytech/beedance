@@ -173,6 +173,7 @@ type Transpiler struct {
 	usesBCD           bool                                   // The output calls the BCD helpers, written at the end
 	usesEndian        bool                                   // The output calls the byte order helpers (endian.go)
 	usesValidate      bool                                   // The output calls IS_VALID or IS_VALID_BCD (validate.go)
+	usesCheckedConv   bool                                   // The output calls the range-checked conversions (checked_conv.go)
 	usesChar          bool                                   // The output calls the CHAR helpers, written at the end
 	usesAnyArray      bool                                   // The output has an ARRAY[*] parameter, so iecAny is written at the end
 	loopLabels        []string                               // The labels of the loops being written, innermost last ("" for an unlabelled loop)
@@ -297,6 +298,9 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		}
 		if t.usesValidate {
 			t.write("%s", validateHelpers)
+		}
+		if t.usesCheckedConv {
+			t.write("%s", checkedConvHelpers)
 		}
 		if t.usesChar {
 			t.write("%s", charHelpers)
@@ -4231,6 +4235,10 @@ func (t *Transpiler) transpileStandardFunctionCall(exp *ast.CallExpression) erro
 		// TO_<type>(x) and TRUNC_<integer>(x).
 		if from, to, isConv := object.ParseConversion(name); isConv && (from == "ANY" || from == "TRUNC") && len(exp.Arguments) == 1 {
 			return t.transpileGenericConversion(from, to, exp)
+		}
+		// A conversion to an integer or a bit string, checked (checked_conv.go).
+		if done, err := t.transpileCheckedConversion(name, exp); done {
+			return err
 		}
 		if fn, isStd := royaljellyFunctions[name]; isStd {
 			return t.transpileRoyaljellyCall(name, fn, exp)

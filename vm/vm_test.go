@@ -685,6 +685,14 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 
 		vm := NewWithBuiltins(comp.Bytecode(), vmBuiltins)
 		err = vm.Run()
+		// A built-in that fails is a runtime error: an expected error
+		// object is the message the run fails with.
+		if want, isErr := tt.expected.(*object.Error); isErr {
+			if err == nil || err.Error() != strings.TrimPrefix(want.Message, "BUILTIN ERROR: ") {
+				t.Errorf("test #%d/%d on input '%s': vm error %v, want %q", i, len(tests), tt.input, err, want.Message)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatalf("test #%d/%d on input '%s': vm error: %s", i, len(tests), tt.input, err)
 		}

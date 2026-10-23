@@ -492,7 +492,8 @@ func TestConvertToIntegerFunctions(t *testing.T) {
 		{"REAL_TO_INT(5.4);", int64(5)},
 		{"REAL_TO_INT(5.5);", int64(6)}, // round half to even
 		{"REAL_TO_INT(5.6);", int64(6)},
-		{"REAL_TO_INT(6.5);", int64(7)},
+		{"REAL_TO_INT(6.5);", int64(6)}, // half to even (IEC Ed. 3)
+		{"REAL_TO_INT(7.5);", int64(8)},
 		{"LREAL_TO_DINT(-3.5);", int64(-4)},
 
 		// STRING to Integer

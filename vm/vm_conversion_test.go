@@ -52,12 +52,16 @@ func TestConversionsAgreeWithEvaluator(t *testing.T) {
 			t.Errorf("%s: the types %q and %q are not constants of the bytecode", tt.input, from, to)
 		}
 		machine := New(bytecode)
+		ev := evaluator.Eval(parse(t, tt.input), object.NewEnvironment())
 		if err := machine.Run(); err != nil {
-			t.Errorf("%s: vm: %v", tt.input, err)
+			// A conversion that fails is a runtime error on both engines,
+			// with the same message.
+			if e, isErr := ev.(*object.Error); !isErr || !strings.Contains(e.Message, err.Error()) {
+				t.Errorf("%s: vm error %q, evaluator %v", tt.input, err, ev)
+			}
 			continue
 		}
 		got := machine.LastPoppedStackElem().Inspect()
-		ev := evaluator.Eval(parse(t, tt.input), object.NewEnvironment())
 		if ev == nil || ev.Inspect() != got {
 			t.Errorf("%s: vm %s, evaluator %v", tt.input, got, ev)
 		}

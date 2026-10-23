@@ -379,7 +379,8 @@ func TestConversions(t *testing.T) {
 		{"int to usint negative", &Int{Value: -1}, "INT", "USINT", "ERROR: value -1 is out of range for type USINT (0 to 255)"},
 		{"any_int", &DInt{Value: 7}, "ANY_INT", "UINT", "UINT 7"},
 		// Reals round to the nearest integer.
-		{"real to int", &Real{Value: 2.5}, "REAL", "INT", "INT 3"},
+		{"real to int", &Real{Value: 2.5}, "REAL", "INT", "INT 2"}, // half to even (IEC Ed. 3)
+		{"real to int, odd half", &Real{Value: 3.5}, "REAL", "INT", "INT 4"},
 		{"lreal to dint", &LReal{Value: -2.4}, "LREAL", "DINT", "DINT -2"},
 		{"string to int", &String{Value: " 42 "}, "STRING", "INT", "LINT 42"},
 		{"string to int bad", &String{Value: "x"}, "STRING", "INT", "ERROR: could not parse string to integer: x"},
