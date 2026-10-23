@@ -428,7 +428,7 @@ func (s *Server) handle(m *message) (done bool) {
 			s.reply(m, map[string]any{"queued": s.sess.QueuedInputs()})
 		}
 	case "disconnect", "terminate":
-		s.cancel() // no stop is reported after this
+		s.cancel()       // no stop is reported after this
 		s.closeSession() // an attached program runs on without the debugger
 		s.reply(m, nil)
 		if m.Command == "terminate" {
@@ -470,7 +470,7 @@ func (s *Server) launch(a launchArgs) error {
 	}
 	o := vmdebug.Options{Program: a.ProgramName, Engine: engine, Realtime: a.Realtime == nil || *a.Realtime,
 		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
-		Notify: func(msg string) { s.output("stderr", msg) },
+		Notify:  func(msg string) { s.output("stderr", msg) },
 		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace}}
 	if a.ScanEvents > 0 {
 		every := time.Duration(a.ScanEvents) * time.Millisecond
