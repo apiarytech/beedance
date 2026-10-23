@@ -541,6 +541,21 @@ func (p *Parser) ParseProgram() *ast.Program {
 
 // parseStatement is the central dispatch function for parsing a single statement.
 // It determines the statement type based on the current token and calls the appropriate parsing function.
+// statementOrNil returns s as a Statement, or an untyped nil when s is a nil
+// pointer. A typed nil in an interface is not nil, so a parse function that
+// failed (a METHOD without a name) would otherwise reach the checks that
+// follow as a statement, and they would dereference it.
+func statementOrNil[T interface {
+	comparable
+	ast.Statement
+}](s T) ast.Statement {
+	var zero T
+	if s == zero {
+		return nil
+	}
+	return s
+}
+
 func (p *Parser) parseStatement() ast.Statement {
 	defer untrace(trace("parseStatement"))
 
@@ -576,23 +591,23 @@ func (p *Parser) parseStatement() ast.Statement {
 	// If it's not an IL instruction, parse as a standard ST statement.
 	switch p.curToken.Type {
 	case token.VAR:
-		return p.parseVarBlockStatement()
+		return statementOrNil(p.parseVarBlockStatement())
 	case token.VAR_GLOBAL:
-		return p.parseGlobalVarDeclStatement()
+		return statementOrNil(p.parseGlobalVarDeclStatement())
 	case token.VAR_EXTERNAL:
-		return p.parseExternalVarDeclStatement()
+		return statementOrNil(p.parseExternalVarDeclStatement())
 	case token.VAR_ACCESS:
-		return p.parseAccessVarDeclStatement()
+		return statementOrNil(p.parseAccessVarDeclStatement())
 	case token.VAR_TEMP:
-		return p.parseTempVarDeclStatement()
+		return statementOrNil(p.parseTempVarDeclStatement())
 	case token.VAR_CONFIG:
-		return p.parseConfigVarDeclStatement()
+		return statementOrNil(p.parseConfigVarDeclStatement())
 	case token.TYPE:
-		return p.parseTypeBlockDeclaration()
+		return statementOrNil(p.parseTypeBlockDeclaration())
 	case token.RETURN:
-		return p.parseReturnStatement()
+		return statementOrNil(p.parseReturnStatement())
 	case token.IF:
-		return p.parseIfStatement()
+		return statementOrNil(p.parseIfStatement())
 	case token.FOR:
 		return p.parseForStatement()
 	case token.WHILE:
@@ -634,11 +649,11 @@ func (p *Parser) parseStatement() ast.Statement {
 	case token.METHOD:
 		// This case was missing. Methods are valid statements within a FUNCTION_BLOCK body.
 		// This ensures they are parsed correctly when encountered by the general-purpose parseStatement function.
-		return p.parseMethodImplementation()
+		return statementOrNil(p.parseMethodImplementation())
 	case token.NAMESPACE:
 		return p.parseNamespaceDeclaration()
 	case token.EXIT:
-		return p.parseExitStatement()
+		return statementOrNil(p.parseExitStatement())
 	case token.IDENT:
 		// IEC-68: label: before a statement. (In a CASE branch, name: starts
 		// the next branch instead: the statement loop stops there first.)
@@ -2904,11 +2919,19 @@ func (p *Parser) parseBlockStatementUntil(end ...token.TokenType) *ast.BlockStat
 			break
 		}
 
+		start := p.curToken
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
 		if !isBlockStatement(stmt) && !p.isIlInstruction() {
+			p.nextToken()
+		}
+		// Every pass consumes a token. A statement that parses nothing and
+		// leaves the parser where it was (a bare IL mnemonic such as S or LD
+		// before END_PROGRAM) would otherwise repeat for ever, appending a
+		// statement each time.
+		if p.curToken == start {
 			p.nextToken()
 		}
 	}

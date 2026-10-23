@@ -214,3 +214,17 @@ func TestBrokenSource(t *testing.T) {
 		t.Errorf("Definition(x) in a broken source = %v, %v", d, ok)
 	}
 }
+
+// TestAnalyzeMalformedMethod: ide.Analyze("method") must not panic (issue #9).
+func TestAnalyzeMalformedMethod(t *testing.T) {
+	for _, src := range []string{"method", "PROGRAM P\nmethod\nEND_PROGRAM", "FUNCTION A method"} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("Analyze(%q) panicked: %v", src, r)
+				}
+			}()
+			Analyze(src)
+		}()
+	}
+}
