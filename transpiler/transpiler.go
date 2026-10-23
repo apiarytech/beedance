@@ -7,6 +7,7 @@ import (
 	"github.com/apiarytech/beedance/enums"
 	"github.com/apiarytech/beedance/evaluator"
 	"github.com/apiarytech/beedance/inputwrites"
+	"github.com/apiarytech/beedance/mixedsign"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sfc"
 	"github.com/apiarytech/beedance/stdcalls"
@@ -252,6 +253,10 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 			if err := inputwrites.Check(expandedAST); err != nil {
 				return err
 			}
+		}
+		// UDINT + DINT and the like; see package mixedsign.
+		if err := mixedsign.Check(expandedAST); err != nil {
+			return err
 		}
 		// R_EDGE and F_EDGE inputs; see package edges.
 		if err := edgesThenEnables(expandedAST); err != nil {

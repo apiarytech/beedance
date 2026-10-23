@@ -16,6 +16,7 @@ import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/enums"
+	"github.com/apiarytech/beedance/mixedsign"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sfc"
 	"github.com/apiarytech/beedance/stdcalls"
@@ -67,6 +68,10 @@ type Variable struct {
 // variables; the program's body is the cyclic bytecode, as in
 // CompileProgram. Other programs in the file are left out.
 func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*CompiledProgram, error) {
+	// UDINT + DINT and the like are refused; see package mixedsign.
+	if err := mixedsign.Check(program); err != nil {
+		return nil, err
+	}
 	// Charts (SFC) run as the ST they lower to, as LD and FBD bodies do.
 	program, err := sfc.Program(program)
 	if err != nil {
@@ -499,6 +504,9 @@ func (c *Compiler) currentLoop() *loopContext {
 // the execution model of a PLC, where initialization runs once and the main logic
 // runs repeatedly in a scan cycle. It is renamed to match the call in main.go.
 func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
+	if err := mixedsign.Check(&ast.Program{Statements: []ast.Statement{node}}); err != nil {
+		return nil, err
+	}
 	if err := checkDuplicates(node.Name.Value, node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars, externalVars(node.VarExternal), tempVars(node.VarTemp)); err != nil {
 		return nil, err
 	}
@@ -592,6 +600,10 @@ func (c *Compiler) compileNode(node ast.Node) error {
 	switch node := node.(type) {
 	// A Program is the root of the AST, consisting of a series of statements.
 	case *ast.Program:
+		// UDINT + DINT and the like are refused; see package mixedsign.
+		if err := mixedsign.Check(node); err != nil {
+			return err
+		}
 		// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
 		typedfbs.Declare(node)
 		// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.

@@ -15,6 +15,7 @@ import (
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/enums"
 	"github.com/apiarytech/beedance/inputwrites"
+	"github.com/apiarytech/beedance/mixedsign"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/stdcalls"
 	"github.com/apiarytech/beedance/token"
@@ -1139,6 +1140,11 @@ func evalProgram(program *ast.Program, env *object.Environment) object.Object {
 		if err := inputwrites.Check(program); err != nil {
 			return newError(program, "%s", err)
 		}
+	}
+	// UDINT + DINT and the like are refused, as by the compiler and the
+	// transpiler; see package mixedsign.
+	if err := mixedsign.Check(program); err != nil {
+		return newError(program, "%s", err)
 	}
 	// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
 	typedfbs.Declare(program)

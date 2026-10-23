@@ -8,7 +8,7 @@ flowchart LR
     xml[PLCopen XML<br/>text and graphical] <-->|plcopen| ast
     ast <-->|diagram| svg[LD / FBD / SFC<br/>model, SVG drawings]
     ast --> mac[macro expansion]
-    mac --> low[lowering, every engine alike<br/>edges · enables · enums · stdcalls<br/>typedfbs · sfc · inputwrites]
+    mac --> low[lowering, every engine alike<br/>edges · enables · enums · stdcalls<br/>typedfbs · sfc · inputwrites · mixedsign]
     low --> ev[evaluator<br/>tree-walking]
     low --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
     low --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
@@ -58,6 +58,7 @@ flowchart LR
 | `typedfbs` | The typed standard function blocks of Ed.3 (`CTU_INT` ... `CTUD_ULINT`, `TON_LTIME`, `TOF_LTIME`, `TP_LTIME`) in ST, given to a program that uses one without declaring it |
 | `sfc` | Sequential Function Charts lowered to ST, so a chart runs on the compiler and VM, and in transpiled Go |
 | `inputwrites` | The check that no POU assigns its own `VAR_INPUT` (IEC-69), for the evaluator and the transpiler; `AllowInputWrites` lifts it for CODESYS-style libraries |
+| `mixedsign` | The check that no arithmetic mixes a signed and an unsigned integer type neither of which holds the other (`UDINT + DINT`), a compile error on every engine (issue #18) |
 | `analyzer` | Static analysis on the parser's AST, with types of its own worked out from the declarations: unused variables, unreachable code, implicit narrowing, multiple writes to an output, loops that do not end or may overrun the cycle time, and the PLCopen coding guidelines (`beedance -lint`; see [Static analysis](analyzer.md)) |
 | `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
 | `code` | Bytecode opcodes and their encoding |

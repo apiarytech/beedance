@@ -90,8 +90,8 @@
   <rect x="484" y="352" width="107" height="40" rx="5" class="bh"/>
   <text x="537.5" y="368" class="sm">inputwrites</text>
   <text x="537.5" y="383" class="s">inputs read-only</text>
-  <text x="654.5" y="368" class="s">applied by the evaluator,</text>
-  <text x="654.5" y="383" class="s">compiler and transpiler</text>
+  <text x="654.5" y="368" class="s">with mixedsign, applied by</text>
+  <text x="654.5" y="383" class="s">evaluator, compiler, transpiler</text>
   <path d="M596,170 V302" class="ln" marker-end="url(#a)"/>
   <path d="M710,324 H725 V132 H738" class="ln" marker-end="url(#a)"/>
   <path d="M725,210 H738" class="ln" marker-end="url(#a)"/>

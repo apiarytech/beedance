@@ -285,3 +285,24 @@ IF n <> 3 THEN failures := 1; END_IF;
 END_PROGRAM
 `)
 }
+
+// Issue #18: UDINT + DINT without a conversion is refused by every engine.
+func TestMixedSignIsRefusedIssue18(t *testing.T) {
+	engines := []sil.Engine{sil.Evaluator, sil.VM}
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
+		engines = append(engines, sil.Go)
+	}
+	src := "PROGRAM TEST_Mixed\nVAR_OUTPUT failures : INT; END_VAR\nVAR u : UDINT := 1; d : DINT := -2; r2 : LINT; END_VAR\nr2 := u + d;\nEND_PROGRAM\n"
+	results, err := sil.Run(context.Background(), src, sil.Options{Engines: engines, MaxScans: 1, GoTimeout: time.Minute})
+	if err == nil {
+		for _, r := range results {
+			for _, e := range r.Engines {
+				if !strings.Contains(e.Err, "mixes signed and unsigned") {
+					t.Errorf("%s: %q, want the mixed-sign error", e.Engine, e.Err)
+				}
+			}
+		}
+	} else if !strings.Contains(err.Error(), "mixes signed and unsigned") {
+		t.Errorf("sil.Run: %v, want the mixed-sign error", err)
+	}
+}
