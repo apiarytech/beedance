@@ -1,8 +1,10 @@
 package evaluator
 
 import (
-	"github.com/apiarytech/beedance/object"
+	"math"
 	"time"
+
+	"github.com/apiarytech/beedance/object"
 )
 
 // evalTON implements the logic for the TON (Timer On-Delay) standard function block.
@@ -141,7 +143,9 @@ func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
 	var et time.Duration
 	q := FALSE
 
-	if inBool.Value && !lastINBool { // Rising edge
+	// A rising edge starts a pulse only when none is running: TP is not
+	// retriggerable (IEC 61131-3), as the VM's and royaljelly's TP.
+	if inBool.Value && !lastINBool && !pulseActive {
 		pulseActive = true
 		startTime = nowFunc()
 		instanceEnv.Set("__pulseActive", TRUE)
@@ -158,8 +162,13 @@ func evalTP(instanceEnv, callEnv *object.Environment) object.Object {
 			pulseActive = false
 			instanceEnv.Set("__pulseActive", FALSE)
 			instanceEnv.Set("__startTime", nil)
+			instanceEnv.Set("__pulseDone", TRUE)
 		}
+	} else if done, _ := instanceEnv.Get("__pulseDone"); inBool.Value && isBoolTrue(done) {
+		et = ptDuration.Value // the pulse is over; ET stays PT while IN is TRUE
+		q = FALSE
 	} else {
+		instanceEnv.Set("__pulseDone", FALSE)
 		et = 0
 		q = FALSE
 	}
@@ -195,7 +204,8 @@ func evalCTU(instanceEnv, callEnv *object.Environment) object.Object {
 	if rBool.Value {
 		cv = 0
 	} else if cuBool.Value && !lastCUBool { // Rising edge on CU
-		if cv < pvInt {
+		// CV counts past PV up to PVmax, the INT maximum (IEC 61131-3).
+		if cv < math.MaxInt16 {
 			cv++
 		}
 	}
@@ -233,7 +243,7 @@ func evalCTD(instanceEnv, callEnv *object.Environment) object.Object {
 	if ldBool.Value {
 		cv = pvInt
 	} else if cdBool.Value && !lastCDBool { // Rising edge on CD
-		if cv > 0 {
+		if cv > math.MinInt16 { // down to PVmin, the INT minimum
 			cv--
 		}
 	}
@@ -282,11 +292,11 @@ func evalCTUD(instanceEnv, callEnv *object.Environment) object.Object {
 		cuRising := cuBool.Value && !lastCUBool
 		cdRising := cdBool.Value && !lastCDBool
 		if cuRising && !cdRising {
-			if cv < pvInt {
+			if cv < math.MaxInt16 { // up to PVmax, the INT maximum
 				cv++
 			}
 		} else if cdRising && !cuRising {
-			if cv > 0 {
+			if cv > math.MinInt16 { // down to PVmin, the INT minimum
 				cv--
 			}
 		}

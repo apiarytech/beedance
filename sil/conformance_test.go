@@ -767,8 +767,9 @@ up := c3.QU;
 IF n = 6 THEN
   IF c1.CV <> 3 OR c1.Q THEN failures := failures + 1; END_IF;
   IF c2.CV <> UDINT#1 OR c2.Q THEN failures := failures + 2; END_IF;
-  IF c3.CV <> LINT#2 OR NOT c3.QU THEN failures := failures + 4; END_IF;
-  IF c4.CV <> 2 OR NOT c4.Q THEN failures := failures + 8; END_IF;
+  (* CV counts past PV, up to PVmax (CV < PVmax): three edges by n = 6. *)
+  IF c3.CV <> LINT#3 OR NOT c3.QU THEN failures := failures + 4; END_IF;
+  IF c4.CV <> 3 OR NOT c4.Q THEN failures := failures + 8; END_IF;
   IF NOT t1.Q THEN failures := failures + 16; END_IF;
   done := TRUE;
 END_IF;

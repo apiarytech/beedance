@@ -299,9 +299,9 @@ func TestCTUD(t *testing.T) {
 	testBooleanObjectInEnv(t, progEnv, "IsFull", true)
 	testBooleanObjectInEnv(t, progEnv, "IsEmpty", false)
 
-	// --- Cycle 5: Try to count past PV ---
-	pulse("CountUp") // CV should stay 5
-	testIntegerObjectInEnv(t, progEnv, "CurrentValue", 5)
+	// --- Cycle 5: Count past PV (up to PVmax, IEC 61131-3) ---
+	pulse("CountUp") // CV=6
+	testIntegerObjectInEnv(t, progEnv, "CurrentValue", 6)
 
 	// --- Cycle 6: Load PV ---
 	progEnv.Set("Load", TRUE)

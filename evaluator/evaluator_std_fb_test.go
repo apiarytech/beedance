@@ -248,12 +248,12 @@ func TestStandardFunctionBlocks(t *testing.T) {
 		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 3)
 		testBooleanObjectInEnv(t, progEnv, "IsDone", true) // Q is now true
 
-		// --- Cycle 7: Fourth rising edge (CV does not exceed PV in this implementation) ---
+		// --- Cycle 7: Fourth rising edge: CV counts past PV, up to PVmax ---
 		progEnv.Set("CountUp", FALSE)
 		runScan()
 		progEnv.Set("CountUp", TRUE)
 		runScan()
-		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 3) // CV is capped
+		testIntegerObjectInEnv(t, progEnv, "CurrentValue", 4)
 		testBooleanObjectInEnv(t, progEnv, "IsDone", true)
 
 		// --- Cycle 8: Reset ---

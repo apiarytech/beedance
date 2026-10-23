@@ -30,6 +30,17 @@ import (
 // counterTypes are the types of the typed counters.
 var counterTypes = []string{"INT", "DINT", "LINT", "UDINT", "ULINT"}
 
+// counterLimits are PVmin and PVmax of IEC 61131-3's counters for each
+// counter type: its range. CV counts past PV up to them, as the standard's
+// CV < PVmax and CV > PVmin say, and as royaljelly's CTU, CTD and CTUD do.
+var counterLimits = map[string][2]string{
+	"INT":   {"INT#-32768", "INT#32767"},
+	"DINT":  {"DINT#-2147483648", "DINT#2147483647"},
+	"LINT":  {"LINT#-9223372036854775808", "LINT#9223372036854775807"},
+	"UDINT": {"UDINT#0", "UDINT#4294967295"},
+	"ULINT": {"ULINT#0", "ULINT#18446744073709551615"},
+}
+
 const counterSource = `
 FUNCTION_BLOCK CTU_$T
 VAR_INPUT CU : BOOL; R : BOOL; PV : $T; END_VAR
@@ -37,7 +48,7 @@ VAR_OUTPUT Q : BOOL; CV : $T; END_VAR
 VAR lastCU : BOOL; END_VAR
 IF R THEN
 	CV := 0;
-ELSIF CU AND NOT lastCU AND CV < PV THEN
+ELSIF CU AND NOT lastCU AND CV < $MAX THEN
 	CV := CV + 1;
 END_IF;
 Q := CV >= PV;
@@ -50,7 +61,7 @@ VAR_OUTPUT Q : BOOL; CV : $T; END_VAR
 VAR lastCD : BOOL; END_VAR
 IF LD THEN
 	CV := PV;
-ELSIF CD AND NOT lastCD AND CV > 0 THEN
+ELSIF CD AND NOT lastCD AND CV > $MIN THEN
 	CV := CV - 1;
 END_IF;
 Q := CV <= 0;
@@ -66,11 +77,11 @@ IF R THEN
 ELSIF LD THEN
 	CV := PV;
 ELSIF CU AND NOT lastCU AND NOT (CD AND NOT lastCD) THEN
-	IF CV < PV THEN
+	IF CV < $MAX THEN
 		CV := CV + 1;
 	END_IF;
 ELSIF CD AND NOT lastCD AND NOT (CU AND NOT lastCU) THEN
-	IF CV > 0 THEN
+	IF CV > $MIN THEN
 		CV := CV - 1;
 	END_IF;
 END_IF;
@@ -172,7 +183,10 @@ func blockSources() map[string]string {
 			}
 		}
 		for _, t := range counterTypes {
-			split(strings.ReplaceAll(counterSource, "$T", t))
+			src := strings.ReplaceAll(counterSource, "$T", t)
+			src = strings.ReplaceAll(src, "$MIN", counterLimits[t][0])
+			src = strings.ReplaceAll(src, "$MAX", counterLimits[t][1])
+			split(src)
 		}
 		split(timerSource)
 	})

@@ -118,3 +118,61 @@ END_PROGRAM
 `
 
 func TestForAtTypeLimitsIssue14(t *testing.T) { runOnEveryEngine(t, forAtTypeLimits) }
+
+// CTU, CTD and CTUD count past PV, up to PVmax and down to PVmin, their
+// type's limits (IEC 61131-3: CV < PVmax, CV > PVmin); the evaluator and the
+// VM used to stop at PV and 0, while royaljelly (the Go engine) counts on.
+const countersPastPV = `
+PROGRAM TEST_CtuCountsPastPV
+VAR_OUTPUT failures : INT; message : STRING; done : BOOL; END_VAR
+VAR c : CTU; d : CTD; ud : CTUD; c2 : CTU_DINT; scans : INT; END_VAR
+scans := scans + 1;
+c(CU := (scans MOD 2) = 0, R := FALSE, PV := 3);
+d(CD := (scans MOD 2) = 0, LD := scans = 1, PV := 2);
+ud(CU := (scans MOD 2) = 0, CD := FALSE, R := FALSE, LD := FALSE, PV := 3);
+c2(CU := (scans MOD 2) = 0, R := FALSE, PV := 3);
+IF scans >= 20 THEN
+  done := TRUE;
+  IF c.CV <> 10 OR NOT c.Q THEN failures := failures + 1; message := 'CTU'; END_IF;
+  IF d.CV <> -8 OR NOT d.Q THEN failures := failures + 1; message := 'CTD'; END_IF;
+  IF ud.CV <> 10 OR NOT ud.QU THEN failures := failures + 1; message := 'CTUD'; END_IF;
+  IF c2.CV <> 10 THEN failures := failures + 1; message := 'CTU_DINT'; END_IF;
+END_IF;
+END_PROGRAM
+
+`
+
+func TestCountersPastPV(t *testing.T) { runOnEveryEngine(t, countersPastPV) }
+
+// TP is not retriggerable: an edge of IN during a pulse is ignored, and ET
+// stays PT after the pulse while IN is TRUE. royaljelly's TP does this from
+// v0.3.3 (its issue #31); until RoyaljellyVersion is that, the test runs on
+// the evaluator and the VM.
+const tpNotRetriggerable = `
+PROGRAM TEST_TpNotRetriggerable
+VAR_OUTPUT failures : INT; message : STRING; done : BOOL; END_VAR
+VAR p : TP; scans : INT; inp : BOOL; END_VAR
+scans := scans + 1;
+(* 10 ms scans: IN high 1-20, low 21-40, high again from 41. PT = 1 s. *)
+inp := scans <= 20 OR scans > 40;
+p(IN := inp, PT := T#1s);
+IF scans = 50 AND (NOT p.Q OR p.ET <> T#490ms) THEN failures := failures + 1; message := 'retriggered'; END_IF;
+IF scans = 105 AND (p.Q OR p.ET <> T#1s) THEN failures := failures + 1; message := 'ET after pulse'; END_IF;
+IF scans >= 150 THEN done := TRUE; END_IF;
+END_PROGRAM
+`
+
+func TestTPNotRetriggerable(t *testing.T) {
+	results, err := sil.Run(context.Background(), tpNotRetriggerable, sil.Options{Engines: []sil.Engine{sil.Evaluator, sil.VM}, MaxScans: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if !r.Passed {
+			t.Errorf("%s failed: mismatch %q", r.Name, r.Mismatch)
+			for _, e := range r.Engines {
+				t.Logf("    %s: %v", e.Engine, e.Problems())
+			}
+		}
+	}
+}
