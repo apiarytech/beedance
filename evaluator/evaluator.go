@@ -4091,7 +4091,7 @@ func evalIndexExpression(node ast.Node, left, index object.Object) object.Object
 	switch left.Type() {
 	case object.ARRAY_OBJ:
 		if _, _, ok := object.GetIntegerObjectValue(index); ok {
-			return evalArrayIndexExpression(left, index)
+			return evalArrayIndexExpression(node, left, index)
 		}
 		return newError(node, "array index must be an integer, got %s", index.Type())
 	case object.HASH_OBJ:
@@ -4102,14 +4102,17 @@ func evalIndexExpression(node ast.Node, left, index object.Object) object.Object
 }
 
 // evalArrayIndexExpression performs the bounds check and lookup for an array index operation.
-func evalArrayIndexExpression(array, index object.Object) object.Object {
+// An index outside the array's bounds is a runtime error, as it is for a
+// write (and as doc/backends.md says); it used to read as NULL.
+func evalArrayIndexExpression(node ast.Node, array, index object.Object) object.Object {
 	arrayObject := array.(*object.Array)
 	idx, _, _ := object.GetIntegerObjectValue(index)
+	declared := idx
 	idx -= arrayObject.LowerBound // Arrays are indexed from their declared lower bound.
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
-		return NULL
+		return newError(node, "index out of bounds: %d", declared)
 	}
 
 	return arrayObject.Elements[idx]

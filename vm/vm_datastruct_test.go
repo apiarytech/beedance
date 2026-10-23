@@ -25,13 +25,16 @@ func TestArrayElementAssignment(t *testing.T) {
 	runVmTests(t, tests)
 }
 
-func TestArrayReadOutOfRangeIsNull(t *testing.T) {
-	tests := []vmTestCase{
-		{"[1, 2, 3][3];", Null},
-		{"[1, 2, 3][-1];", Null},
-		{"[][0];", Null},
-	}
-	runVmTests(t, tests)
+// An array index outside the bounds is a runtime error, for a read as for a
+// write (issue #11): it used to read as NULL.
+func TestArrayReadOutOfRangeIsAnError(t *testing.T) {
+	runVmErrorTests(t, []vmErrorTestCase{
+		{"[1, 2, 3][3];", "array index out of bounds: 3"},
+		{"[1, 2, 3][-1];", "array index out of bounds: -1"},
+		{"[][0];", "array index out of bounds: 0"},
+		{"[1, 2, 3][99];", "array index out of bounds: 99"},
+		{"VAR a : ARRAY[1..3] OF INT := [1, 2, 3]; i : INT := 4; END_VAR a[i];", "array index out of bounds: 4"},
+	})
 }
 
 func TestArrayAssignmentOutOfRange(t *testing.T) {

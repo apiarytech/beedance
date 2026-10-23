@@ -10,7 +10,10 @@
 package evaluator
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/apiarytech/beedance/object"
 )
 
 func TestEvalCommaSeparatedIndexExpressions(t *testing.T) {
@@ -64,7 +67,7 @@ func TestEvalCommaSeparatedIndexExpressions(t *testing.T) {
 			END_VAR
 			Matrix[0, 4];
 			`,
-			nil, // Out of bounds access should result in NULL
+			"index out of bounds: 4", // a runtime error, as for a write
 		},
 	}
 
@@ -75,6 +78,10 @@ func TestEvalCommaSeparatedIndexExpressions(t *testing.T) {
 			testIntegerObject(t, evaluated, tt.input, int64(expected))
 		case nil:
 			testNullObject(t, evaluated)
+		case string:
+			if e, ok := evaluated.(*object.Error); !ok || !strings.Contains(e.Message, expected) {
+				t.Errorf("%s: got %v, want an error containing %q", tt.input, evaluated, expected)
+			}
 		}
 	}
 }

@@ -1207,11 +1207,13 @@ func (vm *VM) executeArrayIndex(array, index object.Object) error {
 	if !ok {
 		return fmt.Errorf("array index must be an integer, got %s", index.Type())
 	}
+	declared := i
 	i -= arrayObject.LowerBound                 // Arrays are indexed from their declared lower bound.
 	max := int64(len(arrayObject.Elements) - 1) // Keep as int64 for comparison with int64 `i`
 
+	// An index outside the bounds is a runtime error, as for a write.
 	if i < 0 || i > max {
-		return vm.push(Null)
+		return fmt.Errorf("array index out of bounds: %d", declared)
 	}
 
 	return vm.push(arrayObject.Elements[i])

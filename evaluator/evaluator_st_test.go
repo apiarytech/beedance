@@ -863,13 +863,14 @@ func TestArrayIndexExpressions(t *testing.T) {
 			"[1, 2, 3][1 + 1];",
 			3,
 		},
+		// An index outside the bounds is a runtime error, as for a write.
 		{
 			"[1, 2, 3][3];",
-			nil,
+			"index out of bounds: 3",
 		},
 		{
 			"[1, 2, 3][-1];",
-			nil,
+			"index out of bounds: -1",
 		},
 	}
 
@@ -877,10 +878,14 @@ func TestArrayIndexExpressions(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			t.Logf("Test %d/%d", i+1, len(tests))
 			evaluated := testEval(t, tt.input)
-			integer, ok := tt.expected.(int)
-			if ok {
-				testIntegerObject(t, evaluated, tt.input, int64(integer))
-			} else {
+			switch expected := tt.expected.(type) {
+			case int:
+				testIntegerObject(t, evaluated, tt.input, int64(expected))
+			case string:
+				if e, ok := evaluated.(*object.Error); !ok || !strings.Contains(e.Message, expected) {
+					t.Errorf("got %v, want an error containing %q", evaluated, expected)
+				}
+			default:
 				testNullObject(t, evaluated)
 			}
 		})

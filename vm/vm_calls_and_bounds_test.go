@@ -106,7 +106,6 @@ func TestArrayLowerBounds(t *testing.T) {
 		{"VAR a : ARRAY[-1..1] OF INT := [1, 2, 3]; END_VAR a[-1] * 100 + a[0] * 10 + a[1];", 123},
 		{"VAR m : ARRAY[1..2, 1..3] OF INT; END_VAR m[2][3] := 9; m[2][3] * 10 + m[1][1];", 90},
 		{"VAR a : ARRAY[1..3] OF INT; i : INT; s1 : INT; END_VAR FOR i := 1 TO 3 DO a[i] := i * i; END_FOR FOR i := 1 TO 3 DO s1 := s1 + a[i]; END_FOR s1;", 14},
-		{"VAR a : ARRAY[1..3] OF INT := [1, 2, 3]; i : INT := 4; END_VAR a[i];", Null},
 		// A parameter indexes its argument as declared.
 		{"FUNCTION Second : INT VAR_INPUT v : ARRAY[1..3] OF INT; END_VAR Second := v[2]; END_FUNCTION Second([4, 5, 6]);", 5},
 		// Named array types, in structures and function blocks.
