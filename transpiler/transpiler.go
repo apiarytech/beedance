@@ -174,6 +174,7 @@ type Transpiler struct {
 	usesEndian        bool                                   // The output calls the byte order helpers (endian.go)
 	usesValidate      bool                                   // The output calls IS_VALID or IS_VALID_BCD (validate.go)
 	usesCheckedConv   bool                                   // The output calls the range-checked conversions (checked_conv.go)
+	usesForStep       bool                                   // The output checks a variable FOR step (iecForStep)
 	usesChar          bool                                   // The output calls the CHAR helpers, written at the end
 	usesAnyArray      bool                                   // The output has an ARRAY[*] parameter, so iecAny is written at the end
 	loopLabels        []string                               // The labels of the loops being written, innermost last ("" for an unlabelled loop)
@@ -301,6 +302,9 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		}
 		if t.usesCheckedConv {
 			t.write("%s", checkedConvHelpers)
+		}
+		if t.usesForStep {
+			t.write("%s", forStepHelper)
 		}
 		if t.usesChar {
 			t.write("%s", charHelpers)
@@ -2660,6 +2664,13 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 		return err
 	}
 	condition := fmt.Sprintf("%s <= %s", control, end)
+	// BY 0 never ends: a runtime error on every engine (issue #15). A
+	// constant 0 fails where the loop starts; a variable step is checked
+	// by iecForStep each time it is used.
+	if step, isConst := constantInteger(stmt.StepValue); stmt.StepValue != nil && isConst && step == 0 {
+		t.write("\tpanic(\"FOR loop step (BY) is 0\")\n")
+		return nil
+	}
 	if stmt.StepValue != nil {
 		if step, isConst := constantInteger(stmt.StepValue); isConst && step < 0 {
 			condition = fmt.Sprintf("%s >= %s", control, end)
@@ -2668,6 +2679,8 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 			if err != nil {
 				return err
 			}
+			t.usesForStep = true
+			step = "iecForStep(" + step + ")"
 			condition = fmt.Sprintf("(%s >= 0 && %s <= %s) || (%s < 0 && %s >= %s)", step, control, end, step, control, end)
 		}
 	}
@@ -2686,9 +2699,16 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 		// constant -1 for an unsigned control variable (USINT BY -1).
 		t.write(" -= %s(%d)", ctype, object.WrapInteger(-step, strings.TrimPrefix(ctype, "iec.")))
 	} else if stmt.StepValue != nil {
+		_, isConst := constantInteger(stmt.StepValue)
 		t.write(" += ")
+		if !isConst {
+			t.write("iecForStep(")
+		}
 		if err := t.transpileConverted(stmt.StepValue, ctype); err != nil {
 			return err
+		}
+		if !isConst {
+			t.write(")")
 		}
 	} else {
 		t.write("++")

@@ -148,3 +148,14 @@ func iecConvFU(f float64, hi uint64, name string) uint64 {
 	return uint64(r)
 }
 `
+
+// forStepHelper checks a FOR loop's variable step: BY 0 never ends, so it is
+// a runtime error on every engine (issue #15).
+const forStepHelper = `
+func iecForStep[T ~int8 | ~int16 | ~int32 | ~int64 | ~uint8 | ~uint16 | ~uint32 | ~uint64](s T) T {
+	if s == 0 {
+		panic("FOR loop step (BY) is 0")
+	}
+	return s
+}
+`

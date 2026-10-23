@@ -363,7 +363,7 @@ func TestForLoopDirections(t *testing.T) {
 		// A constant negative step counts down, subtracting its magnitude.
 		"for p.i = 10; p.i >= 1; p.i -= iec.INT(2) {",
 		// A variable step is checked when the loop runs.
-		"for p.i = 1; (p.s >= 0 && p.i <= 5) || (p.s < 0 && p.i >= 5); p.i += p.s {")
+		"for p.i = 1; (iecForStep(p.s) >= 0 && p.i <= 5) || (iecForStep(p.s) < 0 && p.i >= 5); p.i += iecForStep(p.s) {")
 }
 
 func TestArraysAndBounds(t *testing.T) {

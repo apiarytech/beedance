@@ -12,6 +12,7 @@ package sil_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,3 +254,34 @@ END_PROGRAM
 `
 
 func TestIntegersWrapIssue12(t *testing.T) { runOnEveryEngine(t, integersWrap) }
+
+// Issue #15: FOR ... BY 0 is a runtime error on every engine, for a constant
+// and for a variable step; a variable step that is not 0 runs as before.
+func TestForByZeroIssue15(t *testing.T) {
+	engines := []sil.Engine{sil.Evaluator, sil.VM}
+	if sil.GoEngineAvailable() == nil && !testing.Short() {
+		engines = append(engines, sil.Go)
+	}
+	for _, step := range []string{"s", "0"} {
+		src := "PROGRAM TEST_By0\nVAR_OUTPUT failures : INT; END_VAR\nVAR s : INT := 0; i : INT; n : INT; END_VAR\nFOR i := 1 TO 3 BY " + step + " DO n := n + 1; IF n > 5 THEN EXIT; END_IF; END_FOR;\nEND_PROGRAM\n"
+		results, err := sil.Run(context.Background(), src, sil.Options{Engines: engines, MaxScans: 1, GoTimeout: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range results {
+			for _, e := range r.Engines {
+				if !strings.Contains(e.Err, "FOR loop step (BY) is 0") {
+					t.Errorf("BY %s on %s: error %q, want the BY 0 error", step, e.Engine, e.Err)
+				}
+			}
+		}
+	}
+	runOnEveryEngine(t, `
+PROGRAM TEST_ByVariable
+VAR_OUTPUT failures : INT; END_VAR
+VAR s : INT := -1; i : INT; n : INT; END_VAR
+FOR i := 3 TO 1 BY s DO n := n + 1; END_FOR;
+IF n <> 3 THEN failures := 1; END_IF;
+END_PROGRAM
+`)
+}

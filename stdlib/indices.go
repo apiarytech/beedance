@@ -88,4 +88,5 @@ const (
 	BuiltinIsValidBcd              // IS_VALID_BCD
 	BuiltinDatepart                // $DATEPART: a part of a date or time, for SPLIT_DATE, SPLIT_TOD and SPLIT_DT
 	BuiltinDayOfWeek               // DAY_OF_WEEK
+	BuiltinForStep                 // $FORSTEP: a FOR loop's step, checked for 0
 )

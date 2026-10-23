@@ -1801,6 +1801,15 @@ func (c *Compiler) compileNode(node ast.Node) error {
 	// check, body, increment, and jump instructions to create the loop structure.
 	// It uses its own scope for the loop control variable.
 	case *ast.ForLoopStatement:
+		// A step that is not a constant other than 0 is checked when the
+		// loop runs: BY 0 never ends, so it is a runtime error (issue #15).
+		if _, haveCheck := c.symbolTable.Resolve("$FORSTEP"); haveCheck && node.StepValue != nil {
+			if step, err := c.evaluateConstantInteger(node.StepValue); err != nil || step == 0 {
+				checked := *node
+				checked.StepValue = &ast.CallExpression{Token: node.Token, Function: &ast.Identifier{Token: node.Token, Value: "$FORSTEP"}, Arguments: []ast.Expression{node.StepValue}}
+				node = &checked
+			}
+		}
 		c.enterLoop()
 
 		// 1. Initialization. The control variable is an ordinary declared

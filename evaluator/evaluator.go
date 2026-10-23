@@ -2512,6 +2512,9 @@ func evalForLoopStatement(fls *ast.ForLoopStatement, env *object.Environment) ob
 		if !ok {
 			return newError(fls.StepValue, "FOR loop step value must be an integer, got %s", stepValObj.Type())
 		}
+		if stepIntVal == 0 { // the loop would never end (issue #15)
+			return newError(fls.StepValue, "FOR loop step (BY) is 0")
+		}
 		stepVal = stepIntVal
 	}
 
@@ -2587,6 +2590,9 @@ func evalForLoopOnVariable(fls *ast.ForLoopStatement, control *ast.Identifier, e
 		if fls.StepValue != nil {
 			if step, err = integer(fls.StepValue, "step value"); err != nil {
 				return err
+			}
+			if step == 0 { // the loop would never end (issue #15)
+				return newError(fls.StepValue, "FOR loop step (BY) is 0")
 			}
 		}
 		if (step > 0 && current > end) || (step <= 0 && current < end) {

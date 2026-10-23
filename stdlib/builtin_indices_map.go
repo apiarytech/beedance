@@ -83,6 +83,7 @@ var BuiltinNameToIndex = map[string]int{
 
 	"CONCAT_DATE_TOD":    BuiltinConcatDateTod,
 	"$ATTEMPT":           BuiltinAttempt,
+	"$FORSTEP":           BuiltinForStep,
 	"$TIMEFN":            BuiltinTimefn,
 	"TO_BIG_ENDIAN":      BuiltinToBigEndian,
 	"TO_LITTLE_ENDIAN":   BuiltinToLittleEndian,
