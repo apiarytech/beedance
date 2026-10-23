@@ -92,6 +92,14 @@ jobs:
       working-directory: connectors/honeycomb
       run: go test -race -count=1 ./...
 
+    # The LSP parses incomplete input on every keystroke: fuzz the parser,
+    # lint and the IDE's analysis briefly for hangs and panics.
+    - name: Fuzz the parser, lint and IDE analysis
+      run: |
+        go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s ./parser
+        go test -run '^$' -fuzz '^FuzzLint$' -fuzztime 30s ./analyzer
+        go test -run '^$' -fuzz '^FuzzAnalyze$' -fuzztime 30s ./ide
+
   # The debugger in the web module (doc/web-debugger.md), under Node.js:
   # a running program must not starve the event loop.
   web:

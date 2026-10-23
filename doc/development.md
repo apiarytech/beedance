@@ -34,6 +34,10 @@ tinygo test ./token ./lexer ./ast ./code ./object ./parser ./stdlib
   is parsed, compiled, evaluated and run on the VM in tests.
 - Host APIs have their own tests: `vm/vm_host_test.go`,
   `evaluator/session_test.go`, `transpiler/host_binding_test.go`.
+- Fuzz targets check that malformed input never hangs or panics:
+  `FuzzParse` (parser), `FuzzLint` (analyzer) and `FuzzAnalyze` (ide),
+  seeded with the example programs. Run one with
+  `go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s ./parser`.
 
 ## CI
 
@@ -42,7 +46,7 @@ tinygo test ./token ./lexer ./ast ./code ./object ./parser ./stdlib
 | Job | Checks |
 |---|---|
 | test | Build, vet and test on Linux, macOS and Windows, with Go 1.27 and stable |
-| lint-race | gofmt, and the tests with the race detector |
+| lint-race | gofmt, the tests with the race detector, and 30 s of each fuzz target |
 | raspberry-pi | ARMv6, ARMv7 and arm64 under QEMU; uploads a `beedance` binary per target |
 | tinygo-test | The core packages, compiler, vm and evaluator under TinyGo, with 1 MB goroutine stacks |
 | raspberry-pi-pico | Firmware for `pico`, `pico-w`, `pico2`, `pico2-w`, uploaded as artifacts |
