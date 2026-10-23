@@ -70,3 +70,24 @@ END_PROGRAM
 `
 
 func TestBigLiteralsIssue17(t *testing.T) { runOnEveryEngine(t, bigLiterals) }
+
+// Issue #16: a power of literals assigned to a narrower integer compiles in
+// the transpiled Go and gives the VM's value.
+const powerLiterals = `
+PROGRAM TEST_PowerLiterals
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR p1 : DINT; p2 : INT; a : DINT := 2; r : LREAL; END_VAR
+p1 := 2 ** 3;
+IF p1 <> 8 THEN failures := failures + 1; message := '2**3'; END_IF;
+p1 := (-2) ** 2;
+IF p1 <> 4 THEN failures := failures + 1; message := '(-2)**2'; END_IF;
+p2 := 3 ** 2;
+IF p2 <> 9 THEN failures := failures + 1; message := 'INT'; END_IF;
+p1 := a ** 2;
+IF p1 <> 4 THEN failures := failures + 1; message := 'a**2'; END_IF;
+r := 2 ** 0.5;
+IF r < 1.414 OR r > 1.415 THEN failures := failures + 1; message := 'real'; END_IF;
+END_PROGRAM
+`
+
+func TestPowerLiteralsIssue16(t *testing.T) { runOnEveryEngine(t, powerLiterals) }

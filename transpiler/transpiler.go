@@ -3765,13 +3765,32 @@ func wREPLACE(s, in iec.WSTRING, l, p iec.LINT) iec.WSTRING {
 // integer, truncated, of the left operand's type (LINT for a literal), as
 // the VM's OpExponent gives it; otherwise a real.
 func (t *Transpiler) transpilePower(exp *ast.InfixExpression) error {
-	integer := func(e ast.Expression) (string, bool) {
+	t.write("%s(gomath.Pow(float64(", t.powerResultType(exp))
+	if err := t.transpileExpression(exp.Left); err != nil {
+		return err
+	}
+	t.write("), float64(")
+	if err := t.transpileExpression(exp.Right); err != nil {
+		return err
+	}
+	t.write(")))")
+	return nil
+}
+
+// powerResultType is the Go type transpilePower gives a ** b.
+func (t *Transpiler) powerResultType(exp *ast.InfixExpression) string {
+	var integer func(e ast.Expression) (string, bool)
+	integer = func(e ast.Expression) (string, bool) {
 		if goType := t.exprGoType(e); isIntegerGoType(goType) {
 			return goType, true
 		}
-		switch e.(type) {
+		switch e := e.(type) {
 		case *ast.IntegerLiteral, *ast.UnsignedIntegerLiteral:
 			return "iec.LINT", true
+		case *ast.PrefixExpression: // a negated literal, (-2)
+			if e.Operator == "-" || e.Operator == "+" {
+				return integer(e.Right)
+			}
 		}
 		return "", false
 	}
@@ -3790,16 +3809,7 @@ func (t *Transpiler) transpilePower(exp *ast.InfixExpression) error {
 	case isRealGoType(t.exprGoType(exp.Left)):
 		result = t.exprGoType(exp.Left)
 	}
-	t.write("%s(gomath.Pow(float64(", result)
-	if err := t.transpileExpression(exp.Left); err != nil {
-		return err
-	}
-	t.write("), float64(")
-	if err := t.transpileExpression(exp.Right); err != nil {
-		return err
-	}
-	t.write(")))")
-	return nil
+	return result
 }
 
 // plcNowHelper is the time of the scan that is running, for the function

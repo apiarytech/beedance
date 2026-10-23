@@ -302,6 +302,19 @@ func (t *Transpiler) transpileValue(value ast.Expression, target string) error {
 		}
 	}
 	t.expectedGoType = expected
+	// a ** b with literal operands has a type of its own (LINT, or LREAL
+	// for (-2) ** 2), which Go does not convert to the target implicitly.
+	if pow, ok := value.(*ast.InfixExpression); ok && pow.Operator == "**" && isNumericGoType(target) {
+		t.expectedGoType = target
+		defer func() { t.expectedGoType = expected }()
+		if t.powerResultType(pow) == target {
+			return t.transpilePower(pow)
+		}
+		t.write("%s(", target)
+		err := t.transpilePower(pow)
+		t.write(")")
+		return err
+	}
 	return t.transpileConverted(value, target)
 }
 
