@@ -2677,7 +2677,11 @@ func (t *Transpiler) transpileForLoopStatement(stmt *ast.ForLoopStatement) error
 	if err := t.transpileExpression(stmt.ControlVar.Left); err != nil {
 		return err
 	}
-	if stmt.StepValue != nil {
+	if step, isConst := constantInteger(stmt.StepValue); stmt.StepValue != nil && isConst && step < 0 && strings.HasPrefix(ctype, "iec.") {
+		// A negative constant step subtracts its magnitude: Go refuses the
+		// constant -1 for an unsigned control variable (USINT BY -1).
+		t.write(" -= %s(%d)", ctype, object.WrapInteger(-step, strings.TrimPrefix(ctype, "iec.")))
+	} else if stmt.StepValue != nil {
 		t.write(" += ")
 		if err := t.transpileConverted(stmt.StepValue, ctype); err != nil {
 			return err

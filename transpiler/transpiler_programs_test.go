@@ -360,8 +360,8 @@ func TestLiteralConversions(t *testing.T) {
 
 func TestForLoopDirections(t *testing.T) {
 	checkContains(t, "PROGRAM P VAR i : INT; s : INT := -1; END_VAR FOR i := 10 TO 1 BY -2 DO END_FOR FOR i := 1 TO 5 BY s DO END_FOR END_PROGRAM",
-		// A constant negative step counts down.
-		"for p.i = 10; p.i >= 1; p.i += (-2) {",
+		// A constant negative step counts down, subtracting its magnitude.
+		"for p.i = 10; p.i >= 1; p.i -= iec.INT(2) {",
 		// A variable step is checked when the loop runs.
 		"for p.i = 1; (p.s >= 0 && p.i <= 5) || (p.s < 0 && p.i >= 5); p.i += p.s {")
 }

@@ -90,3 +90,31 @@ END_PROGRAM
 `
 
 func TestPowerLiteralsIssue16(t *testing.T) { runOnEveryEngine(t, powerLiterals) }
+
+// Issue #14: a FOR control variable keeps its type past the end of its
+// range (it wraps, as an assignment does) on every engine, and a negative
+// step on an unsigned control variable compiles in the transpiled Go.
+const forAtTypeLimits = `
+PROGRAM TEST_AssignWraps
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR i : SINT := 127; END_VAR
+i := i + 1;
+IF i <> -128 THEN failures := 1; message := 'assign'; END_IF;
+END_PROGRAM
+
+PROGRAM TEST_ForSintMax
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR i : SINT; n : INT; END_VAR
+FOR i := 120 TO 127 DO n := n + 1; IF n > 20 THEN EXIT; END_IF; END_FOR;
+IF n <> 21 THEN failures := 1; message := 'iterations'; END_IF;
+END_PROGRAM
+
+PROGRAM TEST_ForUsintDown
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR i : USINT; n : INT; END_VAR
+FOR i := 255 TO 0 BY -1 DO n := n + 1; IF n > 300 THEN EXIT; END_IF; END_FOR;
+IF n <> 301 THEN failures := 1; message := 'iterations'; END_IF;
+END_PROGRAM
+`
+
+func TestForAtTypeLimitsIssue14(t *testing.T) { runOnEveryEngine(t, forAtTypeLimits) }

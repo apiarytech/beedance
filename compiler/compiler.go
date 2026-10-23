@@ -1845,6 +1845,13 @@ func (c *Compiler) compileNode(node ast.Node) error {
 			c.emitConstant(c.addConstant(&object.LInt{Value: 1}))
 		}
 		c.emit(code.OpAdd)
+		// The control variable keeps its type: past the end of a SINT, INT,
+		// DINT, USINT, UINT or UDINT it wraps, as an assignment does and as
+		// the evaluator and the transpiled Go do (FOR i := 120 TO 127 with a
+		// SINT i never ends).
+		if wrap := object.IntegerWrapCode(c.flattenExpressionToString(c.declaredVarType(controlIdent))); wrap != 0 {
+			c.emit(code.OpWrapInt, wrap)
+		}
 		if err := c.setSymbol(symbol); err != nil {
 			return err
 		}
