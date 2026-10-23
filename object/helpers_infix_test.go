@@ -66,17 +66,17 @@ func TestSignedIntegerInfix(t *testing.T) {
 		{"unknown", i(3), "^^", i(3), "ERROR: unknown operator for signed integers: ^^"},
 		{"div zero", i(3), "/", i(0), "ERROR: division by zero"},
 		{"mod zero", i(3), "MOD", i(0), "ERROR: division by zero in MOD"},
-		// The result must fit the result type.
-		{"sint overflow", &SInt{Value: 100}, "+", &SInt{Value: 100}, "ERROR: SINT overflow: 200"},
-		{"sint underflow", &SInt{Value: -100}, "-", &SInt{Value: 100}, "ERROR: SINT underflow: -200"},
-		// 64-bit overflow is caught before it wraps.
-		{"add overflow", l(math.MaxInt64), "+", l(1), "ERROR: signed integer overflow"},
-		{"add negative overflow", l(math.MinInt64), "+", l(-1), "ERROR: signed integer overflow"},
-		{"sub underflow", l(math.MinInt64), "-", l(1), "ERROR: signed integer underflow"},
-		{"sub negative underflow", l(math.MaxInt64), "-", l(-1), "ERROR: signed integer underflow"},
-		{"mul overflow", l(math.MaxInt64), "*", l(2), "ERROR: signed integer overflow"},
-		{"mul negative overflow", l(math.MaxInt64), "*", l(-2), "ERROR: signed integer overflow"},
-		{"div overflow", l(math.MinInt64), "/", l(-1), "ERROR: signed integer overflow"},
+		// The result wraps into the result type (issue #12).
+		{"sint overflow", &SInt{Value: 100}, "+", &SInt{Value: 100}, "SINT -56"},
+		{"sint underflow", &SInt{Value: -100}, "-", &SInt{Value: 100}, "SINT 56"},
+		// 64-bit arithmetic wraps as well.
+		{"add overflow", l(math.MaxInt64), "+", l(1), "LINT -9223372036854775808"},
+		{"add negative overflow", l(math.MinInt64), "+", l(-1), "LINT 9223372036854775807"},
+		{"sub underflow", l(math.MinInt64), "-", l(1), "LINT 9223372036854775807"},
+		{"sub negative underflow", l(math.MaxInt64), "-", l(-1), "LINT -9223372036854775808"},
+		{"mul overflow", l(math.MaxInt64), "*", l(2), "LINT -2"},
+		{"mul negative overflow", l(math.MaxInt64), "*", l(-2), "LINT 2"},
+		{"div overflow", l(math.MinInt64), "/", l(-1), "LINT -9223372036854775808"},
 	})
 }
 
@@ -96,12 +96,12 @@ func TestUnsignedIntegerInfix(t *testing.T) {
 		{"ge", u(3), ">=", u(4), "BOOLEAN false"},
 		{"power", u(3), "**", u(3), "LINT 27"},
 		{"unknown", u(3), "^^", u(3), "ERROR: unknown operator for unsigned integers: ^^"},
-		{"underflow", u(3), "-", u(4), "ERROR: unsigned integer underflow"},
-		{"overflow", u(math.MaxUint64), "+", u(1), "ERROR: unsigned integer overflow"},
-		{"mul overflow", u(math.MaxUint64), "*", u(2), "ERROR: unsigned integer overflow"},
+		{"underflow", u(3), "-", u(4), "ULINT 18446744073709551615"},
+		{"overflow", u(math.MaxUint64), "+", u(1), "ULINT 0"},
+		{"mul overflow", u(math.MaxUint64), "*", u(2), "ULINT 18446744073709551614"},
 		{"div zero", u(3), "/", u(0), "ERROR: division by zero"},
 		{"mod zero", u(3), "MOD", u(0), "ERROR: division by zero in MOD"},
-		{"usint overflow", &USInt{Value: 200}, "+", &USInt{Value: 100}, "ERROR: USINT overflow: 300"},
+		{"usint overflow", &USInt{Value: 200}, "+", &USInt{Value: 100}, "USINT 44"},
 	})
 }
 
@@ -115,7 +115,7 @@ func TestMixedIntegerInfix(t *testing.T) {
 		{"lint+ulint", &LInt{Value: -1}, "+", &ULInt{Value: 2}, "LINT 1"},
 		// A signed operand with a wider unsigned one gives the unsigned type.
 		{"int+udint", &Int{Value: 5}, "+", &UDInt{Value: 3}, "UDINT 8"},
-		{"int-udint negative", &Int{Value: 1}, "-", &UDInt{Value: 3}, "ERROR: UDINT underflow: -2"},
+		{"int-udint negative", &Int{Value: 1}, "-", &UDInt{Value: 3}, "UDINT 4294967294"},
 		{"int+dint", &Int{Value: 5}, "+", &DInt{Value: 3}, "DINT 8"},
 	})
 }

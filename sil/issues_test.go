@@ -223,3 +223,33 @@ func TestConversionOutOfRangeIsAnErrorIssue10(t *testing.T) {
 		}
 	}
 }
+
+// Issue #12: integer arithmetic wraps into its type on every engine, LINT and
+// the unsigned types included (the owner's choice).
+const integersWrap = `
+PROGRAM TEST_LintWraps
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR l : LINT := 9223372036854775807; l2 : LINT; m : LINT := -9223372036854775808; END_VAR
+l2 := l + 1;
+IF l2 <> -9223372036854775808 THEN failures := failures + 1; message := 'add'; END_IF;
+l2 := m - 1;
+IF l2 <> 9223372036854775807 THEN failures := failures + 1; message := 'sub'; END_IF;
+l2 := l * 2;
+IF l2 <> -2 THEN failures := failures + 1; message := 'mul'; END_IF;
+l2 := m / -1;
+IF l2 <> -9223372036854775808 THEN failures := failures + 1; message := 'div'; END_IF;
+END_PROGRAM
+
+PROGRAM TEST_UnsignedWraps
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR a : USINT := 1; b : USINT := 2; c : USINT; u : ULINT := ULINT#18446744073709551615; u2 : ULINT; x : UDINT := 0; y : UDINT; END_VAR
+c := a - b;
+IF c <> 255 THEN failures := failures + 1; message := 'usint'; END_IF;
+u2 := u + 1;
+IF u2 <> 0 THEN failures := failures + 1; message := 'ulint'; END_IF;
+y := x - 1;
+IF y <> UDINT#4294967295 THEN failures := failures + 1; message := 'udint'; END_IF;
+END_PROGRAM
+`
+
+func TestIntegersWrapIssue12(t *testing.T) { runOnEveryEngine(t, integersWrap) }

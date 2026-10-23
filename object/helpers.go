@@ -1141,20 +1141,14 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 	if resultIsUnsigned {
 		uLeft, uRight := uint64(leftVal), uint64(rightVal)
 		switch operator {
+		// Integer arithmetic wraps, as a PLC's registers do and as the VM
+		// and the transpiled Go compute it (the owner's choice for IEC
+		// 61131-3's numeric range errors, issue #12): 1 - 2 in USINT is 255.
 		case "+":
-			if math.MaxUint64-uLeft < uRight {
-				return NewBuiltinError("unsigned integer overflow")
-			}
 			uResultValue = uLeft + uRight
 		case "-":
-			if uLeft < uRight {
-				return NewBuiltinError("unsigned integer underflow")
-			}
 			uResultValue = uLeft - uRight
 		case "*":
-			if uRight > 0 && uLeft > math.MaxUint64/uRight {
-				return NewBuiltinError("unsigned integer overflow")
-			}
 			uResultValue = uLeft * uRight
 		case "/":
 			if uRight == 0 {
@@ -1190,27 +1184,20 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 	} else {
 		// Signed arithmetic
 		switch operator {
+		// Signed arithmetic wraps too: LINT's maximum + 1 is its minimum.
 		case "+":
-			if (rightVal > 0 && leftVal > math.MaxInt64-rightVal) || (rightVal < 0 && leftVal < math.MinInt64-rightVal) {
-				return NewBuiltinError("signed integer overflow")
-			}
 			resultValue = leftVal + rightVal
 		case "-":
-			if (rightVal > 0 && leftVal < math.MinInt64+rightVal) || (rightVal < 0 && leftVal > math.MaxInt64+rightVal) {
-				return NewBuiltinError("signed integer underflow")
-			}
 			resultValue = leftVal - rightVal
 		case "*":
-			if rightVal != 0 && ((leftVal > math.MaxInt64/rightVal && rightVal > 0) || (leftVal < math.MinInt64/rightVal && rightVal > 0) || (leftVal > math.MinInt64/rightVal && rightVal < -1) || (leftVal < math.MaxInt64/rightVal && rightVal < -1)) {
-				return NewBuiltinError("signed integer overflow")
-			}
 			resultValue = leftVal * rightVal
 		case "/":
 			if rightVal == 0 {
 				return NewBuiltinError("division by zero")
 			}
 			if leftVal == math.MinInt64 && rightVal == -1 {
-				return NewBuiltinError("signed integer overflow")
+				resultValue = math.MinInt64 // wraps, as in Go
+				break
 			}
 			resultValue = leftVal / rightVal
 		case "MOD":
@@ -1231,7 +1218,12 @@ func EvalIntegerInfix(left Object, operator string, right Object) Object {
 		}
 	}
 
-	return checkAndCreateIntegerObject(resultType, resultValue, uResultValue, resultIsUnsigned)
+	// The result wraps into its type's range (USINT 1 - 2 is 255).
+	if resultIsUnsigned {
+		resultValue = int64(uResultValue)
+	}
+	resultValue = WrapInteger(resultValue, string(resultType))
+	return checkAndCreateIntegerObject(resultType, resultValue, uint64(resultValue), resultIsUnsigned)
 }
 
 func getResultIntegerType(t1, t2 ObjectType) ObjectType {

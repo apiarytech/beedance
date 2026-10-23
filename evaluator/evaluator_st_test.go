@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"math"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
@@ -375,50 +376,41 @@ func TestErrorHandling(t *testing.T) {
 	}
 }
 
-func TestIntegerOverflowErrors(t *testing.T) {
+// Integer arithmetic wraps into its type's range, as the VM and the
+// transpiled Go compute it (issue #12, the owner's choice).
+func TestIntegerOverflowWraps(t *testing.T) {
 	tests := []struct {
-		input           string
-		expectedMessage string
+		input string
+		want  int64 // the result's bits, as GetIntegerObjectValue gives them
 	}{
-		// SINT (-128 to 127)
-		{"SINT#127 + SINT#1;", "SINT overflow: 128"},
-		{"-SINT#127 - SINT#2;", "SINT underflow: -129"},
-		{"SINT#64 * SINT#3;", "SINT overflow"},
-		{"-SINT#65 * SINT#2;", "SINT underflow"},
-
-		// // INT (-32768 to 32767)
-		{"INT#32767 + INT#1;", "INT overflow: 32768"},
-		{"-INT#32767 - INT#2;", "INT underflow: -32769"},
-		{"INT#16384 * INT#3;", "INT overflow: 49152"},
-
-		// // DINT (-2147483648 to 2147483647)
-		{"DINT#2147483647 + INT#1;", "DINT overflow: 2147483648"},
-		{"-DINT#2147483647 - INT#2;", "DINT underflow: -2147483649"},
-
-		// // LINT (-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
-		{"LINT#9223372036854775807 + LINT#1;", "signed integer overflow"},
-		{"-LINT#9223372036854775807 - LINT#2;", "signed integer underflow"},
-
-		// // USINT (0 to 255)
-		{"USINT#255 + USINT#1;", "USINT overflow: 256"},
-		{"USINT#0 - USINT#1;", "unsigned integer underflow"},
-
-		// // UINT (0 to 65535)
-		{"UINT#65535 + UINT#1;", "UINT overflow: 65536"},
-		{"UINT#0 - UINT#1;", "unsigned integer underflow"},
-
-		// // UDINT (0 to 4294967295)
-		{"UDINT#4294967295 + UINT#1;", "UDINT overflow: 4294967296"},
-		{"UDINT#0 - UINT#1;", "unsigned integer underflow"},
-		{"ULINT#18446744073709551615 + ULINT#1;", "unsigned integer overflow"},
-		{"ULINT#0 - ULINT#1;", "unsigned integer underflow"},
+		{"SINT#127 + SINT#1;", -128},
+		{"-SINT#127 - SINT#2;", 127},
+		{"SINT#64 * SINT#3;", -64},
+		{"-SINT#65 * SINT#2;", 126},
+		{"INT#32767 + INT#1;", -32768},
+		{"-INT#32767 - INT#2;", 32767},
+		{"INT#16384 * INT#3;", -16384},
+		{"DINT#2147483647 + INT#1;", -2147483648},
+		{"-DINT#2147483647 - INT#2;", 2147483647},
+		{"LINT#9223372036854775807 + LINT#1;", math.MinInt64},
+		{"-LINT#9223372036854775807 - LINT#2;", math.MaxInt64},
+		{"USINT#255 + USINT#1;", 0},
+		{"USINT#0 - USINT#1;", 255},
+		{"UINT#65535 + UINT#1;", 0},
+		{"UINT#0 - UINT#1;", 65535},
+		{"UDINT#4294967295 + UINT#1;", 0},
+		{"UDINT#0 - UINT#1;", 4294967295},
+		{"ULINT#18446744073709551615 + ULINT#1;", 0},
+		{"ULINT#0 - ULINT#1;", -1}, // ULINT's maximum
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			evaluated := testEval(t, tt.input)
-
-			testErrorObjectContains(t, evaluated, tt.expectedMessage)
+			got, _, ok := object.GetIntegerObjectValue(evaluated)
+			if !ok || got != tt.want {
+				t.Errorf("got %v, want %d", evaluated, tt.want)
+			}
 		})
 	}
 }

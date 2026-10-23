@@ -60,6 +60,7 @@ var known = map[string]string{
 	"INC2":         integerWidth,
 	"JD2000":       integerWidth,
 	"LTIME_TO_UTC": integerWidth,
+	"RTC_2":        integerWidth, // DT arithmetic; it raised an error on the evaluator before integers wrapped (issue #12)
 	"RND":          integerWidth, // EXPN(10, -32768): ABS wraps, so 1.0 in the source, 0 in the port
 	"SET_DATE":     integerWidth,
 	"SET_TOD":      integerWidth,
