@@ -306,3 +306,30 @@ func TestMixedSignIsRefusedIssue18(t *testing.T) {
 		t.Errorf("sil.Run: %v, want the mixed-sign error", err)
 	}
 }
+
+// IEC-76: a function block with METHODs and an IL body runs its body as IL
+// on every engine; the evaluator took the body for ST, its first statement
+// being the method.
+const ilBodyWithMethods = `
+FUNCTION_BLOCK FB76
+VAR_INPUT x : INT; END_VAR
+VAR_OUTPUT y : INT; END_VAR
+METHOD Twice : INT
+VAR_INPUT v : INT; END_VAR
+Twice := v * 2;
+END_METHOD
+LD x
+ADD 1
+ST y
+END_FUNCTION_BLOCK
+
+PROGRAM TEST_IEC76
+VAR_OUTPUT failures : INT; message : STRING; END_VAR
+VAR f : FB76; END_VAR
+f(x := 4);
+IF f.y <> 5 THEN failures := failures + 1; message := 'body'; END_IF;
+IF f.Twice(v := 3) <> 6 THEN failures := failures + 1; message := 'method'; END_IF;
+END_PROGRAM
+`
+
+func TestILBodyWithMethodsIEC76(t *testing.T) { runOnEveryEngine(t, ilBodyWithMethods) }

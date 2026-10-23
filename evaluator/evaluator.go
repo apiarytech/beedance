@@ -115,10 +115,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		// A BlockStatement can be either a standard block of ST statements or,
 		// through a heuristic, the body of an Instruction List (IL) program.
 		// Check if this is an IL program body
-		if len(node.Statements) > 0 {
-			if _, ok := node.Statements[0].(*ast.IlInstructionStatement); ok {
-				return evalIlProgram(node.Statements, env)
-			}
+		if il, ok := ilBody(node.Statements); ok {
+			return evalIlProgram(il, env)
 		}
 		return evalBlockStatement(node, env)
 
@@ -1272,6 +1270,28 @@ func evalIlProgram(stmts []ast.Statement, env *object.Environment) object.Object
 		return NULL
 	}
 	return finalResult
+}
+
+// ilBody reports whether stmts are an IL body, and returns its instructions.
+// A function block's METHODs and PROPERTYs come before its body (IEC-76):
+// they are skipped, so a block with methods and an IL body runs its body as
+// IL, as one without methods does.
+func ilBody(stmts []ast.Statement) ([]ast.Statement, bool) {
+	var body []ast.Statement
+	for _, s := range stmts {
+		switch s.(type) {
+		case *ast.MethodImplementation, *ast.PropertyDeclaration:
+			continue
+		}
+		body = append(body, s)
+	}
+	if len(body) == 0 {
+		return nil, false
+	}
+	if _, isIL := body[0].(*ast.IlInstructionStatement); !isIL {
+		return nil, false
+	}
+	return body, true
 }
 
 // evalIlInstructionStatement evaluates a single IL instruction. It handles the
@@ -3596,10 +3616,10 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		var evaluated object.Object
 		isILProgram := false
 		// Check for IL first, as it has a special execution context.
-		if block, isBlock := fn.Body.(*ast.BlockStatement); isBlock && len(block.Statements) > 0 {
-			if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL { // cspell:disable-line
+		if block, isBlock := fn.Body.(*ast.BlockStatement); isBlock {
+			if il, isIL := ilBody(block.Statements); isIL {
 				isILProgram = true
-				evaluated = evalIlProgram(block.Statements, fn.Env)
+				evaluated = evalIlProgram(il, fn.Env)
 			}
 		}
 
@@ -3673,10 +3693,10 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		var evaluated object.Object
 		isILProgram := false
 		// Check for IL first.
-		if block, isBlock := fn.Definition.Body.(*ast.BlockStatement); isBlock && len(block.Statements) > 0 {
-			if _, isIL := block.Statements[0].(*ast.IlInstructionStatement); isIL {
+		if block, isBlock := fn.Definition.Body.(*ast.BlockStatement); isBlock {
+			if il, isIL := ilBody(block.Statements); isIL {
 				isILProgram = true
-				evaluated = evalIlProgram(block.Statements, extendedEnv)
+				evaluated = evalIlProgram(il, extendedEnv)
 			}
 		}
 
