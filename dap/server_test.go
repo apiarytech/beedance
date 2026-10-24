@@ -570,4 +570,3 @@ func TestLaunchEngine(t *testing.T) {
 	}
 	c.ok("disconnect", nil, nil)
 }
-
