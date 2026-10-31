@@ -1,4 +1,4 @@
-# beedance
+# <img src="doc/icon/png/beedance-512.png" alt="" width="48" align="center"> BeeDance: Evaluator, Transpiler & Compiler/VM of the IEC 61131 environment in Go!
 
 `beedance` is an interpreter and toolkit for the IEC 61131-3 industrial automation programming languages. It reads and runs all five: Structured Text (ST), Instruction List (IL), Sequential Function Chart (SFC), Ladder Diagram (LD) and Function Block Diagram (FBD). It serves as a powerful foundation for building compilers, analysis tools, and virtual controllers for PLCs.
 
