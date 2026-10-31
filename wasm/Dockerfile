@@ -17,7 +17,7 @@
 #   docker run --rm -i beedance-wasm serve < requests.jsonl
 #   docker run --rm -p 8080:8080 beedance-wasm-web
 
-ARG GO_VERSION=1.27.2
+ARG GO_VERSION=1.27.3
 ARG NODE_VERSION=24
 
 FROM golang:${GO_VERSION} AS build

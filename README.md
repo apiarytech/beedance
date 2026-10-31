@@ -113,7 +113,7 @@ The primary way to use `beedance` is through its command-line interface, which s
 
 ### Toolchain
 
-Go 1.27.2 or later; TinyGo 0.43.0 for the microcontroller builds ([doc/development.md](doc/development.md)). TinyGo 0.43.0 fixes three problems beedance's embedded targets had with 0.42.0:
+Go 1.27.3 or later; TinyGo 0.43.0 for the microcontroller builds ([doc/development.md](doc/development.md)). TinyGo 0.43.0 fixes three problems beedance's embedded targets had with 0.42.0:
 
 *   **VM runtime errors on Xtensa.** `VM.Run` recovers a panic in a program (an index out of range, a division by zero) and returns it as an error. TinyGo 0.42.0 could not recover a panic on Xtensa, so on the ESP32 and ESP32-S3 such a program stopped the firmware instead. 0.43.0 adds panic recovery on Xtensa.
 *   **Goroutine stack alignment on the ESP32 family.** Goroutine stacks come from the heap, and the heap was not 16-byte aligned as the RISC-V and Xtensa calling conventions require. 0.43.0 aligns it; the linker scripts in [embedded/esp32sim/tinygo](embedded/esp32sim/tinygo/) carry the same change.

@@ -69,7 +69,7 @@ beedance -dap                                # the adapter on stdio (VS Code)
 beedance -test FILE.st                       # TEST_ programs on every engine
 ```
 
-Go 1.27.2 is required (`go.mod`). The `go` engine of the `sil` tests
+Go 1.27.3 is required (`go.mod`). The `go` engine of the `sil` tests
 (`sil`, `sfc`, `examples/unit_tests`, `transpiler`, `oscatdiff`) builds
 transpiled programs with the Go toolchain and fetches royaljelly, so it
 needs that Go and royaljelly from the module cache or the network;

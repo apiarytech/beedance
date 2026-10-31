@@ -1,6 +1,6 @@
 module github.com/apiarytech/beedance/oscatdiff
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/apiarytech/beebread v0.2.0
