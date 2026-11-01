@@ -30,8 +30,8 @@ import (
 // Module versions the transpiled tests build with, unless
 // Options.GoReplace points a module at a local directory.
 const (
-	RoyaljellyVersion = "v0.3.3"
-	BeebreadVersion   = "v0.2.0"
+	RoyaljellyVersion = "v0.3.4"
+	BeebreadVersion   = "v0.2.1"
 )
 
 // GoDirective is the go directive of the temporary module the go and wasm

@@ -71,7 +71,7 @@ bug: please report it (see [Backends](backends.md)). `-engines eval` or
 `-engines all` (or `eval,vm,go`) adds the transpiler: the source is
 transpiled to Go on royaljelly, a harness runs each test on the same
 simulated clock, and it is built with the Go toolchain in a temporary
-module (royaljelly v0.3.3, beebread v0.2.0 for OSCAT; downloaded the first
+module (royaljelly v0.3.4, beebread v0.2.1 for OSCAT; downloaded the first
 time). Every engine is compared with the first one listed.
 `-go-replace github.com/apiarytech/royaljelly=../royaljelly` builds with a
 local checkout instead.
