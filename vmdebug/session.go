@@ -575,7 +575,7 @@ func (s *Session) hook(at site) bool {
 	if at.row != s.holdRow {
 		s.holdRow = 0
 	}
-	if s.pauseReq.Swap(false) || s.ctx != nil && s.ctx.Err() != nil {
+	if s.ctx != nil && (s.pauseReq.Swap(false) || s.ctx.Err() != nil) {
 		return stopAt(OnPause, "")
 	}
 	switch s.mode {

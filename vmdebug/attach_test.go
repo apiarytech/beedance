@@ -281,6 +281,30 @@ func TestAttachBreakpointAndSteps(t *testing.T) {
 	}
 }
 
+// A pause asked for while no run waits stops the next run, not a scan nobody
+// is told about: that run would take the stop as stale and the program would
+// go on (a stop on entry, with a host's cycle between Pause and Continue).
+func TestAttachPauseWaitsForARun(t *testing.T) {
+	h := newHost(t, source, "Main")
+	s := h.attach(0)
+	s.SetBreakpoints([]BreakpointSpec{{Line: line(t, source, "c(step := 2)"), Condition: "FALSE"}}) // the hook runs, and never stops
+	s.Pause()
+	h.cycle()
+	if _, scans, _ := h.counts(); scans != 1 || s.State() != HostScan {
+		t.Fatalf("with no run: %d scans, state %v; want the scan complete and the host going on", scans, s.State())
+	}
+	h.run()
+	defer h.close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if st, err := s.Continue(ctx); err != nil || st.Reason != OnPause || ctx.Err() != nil {
+		t.Fatalf("Continue = %+v, %v (ctx %v); want the pause", st, err, ctx.Err())
+	}
+	if s.State() != HostHold {
+		t.Fatalf("state = %v, want held", s.State())
+	}
+}
+
 func TestAttachRefusesWhatTheHostDoes(t *testing.T) {
 	h := newHost(t, source, "Main")
 	s := h.attach(0)
