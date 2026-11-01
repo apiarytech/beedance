@@ -361,11 +361,10 @@ END_PROGRAM
 `
 	h := newHost(t, src, "Main")
 	s := h.attach(0)
-	go func() {
-		for i := 0; i < 5; i++ {
-			h.cycle()
-		}
-	}()
+	// The task cycles until the run has its stop: a stop before the run began
+	// would be taken as stale, and only a later scan's would reach it.
+	h.run()
+	defer h.close()
 	st, _ := s.Continue(context.Background())
 	if st.Reason != OnException || !strings.Contains(st.Message, "index") {
 		t.Fatalf("stopped = %+v", st)
