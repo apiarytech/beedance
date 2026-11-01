@@ -317,8 +317,8 @@ func (s *Server) handle(m *message) (done bool) {
 		}
 	case "pause":
 		if needs(false) {
+			s.reply(m, nil) // before the stopped event the pause leads to
 			s.sess.Pause()
-			s.reply(m, nil)
 		}
 	case "evaluate":
 		var a evaluateArgs
