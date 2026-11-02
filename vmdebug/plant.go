@@ -49,7 +49,7 @@ type plant struct {
 func (s *Session) buildPlants(img *image) error {
 	for _, st := range img.program.Statements {
 		pd, ok := st.(*ast.ProgramDeclaration)
-		if !ok || pd.Name == nil || pd == img.decl || !IsPlant(pd.Name.Value) {
+		if !ok || pd.Name == nil || img.runs(pd) || !IsPlant(pd.Name.Value) {
 			continue
 		}
 		comp := compiler.NewCompilerWithBuiltins(object.Builtins)

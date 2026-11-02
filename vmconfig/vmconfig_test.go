@@ -209,3 +209,104 @@ func TestErrors(t *testing.T) {
 		}
 	}
 }
+
+// A cycle run instance by instance (Begin, Next, In, Out) runs what Cycle
+// runs, in its order, with the tasks' triggers read as Cycle reads them.
+func TestCycleRunMatchesCycle(t *testing.T) {
+	const source = `
+PROGRAM COUNT
+VAR_EXTERNAL n : INT; trig : BOOL; END_VAR
+n := n + 1;
+trig := (n MOD 3) = 0;
+END_PROGRAM
+PROGRAM SLOW
+VAR_EXTERNAL n : INT; s : INT; END_VAR
+s := s * 10 + n MOD 10;
+END_PROGRAM
+PROGRAM ONCE
+VAR_EXTERNAL o : INT; END_VAR
+o := o + 1;
+END_PROGRAM
+PROGRAM BG
+VAR_EXTERNAL b : INT; n : INT; END_VAR
+b := b + n;
+END_PROGRAM
+CONFIGURATION CF
+VAR_GLOBAL n : INT; trig : BOOL; s : INT; o : INT; b : INT; END_VAR
+RESOURCE R1 ON PLC
+TASK FAST(INTERVAL := T#10ms, PRIORITY := 1);
+TASK EDGE(SINGLE := trig, PRIORITY := 2);
+PROGRAM P1 WITH FAST : COUNT;
+PROGRAM P2 WITH EDGE : ONCE;
+PROGRAM P3 : BG;
+END_RESOURCE
+RESOURCE R2 ON PLC
+TASK LAZY(INTERVAL := T#30ms, PRIORITY := 0);
+PROGRAM P4 WITH LAZY : SLOW;
+END_RESOURCE
+END_CONFIGURATION
+`
+	a, b := load(t, source), load(t, source)
+	var order []string
+	for i := 0; i < 12; i++ {
+		now := time.Duration(i) * 10 * time.Millisecond
+		cycle(t, a, now)
+		cy := b.Begin(now)
+		for inst := cy.Next(); inst != nil; inst = cy.Next() {
+			if i == 0 || i == 2 {
+				task := ""
+				if cy.Task() != nil {
+					task = cy.Task().Name
+				}
+				order = append(order, cy.Resource().Name+"/"+task+"/"+inst.Path())
+			}
+			inst.In()
+			if err := inst.VM().Run(); err != nil {
+				t.Fatal(cy.Wrap(err))
+			}
+			inst.Out()
+		}
+		for _, name := range []string{"n", "s", "o", "b"} {
+			if x, y := global(t, a, name), global(t, b, name); x != y {
+				t.Fatalf("cycle %d: %s is %d after Cycle, %d run by instance", i, name, x, y)
+			}
+		}
+	}
+	want := "R1/FAST/R1.P1 R1//R1.P3 R2/LAZY/R2.P4 R1/FAST/R1.P1 R1/EDGE/R1.P2 R1//R1.P3"
+	if got := strings.Join(order, " "); got != want {
+		t.Errorf("order:\n got %s\nwant %s", got, want)
+	}
+}
+
+// LoadOptions.AllowInputWrites reaches the compiler (IEC-69): a function
+// that assigns its own input loads with it and is refused without it.
+func TestAllowInputWrites(t *testing.T) {
+	const source = `
+FUNCTION BUMP : INT
+VAR_INPUT x : INT; END_VAR
+x := x + 1;
+BUMP := x;
+END_FUNCTION
+PROGRAM MAIN
+VAR k : INT; END_VAR
+k := BUMP(k);
+END_PROGRAM
+CONFIGURATION CF
+RESOURCE R1 ON PLC
+PROGRAM P1 : MAIN;
+END_RESOURCE
+END_CONFIGURATION
+`
+	if _, err := LoadSource(source); err == nil {
+		t.Fatal("LoadSource accepted a write to an input")
+	}
+	c, err := LoadSourceWith(source, LoadOptions{AllowInputWrites: true})
+	if err != nil {
+		t.Fatalf("LoadSourceWith: %v", err)
+	}
+	cycle(t, c, 0)
+	cycle(t, c, 10*time.Millisecond)
+	if got := value(t, c, "R1.P1", "k"); got != 2 {
+		t.Errorf("k = %d, want 2", got)
+	}
+}
