@@ -1,4 +1,4 @@
-//go:build js
+//go:build js && !nodebug
 
 /*
  * Copyright (C) 2026 Franklin D. Amador

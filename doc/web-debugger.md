@@ -131,7 +131,10 @@ program selector.
 A page that never runs the tests or the transpiler builds the module with
 `-tags lite` (see [wasm](../wasm/README.md#build)): about a quarter
 smaller, and `version` says which ops it has. The debugger, the analyzer,
-package ide and PLCopen are all in it.
+package ide and PLCopen are all in it. `-tags nodebug` leaves the
+debugger out (no `dap`, no `vmdebug`, no `beedance.dap`), for a page
+that runs programs with the `load` and `scan` ops and does not debug
+them; `version` says `"debugger": false`.
 
 ## Editing a diagram
 
