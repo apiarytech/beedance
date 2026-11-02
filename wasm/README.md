@@ -34,6 +34,7 @@ set when the op failed, and `"errors"` lists any parse errors.
 | `{"op":"lint","source":S}` | `findings`: line, column, severity (info, warning, error), rule, PLCopen, message (package analyzer) |
 | `{"op":"hover","source":S,"line":L,"column":C}`; `complete`, `definition`, `references`, `rename` (`"newName"`) | hover's `text` and `symbol`; completion's `items`; a `span`; the `spans` to change (package ide; columns in bytes, from 1) |
 | `{"op":"diagrams","source":S}` | `diagrams`: each LD, FBD and SFC body: its POU, language, model, SVG and the names its live view reads |
+| `{"op":"apply","source":S,"gesture":G}` | `edits` and `source`: a gesture on a diagram (package ide's `Gesture`: `ld.contact`, `fbd.statement`, `sfc.step`, ...) as text edits, refused if the result reads worse |
 | `{"op":"importXML","xml":X}` | `source`, `name`, and `sim` if the project has it; if `sim` holds the source and the POUs are still what it makes, that text, comments and all |
 | `{"op":"load","source":S,"program":"Main","intervalMs":10}` | `session`, the `variables` (name, type, block, address), their `values` and the `io` image |
 | `{"op":"scan","session":N,"count":1,"values":{...}}` | sets `values`, runs `count` scans; `scans`, `timeMs`, `values`, `io` |

@@ -11,6 +11,7 @@
 package wasm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -117,5 +118,37 @@ END_CONFIGURATION
 	if cfg["name"] != "Cell" || res["name"] != "CPU" || task["name"] != "Fast" || task["interval"] != "T#10ms" ||
 		inst["name"] != "P1" || inst["type"] != "Main" || inst["task"] != "Fast" {
 		t.Errorf("configuration %v", cfg)
+	}
+}
+
+// The apply op: a gesture on a diagram's element, as text edits and the
+// source they make; an unknown gesture is refused.
+func TestApply(t *testing.T) {
+	h := New()
+	d := call(t, h, map[string]any{"op": "diagrams", "source": ldSource})
+	noError(t, d)
+	var stop map[string]any
+	rung := d["diagrams"].([]any)[0].(map[string]any)["rungs"].([]any)[0].(map[string]any)
+	for _, e := range rung["elements"].([]any) {
+		if e := e.(map[string]any); strings.Contains(e["text"].(string), "Stop") {
+			stop = e
+		}
+	}
+	if stop == nil {
+		t.Fatalf("no Stop contact in %v", rung)
+	}
+	r := call(t, h, map[string]any{"op": "apply", "source": ldSource,
+		"gesture": map[string]any{"op": "ld.contact", "at": stop["at"], "where": "after", "name": "Start", "mode": "/"}})
+	noError(t, r)
+	if src := r["source"].(string); !strings.Contains(src, "/Stop /Start ( Run )") || len(r["edits"].([]any)) == 0 {
+		t.Errorf("apply: %v", r)
+	}
+	bad := call(t, h, map[string]any{"op": "apply", "source": ldSource, "gesture": map[string]any{"op": "ld.fly"}})
+	if !strings.Contains(fmt.Sprint(bad["error"]), "unknown gesture") {
+		t.Errorf("unknown gesture: %v", bad)
+	}
+	none := call(t, h, map[string]any{"op": "apply", "source": ldSource})
+	if !strings.Contains(fmt.Sprint(none["error"]), "gesture") {
+		t.Errorf("no gesture: %v", none)
 	}
 }
