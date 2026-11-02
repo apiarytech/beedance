@@ -317,17 +317,77 @@ func (s *dbgServer) image() map[string]any {
 var _ = os.Stdin
 `
 
-// goMainSource is main.go of the built module.
+// goMainSource is main.go of the built module: the program served on
+// the transport stdio gives, its pipes (goStdioSource) or, built for a
+// web page (GOOS=js, in a Web Worker), its messages (goStdioJSSource).
 const goMainSource = `package main
 
-import (
-	"os"
-
-	"beedance.debug/run/dbgprog"
-)
+import "beedance.debug/run/dbgprog"
 
 func main() {
-	dbgprog.Serve(os.Stdin, os.Stdout)
+	r, w := stdio()
+	dbgprog.Serve(r, w)
+}
+`
+
+// goStdioSource is the transport of a program in a process: its pipes.
+const goStdioSource = `//go:build !js
+
+package main
+
+import (
+	"io"
+	"os"
+)
+
+func stdio() (io.Reader, io.Writer) { return os.Stdin, os.Stdout }
+`
+
+// goStdioJSSource is the transport of a program built for a web page and
+// run in a Web Worker: a request is a message to the worker, which calls
+// globalThis.beedanceRecv(line); a reply is a message from it
+// (postMessage(line)), a line each.
+const goStdioJSSource = `//go:build js
+
+package main
+
+import (
+	"bytes"
+	"io"
+	"syscall/js"
+)
+
+func stdio() (io.Reader, io.Writer) {
+	r, w := io.Pipe()
+	lines := make(chan string, 64)
+	js.Global().Set("beedanceRecv", js.FuncOf(func(this js.Value, args []js.Value) any {
+		if len(args) == 1 {
+			line := args[0].String()
+			go func() { lines <- line }()
+		}
+		return nil
+	}))
+	go func() {
+		for line := range lines {
+			w.Write([]byte(line + "\n"))
+		}
+	}()
+	return r, &poster{}
+}
+
+// poster posts each line written to it as a message.
+type poster struct{ buf []byte }
+
+func (p *poster) Write(b []byte) (int, error) {
+	p.buf = append(p.buf, b...)
+	for {
+		i := bytes.IndexByte(p.buf, '\n')
+		if i < 0 {
+			return len(b), nil
+		}
+		js.Global().Call("postMessage", string(p.buf[:i]))
+		p.buf = p.buf[i+1:]
+	}
 }
 `
 

@@ -39,11 +39,18 @@ type DAP struct {
 // adapter's dap.Server.YieldEvery and Yield: for a web page, DAPYield and
 // a function that waits for a macrotask; 0 and nil for a host with
 // threads.
-func NewDAP(onMessage func(msg []byte), yieldEvery time.Duration, yield func()) *DAP {
+//
+// setup, if given, configures the adapter further (dap.Server.GoStart).
+func NewDAP(onMessage func(msg []byte), yieldEvery time.Duration, yield func(), setup ...func(*dap.Server)) *DAP {
 	ch := dap.NewChannel(func(msg []byte) {
 		if msg != nil {
 			onMessage(msg)
 		}
-	}, func(srv *dap.Server) { srv.YieldEvery, srv.Yield = yieldEvery, yield })
+	}, func(srv *dap.Server) {
+		srv.YieldEvery, srv.Yield = yieldEvery, yield
+		for _, f := range setup {
+			f(srv)
+		}
+	})
 	return &DAP{Channel: ch}
 }

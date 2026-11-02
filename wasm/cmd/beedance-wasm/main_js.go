@@ -15,6 +15,7 @@ package main
 import (
 	"syscall/js"
 
+	"github.com/apiarytech/beedance/dap"
 	"github.com/apiarytech/beedance/wasm"
 )
 
@@ -26,7 +27,9 @@ import (
 //	                       {send(json), close()}; onMessage(json) is
 //	                       called with each response and event. opts is
 //	                       optional: {yield: "sleep"} (the default) or
-//	                       {yield: "message"} (see yielder)
+//	                       {yield: "message"} (see yielder), and
+//	                       goStart, a function that builds and runs the
+//	                       go engine's program (wasm.GoStart)
 //
 // then calls globalThis.onBeedanceReady, if the page set it, and stays
 // running to answer calls. The debugger lets the page in between scans
@@ -46,13 +49,17 @@ func main() {
 		}
 		onMessage := args[0]
 		mode := ""
+		var setup []func(*dap.Server)
 		if len(args) > 1 && args[1].Type() == js.TypeObject {
 			if y := args[1].Get("yield"); y.Type() == js.TypeString {
 				mode = y.String()
 			}
+			if g := args[1].Get("goStart"); g.Type() == js.TypeFunction {
+				setup = append(setup, func(srv *dap.Server) { srv.GoStart = wasm.GoStart(g) })
+			}
 		}
 		yield, releaseYield := yielder(mode)
-		d := wasm.NewDAP(func(msg []byte) { onMessage.Invoke(string(msg)) }, wasm.DAPYield, yield)
+		d := wasm.NewDAP(func(msg []byte) { onMessage.Invoke(string(msg)) }, wasm.DAPYield, yield, setup...)
 		var send, closeFn js.Func
 		send = js.FuncOf(func(this js.Value, args []js.Value) any {
 			if len(args) == 1 && args[0].Type() == js.TypeString {

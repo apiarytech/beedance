@@ -102,8 +102,22 @@ them. The evaluator's session is the package's, one at a time: while a
 program is debugged on it, the `test` op refuses the evaluator engine
 rather than wait (a single thread would wait for ever), and a second
 launch on it fails. The `go` engine (the program transpiled and built
-with the Go toolchain, see [Debugging](debugging.md#engines)) is not in a
-browser: it waits for a build service.
+with the Go toolchain, see [Debugging](debugging.md#engines)) runs in a
+page that gives `beedance.dap` a `goStart` function (`wasm.GoStart`, on
+`vmdebug.GoBuild.Start`):
+
+```js
+goStart({source, program, allowInputWrites}, onLine) → Promise<{send(line), close()}>
+```
+
+The page has the program built for GOOS=js, the module
+`vmdebug.GoProgramFiles` makes (beespace's build service does it), and
+runs it in a Web Worker: under GOOS=js the program reads its requests
+from `globalThis.beedanceRecv(line)` and posts each reply line with
+`postMessage`. The worker loads the `wasm_exec.js` of the Go that built
+the program. The module never makes those files itself, so the lite build
+keeps the transpiler out. Without `goStart`, the go engine needs the Go
+toolchain, which a browser has not got, and the launch fails saying so.
 
 ## A configuration
 

@@ -74,6 +74,10 @@ type Server struct {
 	YieldEvery time.Duration
 	// Yield is the sessions' vmdebug.Options.Yield.
 	Yield func()
+	// GoStart, if set, is the sessions' vmdebug.GoBuild.Start: how the go
+	// engine's program is built and started where there is no Go
+	// toolchain (a web page: a build service and a Web Worker).
+	GoStart func(vmdebug.GoStart) (io.ReadWriteCloser, error)
 	// Attach, if set, answers the attach request: a host with programs
 	// of its own (beehive's logic) gives the session attached to the one
 	// asked for (attach.go). Without it, attach is refused.
@@ -480,7 +484,7 @@ func (s *Server) launch(a launchArgs) error {
 	o := vmdebug.Options{Program: a.ProgramName, Engine: engine, Realtime: a.Realtime == nil || *a.Realtime,
 		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
 		Notify:  func(msg string) { s.output("stderr", msg) },
-		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace}}
+		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace, Start: s.GoStart}}
 	if a.ScanEvents > 0 {
 		every := time.Duration(a.ScanEvents) * time.Millisecond
 		o.Sampled = func(smp vmdebug.Sample) {
