@@ -133,7 +133,10 @@ A page that never runs the tests or the transpiler builds the module with
 smaller, and `version` says which ops it has. The debugger, the analyzer,
 package ide and PLCopen are all in it.
 
-## Next on the engine's side
+## Editing a diagram
 
-- Editing a graphical body by gestures (`ide.Index.Apply`, as beehive's
-  diagram editor does) as an op, for a page's diagram editor.
+The `apply` op turns a gesture on a diagram (package ide's `Gesture`, the
+ops beehive's diagram editor sends: `ld.contact`, `ld.coil`, `fbd.input`,
+`sfc.step`, ...) into text edits and the source they make, refused when
+the result reads worse than the source did. The page applies the edits
+to its editor, so undo sees an ordinary edit; the text stays the truth.

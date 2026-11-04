@@ -28,6 +28,8 @@
 //	{"op":"hover","source":"...","line":3,"column":5} also complete, definition,
 //	                                                 references, rename ("newName")
 //	{"op":"diagrams","source":"..."}                 LD, FBD and SFC bodies as SVG
+//	{"op":"apply","source":"...","gesture":{"op":"ld.contact","at":{"row":5,"column":7},
+//	 "where":"after","name":"stop","mode":"/"}}      a diagram gesture as text edits
 //	{"op":"load","source":"...","program":"Main","intervalMs":10}
 //	{"op":"scan","session":1,"count":1,"values":{"start":true,"%IX0.0":true}}
 //	{"op":"set","session":1,"values":{...}}
@@ -51,6 +53,7 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/ide"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
@@ -87,6 +90,8 @@ type Request struct {
 	Line    int    `json:"line,omitempty"`
 	Column  int    `json:"column,omitempty"`
 	NewName string `json:"newName,omitempty"`
+	// apply: the gesture on a diagram (package ide's Gesture).
+	Gesture *ide.Gesture `json:"gesture,omitempty"`
 }
 
 // Host answers requests. It holds the sessions load starts; it is safe for
@@ -166,7 +171,7 @@ func (h *Host) Do(req Request) (any, error) {
 // ops are the ops this build answers: these, and the full build's
 // (full.go; a build with -tags lite leaves them out).
 var ops = append([]string{"version", "check", "exportXML", "importXML", "lint", "hover", "complete",
-	"definition", "references", "rename", "outline", "diagrams", "load", "scan", "set", "read", "unload"}, buildOps...)
+	"definition", "references", "rename", "outline", "diagrams", "apply", "load", "scan", "set", "read", "unload"}, buildOps...)
 
 type versionReply struct {
 	GoVersion string   `json:"goVersion"`
