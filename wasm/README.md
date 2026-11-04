@@ -109,6 +109,12 @@ too, it is about 12.5 MB, or 3.2 MB gzipped:
 GOOS=js GOARCH=wasm go build -trimpath -tags lite -ldflags="-s -w" -o beedance.wasm ./wasm/cmd/beedance-wasm
 ```
 
+A page that runs and stops programs (the `load` and `scan` ops) but does
+not debug them can leave the debugger out: `-tags nodebug` links neither
+`dap` nor `vmdebug`, `globalThis.beedance` has no `dap`, and the
+`version` reply says `"debugger": false` with no `engines`. With `lite`
+too, it is about 11.2 MB (13.2 MB with the debugger).
+
 Built natively (`go run ./wasm/cmd/beedance-wasm`), the command speaks the
 same stdin/stdout protocol as the WASI build, which helps when debugging.
 

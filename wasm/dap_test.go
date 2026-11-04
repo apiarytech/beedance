@@ -1,3 +1,5 @@
+//go:build !nodebug
+
 /*
  * Copyright (C) 2026 Franklin D. Amador
  *
