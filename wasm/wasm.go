@@ -186,6 +186,9 @@ type checkReply struct {
 	// Programs are the PROGRAMs declared, tests among them.
 	Programs []string `json:"programs"`
 	Tests    []string `json:"tests"`
+	// Configurations are the CONFIGURATIONs declared, which a debugger
+	// launches as it launches a PROGRAM (programName).
+	Configurations []string `json:"configurations"`
 	// POUs are the source's declarations, in order: an editor's outline
 	// and the scopes of a search.
 	POUs []pouInfo `json:"pous"`
@@ -215,7 +218,12 @@ func check(source string) checkReply {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	r := checkReply{OK: len(p.Errors()) == 0, Errors: p.Errors(), Programs: []string{}, Tests: []string{},
-		POUs: outline(program), Located: []locatedInfo{}}
+		Configurations: []string{}, POUs: outline(program), Located: []locatedInfo{}}
+	for _, st := range program.Statements {
+		if cd, ok := st.(*ast.ConfigurationDeclaration); ok && cd.Name != nil {
+			r.Configurations = append(r.Configurations, cd.Name.Value)
+		}
+	}
 	for _, pd := range programs(program) {
 		name := pd.Name.Value
 		r.Programs = append(r.Programs, name)

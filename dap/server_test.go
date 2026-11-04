@@ -570,3 +570,59 @@ func TestLaunchEngine(t *testing.T) {
 	}
 	c.ok("disconnect", nil, nil)
 }
+
+// A launch's programName may name a CONFIGURATION: its instances run on
+// their tasks, the frame names the instance, and the scopes are the
+// instance's variables (Locals) and the configuration's.
+func TestConfiguration(t *testing.T) {
+	const src = `PROGRAM COUNT
+VAR_EXTERNAL total : INT; END_VAR
+VAR n : INT; END_VAR
+n := n + 1;
+total := total + 1;
+END_PROGRAM
+CONFIGURATION CELL
+VAR_GLOBAL total : INT; END_VAR
+RESOURCE R1 ON PLC
+TASK FAST(INTERVAL := T#10ms);
+PROGRAM P1 WITH FAST : COUNT;
+PROGRAM P2 WITH FAST : COUNT;
+END_RESOURCE
+END_CONFIGURATION
+`
+	c := newClient(t)
+	c.ok("initialize", map[string]any{"adapterID": "beedance"}, nil)
+	c.ok("launch", map[string]any{"program": "cell.st", "source": src, "programName": "CELL", "realtime": false}, nil)
+	c.event("initialized")
+	incr := lineOf(t, src, "n := n + 1")
+	var bps struct{ Breakpoints []breakpoint }
+	c.ok("setBreakpoints", map[string]any{"source": map[string]any{"path": "cell.st"},
+		"breakpoints": []map[string]any{{"line": incr}}}, &bps)
+	if !bps.Breakpoints[0].Verified {
+		t.Fatalf("breakpoints %+v", bps.Breakpoints)
+	}
+	c.ok("configurationDone", nil, nil)
+	for _, want := range []string{"R1.P1", "R1.P2"} {
+		if st := c.event("stopped"); st["reason"] != "breakpoint" {
+			t.Fatalf("stopped %v", st)
+		}
+		f := c.top()
+		if f.Name != want || f.Line != incr {
+			t.Errorf("frame %+v, want %s", f, want)
+		}
+		locals, _ := c.vars(f.ID, "Locals")
+		if _, ok := locals["n"]; !ok {
+			t.Errorf("locals of %s: %+v", want, locals)
+		}
+		globals, _ := c.vars(f.ID, "CONFIGURATION CELL")
+		if _, ok := globals["total"]; !ok || globals["R1"].VariablesReference == 0 {
+			t.Errorf("configuration scope: %+v", globals)
+		}
+		c.ok("continue", map[string]any{"threadId": 1}, nil)
+	}
+	var th struct{ Threads []thread }
+	c.ok("threads", nil, &th)
+	if th.Threads[0].Name != "CONFIGURATION CELL" {
+		t.Errorf("threads %+v", th.Threads)
+	}
+}

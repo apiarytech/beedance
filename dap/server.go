@@ -268,7 +268,7 @@ func (s *Server) handle(m *message) (done bool) {
 	case "threads":
 		name := "PROGRAM"
 		if s.sess != nil {
-			name = "PROGRAM " + s.name()
+			name = s.kind() + s.name()
 		}
 		s.reply(m, map[string]any{"threads": []thread{{ID: 1, Name: name}}})
 	case "stackTrace":
@@ -443,6 +443,15 @@ func (s *Server) handle(m *message) (done bool) {
 }
 
 func (s *Server) name() string { return s.sess.Program() }
+
+// kind is what the session runs, before its name: "PROGRAM " or
+// "CONFIGURATION ".
+func (s *Server) kind() string {
+	if s.sess.Configuration() {
+		return "CONFIGURATION "
+	}
+	return "PROGRAM "
+}
 
 // launch loads the program a names.
 func (s *Server) launch(a launchArgs) error {
@@ -723,7 +732,7 @@ func (s *Server) scopes(frame int) []scope {
 	if frame > 0 || len(s.sess.Locals(frame)) > 0 {
 		out = append(out, scope{Name: "Locals", PresentationHint: "locals", VariablesReference: s.ref(varRef{kind: refLocals, frame: frame})})
 	}
-	out = append(out, scope{Name: "PROGRAM " + s.name(), VariablesReference: s.ref(varRef{kind: refProgram})})
+	out = append(out, scope{Name: s.kind() + s.name(), VariablesReference: s.ref(varRef{kind: refProgram})})
 	for i, name := range s.sess.Plants() {
 		out = append(out, scope{Name: "PLANT " + name, VariablesReference: s.ref(varRef{kind: refPlant, frame: i})})
 	}

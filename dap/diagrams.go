@@ -107,13 +107,37 @@ func (s *Server) prefixFor(ix *ide.Index, program, pou string, chosen map[string
 			return strings.TrimSuffix(v, ".") + ".", true
 		}
 	}
+	if insts := s.sess.Instances(); len(insts) > 0 {
+		// A configuration: a program's body through its first instance, a
+		// function block's through the first instance's variable of its type.
+		for _, inst := range insts {
+			if strings.EqualFold(inst.Type, pou) {
+				return inst.Path + ".", true
+			}
+		}
+		for _, inst := range insts {
+			if name, ok := variableOfType(ix, inst.Type, pou); ok {
+				return inst.Path + "." + name + ".", true
+			}
+		}
+		return "", false
+	}
+	if name, ok := variableOfType(ix, program, pou); ok {
+		return name + ".", true
+	}
+	return "", false
+}
+
+// variableOfType is the first variable of PROGRAM program whose type is
+// pou.
+func variableOfType(ix *ide.Index, program, pou string) (string, bool) {
 	for _, sym := range ix.Outline() {
 		if sym.Kind != ide.Program || !strings.EqualFold(sym.Name, program) {
 			continue
 		}
 		for _, c := range sym.Children {
 			if c.Kind == ide.Variable && strings.EqualFold(c.Type, pou) {
-				return c.Name + ".", true
+				return c.Name, true
 			}
 		}
 	}

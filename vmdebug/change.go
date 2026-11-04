@@ -113,9 +113,14 @@ func (s *Session) change(source string) (Report, error) {
 	c := carrier{old: old.members(), fresh: img.members()}
 	oldVars := map[string]bool{}
 	for _, v := range old.eng.Variables() {
-		oldVars[strings.ToUpper(v.Name)] = true
+		if !v.group {
+			oldVars[strings.ToUpper(v.Name)] = true
+		}
 	}
 	for _, nv := range img.eng.Variables() {
+		if nv.group {
+			continue // a resource: its instances are carried below
+		}
 		key := strings.ToUpper(nv.Name)
 		ov, existed := old.decls[key]
 		delete(oldVars, key)
@@ -142,6 +147,11 @@ func (s *Session) change(source string) (Report, error) {
 	for _, v := range old.eng.Variables() {
 		if oldVars[strings.ToUpper(v.Name)] {
 			r.Removed = append(r.Removed, v.Name)
+		}
+	}
+	if ce, ok := img.eng.(*configEngine); ok {
+		if was, ok := old.eng.(*configEngine); ok {
+			ce.carry(was, c, &r)
 		}
 	}
 	carryPlants(old, img, c)

@@ -105,6 +105,13 @@ launch on it fails. The `go` engine (the program transpiled and built
 with the Go toolchain, see [Debugging](debugging.md#engines)) is not in a
 browser: it waits for a build service.
 
+## A configuration
+
+`launch` with `programName` naming a `CONFIGURATION` debugs its tasks on
+the VM (see [Debugging](debugging.md#a-configuration)); the `check`
+reply's `configurations` lists the ones a source declares, for a page's
+program selector.
+
 ## A smaller module
 
 A page that never runs the tests or the transpiler builds the module with
@@ -114,6 +121,5 @@ package ide and PLCopen are all in it.
 
 ## Next on the engine's side
 
-- A `CONFIGURATION`'s tasks (`vmconfig`) under the debugger.
 - Editing a graphical body by gestures (`ide.Index.Apply`, as beehive's
   diagram editor does) as an op, for a page's diagram editor.

@@ -101,6 +101,9 @@ type Task struct {
 type Instance struct {
 	Name, Type string
 	Task       *Task // nil for one with no task
+	config     *Configuration
+	resource   *Resource
+	compiled   *compiler.CompiledProgram
 	scan       *vm.VM
 	globals    []object.Object
 	slots      map[string]int    // a variable's slot by upper-case name
@@ -124,6 +127,9 @@ type LoadOptions struct {
 	// AllowInputWrites lets a POU assign its own VAR_INPUT variables, as
 	// CODESYS does (IEC-69); off, IEC 61131-3's rule refuses it.
 	AllowInputWrites bool
+	// Name is the CONFIGURATION to load, of a source that declares
+	// several; empty is the first.
+	Name string
 }
 
 // LoadSource parses source and loads its CONFIGURATION (the first, if
@@ -143,10 +149,13 @@ func LoadSourceWith(source string, opt LoadOptions) (*Configuration, error) {
 	configIndex := -1
 	var config *ast.ConfigurationDeclaration
 	for i, s := range base.Statements {
-		if cd, ok := s.(*ast.ConfigurationDeclaration); ok {
+		if cd, ok := s.(*ast.ConfigurationDeclaration); ok && (opt.Name == "" || cd.Name != nil && strings.EqualFold(cd.Name.Value, opt.Name)) {
 			configIndex, config = i, cd
 			break
 		}
+	}
+	if config == nil && opt.Name != "" {
+		return nil, fmt.Errorf("no CONFIGURATION %s in the source", opt.Name)
 	}
 	if config == nil {
 		return nil, fmt.Errorf("no CONFIGURATION in the source")
@@ -156,10 +165,11 @@ func LoadSourceWith(source string, opt LoadOptions) (*Configuration, error) {
 		return nil, fmt.Errorf("VAR_CONFIG path '%s' does not name a variable of a program instance in configuration '%s'", unmatched[0].AccessPath.String(), config.Name.Value)
 	}
 	c := &Configuration{
-		Name:    config.Name.Value,
-		IO:      map[string]object.Object{},
-		globals: map[string]object.Object{},
-		names:   map[string]string{},
+		Name:             config.Name.Value,
+		IO:               map[string]object.Object{},
+		allowInputWrites: opt.AllowInputWrites,
+		globals:          map[string]object.Object{},
+		names:            map[string]string{},
 	}
 	for ri, res := range config.Resources {
 		r := &Resource{Name: res.Name.Value}
@@ -184,6 +194,7 @@ func LoadSourceWith(source string, opt LoadOptions) (*Configuration, error) {
 			if err != nil {
 				return nil, fmt.Errorf("program %s: %w", pc.InstanceName.Value, err)
 			}
+			inst.resource = r
 			r.Instances = append(r.Instances, inst)
 			if pc.TaskName == nil {
 				r.background = append(r.background, inst)
@@ -298,6 +309,8 @@ func (c *Configuration) load(source string, configIndex, ri, pi int, entries []*
 	inst := &Instance{
 		Name:      pc.InstanceName.Value,
 		Type:      pd.Name.Value,
+		config:    c,
+		compiled:  compiled,
 		globals:   make([]object.Object, vm.GlobalsSize),
 		slots:     map[string]int{},
 		addresses: map[string]string{},
@@ -409,25 +422,86 @@ func find(name string, blocks ...[]*ast.VarDeclStatement) *ast.VarDeclStatement 
 // Cycle runs the tasks that are due at now, the time since the
 // configuration started, which the standard timers also read.
 func (c *Configuration) Cycle(now time.Duration) error {
-	c.now = now
-	for _, r := range c.Resources {
-		for _, task := range r.Tasks {
-			if !c.due(task) {
-				continue
-			}
-			for _, inst := range task.Instances {
-				if err := c.run(inst); err != nil {
-					return fmt.Errorf("resource %s, task %s: %w", r.Name, task.Name, err)
-				}
-			}
+	cy := c.Begin(now)
+	for inst := cy.Next(); inst != nil; inst = cy.Next() {
+		inst.In()
+		if err := inst.VM().Run(); err != nil {
+			return cy.Wrap(fmt.Errorf("program %s: %w", inst.Name, err))
 		}
-		for _, inst := range r.background {
-			if err := c.run(inst); err != nil {
-				return fmt.Errorf("resource %s: %w", r.Name, err)
+		inst.Out()
+	}
+	return nil
+}
+
+// A CycleRun is one cycle of the configuration that a host runs instance
+// by instance, as a debugger does to stop inside one: Next gives each
+// instance due in turn, in Cycle's order; the host calls the instance's
+// In, runs its VM to the end, and calls its Out before the next.
+type CycleRun struct {
+	c        *Configuration
+	ri, ti   int // the resource, and the task in it (len(Tasks): its background)
+	ii       int // the next instance of that task
+	resource *Resource
+	task     *Task // the task of the last instance Next gave; nil in a background task
+}
+
+// Begin starts the cycle at now, the time since the configuration
+// started, which the standard timers also read.
+func (c *Configuration) Begin(now time.Duration) *CycleRun {
+	c.now = now
+	return &CycleRun{c: c, ti: -1}
+}
+
+// Next is the next instance due in the cycle, nil at its end. A task's
+// INTERVAL or SINGLE trigger is read when the cycle reaches it, after the
+// tasks before it have run, as Cycle reads it.
+func (cy *CycleRun) Next() *Instance {
+	for cy.ri < len(cy.c.Resources) {
+		r := cy.c.Resources[cy.ri]
+		cy.resource = r
+		var list []*Instance
+		switch {
+		case cy.ti >= 0 && cy.ti < len(r.Tasks):
+			list = r.Tasks[cy.ti].Instances
+		case cy.ti == len(r.Tasks):
+			list = r.background
+		}
+		if cy.ti >= 0 && cy.ii < len(list) {
+			cy.ii++
+			if cy.ti < len(r.Tasks) {
+				cy.task = r.Tasks[cy.ti]
+			} else {
+				cy.task = nil
 			}
+			return list[cy.ii-1]
+		}
+		// The next task of the resource that is due, or its background.
+		cy.ii = 0
+		for cy.ti++; cy.ti < len(r.Tasks) && !cy.c.due(r.Tasks[cy.ti]); cy.ti++ {
+		}
+		if cy.ti > len(r.Tasks) {
+			cy.ri, cy.ti = cy.ri+1, -1
 		}
 	}
 	return nil
+}
+
+// Task is the task of the instance Next gave last; nil for one with no
+// task.
+func (cy *CycleRun) Task() *Task { return cy.task }
+
+// Resource is the resource of the instance Next gave last.
+func (cy *CycleRun) Resource() *Resource { return cy.resource }
+
+// Wrap says where in the cycle err happened, as Cycle's errors do.
+func (cy *CycleRun) Wrap(err error) error {
+	if cy.resource == nil {
+		return err
+	}
+	if cy.task == nil {
+		return fmt.Errorf("resource %s: %w", cy.resource.Name, err)
+	}
+	return fmt.Errorf("resource %s, task %s: %w", cy.resource.Name, cy.task.Name, err)
 }
 
 // due reports whether a task runs in the cycle at c.now, and records it.
@@ -448,26 +522,52 @@ func (c *Configuration) due(task *Task) bool {
 	return true
 }
 
-// run runs one scan of an instance: the shared globals and its connected
-// inputs in, its body, the shared globals and its connected outputs out.
-func (c *Configuration) run(inst *Instance) error {
-	for name, slot := range inst.shared {
-		inst.globals[slot] = c.globals[name]
+// In starts a run of the instance: the shared globals and its connected
+// inputs in, its VM at the start of its body.
+func (i *Instance) In() {
+	c := i.config
+	for name, slot := range i.shared {
+		i.globals[slot] = c.globals[name]
 	}
-	for _, in := range inst.inputs {
-		inst.globals[in.slot] = object.CopyValue(c.globals[in.global])
+	for _, in := range i.inputs {
+		i.globals[in.slot] = object.CopyValue(c.globals[in.global])
 	}
-	inst.scan.Reset()
-	if err := inst.scan.Run(); err != nil {
-		return fmt.Errorf("program %s: %w", inst.Name, err)
+	i.scan.Reset()
+}
+
+// Out ends a run of the instance: the shared globals and its connected
+// outputs out.
+func (i *Instance) Out() {
+	c := i.config
+	for name, slot := range i.shared {
+		c.globals[name] = i.globals[slot]
 	}
-	for name, slot := range inst.shared {
-		c.globals[name] = inst.globals[slot]
+	for _, out := range i.outputs {
+		c.globals[out.global] = object.CopyValue(i.globals[out.slot])
 	}
-	for _, out := range inst.outputs {
-		c.globals[out.global] = object.CopyValue(inst.globals[out.slot])
-	}
-	return nil
+}
+
+// VM is the VM that runs the instance's body; In resets it.
+func (i *Instance) VM() *vm.VM { return i.scan }
+
+// Compiled is the instance's program as compiled.
+func (i *Instance) Compiled() *compiler.CompiledProgram { return i.compiled }
+
+// Store is the instance's globals store, which its VM and Compiled's
+// variables' slots index.
+func (i *Instance) Store() []object.Object { return i.globals }
+
+// Resource is the resource the instance is declared in.
+func (i *Instance) Resource() *Resource { return i.resource }
+
+// Path is the instance's name under its resource, "R1.P1".
+func (i *Instance) Path() string { return i.resource.Name + "." + i.Name }
+
+// SharedSlot is the slot of a configuration global in the instance's
+// store, by name; false if the instance does not share it.
+func (i *Instance) SharedSlot(name string) (int, bool) {
+	slot, ok := i.shared[strings.ToUpper(name)]
+	return slot, ok
 }
 
 // Run runs cycles every period on the wall clock until ctx ends, and
