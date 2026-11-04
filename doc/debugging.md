@@ -279,8 +279,6 @@ configuration.
 ## Not yet
 
 - One source file per session.
-- The go engine in a browser: the program must be built by a service and
-  returned as a WebAssembly module the page runs beside the engine.
 - The firmware `-embedded` generates carries no line table, so it cannot
   be debugged at source level on the board; the go engine's hooks
   (`transpiler.Options.Debug`) are the way there.
