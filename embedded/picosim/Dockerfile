@@ -7,7 +7,7 @@
 #   docker build -f embedded/picosim/Dockerfile -t beedance-picosim .
 #   docker run --rm -p 4000:4000 -p 3333:3333 beedance-picosim
 
-ARG TINYGO_VERSION=0.43.0
+ARG TINYGO_VERSION=0.44.0
 ARG NODE_VERSION=22
 
 FROM tinygo/tinygo:${TINYGO_VERSION} AS firmware
@@ -16,7 +16,7 @@ FROM tinygo/tinygo:${TINYGO_VERSION} AS firmware
 ARG TARGET=pico
 ARG PKG=./embedded/example/raspberrypi
 USER root
-# Build with the Go that ships in the image (TinyGo 0.43.0 has Go 1.27.2)
+# Build with the Go that ships in the image (TinyGo 0.44.0 has Go 1.27.3)
 # rather than downloading the newer patch release go.mod may ask for. Only the
 # container's copy of go.mod is lowered, and only when it is newer.
 ENV GOTOOLCHAIN=local

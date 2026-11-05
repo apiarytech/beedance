@@ -1,4 +1,4 @@
-/* From TinyGo 0.43.0, targets/esp32c6.ld (BSD 3-Clause, see LICENSE.tinygo),
+/* From TinyGo 0.44.0, targets/esp32c6.ld (BSD 3-Clause, see LICENSE.tinygo),
  * changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
  * an esp_app_desc_t at the start of .data, segment 0 on the C6, which the bootloader checks. */
 

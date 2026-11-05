@@ -28,10 +28,6 @@ firmware starts on connect). The example prints, on the ESP32-C3:
 ```text
 ESP-ROM:esp32c3-api1-20210207
 ...
-I (0) boot: ESP-IDF v5.4.4-1438-g962f1ee3888 2nd stage bootloader
-...
-I (18) boot: Loaded app from partition at offset 0x10000
-...
 Starting embedded beedance VM...
 VM execution finished.
 Result: 30
@@ -42,27 +38,29 @@ Result: 30
 | `CHIP` | Core | How it boots | QEMU |
 |---|---|---|---|
 | `esp32` | Xtensa | TinyGo's `esp32-qemu` target, from the ROM | `qemu-system-xtensa -machine esp32` |
-| `esp32c3` | RISC-V | ESP-IDF's bootloader, then the app built with `tinygo/esp32c3-idf.json` | `qemu-system-riscv32 -machine esp32c3 -icount 3` |
-| `esp32s3` | Xtensa | ESP-IDF's bootloader, then the app built with `tinygo/esp32s3-idf.json` | `qemu-system-xtensa -machine esp32s3` |
+| `esp32c3` | RISC-V | `tinygo/esp32c3-sim.json`, from the ROM | `qemu-system-riscv32 -machine esp32c3 -icount 3` |
+| `esp32s3` | Xtensa | `tinygo/esp32s3-sim.json`, from the ROM | `qemu-system-xtensa -machine esp32s3` |
 | `esp32c6` | RISC-V | ESP-IDF's bootloader, then the app built with `tinygo/esp32c6-idf.json` | `qemu-system-riscv32 -machine esp32c6 -icount 3`, built from source |
 
 - **ESP32**: TinyGo writes a `.img`, a whole 4 MB flash image with the
   program at `0x1000`, where the ESP32's ROM loads it.
-- **ESP32-C3, ESP32-S3 and ESP32-C6**: the ROM cannot load a TinyGo image:
-  it has segments mapped from flash, which only a bootloader sets up (the
-  ROM faults copying one, at `0x3c000020` on the C3). So the flash image is
+- **ESP32-C3 and ESP32-S3**: the ROM loads TinyGo's image from flash offset
+  0, with code and read-only data mapped by TinyGo's startup code (since
+  TinyGo 0.44). [tinygo](tinygo/) holds a target for each that sends output
+  to UART0 rather than USB.
+- **ESP32-C6**: the ROM cannot load a TinyGo image: it has segments mapped
+  from flash, which only a bootloader sets up. So the flash image is
   ESP-IDF's: its second-stage bootloader at `0x0`, the partition table at
   `0x8000` (both in [boot](boot/README.md), built by ESP-IDF v5.4) and the
   app at `0x10000`. Two changes to TinyGo's target make the app bootable
-  there ([tinygo](tinygo/), copies of TinyGo 0.43.0's files):
-  - the linker script starts segment 0 (`.rodata`; `.data` on the C6) with
-    an `esp_app_desc_t`, the app description ESP-IDF's bootloader requires
-    (without it the bootloader reads TinyGo's data as one and refuses the
-    app: `Image requires efuse blk rev >= v596.79`);
-  - the startup code maps flash from the app partition at `0x10000`,
-    instead of from 0 as when the ROM starts the program. On the C6, code
-    (`0x42000000`) and read-only data (`0x42800000`) are mapped separately:
-    TinyGo maps one 16 MB window, which puts the data 8 MB into flash and
+  there ([tinygo](tinygo/), copies of TinyGo 0.44.0's files):
+  - the linker script starts segment 0 (`.data`) with an `esp_app_desc_t`,
+    the app description ESP-IDF's bootloader requires (without it the
+    bootloader reads TinyGo's data as one and refuses the app:
+    `Image requires efuse blk rev >= v596.79`);
+  - the startup code maps code (`0x42000000`) and read-only data
+    (`0x42800000`) separately from the app partition at `0x10000`. TinyGo
+    maps one 16 MB window from 0, which puts the data 8 MB into flash and
     relies on the flash chip wrapping addresses, which QEMU does not.
 
   The C6 needs two more things. Its QEMU machine is in Espressif's source
@@ -71,7 +69,7 @@ Result: 30
   for 4 MB of flash: the C6's MMU page size follows the flash size, and
   the app is built for 64 KB pages.
 
-  The same targets build firmware for real boards booted by ESP-IDF's
+  The same target builds firmware for real boards booted by ESP-IDF's
   bootloader (`esptool.py write_flash 0x0 bootloader.bin 0x8000
   partition-table.bin 0x10000 app.bin`).
 
@@ -84,7 +82,7 @@ Result: 30
   been tried on a board. The test passes because the VM has finished by
   then.
 - **Not emulated**: the ESP32-S2, H2, C2 and P4. Espressif's QEMU has no
-  machine for them. TinyGo 0.43 builds firmware for the H2
+  machine for them. TinyGo 0.44 builds firmware for the H2
   (`esp32h2-devkitm-1`), to be tried on a board, but has no target for the
   S2, C2 and P4 (only their register definitions). On every chip, Wi-Fi,
   Bluetooth and most peripherals are not emulated. TinyGo builds firmware
@@ -98,7 +96,7 @@ Build arguments pick what is built:
 |---|---|---|
 | `CHIP` | `esp32` | `esp32`, `esp32c3`, `esp32s3` or `esp32c6` |
 | `PKG` | `./embedded/example/raspberrypi` | Go package to build |
-| `TINYGO_VERSION` | `0.43.0` | The `tinygo/` files are TinyGo 0.43.0's: check them against a new version |
+| `TINYGO_VERSION` | `0.44.0` | The `tinygo/` files are TinyGo 0.44.0's: check them against a new version |
 | `QEMU_TAG`, `QEMU_VERSION` | `esp-develop-9.2.2-20260417` | Espressif QEMU release (ESP32, C3, S3) |
 | `QEMU_COMMIT` | `febae182e132e4055529be423a818225ebddaa3a` | Espressif QEMU source the C6's is built from |
 

@@ -201,7 +201,7 @@ jobs:
       - name: Set up TinyGo
         uses: acifani/setup-tinygo@v3
         with:
-          tinygo-version: '0.43.0' # Specify the TinyGo version you want to use
+          tinygo-version: '0.44.0' # Specify the TinyGo version you want to use
 
       # Each test runs in a goroutine, whose stack TinyGo does not grow: the
       # parser and compiler recurse deeply, and compiling the OSCAT library
@@ -235,7 +235,7 @@ jobs:
       - name: Set up TinyGo
         uses: acifani/setup-tinygo@v3
         with:
-          tinygo-version: '0.43.0'
+          tinygo-version: '0.44.0'
 
       - name: Build the embedded VM example
         run: tinygo build -target=${{ matrix.target }} -size short -o beedance-${{ matrix.target }}.uf2 ./embedded/example/raspberrypi/
@@ -315,8 +315,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # TinyGo firmware on Espressif's QEMU; the C3, S3 and C6 boot through
-      # ESP-IDF's bootloader. See embedded/esp32sim/README.md.
+      # TinyGo firmware on Espressif's QEMU; the C6 boots through ESP-IDF's
+      # bootloader. See embedded/esp32sim/README.md.
       - name: Build the emulator image
         run: docker build -f embedded/esp32sim/Dockerfile --build-arg CHIP=${{ matrix.chip }} -t beedance-esp32sim .
 

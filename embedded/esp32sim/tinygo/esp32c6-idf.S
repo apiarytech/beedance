@@ -1,4 +1,4 @@
-// From TinyGo 0.43.0, src/device/esp/esp32c6.S (BSD 3-Clause, see LICENSE.tinygo),
+// From TinyGo 0.44.0, src/device/esp/esp32c6.S (BSD 3-Clause, see LICENSE.tinygo),
 // changed for ESP-IDF's second-stage bootloader (embedded/esp32sim):
 // IROM and DROM are each mapped from 0x10000, the app partition, instead of
 // one 16MB window from 0.
