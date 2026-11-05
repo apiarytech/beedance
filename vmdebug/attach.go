@@ -181,7 +181,7 @@ func (s *Session) Scan() error {
 		return ErrStopped
 	}
 	if !s.midScan {
-		if s.pauseReq.Swap(false) {
+		if s.ctx != nil && s.pauseReq.Swap(false) {
 			return s.stopAttached(s.between(OnPause)) // before the scan: it is not started
 		}
 		s.beginScan()
@@ -218,9 +218,10 @@ func (s *Session) Scan() error {
 // needsHook reports whether the next scan needs the debugger's hook in
 // it: a breakpoint, a step, or a pause asked for. Without one the scan
 // runs at the VM's full speed, and a pause takes effect before the next
-// scan.
+// scan. A pause waits for a run (see Pause): the next run would take a stop
+// that no run waited for as stale, and the program would go on.
 func (s *Session) needsHook() bool {
-	if s.mode != modeContinue || s.pauseReq.Load() {
+	if s.mode != modeContinue || s.ctx != nil && s.pauseReq.Load() {
 		return true
 	}
 	s.cmu.Lock()
