@@ -31,7 +31,7 @@ that is not a test. A `launch.json` chooses more:
 | Attribute | Default | |
 |---|---|---|
 | `program` | the file in the editor | the `.st` file |
-| `programName` | the first `PROGRAM` that is not a `TEST_` | the `PROGRAM` to run |
+| `programName` | the first `PROGRAM` that is not a `TEST_` | the `PROGRAM` to run, or a `CONFIGURATION` (see [A configuration](#a-configuration)) |
 | `interval` | `10ms` | the scan time: the clock moves this much each scan |
 | `realtime` | `true` | run the scans an interval apart on the wall clock; `false` runs them as fast as they go |
 | `stopOnEntry` | `false` | stop before the first scan |
@@ -177,6 +177,25 @@ the program's, so a running plant keeps its state while the program is
 tuned. The PROGRAM debugged by default is the first that is neither a
 test nor a plant model.
 
+## A configuration
+
+`programName` may name a `CONFIGURATION`: its program instances then run
+on their tasks as package vmconfig runs them (`INTERVAL`, `SINGLE`,
+`PRIORITY`, the programs with no task last), on the VM only. A scan is one
+cycle: the instances due run one after another, on the session's clock.
+
+- A breakpoint on a line of a program stops every instance of it, in turn;
+  a line of a program the configuration has no instance of is refused.
+- The body's frame is named for the instance (`R1.P1`); its scope `Locals`
+  lists the instance's variables.
+- The scope `CONFIGURATION CELL` lists the configuration's and resources'
+  globals, then each resource, whose members are its instances.
+- Names are paths, as `VAR_CONFIG` writes them: `R1.P1.n` in watches,
+  evaluate, set and force; a global by its name. While an instance runs,
+  a global it shares reads and writes its copy.
+- Online change carries each instance's variables by its path; an
+  instance added or removed is reported as such. The tasks start over.
+
 ## In a web page
 
 The WebAssembly build of beedance serves the same adapter to a page, one
@@ -260,8 +279,6 @@ configuration.
 ## Not yet
 
 - One source file per session.
-- The go engine in a browser: the program must be built by a service and
-  returned as a WebAssembly module the page runs beside the engine.
 - The firmware `-embedded` generates carries no line table, so it cannot
   be debugged at source level on the board; the go engine's hooks
   (`transpiler.Options.Debug`) are the way there.

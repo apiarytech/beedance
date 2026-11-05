@@ -190,6 +190,17 @@ func ideOp(req Request) (reply any, ok bool, err error) {
 			r.Diagrams = append(r.Diagrams, diagramInfo{Diagram: d, Watches: w})
 		}
 		return r, true, nil
+	case "apply":
+		// A gesture on a diagram: the edits that make it, and the source
+		// they make, checked to read no worse (ide.Index.Apply).
+		if req.Gesture == nil {
+			return nil, true, errors.New(`apply: give "gesture"`)
+		}
+		res, err := ide.Analyze(req.Source).Apply(*req.Gesture)
+		if err != nil {
+			return nil, true, err
+		}
+		return res, true, nil
 	case "hover", "complete", "definition", "references", "rename":
 	default:
 		return nil, false, nil

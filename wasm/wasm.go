@@ -28,6 +28,8 @@
 //	{"op":"hover","source":"...","line":3,"column":5} also complete, definition,
 //	                                                 references, rename ("newName")
 //	{"op":"diagrams","source":"..."}                 LD, FBD and SFC bodies as SVG
+//	{"op":"apply","source":"...","gesture":{"op":"ld.contact","at":{"row":5,"column":7},
+//	 "where":"after","name":"stop","mode":"/"}}      a diagram gesture as text edits
 //	{"op":"load","source":"...","program":"Main","intervalMs":10}
 //	{"op":"scan","session":1,"count":1,"values":{"start":true,"%IX0.0":true}}
 //	{"op":"set","session":1,"values":{...}}
@@ -51,10 +53,10 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/ide"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
-	"github.com/apiarytech/beedance/vmdebug"
 )
 
 // Request is one call. Only the fields its op uses are read.
@@ -87,6 +89,8 @@ type Request struct {
 	Line    int    `json:"line,omitempty"`
 	Column  int    `json:"column,omitempty"`
 	NewName string `json:"newName,omitempty"`
+	// apply: the gesture on a diagram (package ide's Gesture).
+	Gesture *ide.Gesture `json:"gesture,omitempty"`
 }
 
 // Host answers requests. It holds the sessions load starts; it is safe for
@@ -142,7 +146,7 @@ func (h *Host) Do(req Request) (any, error) {
 	switch strings.ToLower(req.Op) {
 	case "version":
 		return versionReply{GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Ops: ops,
-			Engines: []string{string(vmdebug.EngineVM), string(vmdebug.EngineEvaluator)}}, nil
+			Engines: debugEngines, Debugger: len(debugEngines) > 0}, nil
 	case "check":
 		return check(req.Source), nil
 	case "test":
@@ -166,7 +170,7 @@ func (h *Host) Do(req Request) (any, error) {
 // ops are the ops this build answers: these, and the full build's
 // (full.go; a build with -tags lite leaves them out).
 var ops = append([]string{"version", "check", "exportXML", "importXML", "lint", "hover", "complete",
-	"definition", "references", "rename", "outline", "diagrams", "load", "scan", "set", "read", "unload"}, buildOps...)
+	"definition", "references", "rename", "outline", "diagrams", "apply", "load", "scan", "set", "read", "unload"}, buildOps...)
 
 type versionReply struct {
 	GoVersion string   `json:"goVersion"`
@@ -174,10 +178,13 @@ type versionReply struct {
 	GOARCH    string   `json:"goarch"`
 	Ops       []string `json:"ops"`
 	// Engines are the debugger's engines this module can launch a program
-	// on (the launch request's "engine"): the VM and the evaluator; the
-	// go engine needs the Go toolchain, which a WebAssembly module has
-	// not got.
+	// on (the launch request's "engine"): the VM and the evaluator; none
+	// in a build with no debugger (-tags nodebug). The go engine is not
+	// listed: a page gives it a build (beedance.dap's goStart).
 	Engines []string `json:"engines"`
+	// Debugger reports whether the module has the debugger (beedance.dap);
+	// a build with -tags nodebug has not.
+	Debugger bool `json:"debugger"`
 }
 
 type checkReply struct {
@@ -186,6 +193,9 @@ type checkReply struct {
 	// Programs are the PROGRAMs declared, tests among them.
 	Programs []string `json:"programs"`
 	Tests    []string `json:"tests"`
+	// Configurations are the CONFIGURATIONs declared, which a debugger
+	// launches as it launches a PROGRAM (programName).
+	Configurations []string `json:"configurations"`
 	// POUs are the source's declarations, in order: an editor's outline
 	// and the scopes of a search.
 	POUs []pouInfo `json:"pous"`
@@ -215,7 +225,12 @@ func check(source string) checkReply {
 	p := parser.New(lexer.New(source))
 	program := p.ParseProgram()
 	r := checkReply{OK: len(p.Errors()) == 0, Errors: p.Errors(), Programs: []string{}, Tests: []string{},
-		POUs: outline(program), Located: []locatedInfo{}}
+		Configurations: []string{}, POUs: outline(program), Located: []locatedInfo{}}
+	for _, st := range program.Statements {
+		if cd, ok := st.(*ast.ConfigurationDeclaration); ok && cd.Name != nil {
+			r.Configurations = append(r.Configurations, cd.Name.Value)
+		}
+	}
 	for _, pd := range programs(program) {
 		name := pd.Name.Value
 		r.Programs = append(r.Programs, name)

@@ -95,6 +95,22 @@ func TestCheck(t *testing.T) {
 	if got := len(reply["tests"].([]any)); got != 3 {
 		t.Errorf("%d tests, want 3", got)
 	}
+	if got := reply["configurations"].([]any); len(got) != 0 {
+		t.Errorf("configurations %v, want none", got)
+	}
+	cfg := call(t, New(), map[string]any{"op": "check", "source": `PROGRAM P
+VAR n : INT; END_VAR
+n := n + 1;
+END_PROGRAM
+CONFIGURATION CELL
+RESOURCE R1 ON PLC
+PROGRAM P1 : P;
+END_RESOURCE
+END_CONFIGURATION
+`})
+	if got := cfg["configurations"].([]any); len(got) != 1 || got[0] != "CELL" {
+		t.Errorf("configurations %v, want [CELL]", got)
+	}
 	// The outline, for an editor's search, and the program's I/O.
 	var outline []string
 	for _, p := range reply["pous"].([]any) {

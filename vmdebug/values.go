@@ -123,9 +123,11 @@ func (img *image) whyNotRun(line int) string {
 		in = pd // nil after a POU that is no PROGRAM
 	}
 	switch {
-	case in == nil || in == img.decl || in.Name == nil:
+	case in == nil || in.Name == nil || img.runs(in):
 	case IsPlant(in.Name.Value):
 		return fmt.Sprintf("%s is a plant model: it runs after each scan, and no breakpoint stops it", in.Name.Value)
+	case img.config != nil:
+		return fmt.Sprintf("PROGRAM %s does not run in this session: CONFIGURATION %s has no instance of it", in.Name.Value, img.name)
 	default:
 		return fmt.Sprintf("PROGRAM %s does not run in this session: it runs PROGRAM %s. Debug %s instead, or run both from a CONFIGURATION's tasks",
 			in.Name.Value, img.name, in.Name.Value)

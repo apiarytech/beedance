@@ -74,6 +74,10 @@ type Server struct {
 	YieldEvery time.Duration
 	// Yield is the sessions' vmdebug.Options.Yield.
 	Yield func()
+	// GoStart, if set, is the sessions' vmdebug.GoBuild.Start: how the go
+	// engine's program is built and started where there is no Go
+	// toolchain (a web page: a build service and a Web Worker).
+	GoStart func(vmdebug.GoStart) (io.ReadWriteCloser, error)
 	// Attach, if set, answers the attach request: a host with programs
 	// of its own (beehive's logic) gives the session attached to the one
 	// asked for (attach.go). Without it, attach is refused.
@@ -268,7 +272,7 @@ func (s *Server) handle(m *message) (done bool) {
 	case "threads":
 		name := "PROGRAM"
 		if s.sess != nil {
-			name = "PROGRAM " + s.name()
+			name = s.kind() + s.name()
 		}
 		s.reply(m, map[string]any{"threads": []thread{{ID: 1, Name: name}}})
 	case "stackTrace":
@@ -444,6 +448,15 @@ func (s *Server) handle(m *message) (done bool) {
 
 func (s *Server) name() string { return s.sess.Program() }
 
+// kind is what the session runs, before its name: "PROGRAM " or
+// "CONFIGURATION ".
+func (s *Server) kind() string {
+	if s.sess.Configuration() {
+		return "CONFIGURATION "
+	}
+	return "PROGRAM "
+}
+
 // launch loads the program a names.
 func (s *Server) launch(a launchArgs) error {
 	if a.Program == "" {
@@ -471,7 +484,7 @@ func (s *Server) launch(a launchArgs) error {
 	o := vmdebug.Options{Program: a.ProgramName, Engine: engine, Realtime: a.Realtime == nil || *a.Realtime,
 		AllowInputWrites: a.AllowInputWrites, YieldEvery: s.YieldEvery, Yield: s.Yield,
 		Notify:  func(msg string) { s.output("stderr", msg) },
-		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace}}
+		GoBuild: vmdebug.GoBuild{Replace: a.GoReplace, Start: s.GoStart}}
 	if a.ScanEvents > 0 {
 		every := time.Duration(a.ScanEvents) * time.Millisecond
 		o.Sampled = func(smp vmdebug.Sample) {
@@ -723,7 +736,7 @@ func (s *Server) scopes(frame int) []scope {
 	if frame > 0 || len(s.sess.Locals(frame)) > 0 {
 		out = append(out, scope{Name: "Locals", PresentationHint: "locals", VariablesReference: s.ref(varRef{kind: refLocals, frame: frame})})
 	}
-	out = append(out, scope{Name: "PROGRAM " + s.name(), VariablesReference: s.ref(varRef{kind: refProgram})})
+	out = append(out, scope{Name: s.kind() + s.name(), VariablesReference: s.ref(varRef{kind: refProgram})})
 	for i, name := range s.sess.Plants() {
 		out = append(out, scope{Name: "PLANT " + name, VariablesReference: s.ref(varRef{kind: refPlant, frame: i})})
 	}

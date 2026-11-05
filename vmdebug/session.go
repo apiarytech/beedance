@@ -47,7 +47,9 @@ import (
 // Options configure a Session.
 type Options struct {
 	// Program is the PROGRAM to run; empty is the first that is not a
-	// test (TEST_...), else the first.
+	// test (TEST_...), else the first. It may name a CONFIGURATION
+	// instead: its program instances then run on their tasks, a scan
+	// being one cycle of the configuration (on the VM only).
 	Program string
 	// Engine runs the program: the VM (EngineVM, the default), the
 	// evaluator (EngineEvaluator) or a transpiled program (EngineGo).
@@ -196,9 +198,10 @@ const (
 // image is what Load or Change made of a source.
 type image struct {
 	source  string
-	name    string // the PROGRAM's name, as declared
+	name    string // the PROGRAM's name, as declared, or the CONFIGURATION's
 	program *ast.Program
-	decl    *ast.ProgramDeclaration
+	decl    *ast.ProgramDeclaration       // nil for a configuration
+	config  *ast.ConfigurationDeclaration // the configuration run, if one is
 	eng     engine
 
 	vars    []watch.Variable
@@ -269,10 +272,14 @@ func (s *Session) build(source, name string) (*image, error) {
 		return nil, err
 	}
 	clock := func() time.Duration { return s.elapsed }
-	switch s.opts.Engine {
-	case EngineEvaluator:
+	switch {
+	case img.config != nil && s.opts.Engine != EngineVM:
+		return nil, fmt.Errorf("CONFIGURATION %s runs on the VM engine only", img.name)
+	case img.config != nil:
+		img.eng, err = newConfigEngine(img, s.opts, clock)
+	case s.opts.Engine == EngineEvaluator:
 		img.eng, err = newEvalEngine(img, s.opts, s.evalSession)
-	case EngineGo:
+	case s.opts.Engine == EngineGo:
 		img.eng, err = newGoEngine(img, s.opts, clock)
 	default:
 		img.eng, err = newVMEngine(img, s.opts, clock)
@@ -296,12 +303,17 @@ func (s *Session) analyze(source, name string) (*image, error) {
 	if errs := p.Errors(); len(errs) > 0 {
 		return nil, fmt.Errorf("parse: %s", strings.Join(errs, "; "))
 	}
-	decl, err := pick(program, name)
-	if err != nil {
-		return nil, err
-	}
-	img := &image{source: source, name: decl.Name.Value, program: program, decl: decl,
+	img := &image{source: source, program: program,
 		decls: map[string]Variable{}, located: map[string]Variable{}, userPOU: map[string]bool{}}
+	if img.config = pickConfiguration(program, name); img.config != nil {
+		img.name = img.config.Name.Value
+	} else {
+		decl, err := pick(program, name)
+		if err != nil {
+			return nil, err
+		}
+		img.name, img.decl = decl.Name.Value, decl
+	}
 	// The source's own POUs, before compiling adds the standard ones.
 	for _, st := range program.Statements {
 		var pou string
@@ -320,8 +332,80 @@ func (s *Session) analyze(source, name string) (*image, error) {
 			img.pouRows = append(img.pouRows, row)
 		}
 	}
-	img.vars = watch.Variables(program, decl, s.opts.Watch)
+	if img.config != nil {
+		img.vars = configVariables(program, img.config, s.opts.Watch)
+	} else {
+		img.vars = watch.Variables(program, img.decl, s.opts.Watch)
+	}
 	return img, nil
+}
+
+// pickConfiguration finds the CONFIGURATION named name, or nil; an empty
+// name picks a PROGRAM, not a configuration.
+func pickConfiguration(program *ast.Program, name string) *ast.ConfigurationDeclaration {
+	if name == "" {
+		return nil
+	}
+	for _, st := range program.Statements {
+		if cd, ok := st.(*ast.ConfigurationDeclaration); ok && cd.Name != nil && strings.EqualFold(cd.Name.Value, name) {
+			return cd
+		}
+	}
+	return nil
+}
+
+// runs reports whether the session runs pd: it is the program debugged,
+// or the configuration debugged has an instance of it.
+func (img *image) runs(pd *ast.ProgramDeclaration) bool {
+	if img.config == nil {
+		return pd == img.decl
+	}
+	for _, r := range img.config.Resources {
+		for _, pc := range r.Programs {
+			if pc.TypeName != nil && pd.Name != nil && strings.EqualFold(pc.TypeName.Value, pd.Name.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Instance is a program instance of the configuration a session runs.
+type Instance struct {
+	// Path is the instance's name under its resource, "R1.P1", the
+	// prefix of its variables' names.
+	Path string
+	// Type is its PROGRAM.
+	Type string
+}
+
+// Instances are the program instances of the configuration the session
+// runs, in declaration order; none for a PROGRAM. It may be called while a
+// run is in progress.
+func (s *Session) Instances() []Instance {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	var out []Instance
+	if s.img.config == nil {
+		return out
+	}
+	for _, r := range s.img.config.Resources {
+		for _, pc := range r.Programs {
+			if r.Name != nil && pc.InstanceName != nil && pc.TypeName != nil {
+				out = append(out, Instance{Path: r.Name.Value + "." + pc.InstanceName.Value, Type: pc.TypeName.Value})
+			}
+		}
+	}
+	return out
+}
+
+// Configuration reports whether the session runs a CONFIGURATION (its
+// name is Program) rather than a PROGRAM. It may be called while a run is
+// in progress.
+func (s *Session) Configuration() bool {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	return s.img.config != nil
 }
 
 // index reads what the debugger needs of img's engine: its variables by

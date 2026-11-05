@@ -70,6 +70,21 @@ c.SetGlobal("trig", &object.Boolean{Value: true}) // e.g. a SINGLE trigger
 err = c.Run(ctx, 10*time.Millisecond) // or cycles on the wall clock until ctx ends
 ```
 
+A host that runs each instance itself (the debugger, to stop inside one)
+steps through a cycle; `Cycle` is this loop:
+
+```go
+cy := c.Begin(elapsed)
+for inst := cy.Next(); inst != nil; inst = cy.Next() {
+	inst.In()                  // shared globals and connected inputs in
+	err := inst.VM().Run()     // the body; cy.Wrap(err) says where
+	inst.Out()                 // shared globals and connected outputs out
+}
+```
+
+`LoadOptions.Name` picks a configuration of a source that declares
+several.
+
 Two resources share one scope of globals, so they may not declare the same
 name. A `VAR_CONFIG` path reaches a program's variable or a member of one of
 its instances, not deeper.

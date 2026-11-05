@@ -96,3 +96,33 @@ func TestDiagramsLive(t *testing.T) {
 	c.ok("pause", map[string]any{"threadId": 1}, nil)
 	c.event("stopped")
 }
+
+// TestDiagramsConfiguration: under a CONFIGURATION, a function block's
+// body is seen through the first instance's variable of its type.
+func TestDiagramsConfiguration(t *testing.T) {
+	src := ldProgram + `CONFIGURATION CELL
+VAR_GLOBAL END_VAR
+RESOURCE R1 ON PLC
+PROGRAM P1 : Main;
+END_RESOURCE
+END_CONFIGURATION
+`
+	c := newClient(t)
+	c.ok("initialize", map[string]any{"adapterID": "beedance"}, nil)
+	c.ok("launch", map[string]any{"program": "main.st", "source": src, "programName": "CELL", "speed": 0, "stopOnEntry": true}, nil)
+	c.event("initialized")
+	c.ok("configurationDone", nil, nil)
+	c.event("stopped")
+	c.ok("beedance/force", map[string]any{"name": "R1.P1.go", "value": "TRUE"}, nil)
+	c.ok("beedance/stepScan", nil, nil)
+	c.event("stopped")
+	var r liveReply
+	c.ok("beedance/diagrams", nil, &r)
+	if r.Program != "CELL" || len(r.Diagrams) != 1 {
+		t.Fatalf("diagrams %+v", r)
+	}
+	d := r.Diagrams[0]
+	if d.Prefix != "R1.P1.m." || d.Live == nil || d.Live.Values["Run"] != "TRUE" {
+		t.Fatalf("diagram %+v", d)
+	}
+}

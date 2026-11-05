@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,51 @@ type GoBuild struct {
 	// Keep leaves the module's directory in place after Close, for a look
 	// at the generated code; its path is Session.GoModule.
 	Keep bool
+	// Start, if set, builds and starts the program in place of the Go
+	// toolchain and a process: a host with neither (a web page) has a
+	// build service build it (for GOOS=js) and runs it (in a Web Worker).
+	// The program it returns speaks the engine's protocol, a JSON object
+	// a line; Close ends it. Replace and Keep are not used with it.
+	Start func(GoStart) (io.ReadWriteCloser, error)
+}
+
+// GoStart is what GoBuild.Start builds: the PROGRAM Program of Source,
+// transpiled with the debugger's hooks as GoProgramFiles makes the
+// module. The engine does not make the files itself, so a host that has
+// a service build them (a web page) does not carry the transpiler.
+type GoStart struct {
+	Source           string
+	Program          string
+	AllowInputWrites bool
+}
+
+// GoProgramFiles are the files of the module the go engine builds for
+// the PROGRAM program of source: the program transpiled with the
+// debugger's hooks and the runtime that serves it, on royaljelly (and
+// beebread for OSCAT) at package sil's versions. Built for GOOS=js, it
+// serves a Web Worker's messages (see GoBuild.Start); else its pipes.
+func GoProgramFiles(source, program string, allowInputWrites bool) (map[string]string, error) {
+	return goProgramFiles(source, program, allowInputWrites, nil)
+}
+
+func goProgramFiles(source, program string, allowInputWrites bool, replace map[string]string) (map[string]string, error) {
+	prog, errs := parseSource(source)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("parse: %s", strings.Join(errs, "; "))
+	}
+	code, err := transpiler.GoFileWith(prog, transpiler.Options{Package: "dbgprog", HostBinding: true, Debug: true, AllowInputWrites: allowInputWrites})
+	if err != nil {
+		return nil, fmt.Errorf("transpile: %w", err)
+	}
+	hasClock := bytes.Contains(code, []byte("var plcClock"))
+	return map[string]string{
+		"go.mod":           goModule(string(code), replace),
+		"main.go":          goMainSource,
+		"stdio.go":         goStdioSource,
+		"stdio_js.go":      goStdioJSSource,
+		"dbgprog/prog.go":  string(code),
+		"dbgprog/serve.go": goRuntime(program, hasClock),
+	}, nil
 }
 
 // ErrNoGoToolchain is returned by Load on the go engine when go is not in
@@ -86,6 +132,7 @@ type goEngine struct {
 	timeout time.Duration
 
 	cmd        *exec.Cmd
+	conn       io.ReadWriteCloser // GoBuild.Start's program, in place of cmd
 	stdin      *bufio.Writer
 	closeStdin func() error
 	out        *json.Decoder
@@ -105,17 +152,16 @@ type goEngine struct {
 // newGoEngine transpiles img's source with the hooks, builds it and starts
 // it.
 func newGoEngine(img *image, o Options, clock func() time.Duration) (eng *goEngine, err error) {
+	if o.GoBuild.Start != nil {
+		return startGoEngine(img, o, clock)
+	}
 	goTool, lookErr := exec.LookPath("go")
 	if lookErr != nil {
 		return nil, ErrNoGoToolchain
 	}
-	program, errs := parseSource(img.source)
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("parse: %s", strings.Join(errs, "; "))
-	}
-	code, err := transpiler.GoFileWith(program, transpiler.Options{Package: "dbgprog", HostBinding: true, Debug: true, AllowInputWrites: o.AllowInputWrites})
+	files, err := goProgramFiles(img.source, img.name, o.AllowInputWrites, o.GoBuild.Replace)
 	if err != nil {
-		return nil, fmt.Errorf("transpile: %w", err)
+		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "beedance-debug-")
 	if err != nil {
@@ -131,13 +177,6 @@ func newGoEngine(img *image, o Options, clock func() time.Duration) (eng *goEngi
 			e.Close()
 		}
 	}()
-	hasClock := bytes.Contains(code, []byte("var plcClock"))
-	files := map[string]string{
-		"go.mod":           goModule(string(code), o.GoBuild.Replace),
-		"main.go":          goMainSource,
-		"dbgprog/prog.go":  string(code),
-		"dbgprog/serve.go": goRuntime(img.name, hasClock),
-	}
 	if err := os.MkdirAll(filepath.Join(dir, "dbgprog"), 0o755); err != nil {
 		return nil, err
 	}
@@ -180,14 +219,36 @@ func newGoEngine(img *image, o Options, clock func() time.Duration) (eng *goEngi
 	}
 	e.stdin = bufio.NewWriter(stdin)
 	e.closeStdin = stdin.Close
-	e.clock = clock
 	e.out = json.NewDecoder(bufio.NewReader(stdout))
-	e.decls, _ = declVariables(img.decl)
-	e.rows, e.first = sourceRows(img)
-	if err := e.refreshIO(); err != nil {
+	return e, e.begin(img, clock)
+}
+
+// startGoEngine has GoBuild.Start build and start the program.
+func startGoEngine(img *image, o Options, clock func() time.Duration) (*goEngine, error) {
+	conn, err := o.GoBuild.Start(GoStart{Source: img.source, Program: img.name, AllowInputWrites: o.AllowInputWrites})
+	if err != nil {
+		return nil, err
+	}
+	e := &goEngine{name: img.name, timeout: o.GoBuild.Timeout, conn: conn,
+		io: map[string]object.Object{}, ioTypes: map[string]string{}}
+	if e.timeout <= 0 {
+		e.timeout = 10 * time.Second
+	}
+	e.stdin = bufio.NewWriter(conn)
+	e.out = json.NewDecoder(bufio.NewReader(conn))
+	if err := e.begin(img, clock); err != nil {
+		e.Close()
 		return nil, err
 	}
 	return e, nil
+}
+
+// begin reads what the engine needs of the started program.
+func (e *goEngine) begin(img *image, clock func() time.Duration) error {
+	e.clock = clock
+	e.decls, _ = declVariables(img.decl)
+	e.rows, e.first = sourceRows(img)
+	return e.refreshIO()
 }
 
 // goModule is the module's go.mod: royaljelly, and beebread when the code
@@ -283,10 +344,18 @@ func (e *goEngine) kill() {
 	if e.cmd != nil && e.cmd.Process != nil {
 		e.cmd.Process.Kill()
 	}
+	if e.conn != nil {
+		e.conn.Close()
+	}
 }
 
-// Close ends the process and removes the module.
+// Close ends the process (or GoBuild.Start's program) and removes the
+// module.
 func (e *goEngine) Close() {
+	if e.conn != nil {
+		e.conn.Close()
+		e.conn = nil
+	}
 	if e.cmd != nil {
 		if e.closeStdin != nil {
 			e.closeStdin()

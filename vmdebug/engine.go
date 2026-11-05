@@ -65,6 +65,9 @@ type Variable struct {
 	Type     string
 	Address  string // a located variable's
 	Constant bool
+	// group: a configuration's resource, whose members are its program
+	// instances; online change carries them one by one.
+	group bool
 }
 
 // errPaused is returned by an engine's Run when the hook stopped the scan:
