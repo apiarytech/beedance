@@ -360,9 +360,13 @@ func terminator(s ast.Statement) string {
 		}
 		return "JMP"
 	case *ast.IlInstructionStatement:
+		// JMPC, JMPCN, RETC and RETCN (modifier C) go on when their
+		// condition does not hold: only the plain JMP and RET end a block.
 		switch up(x.Operator) {
 		case "RET", "JMP":
-			return up(x.Operator)
+			if !strings.Contains(up(x.Modifier), "C") {
+				return up(x.Operator)
+			}
 		}
 	}
 	return ""

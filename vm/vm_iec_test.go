@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+// Unary minus works on every signed integer type, as in the evaluator:
+// the VM once negated only LINT, REAL and LREAL, so -x of a DINT failed
+// with "unsupported type for negation".
+func TestVmNegateTypedIntegers(t *testing.T) {
+	runVmTests(t, []vmTestCase{
+		{"-SINT#3", -3},
+		{"-INT#7", -7},
+		{"-DINT#100000", -100000},
+		{"-LINT#5", -5},
+		{"-(-DINT#2)", 2},
+	})
+}
+
 func TestIecVmOperators(t *testing.T) {
 	tests := []vmTestCase{
 		// Arithmetic
