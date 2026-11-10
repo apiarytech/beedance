@@ -126,6 +126,40 @@ END_PROGRAM
 	expect(t, fs, "unreachable-code", 5, 10, 13, 16, 20, 23)
 }
 
+// IL's conditional jumps and returns (JMPC, JMPCN, RETC, RETCN) go on to
+// the next instruction when their condition does not hold, so it is not
+// unreachable; after a plain JMP or RET it is.
+func TestILConditionalJumpIsNotTerminator(t *testing.T) {
+	fs := check(t, `PROGRAM P
+VAR a : BOOL; i : INT; END_VAR
+    LD a
+    JMPCN one
+    LD 1
+    ST i
+one:
+    LD a
+    JMPC two
+    LD 2
+    ST i
+two:
+    LD a
+    RETC
+    LD a
+    RETCN
+    LD 3
+    ST i
+    JMP three
+    LD 4
+    ST i
+three:
+    RET
+    LD 5
+    ST i
+END_PROGRAM
+`)
+	expect(t, fs, "unreachable-code", 20, 24)
+}
+
 // An input declared CONSTANT is not a constant: its caller gives it.
 func TestInputConstantIsNotConstant(t *testing.T) {
 	fs := check(t, `FUNCTION F : INT

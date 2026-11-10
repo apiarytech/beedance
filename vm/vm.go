@@ -1105,15 +1105,25 @@ func (vm *VM) executeBangOperator() error {
 func (vm *VM) executeMinusOperator() error {
 	operand := vm.pop()
 
-	// The `isInteger` check allows multiple integer types, so we must handle them.
+	// As the evaluator does (evalMinusPrefixOperatorExpression): a signed
+	// integer keeps its type, USINT and UINT become SINT and INT.
 	switch o := operand.(type) {
+	case *object.SInt:
+		return vm.push(&object.SInt{Value: -o.Value})
+	case *object.Int:
+		return vm.push(&object.Int{Value: -o.Value})
+	case *object.DInt:
+		return vm.push(&object.DInt{Value: -o.Value})
 	case *object.LInt:
 		return vm.push(&object.LInt{Value: -o.Value})
+	case *object.USInt:
+		return vm.push(&object.SInt{Value: -int8(o.Value)})
+	case *object.UInt:
+		return vm.push(&object.Int{Value: -int16(o.Value)})
 	case *object.Real:
 		return vm.push(&object.Real{Value: -o.Value})
 	case *object.LReal:
 		return vm.push(&object.LReal{Value: -o.Value})
-		// In a full implementation, other integer types (SINT, INT, DINT) would be handled here.
 	default:
 		return fmt.Errorf("unsupported type for negation: %s", operand.Type())
 	}
