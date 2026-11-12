@@ -543,10 +543,12 @@ func TestChangeWhileRunning(t *testing.T) {
 	if err := s.Set("%IX0.0", "TRUE"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	// Until a scan has run: a fixed 40 ms was too short on
+	// the slowest target (ARMv6 under emulation).
 	live := s.Live()
-	time.Sleep(20 * time.Millisecond)
-	live = s.Live()
+	for deadline := time.Now().Add(10 * time.Second); (live.Scan == 0 || len(live.Values) == 0) && time.Now().Before(deadline); live = s.Live() {
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	<-done
 	if live.Scan == 0 || len(live.Values) == 0 {
