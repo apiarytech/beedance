@@ -136,6 +136,62 @@ is `vm.GlobalsNeeded` of the bytecode. The default of `vm.GlobalsSize`
 slots takes 512 KB on a 32-bit target, more than the RP2040's 264 KB of RAM.
 Code that makes its own VM for a microcontroller should do the same.
 
+## Surviving memory faults
+
+A microcontroller in space, or near a reactor or an accelerator, takes
+bit flips from radiation, and neither the RP2040 nor the classic ESP32 has
+ECC RAM. The generated program checks its memory with package
+`embedded/harden` and restarts the program when it finds a fault, instead
+of stopping.
+
+| Check | When | Covers |
+|---|---|---|
+| `harden.RepairSingletons` | after every scan | `vm.True` and `vm.False`, which every `BOOL` points to |
+| `harden.Scrubber` | `ScrubBytes` bytes after every scan | the instructions and constants, against the checksum written into the file |
+| `harden.Checksum` | after every fault | the whole image, restored from the constants in flash when it does not match |
+| `harden.Retain` | at each start, and saved every `RetainEvery` scans | `RETAIN` variables, in two copies with a CRC each |
+
+The checks run before `onScan`, so outputs from a corrupt scan never
+leave. A fault is a scan that fails or a check that fails. It calls
+`SafeState(err)`, restores the image if it is corrupt, runs the
+initialization again and loads the `RETAIN` variables. After `Restarts`
+faults in a row, `Run` returns the last one.
+
+The firmware sets these before `Run`:
+
+| Variable | What |
+|---|---|
+| `Restarts` | faults in a row before `Run` gives up; less than 0 for no bound; 0 (default) returns the first fault, as before |
+| `ScrubBytes` | bytes of the image checked per scan; 0 checks only after a fault |
+| `SafeState func(error)` | drives the outputs to a safe state |
+| `Watchdog func()` | called after each scan that passed its checks: feed the hardware watchdog in it |
+| `RetainStore harden.Store` | two copies in flash, FRAM or battery-backed RAM; `harden.MemStore` keeps them in RAM |
+| `RetainEvery` | scans between saves; a save writes only when the values changed |
+
+`ProgramOptions.Restarts`, `ScrubBytes` and `RetainEvery` set their
+starting values. `Faults` counts restarts; `RetainErr` is the last
+retain error, `harden.ErrNoRetain` after a cold start.
+
+```go
+program.Restarts = -1
+program.ScrubBytes = 256
+program.SafeState = func(error) { relay.Low() }
+program.Watchdog = func() { machine.Watchdog.Update() }
+program.RetainStore = flashStore{}
+err := program.Run(0, readAndDrivePins)
+```
+
+A copy of the `RETAIN` variables holds their names' and types' fingerprint.
+A program whose `RETAIN` variables changed starts cold rather than load
+another program's values. Elementary types, strings, dates and times,
+arrays and structs are kept. A variable holding anything else, such as a
+TON with its internal state, starts at its initial value.
+
+Not covered: the VM's stack and the program's other variables in RAM
+(only restart clears them), and the CPU itself. A scan run twice and
+compared, or variables stored three times, would cover them at a cost in
+scan time and RAM.
+
 ## Not yet
 
 - No binary bytecode format: programs are compiled from source, or

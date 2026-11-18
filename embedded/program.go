@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/vm"
 )
@@ -37,6 +39,22 @@ type ProgramOptions struct {
 	// programs.
 	StackSize int
 	MaxFrames int
+	// Restarts is how many faults in a row Run restarts the program after,
+	// before it gives up and returns the fault; less than 0 restarts it
+	// for ever. 0, the default, returns the first fault. A fault is a scan
+	// that fails, or a check after a scan that finds memory corrupt (see
+	// package harden). The generated variable Restarts starts at this.
+	Restarts int
+	// ScrubBytes is how many bytes of the program image each scan checks
+	// against its checksum, so that the whole image is read every few
+	// scans; 0, the default, checks it only after a fault. The generated
+	// variable ScrubBytes starts at this.
+	ScrubBytes int
+	// RetainEvery is how many scans apart the RETAIN variables are saved,
+	// when a firmware gives Run a harden.Store (the generated RetainStore)
+	// and they changed; default 1. Flash wears with writes: a program
+	// whose RETAIN variables change often saves less often.
+	RetainEvery int
 }
 
 // GenerateEmbeddedProgram writes Go that runs a compiled PROGRAM
@@ -49,6 +67,16 @@ type ProgramOptions struct {
 // after each scan with the VM, whose I/O image (VM.IO) holds the located
 // variables: the place to read the pins into %I before the next scan and
 // drive them from %Q.
+//
+// The generated program guards against faults in memory, such as bit
+// flips from radiation, with package harden. After each scan, before
+// onScan, it checks the VM's TRUE and FALSE and, with ScrubBytes, a slice
+// of the program image. A fault calls SafeState, if set, then restarts the
+// program, up to Restarts in a row: it restores a corrupt image from the
+// copy built into the firmware, runs the initialization again and loads
+// the RETAIN variables from RetainStore, if set. Watchdog, if set, is
+// called after each scan that passed its checks, to feed a hardware
+// watchdog.
 func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o ProgramOptions) error {
 	if prog == nil || prog.InitBytecode == nil || prog.CyclicBytecode == nil {
 		return fmt.Errorf("a compiled program with initialization and cyclic bytecode is needed")
@@ -58,6 +86,9 @@ func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o Prog
 	}
 	if o.Interval <= 0 {
 		o.Interval = 100 * time.Millisecond
+	}
+	if o.RetainEvery <= 0 {
+		o.RetainEvery = 1
 	}
 	initConsts, err := constantsTo("initConstants", prog.InitBytecode.Constants)
 	if err != nil {
@@ -75,13 +106,34 @@ func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o Prog
 	if o.MaxFrames > 0 {
 		vmOpts = append(vmOpts, fmt.Sprintf("vm.WithMaxFrames(%d)", o.MaxFrames))
 	}
+	var slots, layout []string
+	for _, v := range prog.Variables {
+		if v.Retain && !v.Constant && v.Global >= 0 {
+			slots = append(slots, fmt.Sprint(v.Global))
+			layout = append(layout, v.Name, v.Type)
+		}
+	}
 	main := ""
 	if o.Package == "main" {
 		main = fmt.Sprintf(programMain, o.Scans)
 	}
-	_, err = fmt.Fprintf(w, programTemplate, o.Package,
-		instructionsToGoLiteral(prog.InitBytecode.Instructions), instructionsToGoLiteral(prog.CyclicBytecode.Instructions),
-		initConsts, scanConsts, int64(o.Interval), strings.Join(vmOpts, ", "), globals, main)
+	_, err = strings.NewReplacer(
+		"$PACKAGE", o.Package,
+		"$INIT_IMAGE", instructionsToGoString(prog.InitBytecode.Instructions),
+		"$SCAN_IMAGE", instructionsToGoString(prog.CyclicBytecode.Instructions),
+		"$INIT_CONSTANTS", initConsts,
+		"$SCAN_CONSTANTS", scanConsts,
+		"$CHECKSUM", fmt.Sprintf("0x%08x", harden.Checksum(prog.InitBytecode, prog.CyclicBytecode)),
+		"$RETAIN_SLOTS", strings.Join(slots, ", "),
+		"$RETAIN_LAYOUT", fmt.Sprintf("0x%08x", harden.Layout(layout...)),
+		"$INTERVAL", fmt.Sprint(int64(o.Interval)),
+		"$VM_OPTIONS", strings.Join(vmOpts, ", "),
+		"$GLOBALS", fmt.Sprint(globals),
+		"$RESTARTS", fmt.Sprint(o.Restarts),
+		"$SCRUB_BYTES", fmt.Sprint(max(o.ScrubBytes, 0)),
+		"$RETAIN_EVERY", fmt.Sprint(o.RetainEvery),
+		"$MAIN", main,
+	).WriteString(w, programTemplate)
 	return err
 }
 
@@ -91,56 +143,185 @@ func constantsTo(name string, constants []object.Object) (string, error) {
 	return strings.ReplaceAll(s, "generatedConstants", name), err
 }
 
+// instructionsToGoString is ins as a Go string constant, 16 bytes a line.
+func instructionsToGoString(ins code.Instructions) string {
+	if len(ins) == 0 {
+		return `""`
+	}
+	var out strings.Builder
+	for i, b := range ins {
+		if i%16 == 0 {
+			if i > 0 {
+				out.WriteString("\" +\n\t")
+			}
+			out.WriteString("\"")
+		}
+		fmt.Fprintf(&out, "\\x%02x", b)
+	}
+	out.WriteString("\"")
+	return out.String()
+}
+
 const programTemplate = `// Code generated by beedance (embedded.GenerateEmbeddedProgram). DO NOT EDIT.
 
-package %s
+package $PACKAGE
 
 import (
 	"time"
 
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/stdlib" // the built-in functions, and the clock
 	"github.com/apiarytech/beedance/vm"
 )
 
-var initInstructions = %s
+// initImage and scanImage are the program's instructions as built. They
+// are constants, in flash on a microcontroller, apart from the copies the
+// VMs run in RAM, so that a corrupt copy can be restored from them.
+const initImage = $INIT_IMAGE
 
-var scanInstructions = %s
+const scanImage = $SCAN_IMAGE
+
+var initInstructions = []byte(initImage)
+
+var scanInstructions = []byte(scanImage)
 
 var initConstants, scanConstants []object.Object
 
-func init() {
-%s
-%s
+// loadConstants makes the constants afresh.
+func loadConstants() {
+$INIT_CONSTANTS
+$SCAN_CONSTANTS
 }
 
+func init() { loadConstants() }
+
+// imageChecksum is the program image's checksum (harden.Checksum).
+const imageChecksum = $CHECKSUM
+
+// retainSlots are the global slots of the RETAIN variables; retainLayout
+// is their fingerprint (harden.Layout).
+var retainSlots = []int{$RETAIN_SLOTS}
+
+const retainLayout = $RETAIN_LAYOUT
+
 // Interval is the time between the starts of scans.
-const Interval = time.Duration(%d)
+const Interval = time.Duration($INTERVAL)
 
 // vmOptions size the VMs' stacks (ProgramOptions.StackSize, MaxFrames).
-var vmOptions = []vm.Option{%s}
+var vmOptions = []vm.Option{$VM_OPTIONS}
 
 // LastScan is how long the last scan took to run, onScan aside: on a
 // device, the program's scan time.
 var LastScan time.Duration
 
+// What a firmware may set before Run.
+var (
+	// Restarts is how many faults in a row Run restarts the program
+	// after before it returns the fault; less than 0 for no bound.
+	Restarts = $RESTARTS
+	// ScrubBytes is how many bytes of the program image each scan checks;
+	// 0 checks it only after a fault.
+	ScrubBytes = $SCRUB_BYTES
+	// SafeState, if not nil, is called with each fault, before the program
+	// restarts or Run returns: drive the outputs to a safe state in it.
+	SafeState func(err error)
+	// Watchdog, if not nil, is called after each scan that passed its
+	// checks: feed the chip's watchdog in it, so that a hang, or faults
+	// that never end, reset the chip.
+	Watchdog func()
+	// RetainStore, if not nil, keeps the RETAIN variables: they are loaded
+	// at each start and saved every RetainEvery scans when they changed.
+	RetainStore harden.Store
+	// RetainEvery is how many scans apart the RETAIN variables are saved.
+	RetainEvery = $RETAIN_EVERY
+)
+
+// What Run reports.
+var (
+	// Faults counts the restarts since Run began.
+	Faults int
+	// RetainErr is the last error loading or saving the RETAIN variables;
+	// harden.ErrNoRetain after a start with none saved.
+	RetainErr error
+)
+
+// images are the program image as the VMs run it.
+func images() []*compiler.Bytecode {
+	return []*compiler.Bytecode{
+		{Instructions: initInstructions, Constants: initConstants},
+		{Instructions: scanInstructions, Constants: scanConstants},
+	}
+}
+
+// checkImage checks the whole program image and, when it does not match
+// its checksum, restores it from initImage, scanImage and loadConstants.
+// It returns harden.ErrImage when the image still does not match.
+func checkImage() error {
+	if harden.Checksum(images()...) == imageChecksum {
+		return nil
+	}
+	copy(initInstructions, initImage)
+	copy(scanInstructions, scanImage)
+	loadConstants()
+	if harden.Checksum(images()...) != imageChecksum {
+		return harden.ErrImage
+	}
+	return nil
+}
+
 // Run runs the program: its initialization, then scans Interval apart,
 // scans of them (0: for ever). onScan, if not nil, is called after each
 // scan with the VM, whose IO() holds the located variables by address.
-// It returns the runtime error that stopped the program.
+// After a fault it restarts the program, up to Restarts times in a row,
+// and it returns the fault that stopped the program.
 func Run(scans int, onScan func(machine *vm.VM)) error {
 	object.FinalizeBuiltins()
 	start := time.Now()
 	clock := func() time.Duration { return time.Since(start) }
-	globals := make([]object.Object, %d)
 	clockBuiltins := stdlib.ClockBuiltins(clock)
+	var retain *harden.Retain
+	if RetainStore != nil {
+		retain = harden.NewRetain(RetainStore, retainSlots, retainLayout)
+	}
+	n, inRow := 0, 0
+	for {
+		err := runFrom(&n, &inRow, scans, onScan, clockBuiltins, retain)
+		if err == nil {
+			return nil
+		}
+		if SafeState != nil {
+			SafeState(err)
+		}
+		if Restarts >= 0 && inRow >= Restarts {
+			return err
+		}
+		inRow++
+		Faults++
+		harden.RepairSingletons()
+		if err := checkImage(); err != nil {
+			if SafeState != nil {
+				SafeState(err)
+			}
+			return err
+		}
+	}
+}
+
+// runFrom starts the program, initialization and all, and runs its scans
+// from the nth until scans or a fault.
+func runFrom(n, inRow *int, scans int, onScan func(machine *vm.VM), clockBuiltins map[int]*object.Builtin, retain *harden.Retain) error {
+	globals := make([]object.Object, $GLOBALS)
 	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals, vmOptions...)
 	for idx, b := range clockBuiltins {
 		initVM.SetBuiltin(idx, b)
 	}
 	if err := initVM.Run(); err != nil {
 		return err
+	}
+	if retain != nil {
+		RetainErr = retain.Load(globals)
 	}
 	// The initialization's VM is dropped before the scans' is made, so a
 	// microcontroller's heap holds one VM's stack and frames, not two.
@@ -153,8 +334,12 @@ func Run(scans int, onScan func(machine *vm.VM)) error {
 	for addr, v := range io {
 		scanVM.IO()[addr] = v
 	}
+	var scrub *harden.Scrubber
+	if ScrubBytes > 0 {
+		scrub = harden.NewScrubber(imageChecksum, images()...)
+	}
 	next := time.Now()
-	for n := 0; scans == 0 || n < scans; n++ {
+	for ; scans == 0 || *n < scans; *n++ {
 		scanVM.Reset()
 		began := time.Now()
 		err := scanVM.Run()
@@ -162,8 +347,26 @@ func Run(scans int, onScan func(machine *vm.VM)) error {
 		if err != nil {
 			return err
 		}
+		// The checks come before onScan, which drives the outputs.
+		if harden.RepairSingletons() {
+			return harden.ErrSingletons
+		}
+		if scrub != nil {
+			if done, ok := scrub.Step(ScrubBytes); done && !ok {
+				return harden.ErrImage
+			}
+		}
 		if onScan != nil {
 			onScan(scanVM)
+		}
+		*inRow = 0
+		if Watchdog != nil {
+			Watchdog()
+		}
+		if retain != nil && RetainEvery > 0 && (*n+1)%RetainEvery == 0 {
+			if err := retain.Save(globals); err != nil {
+				RetainErr = err
+			}
 		}
 		next = next.Add(Interval)
 		if wait := time.Until(next); wait > 0 {
@@ -174,7 +377,7 @@ func Run(scans int, onScan func(machine *vm.VM)) error {
 	}
 	return nil
 }
-%s`
+$MAIN`
 
 const programMain = `
 func main() {

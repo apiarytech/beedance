@@ -75,6 +75,7 @@ flowchart LR
 | `watch` | What a host can watch of a running program, on either engine, under dotted names (`p.tSample.ET`) |
 | `sil` | Unit tests (`PROGRAM TEST_...`) on the evaluator, the VM and the transpiled Go, natively (`go`) or as a WASI module (`wasm`), compared scan by scan; I/O from a plant model, a rig over the rig protocol (TCP or serial), or a host such as beehive (`sil.IO`) |
 | `embedded` | Generates a standalone Go program that embeds the VM and bytecode |
+| `embedded/harden` | What a generated program survives memory faults with (radiation, bit flips): a checksum of the program image scrubbed a slice per scan, a repair of the VM's TRUE and FALSE, RETAIN variables in two checksummed copies |
 | `embedded/example/raspberrypi` | The VM with embedded bytecode as TinyGo firmware, for a Pico, a Pico W or an ESP32 |
 | `embedded/esp32hw/plc` | `program.st` run as a PLC on the VM, scans 10 ms apart, reporting its outputs on the UART; `plc/gen` compiles it into `plc/program` (`go generate`) |
 | `embedded/esp32hw` | Tests of firmware on a real ESP32 on a serial port, reset through RTS (build tag `esp32hw`, `ESP32_PORT`) |
