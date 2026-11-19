@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/embedded"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
 )
 
@@ -55,5 +56,42 @@ END_PROGRAM
 	}
 	if err := generateEmbedded(src, out, embedded.ProgramOptions{}); err == nil || !strings.Contains(err.Error(), "no PROGRAM") {
 		t.Errorf("a file without a PROGRAM: error %v, want one naming the missing PROGRAM", err)
+	}
+}
+
+// -image writes the first PROGRAM of the -iec file as a program image that
+// decodes to what the compiler made.
+func TestGenerateImage(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "blink.st")
+	out := filepath.Join(dir, "blink.img")
+	if err := os.WriteFile(src, []byte(`
+PROGRAM Blink
+VAR RETAIN n : DINT; END_VAR
+VAR t : TON; led AT %QX0.0 : BOOL; END_VAR
+t(IN := NOT t.Q, PT := T#500ms);
+IF t.Q THEN led := NOT led; n := n + 1; END_IF;
+END_PROGRAM
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	object.FinalizeBuiltins() // as main does
+	if err := generateImage(src, out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	im, err := harden.DecodeImage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog, err := compileFirstProgram(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := harden.ImageOf(prog); im.Checksum() != want.Checksum() || len(im.RetainSlots) != 1 {
+		t.Errorf("decoded image differs from the compiled program")
 	}
 }

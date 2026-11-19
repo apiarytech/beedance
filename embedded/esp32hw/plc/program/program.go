@@ -8,13 +8,13 @@ import (
 	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
-	"github.com/apiarytech/beedance/stdlib" // the built-in functions, and the clock
+	_ "github.com/apiarytech/beedance/stdlib" // the built-in functions
 	"github.com/apiarytech/beedance/vm"
 )
 
-// initImage and scanImage are the program's instructions as built. They
-// are constants, in flash on a microcontroller, apart from the copies the
-// VMs run in RAM, so that a corrupt copy can be restored from them.
+// initImage and scanImage are the program's instructions. They are
+// constants, in flash on a microcontroller, so that golden makes the image
+// afresh from them when the copy in RAM is found corrupt.
 const initImage = "\x00\x08\x00\x26\x07\x00\x00\x1d\x02\x00\x1b\x00\x00\x00\x09\x00" +
 	"\x1a\x00\x00\x00\x00\x00\x09\x00\x04\x00\x00\x06\x00\x00\x05\x00" +
 	"\x09\x00\x03\x00\x00\x06\x00\x00\x01\x00\x09\x00\x02\x00\x00\x06" +
@@ -27,23 +27,17 @@ const scanImage = "\x1a\x01\x00\x00\x00\x00\x1a\x01\x00\x00\x05\x00\x1e\x16\x1f\
 	"\x02\x00\x00\x0d\x00\x01\x3a\x03\x1b\x02\x00\x18\x40\x00\x19\x02" +
 	"\x1a\x01\x00\x00\x05\x00\x1e\x2b\x0b\x00"
 
-var initInstructions = []byte(initImage)
-
-var scanInstructions = []byte(scanImage)
-
-var initConstants, scanConstants []object.Object
-
-// loadConstants makes the constants afresh.
-func loadConstants() {
-	initConstants = make([]object.Object, 12)
-	initConstants[0] = &object.String{Value: "IN"}
-	initConstants[1] = &object.String{Value: "running"}
-	initConstants[2] = &object.String{Value: "start"}
-	initConstants[3] = &object.String{Value: "ET"}
-	initConstants[4] = &object.String{Value: "PT"}
-	initConstants[5] = &object.String{Value: "Q"}
-	initConstants[6] = &object.Time{Value: time.Duration(0)}
-	initConstants[7] = &object.CompiledFunction{Instructions: []byte{
+func initConstants() []object.Object {
+	var generatedConstants []object.Object
+	generatedConstants = make([]object.Object, 12)
+	generatedConstants[0] = &object.String{Value: "IN"}
+	generatedConstants[1] = &object.String{Value: "running"}
+	generatedConstants[2] = &object.String{Value: "start"}
+	generatedConstants[3] = &object.String{Value: "ET"}
+	generatedConstants[4] = &object.String{Value: "PT"}
+	generatedConstants[5] = &object.String{Value: "Q"}
+	generatedConstants[6] = &object.Time{Value: time.Duration(0)}
+	generatedConstants[7] = &object.CompiledFunction{Instructions: []byte{
 		0x23, 0x00, 0x00, 0x00, 0x00, 0x1e, 0x17, 0x6c, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x1e, 0x16,
 		0x17, 0x28, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x08, 0x1f, 0x23, 0x00, 0x00, 0x02, 0x00, 0x25,
 		0x3b, 0x00, 0x20, 0x00, 0x1f, 0x18, 0x2a, 0x00, 0x19, 0x02, 0x23, 0x00, 0x00, 0x03, 0x00, 0x25,
@@ -54,218 +48,70 @@ func loadConstants() {
 		0x00, 0x09, 0x1f, 0x23, 0x00, 0x00, 0x03, 0x00, 0x00, 0x06, 0x00, 0x1f, 0x23, 0x00, 0x00, 0x05,
 		0x00, 0x09, 0x1f, 0x22,
 	}, NumLocals: 1, NumParameters: 1, ParameterNames: []string{"THIS"}, OutputNames: []string{}, OutputIndices: []int{}}
-	initConstants[8] = &object.String{Value: "main"}
-	initConstants[9] = &object.String{Value: "__class__"}
-	initConstants[10] = &object.LInt{Value: 0}
-	initConstants[11] = &object.String{Value: "%QX0.0"}
-
-	scanConstants = make([]object.Object, 14)
-	scanConstants[0] = &object.String{Value: "IN"}
-	scanConstants[1] = &object.String{Value: "running"}
-	scanConstants[2] = &object.String{Value: "start"}
-	scanConstants[3] = &object.String{Value: "ET"}
-	scanConstants[4] = &object.String{Value: "PT"}
-	scanConstants[5] = &object.String{Value: "Q"}
-	scanConstants[6] = &object.Time{Value: time.Duration(0)}
-	scanConstants[7] = &object.CompiledFunction{Instructions: []byte{
-		0x23, 0x00, 0x00, 0x00, 0x00, 0x1e, 0x17, 0x6c, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x1e, 0x16,
-		0x17, 0x28, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x08, 0x1f, 0x23, 0x00, 0x00, 0x02, 0x00, 0x25,
-		0x3b, 0x00, 0x20, 0x00, 0x1f, 0x18, 0x2a, 0x00, 0x19, 0x02, 0x23, 0x00, 0x00, 0x03, 0x00, 0x25,
-		0x3b, 0x00, 0x20, 0x00, 0x23, 0x00, 0x00, 0x02, 0x00, 0x1e, 0x03, 0x1f, 0x23, 0x00, 0x00, 0x03,
-		0x00, 0x1e, 0x23, 0x00, 0x00, 0x04, 0x00, 0x1e, 0x0e, 0x17, 0x62, 0x00, 0x23, 0x00, 0x00, 0x03,
-		0x00, 0x23, 0x00, 0x00, 0x04, 0x00, 0x1e, 0x1f, 0x23, 0x00, 0x00, 0x05, 0x00, 0x08, 0x1f, 0x18,
-		0x69, 0x00, 0x23, 0x00, 0x00, 0x05, 0x00, 0x09, 0x1f, 0x18, 0x83, 0x00, 0x23, 0x00, 0x00, 0x01,
-		0x00, 0x09, 0x1f, 0x23, 0x00, 0x00, 0x03, 0x00, 0x00, 0x06, 0x00, 0x1f, 0x23, 0x00, 0x00, 0x05,
-		0x00, 0x09, 0x1f, 0x22,
-	}, NumLocals: 1, NumParameters: 1, ParameterNames: []string{"THIS"}, OutputNames: []string{}, OutputIndices: []int{}}
-	scanConstants[8] = &object.String{Value: "main"}
-	scanConstants[9] = &object.String{Value: "__class__"}
-	scanConstants[10] = &object.LInt{Value: 0}
-	scanConstants[11] = &object.String{Value: "%QX0.0"}
-	scanConstants[12] = &object.Time{Value: time.Duration(1000000000)}
-	scanConstants[13] = &object.LInt{Value: 1}
-
+	generatedConstants[8] = &object.String{Value: "main"}
+	generatedConstants[9] = &object.String{Value: "__class__"}
+	generatedConstants[10] = &object.LInt{Value: 0}
+	generatedConstants[11] = &object.String{Value: "%QX0.0"}
+	return generatedConstants
 }
 
-func init() { loadConstants() }
+func scanConstants() []object.Object {
+	var generatedConstants []object.Object
+	generatedConstants = make([]object.Object, 14)
+	generatedConstants[0] = &object.String{Value: "IN"}
+	generatedConstants[1] = &object.String{Value: "running"}
+	generatedConstants[2] = &object.String{Value: "start"}
+	generatedConstants[3] = &object.String{Value: "ET"}
+	generatedConstants[4] = &object.String{Value: "PT"}
+	generatedConstants[5] = &object.String{Value: "Q"}
+	generatedConstants[6] = &object.Time{Value: time.Duration(0)}
+	generatedConstants[7] = &object.CompiledFunction{Instructions: []byte{
+		0x23, 0x00, 0x00, 0x00, 0x00, 0x1e, 0x17, 0x6c, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x1e, 0x16,
+		0x17, 0x28, 0x00, 0x23, 0x00, 0x00, 0x01, 0x00, 0x08, 0x1f, 0x23, 0x00, 0x00, 0x02, 0x00, 0x25,
+		0x3b, 0x00, 0x20, 0x00, 0x1f, 0x18, 0x2a, 0x00, 0x19, 0x02, 0x23, 0x00, 0x00, 0x03, 0x00, 0x25,
+		0x3b, 0x00, 0x20, 0x00, 0x23, 0x00, 0x00, 0x02, 0x00, 0x1e, 0x03, 0x1f, 0x23, 0x00, 0x00, 0x03,
+		0x00, 0x1e, 0x23, 0x00, 0x00, 0x04, 0x00, 0x1e, 0x0e, 0x17, 0x62, 0x00, 0x23, 0x00, 0x00, 0x03,
+		0x00, 0x23, 0x00, 0x00, 0x04, 0x00, 0x1e, 0x1f, 0x23, 0x00, 0x00, 0x05, 0x00, 0x08, 0x1f, 0x18,
+		0x69, 0x00, 0x23, 0x00, 0x00, 0x05, 0x00, 0x09, 0x1f, 0x18, 0x83, 0x00, 0x23, 0x00, 0x00, 0x01,
+		0x00, 0x09, 0x1f, 0x23, 0x00, 0x00, 0x03, 0x00, 0x00, 0x06, 0x00, 0x1f, 0x23, 0x00, 0x00, 0x05,
+		0x00, 0x09, 0x1f, 0x22,
+	}, NumLocals: 1, NumParameters: 1, ParameterNames: []string{"THIS"}, OutputNames: []string{}, OutputIndices: []int{}}
+	generatedConstants[8] = &object.String{Value: "main"}
+	generatedConstants[9] = &object.String{Value: "__class__"}
+	generatedConstants[10] = &object.LInt{Value: 0}
+	generatedConstants[11] = &object.String{Value: "%QX0.0"}
+	generatedConstants[12] = &object.Time{Value: time.Duration(1000000000)}
+	generatedConstants[13] = &object.LInt{Value: 1}
+	return generatedConstants
+}
 
-// imageChecksum is the program image's checksum (harden.Checksum).
-const imageChecksum = 0x1c392773
-
-// retainSlots are the global slots of the RETAIN variables; retainLayout
-// is their fingerprint (harden.Layout).
-var retainSlots = []int{}
-
-const retainLayout = 0x00000000
+// golden makes the program the firmware is built with, afresh.
+func golden() harden.Image {
+	return harden.Image{
+		Init:         &compiler.Bytecode{Instructions: []byte(initImage), Constants: initConstants()},
+		Scan:         &compiler.Bytecode{Instructions: []byte(scanImage), Constants: scanConstants()},
+		Globals:      3,
+		RetainSlots:  []int{},
+		RetainLayout: 0x00000000,
+	}
+}
 
 // Interval is the time between the starts of scans.
 const Interval = time.Duration(10000000)
 
-// vmOptions size the VMs' stacks (ProgramOptions.StackSize, MaxFrames).
-var vmOptions = []vm.Option{vm.WithStackSize(256), vm.WithMaxFrames(32)}
-
-// LastScan is how long the last scan took to run, onScan aside: on a
-// device, the program's scan time.
-var LastScan time.Duration
-
-// What a firmware may set before Run.
-var (
-	// Restarts is how many faults in a row Run restarts the program
-	// after before it returns the fault; less than 0 for no bound.
-	Restarts = 0
-	// ScrubBytes is how many bytes of the program image each scan checks;
-	// 0 checks it only after a fault.
-	ScrubBytes = 0
-	// SafeState, if not nil, is called with each fault, before the program
-	// restarts or Run returns: drive the outputs to a safe state in it.
-	SafeState func(err error)
-	// Watchdog, if not nil, is called after each scan that passed its
-	// checks: feed the chip's watchdog in it, so that a hang, or faults
-	// that never end, reset the chip.
-	Watchdog func()
-	// RetainStore, if not nil, keeps the RETAIN variables: they are loaded
-	// at each start and saved every RetainEvery scans when they changed.
-	RetainStore harden.Store
-	// RetainEvery is how many scans apart the RETAIN variables are saved.
-	RetainEvery = 1
-)
-
-// What Run reports.
-var (
-	// Faults counts the restarts since Run began.
-	Faults int
-	// RetainErr is the last error loading or saving the RETAIN variables;
-	// harden.ErrNoRetain after a start with none saved.
-	RetainErr error
-)
-
-// images are the program image as the VMs run it.
-func images() []*compiler.Bytecode {
-	return []*compiler.Bytecode{
-		{Instructions: initInstructions, Constants: initConstants},
-		{Instructions: scanInstructions, Constants: scanConstants},
-	}
+// PLC runs the program. A firmware sets its fields before Run: SafeState,
+// Watchdog, RetainStore and Images above all (see harden.PLC).
+var PLC = &harden.PLC{
+	Golden:           golden,
+	GoldenChecksum:   0x1c392773,
+	Interval:         Interval,
+	VMOptions:        []vm.Option{vm.WithStackSize(256), vm.WithMaxFrames(32)},
+	Restarts:         0,
+	ScrubBytes:       0,
+	RetainEvery:      1,
+	TrialScans:       100,
+	HoldDuringUpdate: true,
 }
 
-// checkImage checks the whole program image and, when it does not match
-// its checksum, restores it from initImage, scanImage and loadConstants.
-// It returns harden.ErrImage when the image still does not match.
-func checkImage() error {
-	if harden.Checksum(images()...) == imageChecksum {
-		return nil
-	}
-	copy(initInstructions, initImage)
-	copy(scanInstructions, scanImage)
-	loadConstants()
-	if harden.Checksum(images()...) != imageChecksum {
-		return harden.ErrImage
-	}
-	return nil
-}
-
-// Run runs the program: its initialization, then scans Interval apart,
-// scans of them (0: for ever). onScan, if not nil, is called after each
-// scan with the VM, whose IO() holds the located variables by address.
-// After a fault it restarts the program, up to Restarts times in a row,
-// and it returns the fault that stopped the program.
-func Run(scans int, onScan func(machine *vm.VM)) error {
-	object.FinalizeBuiltins()
-	start := time.Now()
-	clock := func() time.Duration { return time.Since(start) }
-	clockBuiltins := stdlib.ClockBuiltins(clock)
-	var retain *harden.Retain
-	if RetainStore != nil {
-		retain = harden.NewRetain(RetainStore, retainSlots, retainLayout)
-	}
-	n, inRow := 0, 0
-	for {
-		err := runFrom(&n, &inRow, scans, onScan, clockBuiltins, retain)
-		if err == nil {
-			return nil
-		}
-		if SafeState != nil {
-			SafeState(err)
-		}
-		if Restarts >= 0 && inRow >= Restarts {
-			return err
-		}
-		inRow++
-		Faults++
-		harden.RepairSingletons()
-		if err := checkImage(); err != nil {
-			if SafeState != nil {
-				SafeState(err)
-			}
-			return err
-		}
-	}
-}
-
-// runFrom starts the program, initialization and all, and runs its scans
-// from the nth until scans or a fault.
-func runFrom(n, inRow *int, scans int, onScan func(machine *vm.VM), clockBuiltins map[int]*object.Builtin, retain *harden.Retain) error {
-	globals := make([]object.Object, 3)
-	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		initVM.SetBuiltin(idx, b)
-	}
-	if err := initVM.Run(); err != nil {
-		return err
-	}
-	if retain != nil {
-		RetainErr = retain.Load(globals)
-	}
-	// The initialization's VM is dropped before the scans' is made, so a
-	// microcontroller's heap holds one VM's stack and frames, not two.
-	io := initVM.IO()
-	initVM = nil
-	scanVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: scanInstructions, Constants: scanConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		scanVM.SetBuiltin(idx, b)
-	}
-	for addr, v := range io {
-		scanVM.IO()[addr] = v
-	}
-	var scrub *harden.Scrubber
-	if ScrubBytes > 0 {
-		scrub = harden.NewScrubber(imageChecksum, images()...)
-	}
-	next := time.Now()
-	for ; scans == 0 || *n < scans; *n++ {
-		scanVM.Reset()
-		began := time.Now()
-		err := scanVM.Run()
-		LastScan = time.Since(began)
-		if err != nil {
-			return err
-		}
-		// The checks come before onScan, which drives the outputs.
-		if harden.RepairSingletons() {
-			return harden.ErrSingletons
-		}
-		if scrub != nil {
-			if done, ok := scrub.Step(ScrubBytes); done && !ok {
-				return harden.ErrImage
-			}
-		}
-		if onScan != nil {
-			onScan(scanVM)
-		}
-		*inRow = 0
-		if Watchdog != nil {
-			Watchdog()
-		}
-		if retain != nil && RetainEvery > 0 && (*n+1)%RetainEvery == 0 {
-			if err := retain.Save(globals); err != nil {
-				RetainErr = err
-			}
-		}
-		next = next.Add(Interval)
-		if wait := time.Until(next); wait > 0 {
-			time.Sleep(wait)
-		} else {
-			next = time.Now() // overrun: start the next scan now
-		}
-	}
-	return nil
-}
+// Run runs the program: PLC.Run(scans, onScan).
+func Run(scans int, onScan func(machine *vm.VM)) error { return PLC.Run(scans, onScan) }

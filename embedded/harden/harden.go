@@ -171,16 +171,42 @@ func sortedKeys(h *object.Hash) []object.HashKey {
 	return keys
 }
 
-// segments splits bytecode into what a checksum reads: the instructions,
-// in place, so a scrub reads the memory the VM runs, and the encoding of
-// everything else, made now.
-func segments(bcs []*compiler.Bytecode) [][]byte {
-	var segs [][]byte
-	var enc []byte
+// segment is a run of bytes a checksum reads: instructions, in place, so
+// that a scrub reads the memory the VM runs, or buf[lo:hi], the encoding
+// of everything else.
+type segment struct {
+	live   []byte
+	enc    bool
+	lo, hi int
+}
+
+// appendFunction appends the encoding of what the generated code keeps of
+// a compiled function, but its instructions.
+func appendFunction(b []byte, fn *object.CompiledFunction) []byte {
+	b = appendU32(appendU32(append(b, tagFunction), uint32(fn.NumLocals)), uint32(fn.NumParameters))
+	for _, names := range [][]string{fn.ParameterNames, fn.OutputNames} {
+		b = appendU32(b, uint32(len(names)))
+		for _, n := range names {
+			b = appendString(b, n)
+		}
+	}
+	b = appendU32(b, uint32(len(fn.OutputIndices)))
+	for _, i := range fn.OutputIndices {
+		b = appendU64(b, uint64(i))
+	}
+	return appendU32(b, uint32(len(fn.Instructions)))
+}
+
+// appendSegments appends to segs, and to buf, what a checksum of bcs
+// reads. Given the slices of an earlier call, cut to length 0, it
+// allocates nothing more for the same image (but for structs among the
+// constants).
+func appendSegments(segs []segment, buf []byte, bcs []*compiler.Bytecode) ([]segment, []byte) {
+	lo := len(buf)
 	flush := func() {
-		if len(enc) > 0 {
-			segs = append(segs, enc)
-			enc = nil
+		if len(buf) > lo {
+			segs = append(segs, segment{enc: true, lo: lo, hi: len(buf)})
+			lo = len(buf)
 		}
 	}
 	for _, bc := range bcs {
@@ -188,52 +214,53 @@ func segments(bcs []*compiler.Bytecode) [][]byte {
 			continue
 		}
 		flush()
-		segs = append(segs, bc.Instructions)
-		enc = appendU32(enc, uint32(len(bc.Constants)))
+		segs = append(segs, segment{live: bc.Instructions})
+		buf = appendU32(buf, uint32(len(bc.Constants)))
 		for _, c := range bc.Constants {
 			fn, ok := c.(*object.CompiledFunction)
 			if !ok {
-				enc, _ = appendValue(enc, c)
+				buf, _ = appendValue(buf, c)
 				continue
 			}
-			enc = appendU32(appendU32(append(enc, tagFunction), uint32(fn.NumLocals)), uint32(fn.NumParameters))
-			for _, names := range [][]string{fn.ParameterNames, fn.OutputNames} {
-				enc = appendU32(enc, uint32(len(names)))
-				for _, n := range names {
-					enc = appendString(enc, n)
-				}
-			}
-			enc = appendU32(enc, uint32(len(fn.OutputIndices)))
-			for _, i := range fn.OutputIndices {
-				enc = appendU64(enc, uint64(i))
-			}
-			enc = appendU32(enc, uint32(len(fn.Instructions)))
+			buf = appendFunction(buf, fn)
 			flush()
-			segs = append(segs, fn.Instructions)
+			segs = append(segs, segment{live: fn.Instructions})
 		}
 	}
 	flush()
-	return segs
+	return segs, buf
+}
+
+func (s segment) bytes(buf []byte) []byte {
+	if s.enc {
+		return buf[s.lo:s.hi]
+	}
+	return s.live
 }
 
 // Checksum returns the CRC-32 (IEEE) of a program image: the bytecodes'
 // instructions and constants, in order. Of a compiled function it covers
 // what embedded's generated code keeps: not its name, lines or local names.
 func Checksum(bcs ...*compiler.Bytecode) uint32 {
+	segs, buf := appendSegments(nil, nil, bcs)
 	var crc uint32
-	for _, s := range segments(bcs) {
-		crc = crc32.Update(crc, crc32.IEEETable, s)
+	for _, s := range segs {
+		crc = crc32.Update(crc, crc32.IEEETable, s.bytes(buf))
 	}
 	return crc
 }
 
 // Scrubber checks a program image against its checksum a few bytes at a
 // time, so that a scan pays a small, bounded cost and the whole image is
-// read every few scans.
+// read every few scans. The instructions are read where the VM runs them;
+// the constants are encoded afresh at the start of each pass, into buffers
+// kept from pass to pass, so a pass allocates nothing.
 type Scrubber struct {
 	want uint32
 	bcs  []*compiler.Bytecode
-	segs [][]byte
+	segs []segment
+	buf  []byte
+	pass bool // a pass is under way
 	seg  int
 	off  int
 	crc  uint32
@@ -250,12 +277,13 @@ func NewScrubber(want uint32, bcs ...*compiler.Bytecode) *Scrubber {
 // checksum; the next Step starts a new pass. Before then it reports
 // done false and ok true.
 func (s *Scrubber) Step(n int) (done, ok bool) {
-	if s.segs == nil {
-		s.segs, s.seg, s.off, s.crc = segments(s.bcs), 0, 0, 0
+	if !s.pass {
+		s.segs, s.buf = appendSegments(s.segs[:0], s.buf[:0], s.bcs)
+		s.pass, s.seg, s.off, s.crc = true, 0, 0, 0
 	}
 	n = max(n, 1)
 	for n > 0 && s.seg < len(s.segs) {
-		seg := s.segs[s.seg]
+		seg := s.segs[s.seg].bytes(s.buf)
 		k := min(n, len(seg)-s.off)
 		s.crc = crc32.Update(s.crc, crc32.IEEETable, seg[s.off:s.off+k])
 		s.off += k
@@ -267,9 +295,8 @@ func (s *Scrubber) Step(n int) (done, ok bool) {
 	if s.seg < len(s.segs) {
 		return false, true
 	}
-	ok = s.crc == s.want
-	s.segs = nil
-	return true, ok
+	s.pass = false
+	return true, s.crc == s.want
 }
 
 // RepairSingletons sets the VM's shared vm.True and vm.False back to true

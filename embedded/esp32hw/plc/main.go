@@ -51,7 +51,7 @@ func main() {
 	err := program.Run(Scans, func(m *vm.VM) {
 		// The scan began LastScan ago: time its start, as Run schedules it,
 		// not its end, which a garbage collection in the scan delays.
-		now := time.Now().Add(-program.LastScan)
+		now := time.Now().Add(-program.PLC.LastScan)
 		if n == 0 {
 			start = now
 		} else {
@@ -64,8 +64,8 @@ func main() {
 		}
 		last = now
 		n++
-		scanSum += program.LastScan
-		scanMax = max(scanMax, program.LastScan)
+		scanSum += program.PLC.LastScan
+		scanMax = max(scanMax, program.PLC.LastScan)
 		q, _ := m.IO()["%QX0.0"].(*object.Boolean)
 		on := q != nil && q.Value
 		if on && !pulse {

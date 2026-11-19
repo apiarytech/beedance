@@ -140,15 +140,14 @@ Code that makes its own VM for a microcontroller should do the same.
 
 A microcontroller in space, or near a reactor or an accelerator, takes
 bit flips from radiation, and neither the RP2040 nor the classic ESP32 has
-ECC RAM. The generated program checks its memory with package
-`embedded/harden` and restarts the program when it finds a fault, instead
-of stopping.
+ECC RAM. The generated file's `PLC`, a `harden.PLC`, checks its memory
+and restarts the program when it finds a fault, instead of stopping.
 
 | Check | When | Covers |
 |---|---|---|
 | `harden.RepairSingletons` | after every scan | `vm.True` and `vm.False`, which every `BOOL` points to |
-| `harden.Scrubber` | `ScrubBytes` bytes after every scan | the instructions and constants, against the checksum written into the file |
-| `harden.Checksum` | after every fault | the whole image, restored from the constants in flash when it does not match |
+| `harden.Scrubber` | `ScrubBytes` bytes after every scan | the instructions and constants, against the image's checksum |
+| `Image.Checksum` | after every fault | the whole image, made afresh from flash when it does not match |
 | `harden.Retain` | at each start, and saved every `RetainEvery` scans | `RETAIN` variables, in two copies with a CRC each |
 
 The checks run before `onScan`, so outputs from a corrupt scan never
@@ -157,27 +156,34 @@ leave. A fault is a scan that fails or a check that fails. It calls
 initialization again and loads the `RETAIN` variables. After `Restarts`
 faults in a row, `Run` returns the last one.
 
-The firmware sets these before `Run`:
+The firmware sets `PLC`'s fields before `Run`:
 
-| Variable | What |
+| Field | What |
 |---|---|
-| `Restarts` | faults in a row before `Run` gives up; less than 0 for no bound; 0 (default) returns the first fault, as before |
+| `Restarts` | faults in a row before `Run` gives up; less than 0 for no bound; 0 (default) returns the first fault |
 | `ScrubBytes` | bytes of the image checked per scan; 0 checks only after a fault |
 | `SafeState func(error)` | drives the outputs to a safe state |
 | `Watchdog func()` | called after each scan that passed its checks: feed the hardware watchdog in it |
 | `RetainStore harden.Store` | two copies in flash, FRAM or battery-backed RAM; `harden.MemStore` keeps them in RAM |
 | `RetainEvery` | scans between saves; a save writes only when the values changed |
+| `Images harden.ImageStore` | two slots of flash for programs sent while it runs (below); nil refuses updates |
+| `TrialScans` | scans a new program runs on trial (default 100) |
+| `HoldDuringUpdate` | stop the scans, outputs safe, while an update is written (default true; holds only with `OnHold` set) |
+| `OnHold func()` | called each `Interval` while held: write the update's next part in it |
 
-`ProgramOptions.Restarts`, `ScrubBytes` and `RetainEvery` set their
-starting values. `Faults` counts restarts; `RetainErr` is the last
-retain error, `harden.ErrNoRetain` after a cold start.
+`ProgramOptions` sets the starting values of `Restarts`, `ScrubBytes`,
+`RetainEvery` and `TrialScans`, and `ScanDuringUpdate` turns
+`HoldDuringUpdate` off. `PLC` reports `LastScan`, `Faults`, `Rollbacks`,
+`RetainErr` and `SlotErr`.
 
 ```go
-program.Restarts = -1
-program.ScrubBytes = 256
-program.SafeState = func(error) { relay.Low() }
-program.Watchdog = func() { machine.Watchdog.Update() }
-program.RetainStore = flashStore{}
+program.PLC.Restarts = -1
+program.PLC.ScrubBytes = 256
+program.PLC.SafeState = func(error) { relay.Low() }
+program.PLC.Watchdog = func() { machine.Watchdog.Update() }
+program.PLC.RetainStore = retainFlash{}
+program.PLC.Images = imageFlash{}
+program.PLC.OnHold = receiveUpdate
 err := program.Run(0, readAndDrivePins)
 ```
 
@@ -192,9 +198,49 @@ Not covered: the VM's stack and the program's other variables in RAM
 compared, or variables stored three times, would cover them at a cost in
 scan time and RAM.
 
+## Changing the program while it runs
+
+A program goes to the PLC as a program image: `beedance -iec FILE -image
+OUT` writes one (`harden.EncodeImage`). It holds the bytecode, the
+`RETAIN` variables, the built-in functions it calls by name, and a CRC.
+
+| Step | Call | What happens |
+|---|---|---|
+| begin | `PLC.BeginUpdate(size)` | picks the slot the running program is not in; with `HoldDuringUpdate`, calls `SafeState(harden.ErrUpdating)` and stops the scans |
+| write | `PLC.WriteUpdate(part)`, part by part | writes to flash, erasing a sector as the writes reach it |
+| commit | `PLC.CommitUpdate()` | reads the slot back, checks its CRC and that this firmware has its built-ins, writes a trailer |
+| switch | at the end of the scan | the new program starts: initialization, `RETAIN` variables, a new scrub pass |
+| trial | `TrialScans` scans | a fault rolls it back; after them it is kept |
+
+The calls are made from `onScan` or `OnHold`, between scans. While an
+update is written, the image the scans run and scrub does not change:
+the update goes to the other slot. A spoilt or incomplete update is
+refused at commit, and the program runs on.
+
+What runs after a start, a fault or a rollback:
+
+| Slots hold | Runs |
+|---|---|
+| nothing committed | the golden image, built into the firmware and never overwritten |
+| a kept program | the newest kept program |
+| a program started, not kept | it was on trial when the chip reset: it is cleared, and the one before runs |
+| programs committed under another golden image | the golden image: firmware flashed with a new program runs it |
+
+A rollback clears the slot, so the program before it runs: the other
+slot's, or the golden image. `RETAIN` variables are not saved during a
+trial, so a program rolled back to finds its own.
+
+A write to flash stops the chip for the length of an erase, tens of
+milliseconds, as code runs from the same flash. So:
+
+- write in parts of a sector or less, each part one call;
+- set the hardware watchdog's timeout above the longest erase;
+- leave `HoldDuringUpdate` on where late scans could do harm; the
+  scans stop and the outputs stay safe until the switch.
+
 ## Not yet
 
-- No binary bytecode format: programs are compiled from source, or
-  embedded as Go literals as above.
+- No loader for a program image but `harden.PLC`: a standalone VM
+  program embeds its bytecode as Go literals.
 - No board I/O mapping: located variables live in the VM's I/O image and
   the application moves them to and from pins.
