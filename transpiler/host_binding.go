@@ -24,32 +24,10 @@ import (
 )
 
 func (t *Transpiler) transpileHostBinding(prog *ast.ProgramDeclaration, blocks [][]*ast.VarDeclStatement) error {
-	name := prog.Name.Value
-
-	// The constructor: the factory's initialization, returning the program.
-	t.write("\n// New%s returns a %s program with its initial values.\n", name, name)
-	t.write("func New%s() *%s {\n", name, name)
-	t.write("\tinstance := &%s{}\n", name)
-	t.programVarName = "instance"
-	for _, block := range blocks {
-		for _, decl := range block {
-			if err := t.transpileProgramVarInit(decl); err != nil {
-				t.programVarName = "p"
-				return err
-			}
-		}
-	}
-	t.programVarName = "p"
-	if err := t.transpileConfiguredVars(prog); err != nil {
+	if err := t.transpileConstructor(prog, blocks); err != nil {
 		return err
 	}
-	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
-		if initialStep := t.findInitialStep(sfc); initialStep != nil {
-			t.write("\tinstance.sfcActiveSteps = make(map[string]bool)\n")
-			t.write("\tinstance.sfcActiveSteps[%q] = true\n", initialStep.Name.Value)
-		}
-	}
-	t.write("\treturn instance\n}\n\n")
+	name := prog.Name.Value
 
 	// The variable table.
 	t.write("// Variables lists %s's variables of elementary types for its host.\n", name)
@@ -80,5 +58,37 @@ func (t *Transpiler) transpileHostBinding(prog *ast.ProgramDeclaration, blocks [
 		}
 	}
 	t.write("\t}\n}\n")
+	return nil
+}
+
+// transpileConstructor writes New<Program>(), which returns a program with
+// its initial values: the factory's initialization. Options.HostBinding and
+// Options.Firmware need it.
+func (t *Transpiler) transpileConstructor(prog *ast.ProgramDeclaration, blocks [][]*ast.VarDeclStatement) error {
+	name := prog.Name.Value
+	t.write("\n// New%s returns a %s program with its initial values.\n", name, name)
+	t.write("func New%s() *%s {\n", name, name)
+	t.write("\tinstance := &%s{}\n", name)
+	t.programVarName = "instance"
+	for _, block := range blocks {
+		for _, decl := range block {
+			if err := t.transpileProgramVarInit(decl); err != nil {
+				t.programVarName = "p"
+				return err
+			}
+		}
+	}
+	t.programVarName = "p"
+	if err := t.transpileConfiguredVars(prog); err != nil {
+		return err
+	}
+	if sfc, ok := prog.Body.(*ast.SFCProgram); ok {
+		if initialStep := t.findInitialStep(sfc); initialStep != nil {
+			t.write("\tinstance.sfcActiveSteps = make(map[string]bool)\n")
+			t.write("\tinstance.sfcActiveSteps[%q] = true\n", initialStep.Name.Value)
+		}
+	}
+	t.write("\treturn instance\n}\n\n")
+
 	return nil
 }

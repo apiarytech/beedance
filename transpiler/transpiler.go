@@ -130,6 +130,11 @@ type Transpiler struct {
 	// HostBinding generates New<Program>() and Variables() for each PROGRAM
 	// (see Options.HostBinding).
 	HostBinding bool
+	// Firmware generates New<Program>Firmware() for each PROGRAM, and the
+	// Firmware runtime once (see Options.Firmware and firmware.go).
+	Firmware bool
+	// usesFirmware: a program got a Firmware, so the runtime is written.
+	usesFirmware bool
 	// CompactImage gives the file a process image of only the entries its
 	// located variables use (see Options.CompactImage).
 	CompactImage bool
@@ -324,6 +329,9 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 			t.write("%s", plcTimeHelper)
 		}
 		t.transpileDebugTail()
+		if t.usesFirmware {
+			t.write("%s", firmwareRuntime)
+		}
 		if t.usesProcessImage {
 			if t.CompactImage {
 				t.write("%s", t.compactImageDecl())
@@ -733,6 +741,13 @@ func (t *Transpiler) transpileProgram(prog *ast.ProgramDeclaration) error {
 		if err := t.transpileHostBinding(prog, allVarBlocks); err != nil {
 			return err
 		}
+	} else if t.Firmware {
+		if err := t.transpileConstructor(prog, allVarBlocks); err != nil {
+			return err
+		}
+	}
+	if t.Firmware {
+		t.transpileFirmware(prog, allVarBlocks)
 	}
 	t.programVarName = "" // Unset after use
 	return nil

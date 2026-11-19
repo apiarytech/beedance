@@ -360,6 +360,12 @@ type Options struct {
 	// firmware with a handful of I/O points does not need. Only code in the
 	// generated package can reach either image.
 	CompactImage bool
+	// Firmware generates, for each PROGRAM, New<Program>Firmware(): a
+	// Firmware that runs it scan by scan on a microcontroller and survives
+	// faults in memory. It restarts the program after a panic, keeps the
+	// RETAIN variables in two checksummed copies, feeds a watchdog and
+	// checks the code in flash (firmware.go).
+	Firmware bool
 	// AllowInputWrites: see Transpiler.AllowInputWrites (IEC-69).
 	AllowInputWrites bool
 	// Debug puts the debugger's hooks in the file: a call before each
@@ -379,6 +385,7 @@ func GoFileWith(program *ast.Program, o Options) ([]byte, error) {
 	t.HostBinding, t.PreferOSCAT = o.HostBinding, o.PreferOSCAT
 	t.AllowInputWrites = o.AllowInputWrites
 	t.CompactImage = o.CompactImage
+	t.Firmware = o.Firmware
 	t.Debug = o.Debug
 	if err := t.Transpile(program); err != nil {
 		return nil, err

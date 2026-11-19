@@ -68,6 +68,7 @@ src, err := transpiler.GoFileWith(program, transpiler.Options{
     HostBinding: true,       // New<Program>() and Variables(); see embedding.md
     PreferOSCAT: false,      // OSCAT's version of names the standard also defines
     CompactImage: false,     // a process image of only the located variables' entries
+    Firmware: false,         // New<Program>Firmware(): a scan loop that survives faults; see embedded.md
 })
 ```
 

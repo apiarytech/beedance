@@ -238,6 +238,60 @@ milliseconds, as code runs from the same flash. So:
 - leave `HoldDuringUpdate` on where late scans could do harm; the
   scans stop and the outputs stay safe until the switch.
 
+## Transpiled firmware
+
+A program transpiled to Go runs as native code, faster than the VM, from
+flash. `transpiler.Options.Firmware` (`-go-firmware`) gives each PROGRAM
+`New<Program>Firmware()`, a `Firmware` that runs it scan by scan with the
+same protections as `harden.PLC`, written into the file: it imports
+nothing of beedance.
+
+| `Firmware` field | What |
+|---|---|
+| `Interval` | time between the starts of scans (default 100 ms) |
+| `Restarts` | faults in a row before `Run` gives up; less than 0 for no bound; 0 returns the first |
+| `SafeState func(error)` | called with each fault: drive the outputs to a safe state |
+| `Watchdog func()` | called after each scan that passed its checks |
+| `RetainStore FirmwareStore` | the two copies of the `RETAIN` variables; the methods of `harden.Store`, so one driver serves both |
+| `RetainEvery` | scans between saves (default 1); a save writes only when the values changed |
+| `Code func() []byte` | the firmware's code in flash, as a slice over it |
+| `CodeChecksum` | its CRC-32 from the build; 0 takes it at the start of `Run` |
+| `ScrubBytes` | bytes of the code checked per scan |
+
+```go
+fw := NewMainFirmware()
+fw.Interval = 10 * time.Millisecond
+fw.Restarts = -1
+fw.SafeState = func(error) { relay.Low() }
+fw.Watchdog = func() { machine.Watchdog.Update() }
+fw.RetainStore = retainFlash{}
+fw.Code, fw.ScrubBytes = codeInFlash, 256
+err := fw.Run(0, func(p *Main) { readAndDrivePins() })
+```
+
+A fault is a scan that panics (`FirmwareFault`: an index out of range, a
+division by zero), a panic in `onScan`, or a check of the code that fails.
+Run calls `SafeState` and makes the program afresh, its `RETAIN`
+variables loaded. `onScan` runs only after a scan that passed, so a
+panicking scan's outputs stay in the process image and never reach the
+pins. Where TinyGo cannot recover a panic, the chip halts and the
+watchdog resets it, which loads the `RETAIN` variables the same way.
+
+The code runs from flash, so it cannot be restored from itself: a check
+that fails ends `Run` with `ErrFirmwareCode`, for the firmware to reset the
+chip or a bootloader to start another image. `CodeChecksum` 0 takes the
+checksum when `Run` starts, which finds only flips made after.
+
+Differences from the VM:
+
+| | VM (`harden.PLC`) | Transpiled (`Firmware`) |
+|---|---|---|
+| `RETAIN` kept | elementary types, strings, dates, arrays, structs | elementary types, strings, dates, arrays of them |
+| what is checked | the bytecode in RAM, restored from flash | the code in flash, not restorable |
+| shared `TRUE`/`FALSE` | checked and repaired | none: a `BOOL` is a value |
+| a new program while it runs | two slots, trial, rollback | not yet: a bootloader with two firmware slots |
+| copy format | magic `BDR1` | magic `BDRG`, as values are encoded otherwise |
+
 ## Not yet
 
 - No loader for a program image but `harden.PLC`: a standalone VM

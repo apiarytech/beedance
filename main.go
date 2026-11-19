@@ -57,6 +57,7 @@ func main() {
 	embeddedFile := flag.String("embedded", "", "Path to the output Go file that runs the first PROGRAM of an -iec file on the VM, scan by scan, for a microcontroller (TinyGo); -interval sets its scan time")
 	imageFile := flag.String("image", "", "Path to the output file of the first PROGRAM of an -iec file as a program image, to send to a PLC that runs firmware from -embedded while it runs (harden.PLC.BeginUpdate)")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
+	goFirmware := flag.Bool("go-firmware", false, "With -go: give each PROGRAM New<Program>Firmware(), which runs it scan by scan on a microcontroller and survives faults: restarts after a panic, RETAIN variables in two checksummed copies, a watchdog, a check of the code in flash (see doc/embedded.md)")
 	goCompactImage := flag.Bool("go-compact-image", false, "With -go: give located variables a process image of only the entries they use, instead of royaljelly's vars.ProcessImage (about 33 KB on a 32-bit microcontroller)")
 	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
 	fromXMLFile := flag.String("from-xml", "", "Path to input PLCopen TC6 XML file to convert to IEC 61131-3 text")
@@ -192,7 +193,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -go flag to specify the input file.")
 			os.Exit(1)
 		}
-		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
+		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, Firmware: *goFirmware, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
 		os.Exit(0)
 	}
 
