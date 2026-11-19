@@ -28,6 +28,7 @@ import (
 	"github.com/apiarytech/beedance/compiler"
 	"github.com/apiarytech/beedance/dap"
 	"github.com/apiarytech/beedance/embedded"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/evaluator"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
@@ -54,7 +55,9 @@ func main() {
 	vmFlag := flag.Bool("vm", false, "Use the virtual machine instead of the evaluator")
 	allowInputWritesFlag := flag.Bool("allow-input-writes", false, "Let a POU assign its own VAR_INPUT variables, as CODESYS does and libraries written for it need (OSCAT; IEC-69), on every engine: -test, -vm, -go, the evaluator and configurations. Off, IEC 61131-3's rule, such a source is refused")
 	embeddedFile := flag.String("embedded", "", "Path to the output Go file that runs the first PROGRAM of an -iec file on the VM, scan by scan, for a microcontroller (TinyGo); -interval sets its scan time")
+	imageFile := flag.String("image", "", "Path to the output file of the first PROGRAM of an -iec file as a program image, to send to a PLC that runs firmware from -embedded while it runs (harden.PLC.BeginUpdate)")
 	goFile := flag.String("go", "", "Path to the output Go file for transpilation from an -iec file")
+	goFirmware := flag.Bool("go-firmware", false, "With -go: give each PROGRAM New<Program>Firmware(), which runs it scan by scan on a microcontroller and survives faults: restarts after a panic, RETAIN variables in two checksummed copies, a watchdog, a check of the code in flash (see doc/embedded.md)")
 	goCompactImage := flag.Bool("go-compact-image", false, "With -go: give located variables a process image of only the entries they use, instead of royaljelly's vars.ProcessImage (about 33 KB on a 32-bit microcontroller)")
 	toXMLFile := flag.String("to-xml", "", "Path to output PLCopen TC6 XML file converted from an -iec file")
 	fromXMLFile := flag.String("from-xml", "", "Path to input PLCopen TC6 XML file to convert to IEC 61131-3 text")
@@ -190,7 +193,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -go flag to specify the input file.")
 			os.Exit(1)
 		}
-		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
+		transpileFile(*iecFile, *goFile, transpiler.Options{CompactImage: *goCompactImage, Firmware: *goFirmware, AllowInputWrites: *allowInputWritesFlag}, os.Stdout)
+		os.Exit(0)
+	}
+
+	if *imageFile != "" {
+		if *iecFile == "" {
+			fmt.Fprintln(os.Stderr, "The -iec flag must be provided with the -image flag to specify the input file.")
+			os.Exit(1)
+		}
+		if err := generateImage(*iecFile, *imageFile); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -389,18 +404,16 @@ func printParserErrors(out io.Writer, errors []string) {
 	}
 }
 
-// generateEmbedded writes outputFile, Go that runs the first PROGRAM of
-// inputFile on the VM as a PLC does (embedded.GenerateEmbeddedProgram), for
-// a microcontroller: build it with TinyGo (see doc/embedded.md).
-func generateEmbedded(inputFile, outputFile string, opts embedded.ProgramOptions) error {
+// compileFirstProgram compiles the first PROGRAM of inputFile for the VM.
+func compileFirstProgram(inputFile string) (*compiler.CompiledProgram, error) {
 	src, err := os.ReadFile(inputFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	p := parser.New(lexer.New(string(src)))
 	program := p.ParseProgram()
 	if len(p.Errors()) != 0 {
-		return fmt.Errorf("parser errors:\n\t%s", strings.Join(p.Errors(), "\n\t"))
+		return nil, fmt.Errorf("parser errors:\n\t%s", strings.Join(p.Errors(), "\n\t"))
 	}
 	var name string
 	for _, s := range program.Statements {
@@ -410,11 +423,18 @@ func generateEmbedded(inputFile, outputFile string, opts embedded.ProgramOptions
 		}
 	}
 	if name == "" {
-		return fmt.Errorf("%s has no PROGRAM", inputFile)
+		return nil, fmt.Errorf("%s has no PROGRAM", inputFile)
 	}
 	comp := compiler.NewCompilerWithBuiltins(object.Builtins)
 	comp.AllowInputWrites = allowInputWrites // IEC-69
-	prog, err := comp.CompileProgramUnit(program, name)
+	return comp.CompileProgramUnit(program, name)
+}
+
+// generateEmbedded writes outputFile, Go that runs the first PROGRAM of
+// inputFile on the VM as a PLC does (embedded.GenerateEmbeddedProgram), for
+// a microcontroller: build it with TinyGo (see doc/embedded.md).
+func generateEmbedded(inputFile, outputFile string, opts embedded.ProgramOptions) error {
+	prog, err := compileFirstProgram(inputFile)
 	if err != nil {
 		return err
 	}
@@ -427,6 +447,21 @@ func generateEmbedded(inputFile, outputFile string, opts embedded.ProgramOptions
 		return err
 	}
 	return f.Close()
+}
+
+// generateImage writes outputFile, the first PROGRAM of inputFile as a
+// program image (harden.EncodeImage): what a PLC running firmware from
+// -embedded takes as a new program while it runs.
+func generateImage(inputFile, outputFile string) error {
+	prog, err := compileFirstProgram(inputFile)
+	if err != nil {
+		return err
+	}
+	b, err := harden.EncodeImage(harden.ImageOf(prog))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(outputFile, b, 0o644)
 }
 
 func transpileFile(inputFile, outputFile string, opts transpiler.Options, out io.Writer) {

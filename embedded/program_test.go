@@ -12,6 +12,7 @@ package embedded
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/lexer"
 	"github.com/apiarytech/beedance/object"
 	beeparser "github.com/apiarytech/beedance/parser"
@@ -202,5 +204,174 @@ func TestGenerateEmbeddedProgramStackSize(t *testing.T) {
 	}
 	if got := goRun(t, out.Bytes()); !strings.Contains(got, "program done") {
 		t.Fatalf("output %q", got)
+	}
+}
+
+// A program with a RETAIN counter, a counter that starts over at each
+// start, and an input that, when set, makes the scan fail.
+const faultProgram = `
+PROGRAM Main
+VAR RETAIN
+	count : DINT;
+END_VAR
+VAR
+	fresh : DINT;
+	idx : INT := 1;
+	arr : ARRAY[1..2] OF INT;
+	bad AT %IX0.0 : BOOL;
+	ok AT %QX0.0 : BOOL;
+END_VAR
+count := count + 1;
+fresh := fresh + 1;
+IF bad THEN
+	arr[idx + 5] := 1;
+END_IF;
+ok := TRUE;
+END_PROGRAM
+`
+
+// firmware replaces the generated main with main.
+func firmware(t *testing.T, src, main string, o ProgramOptions) string {
+	t.Helper()
+	o.Package = "main"
+	o.Interval = time.Millisecond
+	var out bytes.Buffer
+	if err := GenerateEmbeddedProgram(&out, compileUnit(t, src, "Main"), o); err != nil {
+		t.Fatal(err)
+	}
+	gen := strings.Replace(out.String(), "\nfunc main() {", "\nfunc unusedMain() {", 1)
+	gen = strings.Replace(gen, "import (\n", "import (\n\t\"fmt\"\n", 1)
+	return goRun(t, []byte(gen+main))
+}
+
+// A flipped instruction, a flipped TRUE and a failing scan each call
+// SafeState and restart the program, which goes on from its RETAIN
+// variables; a second start, as after a reset, does too.
+func TestGenerateEmbeddedProgramRecovers(t *testing.T) {
+	got := firmware(t, faultProgram, `
+func main() {
+	PLC.RetainStore = &harden.MemStore{}
+	var safe []string
+	PLC.SafeState = func(err error) { safe = append(safe, err.Error()) }
+	dog := 0
+	PLC.Watchdog = func() { dog++ }
+	n := 0
+	var count, fresh object.Object
+	err := Run(12, func(m *vm.VM) {
+		n++
+		switch n {
+		case 2:
+			PLC.Image().Scan.Instructions[0] ^= 0xff
+		case 5:
+			vm.True.Value = false
+		case 8:
+			m.IO()["%IX0.0"] = vm.True
+		}
+		count = m.Globals()[PLC.Image().RetainSlots[0]]
+	})
+	fmt.Printf("err=%v faults=%d safe=%d dog=%d count=%s\n", err, PLC.Faults, len(safe), dog, count.Inspect())
+	fmt.Printf("faults: %q\n", safe)
+	PLC.Faults = 0
+	err = Run(3, func(m *vm.VM) {
+		count = m.Globals()[PLC.Image().RetainSlots[0]]
+		fresh = m.Globals()[PLC.Image().RetainSlots[0]+1]
+	})
+	fmt.Printf("restart err=%v count=%s fresh=%s retainErr=%v\n", err, count.Inspect(), fresh.Inspect(), PLC.RetainErr)
+}
+`, ProgramOptions{Restarts: 3, ScrubBytes: 1 << 20})
+	for _, want := range []string{
+		"err=<nil> faults=3 safe=3 dog=12 count=12\n",
+		"restart err=<nil> count=15 fresh=3 retainErr=<nil>\n",
+		"TRUE or FALSE corrupt",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in\n%s", want, got)
+		}
+	}
+}
+
+// Faults that go on past Restarts in a row stop the program, SafeState
+// called for each; with Restarts 0, the first does.
+func TestGenerateEmbeddedProgramGivesUp(t *testing.T) {
+	main := `
+func main() {
+	safe := 0
+	PLC.SafeState = func(error) { safe++ }
+	n := 0
+	err := Run(0, func(m *vm.VM) {
+		if n++; n == 2 {
+			vm.False.Value = true
+		}
+	})
+	fmt.Printf("err=%v faults=%d safe=%d\n", err != nil, PLC.Faults, safe)
+}
+`
+	// A FALSE that reads true fails the scan (bad is FALSE) or the check
+	// after it: either is a fault.
+	if got := firmware(t, faultProgram, main, ProgramOptions{}); !strings.Contains(got, "err=true faults=0 safe=1\n") {
+		t.Errorf("Restarts 0: %s", got)
+	}
+	// A RETAIN count past 2 makes every start fail.
+	src := strings.Replace(faultProgram, "IF bad THEN", "IF bad OR count > 2 THEN", 1)
+	main = `
+func main() {
+	PLC.RetainStore = &harden.MemStore{}
+	safe := 0
+	PLC.SafeState = func(error) { safe++ }
+	err := Run(0, nil)
+	fmt.Printf("err=%v faults=%d safe=%d\n", err != nil, PLC.Faults, safe)
+}
+`
+	if got := firmware(t, src, main, ProgramOptions{Restarts: 2}); !strings.Contains(got, "err=true faults=2 safe=3\n") {
+		t.Errorf("Restarts 2: %s", got)
+	}
+}
+
+// The checksum the generator writes is the one the firmware's golden image
+// has, and a program sent to the firmware, in parts while it holds, runs
+// in its place.
+func TestGenerateEmbeddedProgramUpdates(t *testing.T) {
+	update, err := harden.EncodeImage(harden.ImageOf(compileUnit(t, strings.Replace(faultProgram, "count := count + 1;", "count := count + 100;", 1), "Main")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := firmware(t, faultProgram, fmt.Sprintf(`
+var update = %#v
+
+func main() {
+	fmt.Println("golden", golden().Checksum() == PLC.GoldenChecksum)
+	PLC.Images = &harden.MemImageStore{Size: 1 << 16}
+	var safe []string
+	PLC.SafeState = func(err error) { safe = append(safe, err.Error()) }
+	sent := 0
+	PLC.OnHold = func() {
+		k := min(64, len(update)-sent)
+		if err := PLC.WriteUpdate(update[sent : sent+k]); err != nil {
+			panic(err)
+		}
+		if sent += k; sent == len(update) {
+			if err := PLC.CommitUpdate(); err != nil {
+				panic(err)
+			}
+		}
+	}
+	var count object.Object
+	n := 0
+	err := Run(8, func(m *vm.VM) {
+		if n++; n == 3 {
+			if err := PLC.BeginUpdate(len(update)); err != nil {
+				panic(err)
+			}
+		}
+		count = m.Globals()[PLC.Image().RetainSlots[0]]
+	})
+	fmt.Printf("err=%%v active=%%d trial=%%v count=%%s safe=%%q\n", err, PLC.Active(), PLC.OnTrial(), count.Inspect(), safe)
+}
+`, update), ProgramOptions{TrialScans: 2})
+	// 3 scans of the golden program, 5 of the update counting by 100.
+	for _, want := range []string{"golden true\n", "err=<nil> active=0 trial=false count=500 safe=[\"harden: program held for an update\"]\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in\n%s", want, got)
+		}
 	}
 }

@@ -33,3 +33,6 @@ go.work.sum
 *~
 .DS_Store
 Thumbs.db
+
+# Built by embedded/boot/pico/build.sh
+embedded/boot/pico/out/

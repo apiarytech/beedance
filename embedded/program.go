@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apiarytech/beedance/code"
 	"github.com/apiarytech/beedance/compiler"
-	"github.com/apiarytech/beedance/object"
-	"github.com/apiarytech/beedance/vm"
+	"github.com/apiarytech/beedance/embedded/harden"
 )
 
 // ProgramOptions configures GenerateEmbeddedProgram.
@@ -37,6 +37,17 @@ type ProgramOptions struct {
 	// programs.
 	StackSize int
 	MaxFrames int
+	// Restarts, ScrubBytes, RetainEvery and TrialScans are the starting
+	// values of the harden.PLC fields of those names (see there); 0
+	// RetainEvery is 1, 0 TrialScans is 100.
+	Restarts    int
+	ScrubBytes  int
+	RetainEvery int
+	TrialScans  int
+	// ScanDuringUpdate keeps the program scanning while an update is
+	// written, rather than hold it in its safe state
+	// (harden.PLC.HoldDuringUpdate).
+	ScanDuringUpdate bool
 }
 
 // GenerateEmbeddedProgram writes Go that runs a compiled PROGRAM
@@ -45,10 +56,13 @@ type ProgramOptions struct {
 // clock. The bytecode and its constants are Go literals, so nothing is
 // compiled on the device: build it with TinyGo for a microcontroller.
 //
-// Run(scans, onScan) is the scan loop. onScan, which may be nil, is called
-// after each scan with the VM, whose I/O image (VM.IO) holds the located
-// variables: the place to read the pins into %I before the next scan and
-// drive them from %Q.
+// The file has PLC, a harden.PLC whose golden image is the program, and
+// Run(scans, onScan), which calls PLC.Run. onScan, which may be nil, is
+// called after each scan with the VM, whose I/O image (VM.IO) holds the
+// located variables: the place to read the pins into %I before the next
+// scan and drive them from %Q. PLC survives faults in memory and takes
+// new programs while it runs (see package harden); a firmware sets its
+// fields before Run.
 func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o ProgramOptions) error {
 	if prog == nil || prog.InitBytecode == nil || prog.CyclicBytecode == nil {
 		return fmt.Errorf("a compiled program with initialization and cyclic bytecode is needed")
@@ -59,15 +73,21 @@ func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o Prog
 	if o.Interval <= 0 {
 		o.Interval = 100 * time.Millisecond
 	}
-	initConsts, err := constantsTo("initConstants", prog.InitBytecode.Constants)
+	if o.RetainEvery <= 0 {
+		o.RetainEvery = 1
+	}
+	if o.TrialScans <= 0 {
+		o.TrialScans = 100
+	}
+	initConsts, err := constantsToGoLiterals(prog.InitBytecode.Constants)
 	if err != nil {
 		return fmt.Errorf("initialization constants: %w", err)
 	}
-	scanConsts, err := constantsTo("scanConstants", prog.CyclicBytecode.Constants)
+	scanConsts, err := constantsToGoLiterals(prog.CyclicBytecode.Constants)
 	if err != nil {
 		return fmt.Errorf("cyclic constants: %w", err)
 	}
-	globals := max(vm.GlobalsNeeded(prog.InitBytecode), vm.GlobalsNeeded(prog.CyclicBytecode))
+	im := harden.ImageOf(prog)
 	var vmOpts []string
 	if o.StackSize > 0 {
 		vmOpts = append(vmOpts, fmt.Sprintf("vm.WithStackSize(%d)", o.StackSize))
@@ -75,106 +95,117 @@ func GenerateEmbeddedProgram(w io.Writer, prog *compiler.CompiledProgram, o Prog
 	if o.MaxFrames > 0 {
 		vmOpts = append(vmOpts, fmt.Sprintf("vm.WithMaxFrames(%d)", o.MaxFrames))
 	}
+	var slots []string
+	for _, s := range im.RetainSlots {
+		slots = append(slots, fmt.Sprint(s))
+	}
 	main := ""
 	if o.Package == "main" {
 		main = fmt.Sprintf(programMain, o.Scans)
 	}
-	_, err = fmt.Fprintf(w, programTemplate, o.Package,
-		instructionsToGoLiteral(prog.InitBytecode.Instructions), instructionsToGoLiteral(prog.CyclicBytecode.Instructions),
-		initConsts, scanConsts, int64(o.Interval), strings.Join(vmOpts, ", "), globals, main)
+	_, err = strings.NewReplacer(
+		"$PACKAGE", o.Package,
+		"$INIT_IMAGE", instructionsToGoString(prog.InitBytecode.Instructions),
+		"$SCAN_IMAGE", instructionsToGoString(prog.CyclicBytecode.Instructions),
+		"$INIT_CONSTANTS", initConsts,
+		"$SCAN_CONSTANTS", scanConsts,
+		"$CHECKSUM", fmt.Sprintf("0x%08x", im.Checksum()),
+		"$GLOBALS", fmt.Sprint(im.Globals),
+		"$RETAIN_SLOTS", strings.Join(slots, ", "),
+		"$RETAIN_LAYOUT", fmt.Sprintf("0x%08x", im.RetainLayout),
+		"$INTERVAL", fmt.Sprint(int64(o.Interval)),
+		"$VM_OPTIONS", strings.Join(vmOpts, ", "),
+		"$RESTARTS", fmt.Sprint(o.Restarts),
+		"$SCRUB_BYTES", fmt.Sprint(max(o.ScrubBytes, 0)),
+		"$RETAIN_EVERY", fmt.Sprint(o.RetainEvery),
+		"$TRIAL_SCANS", fmt.Sprint(o.TrialScans),
+		"$HOLD", fmt.Sprint(!o.ScanDuringUpdate),
+		"$MAIN", main,
+	).WriteString(w, programTemplate)
 	return err
 }
 
-// constantsTo is constantsToGoLiterals for a slice called name.
-func constantsTo(name string, constants []object.Object) (string, error) {
-	s, err := constantsToGoLiterals(constants)
-	return strings.ReplaceAll(s, "generatedConstants", name), err
+// instructionsToGoString is ins as a Go string constant, 16 bytes a line.
+func instructionsToGoString(ins code.Instructions) string {
+	if len(ins) == 0 {
+		return `""`
+	}
+	var out strings.Builder
+	for i, b := range ins {
+		if i%16 == 0 {
+			if i > 0 {
+				out.WriteString("\" +\n\t")
+			}
+			out.WriteString("\"")
+		}
+		fmt.Fprintf(&out, "\\x%02x", b)
+	}
+	out.WriteString("\"")
+	return out.String()
 }
 
 const programTemplate = `// Code generated by beedance (embedded.GenerateEmbeddedProgram). DO NOT EDIT.
 
-package %s
+package $PACKAGE
 
 import (
 	"time"
 
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
-	"github.com/apiarytech/beedance/stdlib" // the built-in functions, and the clock
+	_ "github.com/apiarytech/beedance/stdlib" // the built-in functions
 	"github.com/apiarytech/beedance/vm"
 )
 
-var initInstructions = %s
+// initImage and scanImage are the program's instructions. They are
+// constants, in flash on a microcontroller, so that golden makes the image
+// afresh from them when the copy in RAM is found corrupt.
+const initImage = $INIT_IMAGE
 
-var scanInstructions = %s
+const scanImage = $SCAN_IMAGE
 
-var initConstants, scanConstants []object.Object
+func initConstants() []object.Object {
+	var generatedConstants []object.Object
+$INIT_CONSTANTS	return generatedConstants
+}
 
-func init() {
-%s
-%s
+func scanConstants() []object.Object {
+	var generatedConstants []object.Object
+$SCAN_CONSTANTS	return generatedConstants
+}
+
+// golden makes the program the firmware is built with, afresh.
+func golden() harden.Image {
+	return harden.Image{
+		Init:         &compiler.Bytecode{Instructions: []byte(initImage), Constants: initConstants()},
+		Scan:         &compiler.Bytecode{Instructions: []byte(scanImage), Constants: scanConstants()},
+		Globals:      $GLOBALS,
+		RetainSlots:  []int{$RETAIN_SLOTS},
+		RetainLayout: $RETAIN_LAYOUT,
+	}
 }
 
 // Interval is the time between the starts of scans.
-const Interval = time.Duration(%d)
+const Interval = time.Duration($INTERVAL)
 
-// vmOptions size the VMs' stacks (ProgramOptions.StackSize, MaxFrames).
-var vmOptions = []vm.Option{%s}
-
-// LastScan is how long the last scan took to run, onScan aside: on a
-// device, the program's scan time.
-var LastScan time.Duration
-
-// Run runs the program: its initialization, then scans Interval apart,
-// scans of them (0: for ever). onScan, if not nil, is called after each
-// scan with the VM, whose IO() holds the located variables by address.
-// It returns the runtime error that stopped the program.
-func Run(scans int, onScan func(machine *vm.VM)) error {
-	object.FinalizeBuiltins()
-	start := time.Now()
-	clock := func() time.Duration { return time.Since(start) }
-	globals := make([]object.Object, %d)
-	clockBuiltins := stdlib.ClockBuiltins(clock)
-	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		initVM.SetBuiltin(idx, b)
-	}
-	if err := initVM.Run(); err != nil {
-		return err
-	}
-	// The initialization's VM is dropped before the scans' is made, so a
-	// microcontroller's heap holds one VM's stack and frames, not two.
-	io := initVM.IO()
-	initVM = nil
-	scanVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: scanInstructions, Constants: scanConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		scanVM.SetBuiltin(idx, b)
-	}
-	for addr, v := range io {
-		scanVM.IO()[addr] = v
-	}
-	next := time.Now()
-	for n := 0; scans == 0 || n < scans; n++ {
-		scanVM.Reset()
-		began := time.Now()
-		err := scanVM.Run()
-		LastScan = time.Since(began)
-		if err != nil {
-			return err
-		}
-		if onScan != nil {
-			onScan(scanVM)
-		}
-		next = next.Add(Interval)
-		if wait := time.Until(next); wait > 0 {
-			time.Sleep(wait)
-		} else {
-			next = time.Now() // overrun: start the next scan now
-		}
-	}
-	return nil
+// PLC runs the program. A firmware sets its fields before Run: SafeState,
+// Watchdog, RetainStore and Images above all (see harden.PLC).
+var PLC = &harden.PLC{
+	Golden:           golden,
+	GoldenChecksum:   $CHECKSUM,
+	Interval:         Interval,
+	VMOptions:        []vm.Option{$VM_OPTIONS},
+	Restarts:         $RESTARTS,
+	ScrubBytes:       $SCRUB_BYTES,
+	RetainEvery:      $RETAIN_EVERY,
+	TrialScans:       $TRIAL_SCANS,
+	HoldDuringUpdate: $HOLD,
 }
-%s`
+
+// Run runs the program: PLC.Run(scans, onScan).
+func Run(scans int, onScan func(machine *vm.VM)) error { return PLC.Run(scans, onScan) }
+$MAIN`
 
 const programMain = `
 func main() {
