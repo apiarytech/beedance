@@ -9,7 +9,10 @@
 
 package object
 
-import "sort"
+import (
+	"sort"
+	"sync"
+)
 
 // BuiltinEntry holds the name and implementation of a built-in function.
 // This is used for the indexed list required by the compiler and VM.
@@ -31,6 +34,15 @@ var builtinsByName = make(map[string]*Builtin)
 // It maps the stable iota-generated index to the builtin's definition.
 var builtinsByIndex = make(map[int]BuiltinEntry)
 
+// registry guards the registration maps against FinalizeBuiltins, and says
+// whether Builtins must be built again.
+var registry struct {
+	sync.Mutex
+	stale bool // a built-in was registered since Builtins was built
+}
+
+func init() { registry.stale = true }
+
 // RegisterBuiltin is called by packages (like evaluator) to register
 // the implementation of a built-in function. This function is not thread-safe
 // and is intended to be called during application initialization (in init() functions).
@@ -40,15 +52,28 @@ func RegisterBuiltin(index int, name string, fn BuiltinFunction) {
 		Builtin: &Builtin{Fn: fn},
 		Index:   index,
 	}
+	registry.Lock()
+	defer registry.Unlock()
 	builtinsByIndex[index] = entry
 	builtinsByName[name] = entry.Builtin // Keep for evaluator's name-based lookup
+	registry.stale = true
 }
 
 // FinalizeBuiltins sorts the built-ins by name and populates the public
 // `Builtins` slice. This function is now designed to create a dense slice
 // from the registered built-ins and sort it by the `iota`-generated index.
 // This ensures a stable and predictable order for the compiler and VM.
+//
+// It is safe to call from many goroutines, as every engine's entry point
+// does: Builtins is built again only when a built-in was registered since
+// it was last built, so once built it is only read, and programs compiled
+// and run at the same time do not race on it.
 func FinalizeBuiltins() {
+	registry.Lock()
+	defer registry.Unlock()
+	if !registry.stale {
+		return
+	}
 	// Convert the map to a slice for sorting.
 	// This creates a dense slice, which is more robust than a sparse one.
 	builtinsList := make([]BuiltinEntry, 0, len(builtinsByIndex))
@@ -64,6 +89,7 @@ func FinalizeBuiltins() {
 	})
 
 	Builtins = builtinsList
+	registry.stale = false
 }
 
 // GetBuiltinByName is used by the evaluator to look up built-in functions by
