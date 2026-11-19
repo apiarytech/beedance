@@ -289,8 +289,50 @@ Differences from the VM:
 | `RETAIN` kept | elementary types, strings, dates, arrays, structs | elementary types, strings, dates, arrays of them |
 | what is checked | the bytecode in RAM, restored from flash | the code in flash, not restorable |
 | shared `TRUE`/`FALSE` | checked and repaired | none: a `BOOL` is a value |
-| a new program while it runs | two slots, trial, rollback | not yet: a bootloader with two firmware slots |
+| a new program while it runs | two slots, trial, rollback | a new firmware at a reset, through the bootloader (Pico): trial, rollback |
 | copy format | magic `BDR1` | magic `BDRG`, as values are encoded otherwise |
+
+## Bootloader (Pico)
+
+Updating native firmware in flight takes a bootloader:
+[`embedded/boot/pico`](../embedded/boot/pico/README.md), in C, built with
+clang. It keeps four slots of 448 KB in the Pico's flash: run (the app),
+staging (an update), backup (the app before) and golden (the first app,
+never overwritten). An update is installed at a reset, on trial, and
+rolled back at the next reset unless the app confirms it. A run slot whose
+CRC fails at boot is restored from the backup, or else the golden slot.
+
+Package `embedded/boot` is the app's side. Built with TinyGo's
+`pico-boot` target (`pico-boot.json`), it gives `boot.Pico`, over
+`machine.Flash`:
+
+| Call | What |
+|---|---|
+| `BeginUpdate(size)`, `WriteUpdate(part)`, `CommitUpdate()` | write an image to the staging slot, sector by sector, and mark it to install |
+| `boot.Reset()` | reset into the bootloader, to install it |
+| `OnTrial()`, `Confirm()` | keep an update on trial |
+| `Status()` | the bootloader's record: state, flags (`RolledBack`, `Restored`, `Rejected`), slot sizes and CRCs |
+| `boot.Code()` | the run slot and its CRC, for `Firmware.Code` and `CodeChecksum` |
+
+With transpiled firmware:
+
+```go
+code, crc := boot.Code()
+fw.Code, fw.CodeChecksum, fw.ScrubBytes = func() []byte { return code }, crc, 256
+scans := 0
+err := fw.Run(0, func(p *Main) {
+	if scans++; scans == 1000 && boot.Pico.OnTrial() {
+		boot.Pico.Confirm() // a thousand good scans: keep the update
+	}
+})
+// a fault Run cannot recover from, ErrFirmwareCode above all: the
+// bootloader checks the run slot and restores it if it must.
+boot.Reset()
+```
+
+The data area after the golden slot (`boot.DataOff`, 216 KB) is the app's:
+a `harden.Store` for the `RETAIN` variables and a `harden.ImageStore` for
+VM programs go there, at `machine.Flash` offsets from `boot.StatusOff`.
 
 ## Not yet
 
