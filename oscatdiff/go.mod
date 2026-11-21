@@ -7,7 +7,7 @@ require (
 	github.com/apiarytech/beedance v0.0.0-00010101000000-000000000000
 )
 
-require github.com/apiarytech/royaljelly v0.3.4 // indirect
+require github.com/apiarytech/royaljelly v0.4.0 // indirect
 
 // The tests are developed with beedance in this repository.
 replace github.com/apiarytech/beedance => ..

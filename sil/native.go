@@ -30,7 +30,7 @@ import (
 // Module versions the transpiled tests build with, unless
 // Options.GoReplace points a module at a local directory.
 const (
-	RoyaljellyVersion = "v0.3.4"
+	RoyaljellyVersion = "v0.4.0"
 	BeebreadVersion   = "v0.2.1"
 )
 
