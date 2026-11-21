@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/apiarytech/beedance v0.0.0
-	github.com/apiarytech/royaljelly v0.3.4
+	github.com/apiarytech/royaljelly v0.4.0
 )
 
 // The connector is developed with beedance in this repository.

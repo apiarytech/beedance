@@ -1,5 +1,5 @@
-github.com/apiarytech/royaljelly v0.3.4 h1:a2hXdlDh+iK64LNbfjTqbeu5sVbeU7qZ50eGsWsUcEs=
-github.com/apiarytech/royaljelly v0.3.4/go.mod h1:btdgGAeb/abudrywsv5lYjflnyX3LcAOrNLLRF6b3iA=
+github.com/apiarytech/royaljelly v0.4.0 h1:GUKWj+HmOYQ8NvmwUK4C9JePo/KFcgXVAqAu21knXwQ=
+github.com/apiarytech/royaljelly v0.4.0/go.mod h1:btdgGAeb/abudrywsv5lYjflnyX3LcAOrNLLRF6b3iA=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
