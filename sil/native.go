@@ -31,7 +31,7 @@ import (
 // Options.GoReplace points a module at a local directory.
 const (
 	RoyaljellyVersion = "v0.4.0"
-	BeebreadVersion   = "v0.2.1"
+	BeebreadVersion   = "v0.2.2"
 )
 
 // GoDirective is the go directive of the temporary module the go and wasm

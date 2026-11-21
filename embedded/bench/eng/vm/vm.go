@@ -28,7 +28,7 @@ func Bench() {
 	t := report.Start()
 	pulses, on := 0, false
 	err := vmplc.Run(report.Scans, func(m *bvm.VM) {
-		t.Add(vmplc.LastScan)
+		t.Add(vmplc.PLC.LastScan)
 		q, _ := m.IO()["%QX0.0"].(*object.Boolean)
 		if q != nil && q.Value && !on {
 			pulses++
@@ -38,7 +38,7 @@ func Bench() {
 	t.Print("vm", "plc", fmt.Sprintf("pulses:%d,err:%v", pulses, err))
 
 	t = report.Start()
-	err = vmcalc.Run(report.Scans, func(*bvm.VM) { t.Add(vmcalc.LastScan) })
+	err = vmcalc.Run(report.Scans, func(*bvm.VM) { t.Add(vmcalc.PLC.LastScan) })
 	t.Print("vm", "calc", fmt.Sprintf("err:%v", err))
 }
 

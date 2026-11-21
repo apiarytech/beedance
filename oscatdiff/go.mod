@@ -3,7 +3,7 @@ module github.com/apiarytech/beedance/oscatdiff
 go 1.27.3
 
 require (
-	github.com/apiarytech/beebread v0.2.1
+	github.com/apiarytech/beebread v0.2.2
 	github.com/apiarytech/beedance v0.0.0-00010101000000-000000000000
 )
 

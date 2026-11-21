@@ -6,99 +6,73 @@ import (
 	"time"
 
 	"github.com/apiarytech/beedance/compiler"
+	"github.com/apiarytech/beedance/embedded/harden"
 	"github.com/apiarytech/beedance/object"
-	"github.com/apiarytech/beedance/stdlib" // the built-in functions, and the clock
+	_ "github.com/apiarytech/beedance/stdlib" // the built-in functions
 	"github.com/apiarytech/beedance/vm"
 )
 
-var initInstructions = []byte{
-	0x00, 0x00, 0x00, 0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x01, 0x00, 0x00, 0x01, 0x00, 0x1b,
-	0x02, 0x00,
+// initImage and scanImage are the program's instructions. They are
+// constants, in flash on a microcontroller, so that golden makes the image
+// afresh from them when the copy in RAM is found corrupt.
+const initImage = "\x00\x00\x00\x1b\x00\x00\x00\x00\x00\x1b\x01\x00\x00\x01\x00\x1b" +
+	"\x02\x00"
+
+const scanImage = "\x00\x00\x00\x1b\x01\x00\x00\x02\x00\x1b\x00\x00\x1a\x00\x00\x00" +
+	"\x03\x00\x0f\x17\x47\x00\x1a\x01\x00\x1a\x00\x00\x00\x04\x00\x04" +
+	"\x00\x05\x00\x06\x01\x3a\x03\x1b\x01\x00\x1a\x02\x00\x00\x06\x00" +
+	"\x04\x00\x07\x00\x01\x1b\x02\x00\x1a\x00\x00\x00\x02\x00\x01\x3a" +
+	"\x03\x1b\x00\x00\x18\x0c\x00"
+
+func initConstants() []object.Object {
+	var generatedConstants []object.Object
+	generatedConstants = make([]object.Object, 2)
+	generatedConstants[0] = &object.LInt{Value: 0}
+	generatedConstants[1] = &object.LReal{Value: 0.0}
+	return generatedConstants
 }
 
-var scanInstructions = []byte{
-	0x00, 0x00, 0x00, 0x1b, 0x01, 0x00, 0x00, 0x02, 0x00, 0x1b, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
-	0x03, 0x00, 0x0f, 0x17, 0x47, 0x00, 0x1a, 0x01, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x04, 0x00, 0x04,
-	0x00, 0x05, 0x00, 0x06, 0x01, 0x3a, 0x03, 0x1b, 0x01, 0x00, 0x1a, 0x02, 0x00, 0x00, 0x06, 0x00,
-	0x04, 0x00, 0x07, 0x00, 0x01, 0x1b, 0x02, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x3a,
-	0x03, 0x1b, 0x00, 0x00, 0x18, 0x0c, 0x00,
+func scanConstants() []object.Object {
+	var generatedConstants []object.Object
+	generatedConstants = make([]object.Object, 8)
+	generatedConstants[0] = &object.LInt{Value: 0}
+	generatedConstants[1] = &object.LReal{Value: 0.0}
+	generatedConstants[2] = &object.LInt{Value: 1}
+	generatedConstants[3] = &object.LInt{Value: 100}
+	generatedConstants[4] = &object.LInt{Value: 3}
+	generatedConstants[5] = &object.LInt{Value: 7}
+	generatedConstants[6] = &object.LReal{Value: 0.5}
+	generatedConstants[7] = &object.LReal{Value: 1.0}
+	return generatedConstants
 }
 
-var initConstants, scanConstants []object.Object
-
-func init() {
-	initConstants = make([]object.Object, 2)
-	initConstants[0] = &object.LInt{Value: 0}
-	initConstants[1] = &object.LReal{Value: 0.0}
-
-	scanConstants = make([]object.Object, 8)
-	scanConstants[0] = &object.LInt{Value: 0}
-	scanConstants[1] = &object.LReal{Value: 0.0}
-	scanConstants[2] = &object.LInt{Value: 1}
-	scanConstants[3] = &object.LInt{Value: 100}
-	scanConstants[4] = &object.LInt{Value: 3}
-	scanConstants[5] = &object.LInt{Value: 7}
-	scanConstants[6] = &object.LReal{Value: 0.5}
-	scanConstants[7] = &object.LReal{Value: 1.0}
-
+// golden makes the program the firmware is built with, afresh.
+func golden() harden.Image {
+	return harden.Image{
+		Init:         &compiler.Bytecode{Instructions: []byte(initImage), Constants: initConstants()},
+		Scan:         &compiler.Bytecode{Instructions: []byte(scanImage), Constants: scanConstants()},
+		Globals:      3,
+		RetainSlots:  []int{},
+		RetainLayout: 0x00000000,
+	}
 }
 
 // Interval is the time between the starts of scans.
 const Interval = time.Duration(1)
 
-// vmOptions size the VMs' stacks (ProgramOptions.StackSize, MaxFrames).
-var vmOptions = []vm.Option{vm.WithStackSize(256), vm.WithMaxFrames(32)}
-
-// LastScan is how long the last scan took to run, onScan aside: on a
-// device, the program's scan time.
-var LastScan time.Duration
-
-// Run runs the program: its initialization, then scans Interval apart,
-// scans of them (0: for ever). onScan, if not nil, is called after each
-// scan with the VM, whose IO() holds the located variables by address.
-// It returns the runtime error that stopped the program.
-func Run(scans int, onScan func(machine *vm.VM)) error {
-	object.FinalizeBuiltins()
-	start := time.Now()
-	clock := func() time.Duration { return time.Since(start) }
-	globals := make([]object.Object, 3)
-	clockBuiltins := stdlib.ClockBuiltins(clock)
-	initVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: initInstructions, Constants: initConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		initVM.SetBuiltin(idx, b)
-	}
-	if err := initVM.Run(); err != nil {
-		return err
-	}
-	// The initialization's VM is dropped before the scans' is made, so a
-	// microcontroller's heap holds one VM's stack and frames, not two.
-	io := initVM.IO()
-	initVM = nil
-	scanVM := vm.NewWithGlobalsStore(&compiler.Bytecode{Instructions: scanInstructions, Constants: scanConstants}, globals, vmOptions...)
-	for idx, b := range clockBuiltins {
-		scanVM.SetBuiltin(idx, b)
-	}
-	for addr, v := range io {
-		scanVM.IO()[addr] = v
-	}
-	next := time.Now()
-	for n := 0; scans == 0 || n < scans; n++ {
-		scanVM.Reset()
-		began := time.Now()
-		err := scanVM.Run()
-		LastScan = time.Since(began)
-		if err != nil {
-			return err
-		}
-		if onScan != nil {
-			onScan(scanVM)
-		}
-		next = next.Add(Interval)
-		if wait := time.Until(next); wait > 0 {
-			time.Sleep(wait)
-		} else {
-			next = time.Now() // overrun: start the next scan now
-		}
-	}
-	return nil
+// PLC runs the program. A firmware sets its fields before Run: SafeState,
+// Watchdog, RetainStore and Images above all (see harden.PLC).
+var PLC = &harden.PLC{
+	Golden:           golden,
+	GoldenChecksum:   0x57540555,
+	Interval:         Interval,
+	VMOptions:        []vm.Option{vm.WithStackSize(256), vm.WithMaxFrames(32)},
+	Restarts:         0,
+	ScrubBytes:       0,
+	RetainEvery:      1,
+	TrialScans:       100,
+	HoldDuringUpdate: true,
 }
+
+// Run runs the program: PLC.Run(scans, onScan).
+func Run(scans int, onScan func(machine *vm.VM)) error { return PLC.Run(scans, onScan) }
