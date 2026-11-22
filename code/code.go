@@ -8,6 +8,8 @@
  * See the LICENSE files in the project root for full license text.
  */
 
+// Package code defines the VM's bytecode: its opcodes, their operand
+// widths, and how instructions are encoded and decoded.
 package code
 
 import (
