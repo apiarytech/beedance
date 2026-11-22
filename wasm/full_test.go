@@ -15,6 +15,9 @@ package wasm
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/apiarytech/beedance/evaluator"
 )
 
 func TestTest(t *testing.T) {
@@ -81,4 +84,18 @@ func TestTranspile(t *testing.T) {
 	if src := reply["go"].(string); !strings.HasPrefix(src, "package main") {
 		t.Errorf("transpiled source starts %.40q", src)
 	}
+}
+
+// TestTestWhileDebugging: the test op refuses the evaluator while a
+// debugger holds it, which a single thread could not wait out, and runs
+// once the debug session ends.
+func TestTestWhileDebugging(t *testing.T) {
+	h := New()
+	end := evaluator.DebugSession(time.Now)
+	reply := call(t, h, map[string]any{"op": "test", "source": source, "filter": "Add"})
+	end()
+	if e, _ := reply["error"].(string); !strings.Contains(e, "debugging a program") {
+		t.Errorf("while debugging: %v, want it refused", reply)
+	}
+	noError(t, call(t, h, map[string]any{"op": "test", "source": source, "filter": "Add"}))
 }
