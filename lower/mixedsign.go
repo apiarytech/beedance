@@ -8,21 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package mixedsign refuses arithmetic that mixes a signed and an unsigned
-// integer type neither of which holds every value of the other, such as
-// UDINT + DINT: strict IEC 61131-3 has no implicit conversion between them,
-// and the engines computed different results (the evaluator and the VM -1,
-// the transpiled Go 4294967295). The owner chose a compile error (issue
-// #18), for every engine alike: the evaluator, the VM's compiler and the
-// transpiler run Check before anything else.
-//
-// What is refused: +, -, *, / or MOD between two operands whose types are
-// known here, a variable declared in the POU (or globally) or a typed
-// literal (UDINT#5), when one is signed and the other unsigned and neither
-// fits the other (IntegerFits). USINT + INT is allowed, since every USINT is
-// an INT. An untyped literal, a member, an element, a call or a nested
-// expression has no known type and is not checked.
-package mixedsign
+package lower
 
 import (
 	"fmt"
@@ -32,9 +18,24 @@ import (
 	"github.com/apiarytech/beedance/object"
 )
 
-// Check returns the first operation in program that mixes signed and
+// CheckMixedSign refuses arithmetic that mixes a signed and an unsigned
+// integer type neither of which holds every value of the other, such as
+// UDINT + DINT: strict IEC 61131-3 has no implicit conversion between them,
+// and the engines computed different results (the evaluator and the VM -1,
+// the transpiled Go 4294967295). The owner chose a compile error (issue
+// #18), for every engine alike: the evaluator, the VM's compiler and the
+// transpiler run CheckMixedSign before anything else.
+//
+// What is refused: +, -, *, / or MOD between two operands whose types are
+// known here, a variable declared in the POU (or globally) or a typed
+// literal (UDINT#5), when one is signed and the other unsigned and neither
+// fits the other (IntegerFits). USINT + INT is allowed, since every USINT is
+// an INT. An untyped literal, a member, an element, a call or a nested
+// expression has no known type and is not checked.
+//
+// CheckMixedSign returns the first operation in program that mixes signed and
 // unsigned integers, as an error with its position, or nil.
-func Check(program *ast.Program) error {
+func CheckMixedSign(program *ast.Program) error {
 	if program == nil {
 		return nil
 	}

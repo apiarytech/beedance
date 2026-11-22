@@ -13,27 +13,26 @@ package transpiler
 
 import (
 	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/edges"
-	"github.com/apiarytech/beedance/enables"
+	"github.com/apiarytech/beedance/lower"
 )
 
-// edgesThenEnables gives edge inputs their meaning (package edges), then a
-// POU's own EN and ENO theirs around the whole body (package enables,
+// edgesThenEnables gives edge inputs their meaning (lower.Edges), then a
+// POU's own EN and ENO theirs around the whole body (lower.Enables,
 // IEC-75), the same on every engine.
 func edgesThenEnables(program *ast.Program) error {
-	if err := edges.Lower(program); err != nil {
+	if err := lower.Edges(program); err != nil {
 		return err
 	}
-	return enables.Lower(program)
+	return lower.Enables(program)
 }
 
 // declaredEnables reports whether a function block, or one it extends,
 // declares EN or ENO itself (IEC-75): then the field is its own, named as it
-// declares it, and package enables gives it its meaning.
+// declares it, and lower.Enables gives it its meaning.
 func (t *Transpiler) declaredEnables(fb *ast.FunctionBlockDeclaration) (en, eno bool) {
 	for seen := map[*ast.FunctionBlockDeclaration]bool{}; fb != nil && !seen[fb]; {
 		seen[fb] = true
-		e, o := enables.Declares(fb.VarInputs, fb.VarOutputs)
+		e, o := lower.DeclaresEnables(fb.VarInputs, fb.VarOutputs)
 		en, eno = en || e, eno || o
 		if fb.Extends == nil {
 			break

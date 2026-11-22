@@ -132,7 +132,7 @@ var datePartMethods = map[string]string{
 }
 
 // transpileDatePart writes $DATEPART(value, 'PART'), a part of a DATE, TOD
-// or DT, which SPLIT_DATE, SPLIT_TOD and SPLIT_DT are (package stdcalls).
+// or DT, which SPLIT_DATE, SPLIT_TOD and SPLIT_DT are (lower.FormalCalls).
 func (t *Transpiler) transpileDatePart(exp *ast.CallExpression) error {
 	if len(exp.Arguments) != 2 {
 		return fmt.Errorf("$DATEPART takes 2 arguments, got %d", len(exp.Arguments))

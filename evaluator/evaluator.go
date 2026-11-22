@@ -13,13 +13,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/enums"
-	"github.com/apiarytech/beedance/inputwrites"
-	"github.com/apiarytech/beedance/mixedsign"
+	"github.com/apiarytech/beedance/lower"
 	"github.com/apiarytech/beedance/object"
-	"github.com/apiarytech/beedance/stdcalls"
 	"github.com/apiarytech/beedance/token"
-	"github.com/apiarytech/beedance/typedfbs"
 	"math"
 	"sort"
 	"strconv"
@@ -1135,25 +1131,25 @@ func evalProgram(program *ast.Program, env *object.Environment) object.Object {
 	// allows input writes (CODESYS's dialect). Checked before edges'
 	// lowering, which writes edge inputs through THIS.
 	if !allowInputWrites {
-		if err := inputwrites.Check(program); err != nil {
+		if err := lower.CheckInputWrites(program); err != nil {
 			return newError(program, "%s", err)
 		}
 	}
 	// UDINT + DINT and the like are refused, as by the compiler and the
-	// transpiler; see package mixedsign.
-	if err := mixedsign.Check(program); err != nil {
+	// transpiler; see lower.CheckMixedSign.
+	if err := lower.CheckMixedSign(program); err != nil {
 		return newError(program, "%s", err)
 	}
-	// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
-	typedfbs.Declare(program)
-	// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
-	stdcalls.Positional(program)
-	// R_EDGE and F_EDGE inputs; see package edges.
+	// CTU_DINT, TON_LTIME and the other typed blocks; see lower.TypedFBs.
+	lower.TypedFBs(program)
+	// LIMIT(MN := 0, IN := v, MX := 20); see lower.FormalCalls.
+	lower.FormalCalls(program)
+	// R_EDGE and F_EDGE inputs; see lower.Edges.
 	if err := edgesThenEnables(program); err != nil {
 		return newError(program, "%s", err)
 	}
-	// Enumeration values named without their type; see package enums.
-	enums.Qualify(program)
+	// Enumeration values named without their type; see lower.EnumNames.
+	lower.EnumNames(program)
 
 	// Reorder statements to process definitions (TYPE, FUNCTION_BLOCK, FUNCTION, INTERFACE)
 	// before usages (PROGRAM, VAR_GLOBAL, etc.). This is a simple two-pass approach

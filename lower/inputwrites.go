@@ -9,7 +9,16 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package inputwrites checks that no POU assigns its own inputs (IEC-69),
+package lower
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/apiarytech/beedance/ast"
+)
+
+// CheckInputWrites checks that no POU assigns its own inputs (IEC-69),
 // for the evaluator and the transpiler, as the VM's compiler does: IEC
 // 61131-3 makes a VAR_INPUT read-only inside its POU. CODESYS allows the
 // write, and libraries written for it (OSCAT, beeguard's alarm blocks)
@@ -21,25 +30,17 @@
 // of the blocks it extends) or a method (its own inputs and its block's). A
 // member or an element of an input (a.b, a[1]), a FOR counting with one and
 // IL's ST store into it are not refused, as the VM does not; nor is a write
-// through THIS (edges' lowering of R_EDGE inputs).
-package inputwrites
-
-import (
-	"fmt"
-	"strings"
-
-	"github.com/apiarytech/beedance/ast"
-)
-
-// Check returns the first assignment of an input in program, as the VM's
+// through THIS (Edges' lowering of R_EDGE inputs).
+//
+// CheckInputWrites returns the first assignment of an input in program, as the VM's
 // error, or nil.
-func Check(program *ast.Program) error {
+func CheckInputWrites(program *ast.Program) error {
 	if program == nil {
 		return nil
 	}
 	fbs := map[string]*ast.FunctionBlockDeclaration{}
 	collect(program.Statements, fbs)
-	return check(program.Statements, fbs)
+	return checkWrites(program.Statements, fbs)
 }
 
 func collect(stmts []ast.Statement, fbs map[string]*ast.FunctionBlockDeclaration) {
@@ -55,25 +56,25 @@ func collect(stmts []ast.Statement, fbs map[string]*ast.FunctionBlockDeclaration
 	}
 }
 
-func check(stmts []ast.Statement, fbs map[string]*ast.FunctionBlockDeclaration) error {
+func checkWrites(stmts []ast.Statement, fbs map[string]*ast.FunctionBlockDeclaration) error {
 	for _, s := range stmts {
 		switch d := s.(type) {
 		case *ast.FunctionDeclaration:
-			if err := body(d.Body, names(nil, d.VarInputs)); err != nil {
+			if err := writesBody(d.Body, names(nil, d.VarInputs)); err != nil {
 				return err
 			}
 		case *ast.FunctionBlockDeclaration:
 			inputs := chainInputs(d, fbs)
 			blk, ok := d.Body.(*ast.BlockStatement)
 			if !ok {
-				if err := body(d.Body, inputs); err != nil {
+				if err := writesBody(d.Body, inputs); err != nil {
 					return err
 				}
 				continue
 			}
 			for _, st := range blk.Statements {
 				if m, isMethod := st.(*ast.MethodImplementation); isMethod {
-					if err := body(m.Body, names(inputs, m.VarInputs)); err != nil {
+					if err := writesBody(m.Body, names(inputs, m.VarInputs)); err != nil {
 						return err
 					}
 					continue
@@ -83,7 +84,7 @@ func check(stmts []ast.Statement, fbs map[string]*ast.FunctionBlockDeclaration) 
 				}
 			}
 		case *ast.NamespaceDeclaration:
-			if err := check(d.Statements, fbs); err != nil {
+			if err := checkWrites(d.Statements, fbs); err != nil {
 				return err
 			}
 		}
@@ -123,7 +124,7 @@ func names(into map[string]bool, decls []*ast.VarDeclStatement) map[string]bool 
 	return out
 }
 
-func body(b ast.Statement, inputs map[string]bool) error {
+func writesBody(b ast.Statement, inputs map[string]bool) error {
 	if b == nil || len(inputs) == 0 {
 		return nil
 	}

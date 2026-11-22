@@ -52,7 +52,7 @@ func init() {
 // datePartFn is $DATEPART(value, 'PART'): a part of a DATE, TIME_OF_DAY or
 // DATE_AND_TIME (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILLISECOND, or
 // WEEKDAY, 0 for Sunday). SPLIT_DATE, SPLIT_TOD and SPLIT_DT are their
-// outputs' $DATEPART (package stdcalls).
+// outputs' $DATEPART (lower.FormalCalls).
 var datePartFn = func(args ...object.Object) object.Object {
 	if len(args) != 2 {
 		return object.NewBuiltinError("wrong number of arguments for $DATEPART. got=%d, want=2", len(args))

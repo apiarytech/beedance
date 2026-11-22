@@ -8,18 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package stdcalls lets a program call a standard function with its inputs
-// named (IEC 61131-3, the formal call):
-//
-//	a := LIMIT(MN := 0, IN := v, MX := 20);
-//	b := SEL(G := cond, IN0 := x, IN1 := y);
-//	c := MAX(IN1 := p, IN2 := q, IN3 := r);
-//
-// Each engine calls the standard functions with their inputs in order, so
-// the call is rewritten to LIMIT(0, v, 20) for every engine alike. A call
-// of a function the program declares, or with an input the standard does
-// not name (EN), is left as it is.
-package stdcalls
+package lower
 
 import (
 	"regexp"
@@ -52,9 +41,21 @@ var inputs = map[string][]string{
 // MUX's IN0, IN1, ... after K).
 var numbered = regexp.MustCompile(`^IN(\d+)$`)
 
-// Positional rewrites the formal calls of standard functions in the
+// FormalCalls lets a program call a standard function with its inputs
+// named (IEC 61131-3, the formal call):
+//
+//	a := LIMIT(MN := 0, IN := v, MX := 20);
+//	b := SEL(G := cond, IN0 := x, IN1 := y);
+//	c := MAX(IN1 := p, IN2 := q, IN3 := r);
+//
+// Each engine calls the standard functions with their inputs in order, so
+// the call is rewritten to LIMIT(0, v, 20) for every engine alike. A call
+// of a function the program declares, or with an input the standard does
+// not name (EN), is left as it is.
+//
+// FormalCalls rewrites the formal calls of standard functions in the
 // program in place.
-func Positional(program *ast.Program) {
+func FormalCalls(program *ast.Program) {
 	if program == nil {
 		return
 	}

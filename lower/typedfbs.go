@@ -8,14 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package typedfbs gives a program the typed standard function blocks of
-// IEC 61131-3 (3rd edition, Table 44 and 45): the counters CTU_INT,
-// CTU_DINT, CTU_LINT, CTU_UDINT and CTU_ULINT, with CTD_ and CTUD_ of the
-// same types, and the timers TON_LTIME, TOF_LTIME and TP_LTIME. Each is the
-// untyped block (CTU, TON) of that type, in Structured Text, which the
-// program gets if it uses the block and does not declare it, for every
-// engine alike.
-package typedfbs
+package lower
 
 import (
 	"sort"
@@ -193,16 +186,24 @@ func blockSources() map[string]string {
 	return sources
 }
 
-// IsTyped reports whether name (any case) is one of the typed blocks.
-func IsTyped(name string) bool {
+// IsTypedFB reports whether name (any case) is one of the typed blocks.
+func IsTypedFB(name string) bool {
 	_, ok := blockSources()[strings.ToUpper(name)]
 	return ok
 }
 
-// Declare puts before the program's statements the typed blocks it names
+// TypedFBs gives a program the typed standard function blocks of
+// IEC 61131-3 (3rd edition, Table 44 and 45): the counters CTU_INT,
+// CTU_DINT, CTU_LINT, CTU_UDINT and CTU_ULINT, with CTD_ and CTUD_ of the
+// same types, and the timers TON_LTIME, TOF_LTIME and TP_LTIME. Each is the
+// untyped block (CTU, TON) of that type, in Structured Text, which the
+// program gets if it uses the block and does not declare it, for every
+// engine alike.
+//
+// TypedFBs puts before the program's statements the typed blocks it names
 // and does not declare, in place. A program it declared them for has them,
 // so declaring again adds nothing.
-func Declare(program *ast.Program) {
+func TypedFBs(program *ast.Program) {
 	if program == nil {
 		return
 	}

@@ -8,7 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-package stdcalls
+package lower
 
 // The functions that split a time data type (IEC 61131-3, Table 36):
 //

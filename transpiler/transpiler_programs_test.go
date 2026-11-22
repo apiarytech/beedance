@@ -932,7 +932,7 @@ b := SHL(b, 2); x := REAL_TO_INT(r); x := ABS(-3); END_PROGRAM`,
 	if err != nil || strings.Contains(out, "t1.EN") {
 		t.Errorf("TON has no EN, got %v:\n%s", err, out)
 	}
-	// A standard function's inputs may be named (package stdcalls), but only
+	// A standard function's inputs may be named (lower.FormalCalls), but only
 	// by the names it has.
 	if _, err := transpileSource(t, "PROGRAM P VAR r : REAL; END_VAR r := SQRT(IN := 2.0); END_PROGRAM"); err != nil {
 		t.Errorf("SQRT(IN := 2.0): %v", err)

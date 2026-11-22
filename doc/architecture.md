@@ -8,7 +8,7 @@ flowchart LR
     xml[PLCopen XML<br/>text and graphical] <-->|plcopen| ast
     ast <-->|diagram| svg[LD / FBD / SFC<br/>model, SVG drawings]
     ast --> mac[macro expansion]
-    mac --> low[lowering, every engine alike<br/>edges · enables · enums · stdcalls<br/>typedfbs · sfc · inputwrites · mixedsign]
+    mac --> low[lowering, every engine alike<br/>lower: edges · EN/ENO · enums<br/>formal calls · typed FBs · checks<br/>sfc]
     low --> ev[evaluator<br/>tree-walking]
     low --> comp[compiler] --> bc[(bytecode)] --> vm[VM]
     low --> tr[transpiler] --> go[Go source<br/>royaljelly runtime]
@@ -51,14 +51,8 @@ flowchart LR
 | `ast` | The syntax tree, printing back to source, walking and modifying it, namespaces |
 | `object` | Runtime values shared by the evaluator and the VM: integers, reals, strings, times, arrays, structures (hashes), function-block instances, built-ins |
 | `stdlib` | Stateless built-in functions (conversions, arithmetic, strings, arrays, bit strings, selection, clock) registered with `object` at start-up |
-| `edges` | `R_EDGE` and `F_EDGE` inputs of function blocks, lowered to an `R_TRIG`/`F_TRIG` around the body |
-| `enables` | `EN` and `ENO` a POU declares itself, lowered to the IEC rules: the body runs only when `EN` is TRUE (IEC-75) |
-| `enums` | An enumeration's value named without its type (`RED` for `COLOR#RED`) where exactly one enumeration has it |
-| `stdcalls` | Formal calls of standard functions (`LIMIT(MN := 0, IN := v, MX := 20)`) rewritten to their inputs in order |
-| `typedfbs` | The typed standard function blocks of Ed.3 (`CTU_INT` ... `CTUD_ULINT`, `TON_LTIME`, `TOF_LTIME`, `TP_LTIME`) in ST, given to a program that uses one without declaring it |
+| `lower` | The passes every engine runs before it compiles, evaluates or transpiles, so the three agree. Lowerings that rewrite the AST: `Edges` (`R_EDGE` and `F_EDGE` inputs, an `R_TRIG`/`F_TRIG` around the body), `Enables` (`EN` and `ENO` a POU declares itself; the body runs only when `EN` is TRUE, IEC-75), `EnumNames` (`RED` for `COLOR#RED` where exactly one enumeration has it), `FormalCalls` (`LIMIT(MN := 0, IN := v, MX := 20)` to its inputs in order), `TypedFBs` (Ed.3's `CTU_INT` ... `CTUD_ULINT`, `TON_LTIME`, `TOF_LTIME`, `TP_LTIME` in ST, for a program that uses one without declaring it). Checks: `CheckInputWrites` (no POU assigns its own `VAR_INPUT`, IEC-69, for the evaluator and the transpiler; `AllowInputWrites` lifts it), `CheckMixedSign` (no arithmetic mixes a signed and an unsigned type neither of which holds the other, `UDINT + DINT`; issue #18) |
 | `sfc` | Sequential Function Charts lowered to ST, so a chart runs on the compiler and VM, and in transpiled Go |
-| `inputwrites` | The check that no POU assigns its own `VAR_INPUT` (IEC-69), for the evaluator and the transpiler; `AllowInputWrites` lifts it for CODESYS-style libraries |
-| `mixedsign` | The check that no arithmetic mixes a signed and an unsigned integer type neither of which holds the other (`UDINT + DINT`), a compile error on every engine (issue #18) |
 | `analyzer` | Static analysis on the parser's AST, with types of its own worked out from the declarations: unused variables, unreachable code, implicit narrowing, multiple writes to an output, loops that do not end or may overrun the cycle time, and the PLCopen coding guidelines (`beedance -lint`; see [Static analysis](analyzer.md)) |
 | `evaluator` | Tree-walking interpreter; standard function blocks; tasks and configurations; engineering sessions |
 | `code` | Bytecode opcodes and their encoding |
