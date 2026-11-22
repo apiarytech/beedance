@@ -564,3 +564,55 @@ func TestChangeWhileRunning(t *testing.T) {
 		t.Errorf("c.total = %s (forced 500), y = %s (x set TRUE)", value(t, s, "c.total"), value(t, s, "y"))
 	}
 }
+
+const locatedSource = `PROGRAM P
+VAR
+    q AT %QW0 : INT := 1;
+    n : INT;
+END_VAR
+n := n + 1;
+q := q + 100;
+END_PROGRAM
+`
+
+func TestChangeKeepsALocatedValue(t *testing.T) {
+	s := load(t, locatedSource)
+	for range 3 {
+		stopped(t)(s.StepScan(ctx))
+	}
+	r, err := s.Change(strings.Replace(locatedSource, "n := n + 1;", "n := n + 2;", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(r.Kept, "q") {
+		t.Errorf("report %+v", r)
+	}
+	// A located variable's initializer must not overwrite the value the
+	// running program left in the I/O image.
+	if q := value(t, s, "q"); q != "301" {
+		t.Errorf("after the change: q = %s, want 301", q)
+	}
+	stopped(t)(s.StepScan(ctx))
+	if q, n := value(t, s, "q"), value(t, s, "n"); q != "401" || n != "5" {
+		t.Errorf("a scan after the change: q = %s, n = %s, want 401 and 5", q, n)
+	}
+}
+
+func TestFailedChangeKeepsTheIOImage(t *testing.T) {
+	s := load(t, locatedSource)
+	stopped(t)(s.StepScan(ctx))
+	// q's and r's initializers are evaluated before the build fails on z's.
+	broken := strings.Replace(locatedSource, "    n : INT;", "    n : INT;\n    r AT %QW1 : INT := 7;\n    z : INT := 1 / 0;", 1)
+	if _, err := s.Change(broken); err == nil {
+		t.Fatal("the change succeeded")
+	}
+	if q := value(t, s, "q"); q != "101" {
+		t.Errorf("after the failed change: q = %s, want 101", q)
+	}
+	s.mu.Lock()
+	_, leaked := s.img.eng.IO()["%QW1"]
+	s.mu.Unlock()
+	if leaked {
+		t.Error("the failed change left %QW1 in the I/O image")
+	}
+}
