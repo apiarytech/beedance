@@ -7,6 +7,9 @@
  *
  * See the LICENSE files in the project root for full license text.
  */
+
+// Package repl is the interactive read-eval-print loop: it reads
+// Structured Text a line at a time and runs it on the evaluator or the VM.
 package repl
 
 import (
