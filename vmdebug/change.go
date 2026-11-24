@@ -11,6 +11,7 @@
 package vmdebug
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -104,8 +105,14 @@ func (s *Session) change(source string) (Report, error) {
 		return Report{}, ErrMidScan
 	}
 	old := s.img
+	// The I/O image as the running program left it, taken before the new
+	// program is built: on the evaluator the image is the package's, the
+	// same map for both programs, and building the new one writes its
+	// located variables' initial values into it.
+	oldIO := maps.Clone(old.eng.IO())
 	img, err := s.build(source, old.name)
 	if err != nil {
+		restoreIO(old.eng.IO(), oldIO)
 		return Report{}, err
 	}
 
@@ -130,7 +137,15 @@ func (s *Session) change(source string) (Report, error) {
 		case nv.Constant || !strings.EqualFold(nv.Type, ov.Type):
 			r.Reset = append(r.Reset, nv.Name)
 		case nv.Address != "":
-			r.Kept = append(r.Kept, nv.Name) // located: its value is in the I/O image
+			// Located: its value is the old image's at its old address,
+			// written through the engine. On the go engine an output is a
+			// variable of the program, copied to the image at the end of
+			// each scan, so writing the image alone would not reach it.
+			if v, ok := savedIOValue(oldIO, ov.Address); ok && img.eng.Write([]string{nv.Name}, v) != nil {
+				r.Reset = append(r.Reset, nv.Name)
+			} else {
+				r.Kept = append(r.Kept, nv.Name)
+			}
 		default:
 			oldV, _ := old.eng.Read([]string{nv.Name})
 			freshV, _ := img.eng.Read([]string{nv.Name})
@@ -156,7 +171,7 @@ func (s *Session) change(source string) (Report, error) {
 	}
 	carryPlants(old, img, c)
 	// The I/O image: the plant's inputs, the outputs as last written.
-	if oldIO, newIO := old.eng.IO(), img.eng.IO(); oldIO != nil && newIO != nil {
+	if newIO := img.eng.IO(); oldIO != nil && newIO != nil {
 		for addr, v := range oldIO {
 			newIO[addr] = v
 		}
@@ -187,6 +202,40 @@ func (s *Session) change(source string) (Report, error) {
 	s.applyForces()
 	sort.Strings(r.Unforced)
 	return r, nil
+}
+
+// savedIOValue is the value at addr in io, a saved I/O image, the
+// address's case aside.
+func savedIOValue(io map[string]object.Object, addr string) (object.Object, bool) {
+	if addr == "" {
+		return nil, false
+	}
+	if v, ok := io[addr]; ok {
+		return v, v != nil
+	}
+	for a, v := range io {
+		if strings.EqualFold(a, addr) {
+			return v, v != nil
+		}
+	}
+	return nil, false
+}
+
+// restoreIO puts io back as it was when saved was taken from it, for a
+// change that failed after building the new program wrote into a shared
+// image.
+func restoreIO(io, saved map[string]object.Object) {
+	if io == nil || saved == nil {
+		return
+	}
+	for addr := range io {
+		if _, ok := saved[addr]; !ok {
+			delete(io, addr)
+		}
+	}
+	for addr, v := range saved {
+		io[addr] = v
+	}
 }
 
 // carrier carries values from one program to its changed version, with

@@ -99,9 +99,10 @@ func testOp(req Request) (any, error) {
 		if (e == sil.Go || e == sil.Wasm) && runtime.GOARCH == "wasm" {
 			return nil, fmt.Errorf("the %s engine needs the Go toolchain, which WebAssembly has not got: use eval and vm", e)
 		}
-		if e == sil.Evaluator && evaluator.Busy() {
+		if e == sil.Evaluator && evaluator.Debugging() {
 			// A single thread would wait for ever: the debugger holds the
-			// evaluator's session while it debugs a program on it.
+			// evaluator's session while it debugs a program on it. Another
+			// test run's session ends, and sil.Run waits for it.
 			return nil, errors.New("the evaluator is debugging a program: end that session first, or test on the vm engine")
 		}
 	}

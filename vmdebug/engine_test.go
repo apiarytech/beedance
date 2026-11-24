@@ -43,6 +43,8 @@ func runOn(t *testing.T, e Engine) {
 		{"ChangeKeepsTheValues", TestChangeKeepsTheValues},
 		{"ChangeResetsAMemberWhoseTypeChanged", TestChangeResetsAMemberWhoseTypeChanged},
 		{"ChangeWhileRunning", TestChangeWhileRunning},
+		{"ChangeKeepsALocatedValue", TestChangeKeepsALocatedValue},
+		{"FailedChangeKeepsTheIOImage", TestFailedChangeKeepsTheIOImage},
 	} {
 		t.Run(tc.name, tc.f)
 	}

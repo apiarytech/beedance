@@ -109,3 +109,21 @@ func TestSessionIO(t *testing.T) {
 		}
 	}
 }
+
+// TestDebugSession: a debugger's session is Debugging until it ends; any
+// session is Busy, but only a debugger's is Debugging.
+func TestDebugSession(t *testing.T) {
+	end := Session(time.Now)
+	if !Busy() || Debugging() {
+		t.Errorf("a session: Busy %v, Debugging %v; want true, false", Busy(), Debugging())
+	}
+	end()
+	end = DebugSession(time.Now)
+	if !Busy() || !Debugging() {
+		t.Errorf("a debug session: Busy %v, Debugging %v; want true, true", Busy(), Debugging())
+	}
+	end()
+	if Busy() || Debugging() {
+		t.Errorf("after the debug session: Busy %v, Debugging %v; want false, false", Busy(), Debugging())
+	}
+}
