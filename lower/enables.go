@@ -9,27 +9,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package enables gives EN and ENO, when a POU declares them itself, their
-// meaning for every engine alike (IEC-75). IEC 61131-3 provides EN and ENO
-// so (2003 2.5.1.2 and 2.5.2.1a; Ed.3 Table 18):
-//
-//	VAR_INPUT EN : BOOL := 1; END_VAR
-//	VAR_OUTPUT ENO : BOOL; END_VAR
-//
-// and rules: if EN is FALSE when the POU is invoked, its body is not
-// executed and ENO is reset to FALSE; otherwise ENO is set TRUE and the body
-// is executed, which may set ENO FALSE. A function block's outputs keep
-// their values while it is not executed. Lower writes the rules into the
-// body:
-//
-//	ENO := TRUE;
-//	IF EN THEN <body> ELSE ENO := FALSE; END_IF;
-//
-// so EN and ENO are ordinary variables to the engines: EN an input like any
-// other, which keeps its value when a call does not pass it. The engines'
-// own EN and ENO, for a POU that does not declare them, are left to them.
-// An IL body is left as it is: its instructions cannot sit in an ST IF.
-package enables
+package lower
 
 import (
 	"fmt"
@@ -40,19 +20,40 @@ import (
 	"github.com/apiarytech/beedance/parser"
 )
 
-// marker is the variable a lowered POU gets, so Lower may run twice.
+// marker is the variable a lowered POU gets, so Enables may run twice.
 const marker = "_enables_lowered"
 
-// Lower gives the declared EN and ENO of the program's functions and
+// Enables gives EN and ENO, when a POU declares them itself, their
+// meaning for every engine alike (IEC-75). IEC 61131-3 provides EN and ENO
+// so (2003 2.5.1.2 and 2.5.2.1a; Ed.3 Table 18):
+//
+//	VAR_INPUT EN : BOOL := 1; END_VAR
+//	VAR_OUTPUT ENO : BOOL; END_VAR
+//
+// and rules: if EN is FALSE when the POU is invoked, its body is not
+// executed and ENO is reset to FALSE; otherwise ENO is set TRUE and the body
+// is executed, which may set ENO FALSE. A function block's outputs keep
+// their values while it is not executed. Enables writes the rules into the
+// body:
+//
+//	ENO := TRUE;
+//	IF EN THEN <body> ELSE ENO := FALSE; END_IF;
+//
+// so EN and ENO are ordinary variables to the engines: EN an input like any
+// other, which keeps its value when a call does not pass it. The engines'
+// own EN and ENO, for a POU that does not declare them, are left to them.
+// An IL body is left as it is: its instructions cannot sit in an ST IF.
+//
+// Enables gives the declared EN and ENO of the program's functions and
 // function blocks (in namespaces too) their meaning, in place.
-func Lower(program *ast.Program) error {
+func Enables(program *ast.Program) error {
 	if program == nil {
 		return nil
 	}
-	return lowerStatements(program.Statements)
+	return lowerEnableStatements(program.Statements)
 }
 
-func lowerStatements(stmts []ast.Statement) error {
+func lowerEnableStatements(stmts []ast.Statement) error {
 	for _, s := range stmts {
 		switch d := s.(type) {
 		case *ast.FunctionBlockDeclaration:
@@ -68,7 +69,7 @@ func lowerStatements(stmts []ast.Statement) error {
 			}
 			d.Vars = vars
 		case *ast.NamespaceDeclaration:
-			if err := lowerStatements(d.Statements); err != nil {
+			if err := lowerEnableStatements(d.Statements); err != nil {
 				return err
 			}
 		}
@@ -76,10 +77,10 @@ func lowerStatements(stmts []ast.Statement) error {
 	return nil
 }
 
-// Declares reports whether a POU declares EN among its inputs or ENO among
+// DeclaresEnables reports whether a POU declares EN among its inputs or ENO among
 // its outputs (any case): then their meaning is this package's, and an
 // engine leaves its own EN and ENO handling out for it.
-func Declares(inputs, outputs []*ast.VarDeclStatement) (en, eno bool) {
+func DeclaresEnables(inputs, outputs []*ast.VarDeclStatement) (en, eno bool) {
 	for _, d := range inputs {
 		if d != nil && d.Name != nil && strings.EqualFold(d.Name.Value, "EN") {
 			en = true
@@ -94,7 +95,7 @@ func Declares(inputs, outputs []*ast.VarDeclStatement) (en, eno bool) {
 }
 
 func lower(name *ast.Identifier, inputs, outputs, vars []*ast.VarDeclStatement, b ast.Statement) ([]*ast.VarDeclStatement, error) {
-	en, eno := Declares(inputs, outputs)
+	en, eno := DeclaresEnables(inputs, outputs)
 	body, ok := b.(*ast.BlockStatement)
 	if (!en && !eno) || !ok || body == nil || isIL(body) {
 		return vars, nil
@@ -126,7 +127,7 @@ func lower(name *ast.Identifier, inputs, outputs, vars []*ast.VarDeclStatement, 
 		}
 		src.WriteString("END_IF;\n")
 	}
-	stmts, err := parse(src.String())
+	stmts, err := parseEnableLowering(src.String())
 	if err != nil {
 		return vars, fmt.Errorf("%s: %w", name.Value, err)
 	}
@@ -162,8 +163,8 @@ func isIL(body *ast.BlockStatement) bool {
 	return false
 }
 
-// parse parses statements as a program's body.
-func parse(stmts string) ([]ast.Statement, error) {
+// parseEnableLowering parses statements as a program's body.
+func parseEnableLowering(stmts string) ([]ast.Statement, error) {
 	_, out, err := parseDecls("_enables_body : INT;", stmts)
 	return out, err
 }

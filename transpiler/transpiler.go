@@ -14,15 +14,11 @@ package transpiler
 import (
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/enums"
 	"github.com/apiarytech/beedance/evaluator"
-	"github.com/apiarytech/beedance/inputwrites"
-	"github.com/apiarytech/beedance/mixedsign"
+	"github.com/apiarytech/beedance/lower"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sfc"
-	"github.com/apiarytech/beedance/stdcalls"
 	"github.com/apiarytech/beedance/token"
-	"github.com/apiarytech/beedance/typedfbs"
 	"io"
 	"log" // Added for time.Time and time.Duration
 	"sort"
@@ -135,7 +131,7 @@ type Transpiler struct {
 	PreferOSCAT bool
 	// AllowInputWrites lets a POU assign its own VAR_INPUT variables, as
 	// CODESYS does (IEC-69); off, such a program is refused as the VM
-	// refuses it (package inputwrites).
+	// refuses it (lower.CheckInputWrites).
 	AllowInputWrites bool
 	// HostBinding generates New<Program>() and Variables() for each PROGRAM
 	// (see Options.HostBinding).
@@ -252,10 +248,10 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 			return err
 		}
 		expandedAST = lowered
-		// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
-		typedfbs.Declare(expandedAST)
-		// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
-		stdcalls.Positional(expandedAST)
+		// CTU_DINT, TON_LTIME and the other typed blocks; see lower.TypedFBs.
+		lower.TypedFBs(expandedAST)
+		// LIMIT(MN := 0, IN := v, MX := 20); see lower.FormalCalls.
+		lower.FormalCalls(expandedAST)
 		// x AT %I*, located by VAR_CONFIG; see partly_located.go.
 		if err := resolvePartlyLocated(expandedAST); err != nil {
 			return err
@@ -265,20 +261,20 @@ func (t *Transpiler) transpileNode(node ast.Node) error {
 		// IEC-69: inputs are read-only unless allowed; before edges' lowering,
 		// which writes edge inputs through THIS.
 		if !t.AllowInputWrites {
-			if err := inputwrites.Check(expandedAST); err != nil {
+			if err := lower.CheckInputWrites(expandedAST); err != nil {
 				return err
 			}
 		}
-		// UDINT + DINT and the like; see package mixedsign.
-		if err := mixedsign.Check(expandedAST); err != nil {
+		// UDINT + DINT and the like; see lower.CheckMixedSign.
+		if err := lower.CheckMixedSign(expandedAST); err != nil {
 			return err
 		}
-		// R_EDGE and F_EDGE inputs; see package edges.
+		// R_EDGE and F_EDGE inputs; see lower.Edges.
 		if err := edgesThenEnables(expandedAST); err != nil {
 			return err
 		}
-		// Enumeration values named without their type; see package enums.
-		enums.Qualify(expandedAST)
+		// Enumeration values named without their type; see lower.EnumNames.
+		lower.EnumNames(expandedAST)
 		// Go has no namespaces within a package; see namespaces.go.
 		expandedAST = flattenNamespaces(expandedAST)
 		// Uses of a name spelled as it is declared; see name_case.go.
@@ -1640,7 +1636,7 @@ func (t *Transpiler) transpileFunctionBlockDeclaration(fb *ast.FunctionBlockDecl
 
 	// --- EN/ENO wrapper logic ---
 	// For an EN or ENO the block declares, its body does this itself
-	// (package enables, IEC-75).
+	// (lower.Enables, IEC-75).
 	if !declaredEN {
 		t.write("\tif !%s.EN {\n", receiverName)
 		if !declaredENO {

@@ -28,7 +28,7 @@ import (
 
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
-	"github.com/apiarytech/beedance/enables"
+	"github.com/apiarytech/beedance/lower"
 	"github.com/apiarytech/beedance/object"
 )
 
@@ -106,9 +106,9 @@ func (c *Compiler) compileFunctionBlockCall(node *ast.CallExpression, fbDef *ast
 	params := append(append([]*ast.VarDeclStatement{}, inputs...), inOuts...)
 	var enable, enableTarget ast.Expression
 	// IEC-75: a block that declares EN or ENO itself has them as an input
-	// and an output like any other (package enables gives them their
+	// and an output like any other (lower.Enables gives them their
 	// meaning); the call's own EN and ENO are for one that does not.
-	declaredEN, declaredENO := enables.Declares(inputs, outputs)
+	declaredEN, declaredENO := lower.DeclaresEnables(inputs, outputs)
 	copyBacks := []*ast.AssignmentStatement{}
 	outputAssigns := []*ast.AssignmentStatement{}
 

@@ -8,17 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package edges gives the R_EDGE and F_EDGE inputs of function blocks their
-// meaning, for every engine alike. An input declared
-//
-//	VAR_INPUT start : BOOL R_EDGE; END_VAR
-//
-// is TRUE in the body only on the call it rises (F_EDGE: falls). The body
-// starts by keeping the value the caller gave, running an R_TRIG (F_TRIG)
-// on it and setting the input to the trigger's Q; it ends, and returns, by
-// putting the caller's value back, so that a call that does not give the
-// input sees the value it had.
-package edges
+package lower
 
 import (
 	"fmt"
@@ -29,17 +19,28 @@ import (
 	"github.com/apiarytech/beedance/parser"
 )
 
-// Lower gives the edge inputs of the program's function blocks (in
+// Edges gives the R_EDGE and F_EDGE inputs of function blocks their
+// meaning, for every engine alike. An input declared
+//
+//	VAR_INPUT start : BOOL R_EDGE; END_VAR
+//
+// is TRUE in the body only on the call it rises (F_EDGE: falls). The body
+// starts by keeping the value the caller gave, running an R_TRIG (F_TRIG)
+// on it and setting the input to the trigger's Q; it ends, and returns, by
+// putting the caller's value back, so that a call that does not give the
+// input sees the value it had.
+//
+// Edges gives the edge inputs of the program's function blocks (in
 // namespaces too) their meaning, in place. A function block already
-// lowered is left as it is, so Lower may run twice on a program.
-func Lower(program *ast.Program) error {
+// lowered is left as it is, so Edges may run twice on a program.
+func Edges(program *ast.Program) error {
 	if program == nil {
 		return nil
 	}
-	return lowerStatements(program.Statements)
+	return lowerEdgeStatements(program.Statements)
 }
 
-func lowerStatements(stmts []ast.Statement) error {
+func lowerEdgeStatements(stmts []ast.Statement) error {
 	for _, s := range stmts {
 		switch d := s.(type) {
 		case *ast.FunctionBlockDeclaration:
@@ -47,7 +48,7 @@ func lowerStatements(stmts []ast.Statement) error {
 				return err
 			}
 		case *ast.NamespaceDeclaration:
-			if err := lowerStatements(d.Statements); err != nil {
+			if err := lowerEdgeStatements(d.Statements); err != nil {
 				return err
 			}
 		}
@@ -93,11 +94,11 @@ func lowerFunctionBlock(fb *ast.FunctionBlockDeclaration) error {
 		fmt.Fprintf(&start, "%s := %s; %s(CLK := %s); THIS.%s := %s.Q;\n", rawName(name), name, trigName(name), rawName(name), name, trigName(name))
 		fmt.Fprintf(&restore, "THIS.%s := %s;\n", name, rawName(name))
 	}
-	vars, startStmts, err := parse(decls.String(), start.String())
+	vars, startStmts, err := parseEdgeLowering(decls.String(), start.String())
 	if err != nil {
 		return fmt.Errorf("%s: %w", fb.Name.Value, err)
 	}
-	_, restoreStmts, err := parse("", restore.String())
+	_, restoreStmts, err := parseEdgeLowering("", restore.String())
 	if err != nil {
 		return fmt.Errorf("%s: %w", fb.Name.Value, err)
 	}
@@ -119,8 +120,8 @@ func lowerFunctionBlock(fb *ast.FunctionBlockDeclaration) error {
 	return nil
 }
 
-// parse parses variable declarations and statements as a program's.
-func parse(decls, stmts string) ([]*ast.VarDeclStatement, []ast.Statement, error) {
+// parseEdgeLowering parses variable declarations and statements as a program's.
+func parseEdgeLowering(decls, stmts string) ([]*ast.VarDeclStatement, []ast.Statement, error) {
 	src := "PROGRAM _edges\n"
 	if decls != "" {
 		src += "VAR " + decls + "END_VAR\n"
@@ -129,7 +130,7 @@ func parse(decls, stmts string) ([]*ast.VarDeclStatement, []ast.Statement, error
 	p := parser.New(lexer.New(src))
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		return nil, nil, fmt.Errorf("the edge inputs lowered to ST that does not parse (a beedance defect): %s", errs[0])
+		return nil, nil, fmt.Errorf("the edge inputs lowered to ST that does not parseEdgeLowering (a beedance defect): %s", errs[0])
 	}
 	pd, ok := prog.Statements[0].(*ast.ProgramDeclaration)
 	if !ok {

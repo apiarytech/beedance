@@ -9,22 +9,22 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-package inputwrites_test
+package lower_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/apiarytech/beedance/compiler"
-	"github.com/apiarytech/beedance/inputwrites"
 	"github.com/apiarytech/beedance/lexer"
+	"github.com/apiarytech/beedance/lower"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/parser"
 )
 
 // The check refuses exactly what the VM's compiler refuses (IEC-69), so the
 // evaluator and the transpiler, which use it, agree with the VM.
-func TestCheckAgreesWithTheVM(t *testing.T) {
+func TestCheckInputWritesAgreesWithTheVM(t *testing.T) {
 	fns := "FUNCTION F1 : INT\nVAR_INPUT a : INT; END_VAR\nF1 := a;\nEND_FUNCTION\n"
 	fb2 := "FUNCTION_BLOCK FB2\nEND_FUNCTION_BLOCK\n"
 	use := "\nPROGRAM P\nVAR f : FB; d : FB2; x : INT; END_VAR\nf(); d(); x := F1(1);\nEND_PROGRAM\n"
@@ -52,7 +52,7 @@ func TestCheckAgreesWithTheVM(t *testing.T) {
 		if errs := p.Errors(); len(errs) > 0 {
 			t.Fatalf("%s: %v", name, errs)
 		}
-		checkErr := inputwrites.Check(prog)
+		checkErr := lower.CheckInputWrites(prog)
 
 		p = parser.New(lexer.New(src))
 		_, vmErr := compiler.NewCompilerWithBuiltins(object.Builtins).CompileProgramUnit(p.ParseProgram(), "P")

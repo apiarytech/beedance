@@ -8,7 +8,7 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-package mixedsign
+package lower
 
 import (
 	"strings"
@@ -18,19 +18,19 @@ import (
 	"github.com/apiarytech/beedance/parser"
 )
 
-func check(t *testing.T, src string) error {
+func checkMixedSign(t *testing.T, src string) error {
 	t.Helper()
 	p := parser.New(lexer.New(src))
 	prog := p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parse %q: %v", src, p.Errors())
 	}
-	return Check(prog)
+	return CheckMixedSign(prog)
 }
 
-// TestCheck covers issue #18: signed and unsigned integers neither of which
+// TestCheckMixedSign covers issue #18: signed and unsigned integers neither of which
 // holds the other are not mixed without a conversion.
-func TestCheck(t *testing.T) {
+func TestCheckMixedSign(t *testing.T) {
 	refused := []string{
 		"VAR u : UDINT := 1; d : DINT := -2; r2 : LINT; END_VAR r2 := u + d;",
 		"VAR u : UINT; i : INT; x : INT; END_VAR x := i - u;",
@@ -40,7 +40,7 @@ func TestCheck(t *testing.T) {
 		"FUNCTION_BLOCK F VAR u : UDINT; END_VAR METHOD M VAR d : DINT; x : LINT; END_VAR x := u + d; END_METHOD END_FUNCTION_BLOCK",
 	}
 	for _, src := range refused {
-		if err := check(t, src); err == nil || !strings.Contains(err.Error(), "mixes signed and unsigned") {
+		if err := checkMixedSign(t, src); err == nil || !strings.Contains(err.Error(), "mixes signed and unsigned") {
 			t.Errorf("%q: %v, want it refused", src, err)
 		}
 	}
@@ -54,7 +54,7 @@ func TestCheck(t *testing.T) {
 		"FUNCTION_BLOCK F VAR u : UDINT; END_VAR METHOD M VAR u : DINT; d : DINT; x : DINT; END_VAR x := u + d; END_METHOD END_FUNCTION_BLOCK", // the method's u
 	}
 	for _, src := range allowed {
-		if err := check(t, src); err != nil {
+		if err := checkMixedSign(t, src); err != nil {
 			t.Errorf("%q: %v, want it allowed", src, err)
 		}
 	}

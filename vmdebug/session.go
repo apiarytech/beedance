@@ -68,7 +68,7 @@ type Options struct {
 	// Watch chooses the members Watched lists.
 	Watch watch.Options
 	// AllowInputWrites lets a POU assign its own inputs, as CODESYS does
-	// (see package inputwrites).
+	// (see lower.CheckInputWrites).
 	AllowInputWrites bool
 	// Notify, if set, is told what went wrong with a write or force made
 	// while a run was in progress, when it was applied.

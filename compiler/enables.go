@@ -13,16 +13,15 @@ package compiler
 
 import (
 	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/edges"
-	"github.com/apiarytech/beedance/enables"
+	"github.com/apiarytech/beedance/lower"
 )
 
-// edgesThenEnables gives edge inputs their meaning (package edges), then a
-// POU's own EN and ENO theirs around the whole body (package enables,
+// edgesThenEnables gives edge inputs their meaning (lower.Edges), then a
+// POU's own EN and ENO theirs around the whole body (lower.Enables,
 // IEC-75), the same on every engine.
 func edgesThenEnables(program *ast.Program) error {
-	if err := edges.Lower(program); err != nil {
+	if err := lower.Edges(program); err != nil {
 		return err
 	}
-	return enables.Lower(program)
+	return lower.Enables(program)
 }

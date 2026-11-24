@@ -8,7 +8,16 @@
  * See the LICENSE files in the project root for full license text.
  */
 
-// Package enums lets a program name an enumeration's value without its
+package lower
+
+import (
+	"strings"
+
+	"github.com/apiarytech/beedance/ast"
+	"github.com/apiarytech/beedance/token"
+)
+
+// EnumNames lets a program name an enumeration's value without its
 // type, where that is clear (IEC 61131-3):
 //
 //	TYPE COLOR : (RED, GREEN, BLUE); END_TYPE
@@ -18,18 +27,10 @@
 // A name that the POU does not declare, and that is a value of exactly one
 // enumeration, is that value (COLOR#RED) for every engine alike. A name
 // two enumerations share is left as it is, to be written in full.
-package enums
-
-import (
-	"strings"
-
-	"github.com/apiarytech/beedance/ast"
-	"github.com/apiarytech/beedance/token"
-)
-
-// Qualify gives the unqualified enumeration values in the program's POU
+//
+// EnumNames gives the unqualified enumeration values in the program's POU
 // bodies their type, in place.
-func Qualify(program *ast.Program) {
+func EnumNames(program *ast.Program) {
 	if program == nil {
 		return
 	}
@@ -85,16 +86,16 @@ func Qualify(program *ast.Program) {
 				for _, t := range d.VarTemp {
 					addNames(local, t.Vars)
 				}
-				body(d.Body, values, globals, local)
+				qualifyBody(d.Body, values, globals, local)
 			case *ast.FunctionBlockDeclaration:
 				local := declared(d.VarInputs, d.VarOutputs, d.VarInOuts, d.Vars)
 				for _, t := range d.VarTemp {
 					addNames(local, t.Vars)
 				}
-				body(d.Body, values, globals, local)
+				qualifyBody(d.Body, values, globals, local)
 			case *ast.FunctionDeclaration:
 				local := declared(d.VarInputs, d.VarOutputs, d.VarInOuts, d.Vars)
-				body(d.Body, values, globals, local)
+				qualifyBody(d.Body, values, globals, local)
 			case *ast.NamespaceDeclaration:
 				qualify(d.Statements)
 			}
@@ -139,10 +140,10 @@ func addNames(out map[string]bool, decls []*ast.VarDeclStatement) {
 	}
 }
 
-// body qualifies the enumeration values a POU body names. A name is left
+// qualifyBody qualifies the enumeration values a POU qualifyBody names. A name is left
 // alone where it is not a value read (a member, an argument's name, a call,
 // an assignment's target), and where the POU or the program declares it.
-func body(b ast.Node, values map[string]string, globals, local map[string]bool) {
+func qualifyBody(b ast.Node, values map[string]string, globals, local map[string]bool) {
 	if b == nil {
 		return
 	}

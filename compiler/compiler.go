@@ -15,12 +15,9 @@ import (
 	"fmt"
 	"github.com/apiarytech/beedance/ast"
 	"github.com/apiarytech/beedance/code"
-	"github.com/apiarytech/beedance/enums"
-	"github.com/apiarytech/beedance/mixedsign"
+	"github.com/apiarytech/beedance/lower"
 	"github.com/apiarytech/beedance/object"
 	"github.com/apiarytech/beedance/sfc"
-	"github.com/apiarytech/beedance/stdcalls"
-	"github.com/apiarytech/beedance/typedfbs"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,8 +65,8 @@ type Variable struct {
 // variables; the program's body is the cyclic bytecode, as in
 // CompileProgram. Other programs in the file are left out.
 func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*CompiledProgram, error) {
-	// UDINT + DINT and the like are refused; see package mixedsign.
-	if err := mixedsign.Check(program); err != nil {
+	// UDINT + DINT and the like are refused; see lower.CheckMixedSign.
+	if err := lower.CheckMixedSign(program); err != nil {
 		return nil, err
 	}
 	// Charts (SFC) run as the ST they lower to, as LD and FBD bodies do.
@@ -77,16 +74,16 @@ func (c *Compiler) CompileProgramUnit(program *ast.Program, name string) (*Compi
 	if err != nil {
 		return nil, err
 	}
-	// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
-	typedfbs.Declare(program)
-	// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
-	stdcalls.Positional(program)
-	// R_EDGE and F_EDGE inputs; see package edges.
+	// CTU_DINT, TON_LTIME and the other typed blocks; see lower.TypedFBs.
+	lower.TypedFBs(program)
+	// LIMIT(MN := 0, IN := v, MX := 20); see lower.FormalCalls.
+	lower.FormalCalls(program)
+	// R_EDGE and F_EDGE inputs; see lower.Edges.
 	if err := edgesThenEnables(program); err != nil {
 		return nil, err
 	}
-	// Enumeration values named without their type; see package enums.
-	enums.Qualify(program)
+	// Enumeration values named without their type; see lower.EnumNames.
+	lower.EnumNames(program)
 	c.buildPouInfo(program)
 	c.rootProgram = program
 	var target *ast.ProgramDeclaration
@@ -504,7 +501,7 @@ func (c *Compiler) currentLoop() *loopContext {
 // the execution model of a PLC, where initialization runs once and the main logic
 // runs repeatedly in a scan cycle. It is renamed to match the call in main.go.
 func (c *Compiler) CompileProgram(node *ast.ProgramDeclaration) (*CompiledProgram, error) {
-	if err := mixedsign.Check(&ast.Program{Statements: []ast.Statement{node}}); err != nil {
+	if err := lower.CheckMixedSign(&ast.Program{Statements: []ast.Statement{node}}); err != nil {
 		return nil, err
 	}
 	if err := checkDuplicates(node.Name.Value, node.VarInputs, node.VarOutputs, node.VarInOuts, node.Vars, externalVars(node.VarExternal), tempVars(node.VarTemp)); err != nil {
@@ -600,19 +597,19 @@ func (c *Compiler) compileNode(node ast.Node) error {
 	switch node := node.(type) {
 	// A Program is the root of the AST, consisting of a series of statements.
 	case *ast.Program:
-		// UDINT + DINT and the like are refused; see package mixedsign.
-		if err := mixedsign.Check(node); err != nil {
+		// UDINT + DINT and the like are refused; see lower.CheckMixedSign.
+		if err := lower.CheckMixedSign(node); err != nil {
 			return err
 		}
-		// CTU_DINT, TON_LTIME and the other typed blocks; see package typedfbs.
-		typedfbs.Declare(node)
-		// LIMIT(MN := 0, IN := v, MX := 20); see package stdcalls.
-		stdcalls.Positional(node)
-		// R_EDGE and F_EDGE inputs; see package edges.
+		// CTU_DINT, TON_LTIME and the other typed blocks; see lower.TypedFBs.
+		lower.TypedFBs(node)
+		// LIMIT(MN := 0, IN := v, MX := 20); see lower.FormalCalls.
+		lower.FormalCalls(node)
+		// R_EDGE and F_EDGE inputs; see lower.Edges.
 		if err := edgesThenEnables(node); err != nil {
 			return err
 		}
-		enums.Qualify(node) // see package enums
+		lower.EnumNames(node) // see lower.EnumNames
 		// First pass: recursively build POU info, including namespaces.
 		c.buildPouInfo(node)
 		c.rootProgram = node // Set the root program node
