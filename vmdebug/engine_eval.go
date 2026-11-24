@@ -52,7 +52,7 @@ func (s *Session) evalSession() error {
 		if evaluator.Busy() {
 			return ErrEvaluatorBusy
 		}
-		s.evalEnd = evaluator.Session(func() time.Time { return evalEpoch.Add(s.elapsed) })
+		s.evalEnd = evaluator.DebugSession(func() time.Time { return evalEpoch.Add(s.elapsed) })
 	}
 	return nil
 }

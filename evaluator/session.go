@@ -12,6 +12,7 @@ package evaluator
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/apiarytech/beedance/ast"
@@ -19,6 +20,9 @@ import (
 )
 
 var sessionMu sync.Mutex
+
+// debugging is set while a debugger holds the session (DebugSession).
+var debugging atomic.Bool
 
 // Session makes now the evaluator's clock, which the standard timers and
 // SFC action qualifiers read, and gives the evaluator an empty I/O image for
@@ -40,10 +44,27 @@ func Session(now func() time.Time) (end func()) {
 	}
 }
 
-// Busy reports whether a session is in progress: a Session call would wait
-// for it to end. A single-threaded host (a web page) asks before it runs
-// the evaluator while a debugger holds a session (package vmdebug's
-// evaluator engine), rather than wait for ever.
+// DebugSession is Session for a debugger (package vmdebug's evaluator
+// engine): its session lasts as long as the program is debugged, which
+// Debugging reports to callers that must not wait for it.
+func DebugSession(now func() time.Time) (end func()) {
+	endSession := Session(now)
+	debugging.Store(true)
+	return func() {
+		debugging.Store(false)
+		endSession()
+	}
+}
+
+// Debugging reports whether a debugger holds the session (DebugSession).
+// A host asks before it runs the evaluator: a debug session may last for
+// ever, and a single-threaded host (a web page) could not wait it out. A
+// session that runs programs to their end, such as a test run, is not
+// debugging; Session waits for it.
+func Debugging() bool { return debugging.Load() }
+
+// Busy reports whether a session is in progress, a debugger's or any
+// other: a Session call would wait for it to end.
 func Busy() bool {
 	if sessionMu.TryLock() {
 		sessionMu.Unlock()

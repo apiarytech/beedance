@@ -137,7 +137,15 @@ func (s *Session) change(source string) (Report, error) {
 		case nv.Constant || !strings.EqualFold(nv.Type, ov.Type):
 			r.Reset = append(r.Reset, nv.Name)
 		case nv.Address != "":
-			r.Kept = append(r.Kept, nv.Name) // located: its value is in the I/O image
+			// Located: its value is the old image's at its old address,
+			// written through the engine. On the go engine an output is a
+			// variable of the program, copied to the image at the end of
+			// each scan, so writing the image alone would not reach it.
+			if v, ok := savedIOValue(oldIO, ov.Address); ok && img.eng.Write([]string{nv.Name}, v) != nil {
+				r.Reset = append(r.Reset, nv.Name)
+			} else {
+				r.Kept = append(r.Kept, nv.Name)
+			}
 		default:
 			oldV, _ := old.eng.Read([]string{nv.Name})
 			freshV, _ := img.eng.Read([]string{nv.Name})
@@ -194,6 +202,23 @@ func (s *Session) change(source string) (Report, error) {
 	s.applyForces()
 	sort.Strings(r.Unforced)
 	return r, nil
+}
+
+// savedIOValue is the value at addr in io, a saved I/O image, the
+// address's case aside.
+func savedIOValue(io map[string]object.Object, addr string) (object.Object, bool) {
+	if addr == "" {
+		return nil, false
+	}
+	if v, ok := io[addr]; ok {
+		return v, v != nil
+	}
+	for a, v := range io {
+		if strings.EqualFold(a, addr) {
+			return v, v != nil
+		}
+	}
+	return nil, false
 }
 
 // restoreIO puts io back as it was when saved was taken from it, for a
