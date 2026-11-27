@@ -802,6 +802,22 @@ func evalSFCProgram(program *ast.SFCProgram, env *object.Environment) object.Obj
 // five-phase execution model:
 // 1. Evaluate action control logic. 2. Update action outputs and execute bodies.
 // 3. Evaluate transitions. 4. Update step states. 5. Re-evaluate actions for new steps.
+// assignActionFlag writes an action's active state to the boolean variable
+// of its name, if the program has one: into the I/O image when the variable
+// is located (an output a step turns on), else the environment.
+func assignActionFlag(env *object.Environment, action *object.Action) {
+	existing, ok := env.Get(action.Name.Value)
+	if !ok {
+		return
+	}
+	val := nativeBoolToBooleanObject(action.IsActive)
+	if p, isPtr := existing.(*object.Pointer); isPtr && p.Env == nil {
+		ioMap[p.Name] = val
+		return
+	}
+	env.Assign(action.Name.Value, val)
+}
+
 func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	actions := sfcActions(sfc)
 
@@ -815,9 +831,7 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 	// see the current state of the action outputs.
 	for _, action := range actions {
 		// Update the boolean variable in the environment to reflect the action's active state.
-		if _, ok := env.Get(action.Name.Value); ok {
-			env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
-		}
+		assignActionFlag(env, action)
 
 		// If the action is active and has a body (ST code), evaluate it.
 		if action.IsActive && action.Body != nil {
@@ -907,9 +921,7 @@ func evalSFCCycle(sfc *object.SFC, env *object.Environment) object.Object {
 				continue
 			}
 			evaluateAction(action, env)
-			if _, ok := env.Get(action.Name.Value); ok {
-				env.Assign(action.Name.Value, nativeBoolToBooleanObject(action.IsActive))
-			}
+			assignActionFlag(env, action)
 			if action.IsActive && action.Body != nil {
 				res := Eval(action.Body, env)
 				if isError(res) {
@@ -1377,8 +1389,11 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 			}
 		}
 
-		if targetIdent, ok := node.Operand.(*ast.Identifier); ok {
-			env.Assign(targetIdent.Value, crObj)
+		if _, ok := node.Operand.(*ast.Identifier); ok {
+			// As an assignment: a located variable's value goes to the I/O image.
+			if result := assignValue(node, node.Operand, crObj, env); isError(result) {
+				return result
+			}
 			return crObj
 		}
 		return newError(node, "operand for ST must be a variable identifier")
@@ -1391,7 +1406,7 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 			call.Operand = ast.IlInputCall(token.Token{Type: token.IDENT, Literal: op, Row: node.Token.Row, Column: node.Token.Column}, node.Operand)
 			return evalIlInstructionStatement(&call, env)
 		}
-		if targetIdent, ok := node.Operand.(*ast.Identifier); ok {
+		if _, ok := node.Operand.(*ast.Identifier); ok {
 			// The S and R instructions only execute if the current result is TRUE.
 			if cr, ok := env.Get(currentResultVar); ok && object.IsTruthy(cr) {
 				var valToSet *object.Boolean
@@ -1400,7 +1415,9 @@ func evalIlInstructionStatement(node *ast.IlInstructionStatement, env *object.En
 				} else { // op == "R"
 					valToSet = FALSE
 				}
-				env.Assign(targetIdent.Value, valToSet)
+				if result := assignValue(node, node.Operand, valToSet, env); isError(result) {
+					return result
+				}
 			}
 			// S and R instructions do not modify the current result. The result of
 			// the instruction is the (unmodified) current result.
@@ -3576,8 +3593,13 @@ func applyFunction(fn object.Object, args []ast.Expression, callEnv *object.Envi
 		// The program `fn` has its own persistent environment `fn.Env` where static VARs live.
 		// Unlike a function, a program call modifies its own state, so we execute directly in its environment.
 
-		// Pre-declare the program name as a variable in the local scope for the return value.
-		fn.Env.Set(fn.Name.Value, NULL)
+		// Pre-declare the program name as a variable in the local scope for
+		// the return value, unless the program has a variable of that name
+		// (names are case-insensitive: PROGRAM Lamp may declare lamp), which
+		// the VM and the transpiler keep.
+		if _, declared := fn.Env.GetRaw(fn.Name.Value); !declared {
+			fn.Env.Set(fn.Name.Value, NULL)
+		}
 		// EN is TRUE unless this call sets it.
 		fn.Env.Set("EN", TRUE)
 

@@ -143,7 +143,8 @@ nil unless a debugger sets it, so the same file runs as firmware does.
 records every message). Launch arguments are those of `launch.json` above;
 the PLC commands are custom requests: `beedance/force` and
 `beedance/unforce` (`{"name", "value"}`), `beedance/forces`,
-`beedance/stepScan`, `beedance/onlineChange` and `beedance/live`.
+`beedance/stepScan` (`{"count": N}` runs N scans, stopping between them
+only for what stops a run), `beedance/onlineChange` and `beedance/live`.
 
 For a simulator's virtual field devices, three more:
 

@@ -232,6 +232,27 @@ func TestStepScan(t *testing.T) {
 	}
 }
 
+func TestStepScans(t *testing.T) {
+	s := load(t, source)
+	st := stopped(t)(s.StepScans(ctx, 5))
+	if st.Reason != OnScanEnd || st.Scan != 5 || value(t, s, "n") != "5" || s.Elapsed() != 50*time.Millisecond {
+		t.Fatalf("5 scans: %+v, n = %s, elapsed %v", st, value(t, s, "n"), s.Elapsed())
+	}
+	// 0 is one scan; a breakpoint on the way stops the run there.
+	if st = stopped(t)(s.StepScans(ctx, 0)); st.Reason != OnScanEnd || st.Scan != 6 {
+		t.Fatalf("0 scans: %+v", st)
+	}
+	s.SetBreakpoints([]BreakpointSpec{{Line: line(t, source, "c(step")}})
+	if st = stopped(t)(s.StepScans(ctx, 10)); st.Reason != OnBreakpoint || st.Scan != 7 {
+		t.Fatalf("with a breakpoint: %+v", st)
+	}
+	s.SetBreakpoints(nil)
+	// From inside the scan: it ends, then the others run.
+	if st = stopped(t)(s.StepScans(ctx, 3)); st.Reason != OnScanEnd || st.Scan != 9 {
+		t.Fatalf("from inside a scan: %+v", st)
+	}
+}
+
 // A run paused at every statement ends as one that never paused.
 func TestPausingChangesNothing(t *testing.T) {
 	// One session at a time: the evaluator's session is the package's.

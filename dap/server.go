@@ -24,7 +24,7 @@
 //	unforce NAME        beedance/unforce
 //	forces              beedance/forces
 //	set NAME VALUE      (setVariable)     write once
-//	scan                beedance/stepScan run to the end of the scan
+//	scan                beedance/stepScan run to the end of the scan ({"count": N}: N scans)
 //	change              beedance/onlineChange  re-read the file, change online
 //	live                beedance/live     the watched values, while running
 //
@@ -365,9 +365,18 @@ func (s *Server) handle(m *message) (done bool) {
 			s.reply(m, map[string]any{"forces": s.sess.Forced()})
 		}
 	case "beedance/stepScan":
-		if needs(true) {
+		var a stepScanArgs
+		if args(&a) && needs(true) {
+			if a.Count < 0 {
+				s.fail(m, fmt.Errorf("count %d: give the scans to run, 1 or more", a.Count))
+				return
+			}
 			s.reply(m, nil)
-			s.start(s.sess.StepScan)
+			if a.Count > 1 {
+				s.start(func(ctx context.Context) (vmdebug.Stop, error) { return s.sess.StepScans(ctx, a.Count) })
+			} else {
+				s.start(s.sess.StepScan)
+			}
 		}
 	case "beedance/onlineChange":
 		var a onlineChangeArgs

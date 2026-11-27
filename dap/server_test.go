@@ -353,6 +353,18 @@ func TestSession(t *testing.T) {
 	if ev.Result != "142" {
 		t.Errorf("n = %s after the change and a scan, want 142", ev.Result)
 	}
+	// Several scans in one request: a count, stopped at the end of the last.
+	c.ok("beedance/stepScan", map[string]any{"count": 4}, nil)
+	if st := c.event("stopped"); st["description"] != "End of scan 6" {
+		t.Errorf("stopped %v, want the end of scan 6", st)
+	}
+	c.ok("evaluate", map[string]any{"expression": "n", "context": "watch"}, &ev)
+	if ev.Result != "542" {
+		t.Errorf("n = %s after 4 more scans, want 542", ev.Result)
+	}
+	if m := c.request("beedance/stepScan", map[string]any{"count": -1}); m.Success || !strings.Contains(m.Message, "count -1") {
+		t.Errorf("a negative count: success %v, %q", m.Success, m.Message)
+	}
 
 	// Running and pausing; live values while it runs, and the thread, which
 	// VS Code asks for at once.
