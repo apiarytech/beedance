@@ -220,6 +220,13 @@ type stepArgs struct {
 	Granularity string `json:"granularity"`
 }
 
+// stepScanArgs are beedance/stepScan's: the scans to run, one after the
+// other, stopping between them only for what stops a run; 0 or absent
+// is one scan.
+type stepScanArgs struct {
+	Count int `json:"count"`
+}
+
 type disassembleArgs struct {
 	MemoryReference   string `json:"memoryReference"`
 	InstructionOffset int    `json:"instructionOffset"`

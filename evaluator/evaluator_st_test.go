@@ -1002,6 +1002,90 @@ func TestTypedLiteralEvaluation(t *testing.T) {
 	}
 }
 
+// A program's variable may bear the program's name (case-insensitively), as
+// on the other engines: PROGRAM Lamp declares lamp AT %QX0.0, PROGRAM Delay
+// declares delay : TON.
+func TestProgramVariableNamedAsProgram(t *testing.T) {
+	input := `
+		PROGRAM Lamp
+			VAR
+				button AT %IX0.0 : BOOL;
+				lamp AT %QX0.0 : BOOL;
+				delay : TON;
+			END_VAR
+			delay(IN := button, PT := T#2s);
+			lamp := button;
+		END_PROGRAM
+		PROGRAM Delay
+			VAR
+				delay : TON;
+				q : BOOL;
+			END_VAR
+			delay(IN := TRUE, PT := T#2s);
+			q := delay.Q;
+		END_PROGRAM
+	`
+	ioMap = make(map[string]object.Object)
+	ioMap["%IX0.0"] = TRUE
+	env := object.NewEnvironment()
+	testEvalWithEnv(t, input, env)
+	if r := testEvalWithEnv(t, "Lamp();", env); isError(r) {
+		t.Fatal(r.Inspect())
+	}
+	if ioMap["%QX0.0"] != TRUE {
+		t.Errorf("%%QX0.0 = %v, want TRUE: lamp := button in PROGRAM Lamp", ioMap["%QX0.0"])
+	}
+	prog, _ := env.Get("Lamp")
+	if raw, _ := prog.(*object.Program).Env.GetRaw("lamp"); raw == nil || raw.Type() != object.POINTER_OBJ {
+		t.Errorf("lamp in PROGRAM Lamp is %T, want the located variable", raw)
+	}
+	if r := testEvalWithEnv(t, "Delay();", env); isError(r) {
+		t.Fatal(r.Inspect())
+	}
+}
+
+// A located output written by IL's ST, S and R, and by an SFC step's action
+// of its name, goes to the I/O image, as on the other engines.
+func TestLocatedOutputsFromILAndSFC(t *testing.T) {
+	input := `
+		PROGRAM Gates
+			VAR
+				a AT %IX0.0 : BOOL;
+				b AT %IX0.1 : BOOL;
+				both AT %QX0.0 : BOOL;
+				latch AT %QX0.1 : BOOL;
+			END_VAR
+			LD a
+			AND b
+			ST both
+			S latch
+		END_PROGRAM
+		PROGRAM Chart
+			VAR
+				lamp AT %QX0.2 : BOOL;
+			END_VAR
+			INITIAL_STEP Lit: lamp(N); END_STEP
+		END_PROGRAM
+	`
+	ioMap = make(map[string]object.Object)
+	ioMap["%IX0.0"] = TRUE
+	ioMap["%IX0.1"] = TRUE
+	env := object.NewEnvironment()
+	testEvalWithEnv(t, input, env)
+	if r := testEvalWithEnv(t, "Gates();", env); isError(r) {
+		t.Fatal(r.Inspect())
+	}
+	if !isTruthy(ioMap["%QX0.0"]) || !isTruthy(ioMap["%QX0.1"]) {
+		t.Errorf("after ST both, S latch: %%QX0.0 = %v, %%QX0.1 = %v, want TRUE, TRUE", ioMap["%QX0.0"], ioMap["%QX0.1"])
+	}
+	if r := testEvalWithEnv(t, "Chart();", env); isError(r) {
+		t.Fatal(r.Inspect())
+	}
+	if !isTruthy(ioMap["%QX0.2"]) {
+		t.Errorf("the initial step's action lamp(N): %%QX0.2 = %v, want TRUE", ioMap["%QX0.2"])
+	}
+}
+
 func TestLocatedVariables(t *testing.T) {
 	input := `
 		PROGRAM TestLocatedVars

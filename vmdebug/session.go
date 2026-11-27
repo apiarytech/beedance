@@ -495,6 +495,35 @@ func (s *Session) StepOut(ctx context.Context) (Stop, error) { return s.run(ctx,
 // runs the next scan; a breakpoint on the way stops it there.
 func (s *Session) StepScan(ctx context.Context) (Stop, error) { return s.run(ctx, modeScan) }
 
+// StepScans runs n scans as StepScan does, one after the other, and
+// stops between them only for what stops a run: a breakpoint, a failed
+// scan, a pause, a cancelled context. It is what a run of a known length
+// of simulated time asks for (a check of a program's behaviour: the
+// inputs set, n scans run, the outputs read), in one call. The run
+// yields between scans as a continued run does (Options.YieldEvery).
+func (s *Session) StepScans(ctx context.Context, n int) (Stop, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	yielded := time.Now()
+	var st Stop
+	for i := 0; i < n || i == 0; i++ {
+		if i > 0 && s.opts.YieldEvery > 0 && time.Since(yielded) >= s.opts.YieldEvery {
+			if s.opts.Yield != nil {
+				s.opts.Yield()
+			} else {
+				sleep(ctx, time.Millisecond)
+			}
+			yielded = time.Now()
+		}
+		var err error
+		if st, err = s.run(ctx, modeScan); err != nil || st.Reason != OnScanEnd {
+			return st, err
+		}
+	}
+	return st, nil
+}
+
 // Pause stops a run at its next statement, or between scans. It may be
 // called from another goroutine while Continue or a step runs; called
 // while none does, it stops the next one at once.

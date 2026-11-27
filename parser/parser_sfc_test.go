@@ -469,6 +469,32 @@ func TestSfcErrorHandling(t *testing.T) {
 	}
 }
 
+// A variable named step (a timer that steps a sequence) does not make a
+// body an SFC: the keyword is followed by a name there.
+func TestVariableNamedStepIsNotSFC(t *testing.T) {
+	for _, input := range []string{
+		"PROGRAM P VAR step : TON; n : INT; END_VAR step(IN := TRUE, PT := T#1s); IF step.Q THEN n := n + 1; END_IF; END_PROGRAM",
+		"FUNCTION_BLOCK F VAR step : TON; q : BOOL; END_VAR step(IN := TRUE, PT := T#1s); q := step.Q; END_FUNCTION_BLOCK",
+	} {
+		p := New(lexer.New(input))
+		program := p.ParseProgram()
+		checkParserErrors(t, p, "TestVariableNamedStepIsNotSFC", input)
+		if len(program.Statements) != 1 {
+			t.Fatalf("%d statements in %q", len(program.Statements), input)
+		}
+		var body ast.Node
+		switch d := program.Statements[0].(type) {
+		case *ast.ProgramDeclaration:
+			body = d.Body
+		case *ast.FunctionBlockDeclaration:
+			body = d.Body
+		}
+		if _, isSFC := body.(*ast.SFCProgram); isSFC {
+			t.Errorf("%q parsed as an SFC body", input)
+		}
+	}
+}
+
 func TestSFCProgramWithMixedElements(t *testing.T) {
 	// This test validates the loop in `parseSFCProgram`, specifically covering
 	// the skipping of comments and the handling of non-block statements.

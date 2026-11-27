@@ -18,13 +18,17 @@ import (
 
 // isSFC provides a heuristic check to determine if the current token indicates the
 // start of a Sequential Function Chart (SFC) body. It looks for keywords that are
-// unique to SFC, such as STEP, TRANSITION, or ACTION.
+// unique to SFC, such as STEP, TRANSITION, or ACTION, followed by what an SFC
+// element starts with (a name, or FROM): a variable named step or action
+// (step(IN := ...), action := TRUE) is a statement of another language.
 func (p *Parser) isSFC() bool {
 	// SFC bodies are composed of STEP, INITIAL_STEP, TRANSITION, and ACTION statements.
 	// If the current token is one of these, it's a strong indicator of an SFC program.
 	switch p.curToken.Type {
-	case token.STEP, token.INITIAL_STEP, token.TRANSITION, token.ACTION:
-		return true
+	case token.STEP, token.INITIAL_STEP, token.ACTION:
+		return p.peekTokenIs(token.IDENT)
+	case token.TRANSITION:
+		return p.peekTokenIs(token.IDENT) || p.peekTokenIs(token.FROM) || p.peekTokenIs(token.LPAREN)
 	default:
 		return false
 	}

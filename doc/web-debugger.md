@@ -83,6 +83,10 @@ What a page with virtual field devices needs, in `dap` and `vmdebug`
   variables are a scope while stopped.
 - **The speed** (`beedance/speed`): simulated time at a multiple of real
   time, or as fast as it goes, changeable while it runs.
+- **A run of a known length** (`beedance/stepScan` with `count`,
+  `vmdebug.Session.StepScans`): N scans in one request, stopped between
+  them only by what stops a run, for a page that checks what a program
+  does (inputs set, N scans run, outputs read).
 - **The trace** (`beedance/trace`): signals recorded at the end of every
   scan, the last scans kept, for a logic analyzer's view.
 - **The graphical bodies live** (`beedance/diagrams`): each LD, FBD and SFC
